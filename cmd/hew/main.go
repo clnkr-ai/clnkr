@@ -29,6 +29,7 @@ Options:
   --model string         Model identifier (default: claude-sonnet-4-20250514)
   --base-url string      LLM API endpoint (default: https://api.anthropic.com)
   --max-steps int        Maximum agent steps, 0 = default 100 (default: 0)
+  --verbose              Show internal decisions (queries, parsing, cwd)
   --version              Print version and exit
 
 Environment:
@@ -42,6 +43,7 @@ Environment:
 	modelFlag := flags.String("model", "claude-sonnet-4-20250514", "")
 	baseURL := flags.String("base-url", "https://api.anthropic.com", "")
 	maxSteps := flags.Int("max-steps", 0, "")
+	verbose := flags.Bool("verbose", false, "")
 	showVersion := flags.Bool("version", false, "")
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
@@ -94,6 +96,7 @@ Environment:
 	executor := &hew.CommandExecutor{}
 
 	agent := hew.NewAgent(model, executor, cwd, os.Stdout)
+	agent.Verbose = *verbose
 	if *maxSteps > 0 {
 		agent.MaxSteps = *maxSteps
 	}
