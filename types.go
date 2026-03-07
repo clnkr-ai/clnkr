@@ -2,7 +2,7 @@ package hew
 
 import "context"
 
-// Message represents a single message in the conversation.
+// Message is one message in the conversation.
 type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -14,7 +14,7 @@ type Usage struct {
 	OutputTokens int
 }
 
-// Response wraps an LLM response with usage metadata.
+// Response pairs an LLM reply with its token usage.
 type Response struct {
 	Message Message
 	Usage   Usage

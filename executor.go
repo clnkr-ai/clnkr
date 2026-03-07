@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-// CommandExecutor runs shell commands as subprocesses.
+// CommandExecutor shells out to bash.
 type CommandExecutor struct {
 	Timeout time.Duration
 }
 
-// Execute runs a command via bash in the given directory, returning combined output.
+// Execute runs a command in dir and returns combined stdout/stderr.
 func (e *CommandExecutor) Execute(ctx context.Context, command string, dir string) (string, error) {
 	timeout := e.Timeout
 	if timeout == 0 {

@@ -9,10 +9,10 @@ import (
 	"strings"
 )
 
-// DefaultMaxSteps is the safety limit for agent iterations when no override is set.
+// DefaultMaxSteps caps agent iterations when MaxSteps is not set.
 const DefaultMaxSteps = 100
 
-// Agent implements the core query-parse-execute loop.
+// Agent runs the query-parse-execute loop.
 type Agent struct {
 	model    Model
 	executor Executor
@@ -22,7 +22,7 @@ type Agent struct {
 	MaxSteps int
 }
 
-// NewAgent creates an agent with the given model, executor, and working directory.
+// NewAgent wires up an agent with the given model, executor, and working directory.
 func NewAgent(model Model, executor Executor, cwd string) *Agent {
 	return &Agent{
 		model:    model,
@@ -55,8 +55,8 @@ func summarizeCommand(cmd string) string {
 	return fmt.Sprintf("%s ... (%d lines)", first, len(lines))
 }
 
-// Step performs a single query-parse-execute cycle. It does not enforce
-// step limits or track consecutive format errors — that is Run's policy.
+// Step runs one query-parse-execute cycle. It does not enforce step limits
+// or track format errors — that is Run's job.
 func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	a.notify(EventDebug{Message: "querying model..."})
 	resp, err := a.model.Query(ctx, a.messages)
@@ -102,7 +102,7 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	return StepResult{Response: resp, Action: action, Output: output, ExecErr: execErr}, nil
 }
 
-// Run executes the agent loop for the given task. Message history persists across calls.
+// Run loops Step until exit or step limit. Message history persists across calls.
 func (a *Agent) Run(ctx context.Context, task string) error {
 	a.messages = append(a.messages, Message{Role: "user", Content: task})
 	steps := 0

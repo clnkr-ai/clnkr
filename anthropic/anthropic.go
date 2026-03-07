@@ -12,7 +12,7 @@ import (
 	"github.com/cosgroveb/hew"
 )
 
-// Model implements hew.Model for the Anthropic Messages API.
+// Model talks to the Anthropic Messages API.
 type Model struct {
 	baseURL      string
 	apiKey       string
@@ -22,7 +22,7 @@ type Model struct {
 	client       *http.Client
 }
 
-// NewModel creates an Anthropic adapter.
+// NewModel sets up an Anthropic adapter.
 func NewModel(baseURL, apiKey, model, systemPrompt string) *Model {
 	return &Model{
 		baseURL:      baseURL,

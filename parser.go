@@ -8,10 +8,10 @@ import (
 
 var actionPattern = regexp.MustCompile("(?s)```bash\n(.*?)\n```")
 
-// ErrNoCommand indicates the LLM response contained no bash code block.
+// ErrNoCommand means the LLM response had no bash code block.
 var ErrNoCommand = errors.New("no bash command found in response")
 
-// ExtractCommand extracts the first bash command from a fenced code block in LLM output.
+// ExtractCommand pulls the first bash command from a fenced code block in LLM output.
 func ExtractCommand(output string) (string, error) {
 	matches := actionPattern.FindStringSubmatch(output)
 	if len(matches) < 2 {
