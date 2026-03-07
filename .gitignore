@@ -17,3 +17,6 @@ coverage.out
 # OS
 .DS_Store
 Thumbs.db
+
+# Override global gitignore
+!CLAUDE.md
