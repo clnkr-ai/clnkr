@@ -44,7 +44,7 @@ jobs:
       - name: Generate changelog
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          gbp dch --new-version="${VERSION}-1" --distribution=unstable --auto --commit
+          gbp dch --debian-branch=debian/main --new-version="${VERSION}-1" --distribution=unstable --auto --commit
 
       - name: Generate orig tarball
         run: |
