@@ -1,0 +1,40 @@
+package hew
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestLoadPrompt(t *testing.T) {
+	t.Run("base prompt only", func(t *testing.T) {
+		dir := t.TempDir()
+		prompt := LoadPrompt(dir)
+		if !strings.Contains(prompt, "```bash") {
+			t.Error("base prompt should contain bash code block instructions")
+		}
+		if !strings.Contains(prompt, "exit") {
+			t.Error("base prompt should contain exit instructions")
+		}
+	})
+
+	t.Run("appends AGENTS.md when present", func(t *testing.T) {
+		dir := t.TempDir()
+		content := "Always use gofmt before committing."
+		os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(content), 0644)
+
+		prompt := LoadPrompt(dir)
+		if !strings.Contains(prompt, content) {
+			t.Error("prompt should include AGENTS.md content")
+		}
+	})
+
+	t.Run("ignores missing AGENTS.md", func(t *testing.T) {
+		dir := t.TempDir()
+		prompt := LoadPrompt(dir)
+		if prompt == "" {
+			t.Error("prompt should not be empty without AGENTS.md")
+		}
+	})
+}
