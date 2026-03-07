@@ -1,0 +1,76 @@
+.nh
+.TH hew 1 "hew" "User Commands"
+
+.SH NAME
+hew \- a minimal coding agent
+
+
+.SH SYNOPSIS
+\fBhew\fP [\fB-p\fP \fItask\fP] [\fB--model\fP \fIname\fP] [\fB--base-url\fP \fIurl\fP] [\fB--max-steps\fP \fIn\fP] [\fB-v\fP|\fB--verbose\fP] [\fB--version\fP]
+
+
+.SH DESCRIPTION
+\fBhew\fP is a minimal coding agent that queries LLMs and executes bash commands in an iterative loop. It supports both Anthropic and OpenAI-compatible APIs.
+
+.PP
+In default mode, \fBhew\fP starts an interactive REPL. With \fB-p\fP, it runs a single task and exits.
+
+.PP
+Project-specific instructions are loaded from an \fBAGENTS.md\fP file in the current working directory, if present.
+
+
+.SH OPTIONS
+.TP
+\fB-p\fP, \fB--prompt\fP \fItask\fP
+Run the given task and exit. Without this flag, hew starts in conversational REPL mode.
+
+.TP
+\fB--model\fP \fIname\fP
+LLM model identifier (default: claude-sonnet-4-20250514).
+
+.TP
+\fB--base-url\fP \fIurl\fP
+LLM API endpoint (default: https://api.anthropic.com). If the URL contains "anthropic.com", the Anthropic adapter is used; otherwise, the OpenAI-compatible adapter is used.
+
+.TP
+\fB--max-steps\fP \fIn\fP
+Maximum agent iterations. 0 uses the default of 100.
+
+.TP
+\fB-v\fP, \fB--verbose\fP
+Show internal decisions (queries, parsing, working directory).
+
+.TP
+\fB--version\fP
+Print version and exit.
+
+
+.SH ENVIRONMENT
+.TP
+\fBHEW_API_KEY\fP
+API key for the LLM provider (required).
+
+.TP
+\fBANTHROPIC_API_KEY\fP
+Fallback API key when using the Anthropic endpoint.
+
+
+.SH FILES
+.TP
+\fBAGENTS.md\fP
+If present in the current directory, its contents are appended to the system prompt as project-specific instructions.
+
+
+.SH EXIT STATUS
+.TP
+\fB0\fP
+Success.
+
+.TP
+\fB1\fP
+Error (no API key, step limit reached, etc.).
+
+
+.SH AUTHOR
+Brian Cosgrove cosgroveb@gmail.com
+\[la]mailto:cosgroveb@gmail.com\[ra]
