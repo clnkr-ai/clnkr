@@ -21,6 +21,7 @@ type Agent struct {
 	cwd      string
 	out      io.Writer
 	MaxSteps int
+	Verbose  bool
 }
 
 // NewAgent creates an agent with the given model, executor, working directory, and output writer.
@@ -34,6 +35,12 @@ func NewAgent(model Model, executor Executor, cwd string, out io.Writer) *Agent 
 	}
 }
 
+func (a *Agent) debug(format string, args ...interface{}) {
+	if a.Verbose {
+		fmt.Fprintf(a.out, "[hew] "+format+"\n", args...)
+	}
+}
+
 // Run executes the agent loop for the given task. Message history persists across calls.
 func (a *Agent) Run(ctx context.Context, task string) error {
 	a.messages = append(a.messages, Message{Role: "user", Content: task})
@@ -41,16 +48,19 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 	formatErrors := 0
 
 	for {
+		a.debug("querying model...")
 		resp, err := a.model.Query(ctx, a.messages)
 		if err != nil {
 			return fmt.Errorf("query model: %w", err)
 		}
+		a.debug("usage: %d input, %d output tokens", resp.Usage.InputTokens, resp.Usage.OutputTokens)
 		a.messages = append(a.messages, resp.Message)
 		fmt.Fprintln(a.out, resp.Message.Content)
 
 		action, err := ExtractCommand(resp.Message.Content)
 		if errors.Is(err, ErrNoCommand) {
 			formatErrors++
+			a.debug("no bash block found (consecutive: %d)", formatErrors)
 			if formatErrors >= 2 {
 				return fmt.Errorf("consecutive format errors, exiting")
 			}
@@ -66,11 +76,15 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 		formatErrors = 0
 
 		if action == "exit" {
+			a.debug("parsed action: exit")
 			return nil
 		}
 
+		a.debug("parsed action: %s", action)
 		steps++
+		a.debug("step %d/%d", steps, a.MaxSteps)
 		if a.MaxSteps > 0 && steps >= a.MaxSteps {
+			a.debug("step limit reached, requesting summary")
 			a.messages = append(a.messages, Message{
 				Role:    "user",
 				Content: "Step limit reached. Summarize your progress and exit.",
@@ -85,9 +99,11 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 		}
 
 		a.updateCwd(action)
+		a.debug("cwd: %s", a.cwd)
 		fmt.Fprintf(a.out, "--- running: %s ---\n", action)
 		output, execErr := a.executor.Execute(ctx, action, a.cwd)
 		if execErr != nil {
+			a.debug("command error: %v", execErr)
 			output += "\n(error: " + execErr.Error() + ")"
 		}
 		fmt.Fprintln(a.out, output)
