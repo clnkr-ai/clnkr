@@ -149,9 +149,9 @@ jobs:
           cp artifacts/debian-changelog/debian-changelog debian/changelog
           git add debian/changelog
           git commit --allow-empty -m "Update changelog for ${VERSION}-1"
-          git tag "debian/${VERSION}-1"
+          git tag -f "debian/${VERSION}-1"
           git push origin debian/main
-          git push origin "debian/${VERSION}-1"
+          git push origin --force "debian/${VERSION}-1"
 
       - name: Collect assets
         run: |
@@ -180,6 +180,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          # Delete any existing release from a failed run
+          gh release delete "${GITHUB_REF_NAME}" --yes 2>/dev/null || true
           gh release create "${GITHUB_REF_NAME}" \
             --title "hew ${VERSION}" \
             --notes-file release-notes.txt \
