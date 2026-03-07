@@ -1,4 +1,4 @@
-package hew
+package openai_test
 
 import (
 	"context"
@@ -7,9 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/cosgroveb/hew"
+	"github.com/cosgroveb/hew/openai"
 )
 
-func TestOpenAIModel(t *testing.T) {
+func TestModel(t *testing.T) {
 	t.Run("prepends system message", func(t *testing.T) {
 		var gotBody map[string]interface{}
 
@@ -25,8 +28,8 @@ func TestOpenAIModel(t *testing.T) {
 		}))
 		defer server.Close()
 
-		m := NewOpenAIModel(server.URL, "test-key", "gpt-test", "sys prompt")
-		_, err := m.Query(context.Background(), []Message{{Role: "user", Content: "hello"}})
+		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys prompt")
+		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hello"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -48,8 +51,8 @@ func TestOpenAIModel(t *testing.T) {
 		}))
 		defer server.Close()
 
-		m := NewOpenAIModel(server.URL, "test-key", "gpt-test", "sys")
-		resp, err := m.Query(context.Background(), []Message{{Role: "user", Content: "hi"}})
+		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+		resp, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -70,8 +73,8 @@ func TestOpenAIModel(t *testing.T) {
 		}))
 		defer server.Close()
 
-		m := NewOpenAIModel(server.URL, "test-key", "gpt-test", "sys")
-		_, err := m.Query(context.Background(), []Message{{Role: "user", Content: "hi"}})
+		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
 		if err == nil {
 			t.Error("expected error on empty choices")
 		}

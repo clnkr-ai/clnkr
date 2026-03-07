@@ -1,7 +1,6 @@
 package hew
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -44,6 +43,188 @@ func (e *fakeExecutor) Execute(_ context.Context, command string, dir string) (s
 	return out, nil
 }
 
+// collectEvents returns a Notify function and a pointer to the collected events slice.
+func collectEvents() (func(Event), *[]Event) {
+	var events []Event
+	return func(e Event) { events = append(events, e) }, &events
+}
+
+func TestStep(t *testing.T) {
+	t.Run("returns command result", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: "```bash\nls\n```"}},
+		}}
+		executor := &fakeExecutor{outputs: []string{"file1.go\n"}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "list files"})
+
+		result, err := agent.Step(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Action != "ls" {
+			t.Errorf("got action %q, want %q", result.Action, "ls")
+		}
+		if result.Output != "file1.go\n" {
+			t.Errorf("got output %q, want %q", result.Output, "file1.go\n")
+		}
+		if result.ExecErr != nil {
+			t.Errorf("unexpected exec error: %v", result.ExecErr)
+		}
+	})
+
+	t.Run("returns exit action", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: "Done!\n\n```bash\nexit\n```"}},
+		}}
+
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "done"})
+
+		result, err := agent.Step(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Action != "exit" {
+			t.Errorf("got action %q, want %q", result.Action, "exit")
+		}
+		if result.Output != "" {
+			t.Errorf("expected empty output for exit, got %q", result.Output)
+		}
+	})
+
+	t.Run("returns empty action on format error", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: "no code block here"}},
+		}}
+
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "do something"})
+
+		result, err := agent.Step(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Action != "" {
+			t.Errorf("expected empty action on format error, got %q", result.Action)
+		}
+		// Should have appended reminder to messages
+		last := agent.messages[len(agent.messages)-1]
+		if !strings.Contains(last.Content, "bash") {
+			t.Error("format error reminder should mention bash")
+		}
+	})
+
+	t.Run("emits events via Notify", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: "```bash\necho hi\n```"}, Usage: Usage{InputTokens: 10, OutputTokens: 5}},
+		}}
+		executor := &fakeExecutor{outputs: []string{"hi\n"}}
+		notify, events := collectEvents()
+
+		agent := NewAgent(model, executor, "/tmp")
+		agent.Notify = notify
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "say hi"})
+
+		_, err := agent.Step(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Check we got the expected event types in order
+		var types []string
+		for _, e := range *events {
+			switch e.(type) {
+			case EventDebug:
+				types = append(types, "debug")
+			case EventResponse:
+				types = append(types, "response")
+			case EventCommandStart:
+				types = append(types, "cmd_start")
+			case EventCommandDone:
+				types = append(types, "cmd_done")
+			case EventFormatError:
+				types = append(types, "fmt_error")
+			}
+		}
+
+		// Must have response, cmd_start, cmd_done (debug events may vary)
+		hasResponse := false
+		hasCmdStart := false
+		hasCmdDone := false
+		for _, typ := range types {
+			switch typ {
+			case "response":
+				hasResponse = true
+			case "cmd_start":
+				hasCmdStart = true
+			case "cmd_done":
+				hasCmdDone = true
+			}
+		}
+		if !hasResponse {
+			t.Error("missing EventResponse")
+		}
+		if !hasCmdStart {
+			t.Error("missing EventCommandStart")
+		}
+		if !hasCmdDone {
+			t.Error("missing EventCommandDone")
+		}
+	})
+
+	t.Run("nil Notify is safe", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
+		}}
+
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		// Notify is nil by default
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "done"})
+
+		result, err := agent.Step(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Action != "exit" {
+			t.Errorf("got action %q, want %q", result.Action, "exit")
+		}
+	})
+}
+
+func TestMessages(t *testing.T) {
+	t.Run("returns copy of messages", func(t *testing.T) {
+		agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+		agent.messages = []Message{
+			{Role: "user", Content: "hello"},
+			{Role: "assistant", Content: "hi"},
+		}
+
+		msgs := agent.Messages()
+		if len(msgs) != 2 {
+			t.Fatalf("expected 2 messages, got %d", len(msgs))
+		}
+		if msgs[0].Content != "hello" {
+			t.Errorf("got %q, want %q", msgs[0].Content, "hello")
+		}
+	})
+
+	t.Run("mutation does not affect agent", func(t *testing.T) {
+		agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+		agent.messages = []Message{
+			{Role: "user", Content: "hello"},
+		}
+
+		msgs := agent.Messages()
+		msgs[0].Content = "mutated"
+
+		if agent.messages[0].Content != "hello" {
+			t.Error("mutation of returned slice should not affect agent")
+		}
+	})
+}
+
 func TestAgent(t *testing.T) {
 	t.Run("single step then exit", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
@@ -51,9 +232,8 @@ func TestAgent(t *testing.T) {
 			{Message: Message{Role: "assistant", Content: "Done!\n\n```bash\nexit\n```"}},
 		}}
 		executor := &fakeExecutor{outputs: []string{"file1.go\n"}}
-		var buf bytes.Buffer
 
-		agent := NewAgent(model, executor, "/tmp", &buf)
+		agent := NewAgent(model, executor, "/tmp")
 		err := agent.Run(context.Background(), "list files")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -77,9 +257,8 @@ func TestAgent(t *testing.T) {
 
 		model := &fakeModel{responses: responses}
 		executor := &fakeExecutor{outputs: outputs}
-		var buf bytes.Buffer
 
-		agent := NewAgent(model, executor, "/tmp", &buf)
+		agent := NewAgent(model, executor, "/tmp")
 		agent.MaxSteps = 3
 		err := agent.Run(context.Background(), "do stuff")
 		if err != nil {
@@ -94,16 +273,14 @@ func TestAgent(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
 		}}
-		var buf bytes.Buffer
 
-		agent := NewAgent(model, &fakeExecutor{}, "/tmp", &buf)
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
 		if agent.MaxSteps != 100 {
 			t.Errorf("default MaxSteps should be 100, got %d", agent.MaxSteps)
 		}
 	})
 
 	t.Run("tracks cwd on cd", func(t *testing.T) {
-		// Use a real directory that exists
 		realDir := t.TempDir()
 		subDir := filepath.Join(realDir, "sub")
 		if err := os.MkdirAll(subDir, 0o755); err != nil {
@@ -116,9 +293,8 @@ func TestAgent(t *testing.T) {
 			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
 		}}
 		executor := &fakeExecutor{outputs: []string{"", "files"}}
-		var buf bytes.Buffer
 
-		agent := NewAgent(model, executor, realDir, &buf)
+		agent := NewAgent(model, executor, realDir)
 		err := agent.Run(context.Background(), "go to sub and list")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -137,9 +313,8 @@ func TestAgent(t *testing.T) {
 			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
 		}}
 		executor := &fakeExecutor{outputs: []string{"", "files"}}
-		var buf bytes.Buffer
 
-		agent := NewAgent(model, executor, startDir, &buf)
+		agent := NewAgent(model, executor, startDir)
 		err := agent.Run(context.Background(), "try bad cd")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -154,9 +329,8 @@ func TestAgent(t *testing.T) {
 			{Message: Message{Role: "assistant", Content: "no code block"}},
 			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
 		}}
-		var buf bytes.Buffer
 
-		agent := NewAgent(model, &fakeExecutor{}, "/tmp", &buf)
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
 		err := agent.Run(context.Background(), "do something")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -173,27 +347,59 @@ func TestAgent(t *testing.T) {
 			{Message: Message{Role: "assistant", Content: "no block"}},
 			{Message: Message{Role: "assistant", Content: "still no block"}},
 		}}
-		var buf bytes.Buffer
 
-		agent := NewAgent(model, &fakeExecutor{}, "/tmp", &buf)
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
 		err := agent.Run(context.Background(), "do something")
 		if err == nil {
 			t.Error("expected error on consecutive format failures")
 		}
 	})
 
-	t.Run("writes output to configured writer", func(t *testing.T) {
+	t.Run("emits events for output", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: "```bash\necho hi\n```"}, Usage: Usage{InputTokens: 10, OutputTokens: 5}},
 			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
 		}}
-		var buf bytes.Buffer
+		executor := &fakeExecutor{outputs: []string{"hi\n"}}
+		notify, events := collectEvents()
 
-		agent := NewAgent(model, &fakeExecutor{}, "/tmp", &buf)
-		if err := agent.Run(context.Background(), "do something"); err != nil {
+		agent := NewAgent(model, executor, "/tmp")
+		agent.Notify = notify
+		err := agent.Run(context.Background(), "test events")
+		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if buf.Len() == 0 {
-			t.Error("expected output written to buffer")
+
+		var gotResponse, gotCmdStart, gotCmdDone bool
+		for _, e := range *events {
+			switch ev := e.(type) {
+			case EventResponse:
+				if !gotResponse {
+					gotResponse = true
+					if ev.Usage.InputTokens != 10 {
+						t.Errorf("expected 10 input tokens, got %d", ev.Usage.InputTokens)
+					}
+				}
+			case EventCommandStart:
+				gotCmdStart = true
+				if ev.Command != "echo hi" {
+					t.Errorf("expected command %q, got %q", "echo hi", ev.Command)
+				}
+			case EventCommandDone:
+				gotCmdDone = true
+				if ev.Output != "hi\n" {
+					t.Errorf("expected output %q, got %q", "hi\n", ev.Output)
+				}
+			}
+		}
+		if !gotResponse {
+			t.Error("missing EventResponse")
+		}
+		if !gotCmdStart {
+			t.Error("missing EventCommandStart")
+		}
+		if !gotCmdDone {
+			t.Error("missing EventCommandDone")
 		}
 	})
 
@@ -204,14 +410,12 @@ func TestAgent(t *testing.T) {
 			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
 		}}
 		executor := &fakeExecutor{outputs: []string{"stuff"}}
-		var buf bytes.Buffer
 
-		agent := NewAgent(model, executor, startDir, &buf)
+		agent := NewAgent(model, executor, startDir)
 		err := agent.Run(context.Background(), "compound cd")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// cwd should NOT change for compound commands
 		if executor.gotDirs[0] != startDir {
 			t.Errorf("compound cd should not change cwd, got dir %q", executor.gotDirs[0])
 		}
@@ -228,9 +432,8 @@ func TestAgent(t *testing.T) {
 			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
 		}}
 		executor := &fakeExecutor{outputs: []string{"", "files"}}
-		var buf bytes.Buffer
 
-		agent := NewAgent(model, executor, "/tmp", &buf)
+		agent := NewAgent(model, executor, "/tmp")
 		err = agent.Run(context.Background(), "go home")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -246,55 +449,28 @@ func TestAgent(t *testing.T) {
 			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
 		}}
 		failExecutor := &fakeExecutor{outputs: []string{""}}
-		// Override Execute to return an error
-		var buf bytes.Buffer
-		agent := NewAgent(model, failExecutor, "/tmp", &buf)
+
+		agent := NewAgent(model, failExecutor, "/tmp")
 		err := agent.Run(context.Background(), "run failing command")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// The error message from the executor should be sent to the model
 		if len(model.got) < 2 {
 			t.Fatal("expected at least 2 model queries")
 		}
 		lastMsgs := model.got[1]
 		lastMsg := lastMsgs[len(lastMsgs)-1]
-		// fakeExecutor returns "no more outputs" error on second call, but first call succeeds
-		// The output content is "" which is fine — testing that the flow works
 		if lastMsg.Role != "user" {
 			t.Errorf("expected user message with output, got role %q", lastMsg.Role)
 		}
 	})
 
-	t.Run("output includes command separators", func(t *testing.T) {
-		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: "```bash\necho hi\n```"}},
-			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
-		}}
-		executor := &fakeExecutor{outputs: []string{"hi\n"}}
-		var buf bytes.Buffer
-
-		agent := NewAgent(model, executor, "/tmp", &buf)
-		err := agent.Run(context.Background(), "test separators")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		output := buf.String()
-		if !strings.Contains(output, "--- running: echo hi ---") {
-			t.Error("output should contain running separator")
-		}
-		if !strings.Contains(output, "--- done ---") {
-			t.Error("output should contain done separator")
-		}
-	})
-
 	t.Run("returns error on context cancellation", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{}}
-		var buf bytes.Buffer
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		agent := NewAgent(model, &fakeExecutor{}, "/tmp", &buf)
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
 		err := agent.Run(ctx, "do something")
 		if err == nil {
 			t.Error("expected error on cancelled context")

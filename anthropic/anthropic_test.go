@@ -1,4 +1,4 @@
-package hew
+package anthropic_test
 
 import (
 	"context"
@@ -7,9 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/cosgroveb/hew"
+	"github.com/cosgroveb/hew/anthropic"
 )
 
-func TestAnthropicModel(t *testing.T) {
+func TestModel(t *testing.T) {
 	t.Run("sends correct request", func(t *testing.T) {
 		var gotBody map[string]interface{}
 		var gotHeaders http.Header
@@ -25,8 +28,8 @@ func TestAnthropicModel(t *testing.T) {
 		}))
 		defer server.Close()
 
-		m := NewAnthropicModel(server.URL, "test-key", "claude-test", "sys prompt")
-		_, err := m.Query(context.Background(), []Message{{Role: "user", Content: "hello"}})
+		m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys prompt")
+		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hello"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -50,8 +53,8 @@ func TestAnthropicModel(t *testing.T) {
 		}))
 		defer server.Close()
 
-		m := NewAnthropicModel(server.URL, "test-key", "claude-test", "sys")
-		resp, err := m.Query(context.Background(), []Message{{Role: "user", Content: "hi"}})
+		m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
+		resp, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -73,8 +76,8 @@ func TestAnthropicModel(t *testing.T) {
 		}))
 		defer server.Close()
 
-		m := NewAnthropicModel(server.URL, "bad-key", "claude-test", "sys")
-		_, err := m.Query(context.Background(), []Message{{Role: "user", Content: "hi"}})
+		m := anthropic.NewModel(server.URL, "bad-key", "claude-test", "sys")
+		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
 		if err == nil {
 			t.Error("expected error on 401")
 		}
