@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 jobs:
-  debian:
+  debian-amd64:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
       - name: Install Debian tooling
         env:
           DEBIAN_FRONTEND: noninteractive
-        run: sudo apt-get update && sudo apt-get install -y debhelper devscripts dpkg-dev lintian bash-completion
+        run: sudo apt-get update && sudo apt-get install -y debhelper dpkg-dev git-buildpackage lintian bash-completion
 
       - name: Configure git and dch environment
         run: |
@@ -44,19 +44,12 @@ jobs:
       - name: Generate changelog
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          # Find the previous release tag to generate commit log
           PREV_TAG=$(git tag -l 'v[0-9]*' --sort=-v:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
-          # Create a fresh changelog entry
-          dch --newversion "${VERSION}-1" --distribution unstable --force-distribution "Release ${VERSION}"
-          # Append individual commit subjects
           if [ -n "${PREV_TAG}" ]; then
-            git log --format='  * %s' "${PREV_TAG}..${GITHUB_REF_NAME}" -- . ':(exclude)debian' | while read -r line; do
-              dch --append "$line"
-            done
+            gbp dch --new-version="${VERSION}-1" --distribution=unstable --since="${PREV_TAG}" --commit
+          else
+            gbp dch --new-version="${VERSION}-1" --distribution=unstable --auto --commit
           fi
-          dch --release ""
-          git add debian/changelog
-          git commit -m "Update changelog for ${VERSION}-1"
 
       - name: Generate orig tarball
         run: |
@@ -90,8 +83,69 @@ jobs:
           name: debian-changelog
           path: debian-changelog
 
+  debian-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Debian tooling
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: sudo apt-get update && sudo apt-get install -y debhelper dpkg-dev git-buildpackage lintian bash-completion
+
+      - name: Configure git and dch environment
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo 'DEBFULLNAME=Brian Cosgrove' >> "$GITHUB_ENV"
+          echo 'DEBEMAIL=cosgroveb@gmail.com' >> "$GITHUB_ENV"
+
+      - name: Merge main into debian/main
+        run: |
+          git checkout debian/main
+          git merge --no-edit "${{ github.sha }}"
+
+      - name: Generate changelog
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PREV_TAG=$(git tag -l 'v[0-9]*' --sort=-v:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
+          if [ -n "${PREV_TAG}" ]; then
+            gbp dch --new-version="${VERSION}-1" --distribution=unstable --since="${PREV_TAG}" --commit
+          else
+            gbp dch --new-version="${VERSION}-1" --distribution=unstable --auto --commit
+          fi
+
+      - name: Generate orig tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          git archive --format=tar.gz --prefix="hew-${VERSION}/" \
+            HEAD -- . ':(exclude)debian' > "../hew_${VERSION}.orig.tar.gz"
+
+      - name: Build arm64 package
+        # -d skips Build-Depends check: golang-go comes from actions/setup-go, not apt
+        run: dpkg-buildpackage -us -uc -d
+
+      - name: Run lintian
+        run: |
+          lintian --suppress-tags bad-distribution-in-changes-file,latest-debian-changelog-entry-reuses-existing-version \
+            --fail-on error ../*.changes
+
+      - name: Collect build output
+        run: cp ../hew_*.deb .
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-arm64
+          path: hew_*.deb
+
   binaries:
-    needs: debian
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -121,7 +175,7 @@ jobs:
           path: hew-*
 
   release:
-    needs: binaries
+    needs: [debian-amd64, debian-arm64, binaries]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -157,6 +211,7 @@ jobs:
         run: |
           mkdir -p release
           cp artifacts/deb-amd64/*.deb release/
+          cp artifacts/deb-arm64/*.deb release/
           cp artifacts/binaries/hew-* release/
 
       - name: Generate source tarball
