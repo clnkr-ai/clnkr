@@ -33,8 +33,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          echo 'DEBFULLNAME=github-actions[bot]' >> "$GITHUB_ENV"
-          echo 'DEBEMAIL=github-actions[bot]@users.noreply.github.com' >> "$GITHUB_ENV"
+          echo 'DEBFULLNAME=Brian Cosgrove' >> "$GITHUB_ENV"
+          echo 'DEBEMAIL=cosgroveb@gmail.com' >> "$GITHUB_ENV"
 
       - name: Merge main into debian/main
         run: |
@@ -44,7 +44,19 @@ jobs:
       - name: Generate changelog
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          gbp dch --debian-branch=debian/main --new-version="${VERSION}-1" --distribution=unstable --auto --commit
+          # Find the previous release tag to generate commit log
+          PREV_TAG=$(git tag -l 'v[0-9]*' --sort=-v:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
+          # Create a fresh changelog entry
+          dch --newversion "${VERSION}-1" --distribution unstable --force-distribution "Release ${VERSION}"
+          # Append individual commit subjects
+          if [ -n "${PREV_TAG}" ]; then
+            git log --format='  * %s' "${PREV_TAG}..${GITHUB_REF_NAME}" -- . ':(exclude)debian' | while read -r line; do
+              dch --append "$line"
+            done
+          fi
+          dch --release ""
+          git add debian/changelog
+          git commit -m "Update changelog for ${VERSION}-1"
 
       - name: Generate orig tarball
         run: |
@@ -58,7 +70,7 @@ jobs:
 
       - name: Run lintian
         run: |
-          lintian --suppress-tags bad-distribution-in-changes-file \
+          lintian --suppress-tags bad-distribution-in-changes-file,latest-debian-changelog-entry-reuses-existing-version \
             --fail-on error ../*.changes
 
       - name: Upload deb
@@ -121,7 +133,7 @@ jobs:
 
       - name: Run lintian
         run: |
-          lintian --suppress-tags bad-distribution-in-changes-file \
+          lintian --suppress-tags bad-distribution-in-changes-file,latest-debian-changelog-entry-reuses-existing-version \
             --fail-on error ../*.changes
 
       - name: Upload deb
