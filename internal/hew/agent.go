@@ -20,6 +20,7 @@ type Agent struct {
 	messages []Message
 	cwd      string
 	out      io.Writer
+	DebugOut io.Writer
 	MaxSteps int
 	Verbose  bool
 }
@@ -36,9 +37,24 @@ func NewAgent(model Model, executor Executor, cwd string, out io.Writer) *Agent 
 }
 
 func (a *Agent) debug(format string, args ...interface{}) {
-	if a.Verbose {
-		fmt.Fprintf(a.out, "[hew] "+format+"\n", args...)
+	if !a.Verbose {
+		return
 	}
+	w := a.DebugOut
+	if w == nil {
+		w = a.out
+	}
+	fmt.Fprintf(w, "[hew] "+format+"\n", args...)
+}
+
+// summarizeCommand returns a short display form of a command for debug output.
+func summarizeCommand(cmd string) string {
+	lines := strings.Split(cmd, "\n")
+	first := lines[0]
+	if len(lines) == 1 {
+		return first
+	}
+	return fmt.Sprintf("%s ... (%d lines)", first, len(lines))
 }
 
 // Run executes the agent loop for the given task. Message history persists across calls.
@@ -80,7 +96,7 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 			return nil
 		}
 
-		a.debug("parsed action: %s", action)
+		a.debug("parsed action: %s", summarizeCommand(action))
 		steps++
 		a.debug("step %d/%d", steps, a.MaxSteps)
 		if a.MaxSteps > 0 && steps >= a.MaxSteps {
@@ -100,7 +116,7 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 
 		a.updateCwd(action)
 		a.debug("cwd: %s", a.cwd)
-		fmt.Fprintf(a.out, "--- running: %s ---\n", action)
+		fmt.Fprintf(a.out, "--- running: %s ---\n", summarizeCommand(action))
 		output, execErr := a.executor.Execute(ctx, action, a.cwd)
 		if execErr != nil {
 			a.debug("command error: %v", execErr)
