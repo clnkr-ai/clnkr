@@ -1,4 +1,4 @@
-package hew
+package anthropic
 
 import (
 	"bytes"
@@ -8,10 +8,12 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/cosgroveb/hew"
 )
 
-// AnthropicModel implements Model for the Anthropic Messages API.
-type AnthropicModel struct {
+// Model implements hew.Model for the Anthropic Messages API.
+type Model struct {
 	baseURL      string
 	apiKey       string
 	model        string
@@ -20,9 +22,9 @@ type AnthropicModel struct {
 	client       *http.Client
 }
 
-// NewAnthropicModel creates an Anthropic adapter.
-func NewAnthropicModel(baseURL, apiKey, model, systemPrompt string) *AnthropicModel {
-	return &AnthropicModel{
+// NewModel creates an Anthropic adapter.
+func NewModel(baseURL, apiKey, model, systemPrompt string) *Model {
+	return &Model{
 		baseURL:      baseURL,
 		apiKey:       apiKey,
 		model:        model,
@@ -32,14 +34,14 @@ func NewAnthropicModel(baseURL, apiKey, model, systemPrompt string) *AnthropicMo
 	}
 }
 
-type anthropicRequest struct {
-	Model     string    `json:"model"`
-	MaxTokens int       `json:"max_tokens"`
-	System    string    `json:"system,omitempty"`
-	Messages  []Message `json:"messages"`
+type request struct {
+	Model     string       `json:"model"`
+	MaxTokens int          `json:"max_tokens"`
+	System    string       `json:"system,omitempty"`
+	Messages  []hew.Message `json:"messages"`
 }
 
-type anthropicResponse struct {
+type response struct {
 	Content []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
@@ -52,20 +54,20 @@ type anthropicResponse struct {
 
 const maxResponseBytes = 1 << 20 // 1MB
 
-func (m *AnthropicModel) Query(ctx context.Context, messages []Message) (Response, error) {
-	body, err := json.Marshal(anthropicRequest{
+func (m *Model) Query(ctx context.Context, messages []hew.Message) (hew.Response, error) {
+	body, err := json.Marshal(request{
 		Model:     m.model,
 		MaxTokens: m.maxTokens,
 		System:    m.systemPrompt,
 		Messages:  messages,
 	})
 	if err != nil {
-		return Response{}, fmt.Errorf("marshal request: %w", err)
+		return hew.Response{}, fmt.Errorf("marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", m.baseURL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
-		return Response{}, fmt.Errorf("create request: %w", err)
+		return hew.Response{}, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", m.apiKey)
@@ -73,21 +75,21 @@ func (m *AnthropicModel) Query(ctx context.Context, messages []Message) (Respons
 
 	resp, err := m.client.Do(req)
 	if err != nil {
-		return Response{}, fmt.Errorf("send request: %w", err)
+		return hew.Response{}, fmt.Errorf("send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
-		return Response{}, fmt.Errorf("read response: %w", err)
+		return hew.Response{}, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return Response{}, fmt.Errorf("api error (status %d): %s", resp.StatusCode, respBody)
+		return hew.Response{}, fmt.Errorf("api error (status %d): %s", resp.StatusCode, respBody)
 	}
 
-	var apiResp anthropicResponse
+	var apiResp response
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return Response{}, fmt.Errorf("unmarshal response: %w", err)
+		return hew.Response{}, fmt.Errorf("unmarshal response: %w", err)
 	}
 
 	var text string
@@ -96,8 +98,8 @@ func (m *AnthropicModel) Query(ctx context.Context, messages []Message) (Respons
 			text += block.Text
 		}
 	}
-	return Response{
-		Message: Message{Role: "assistant", Content: text},
-		Usage:   Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens},
+	return hew.Response{
+		Message: hew.Message{Role: "assistant", Content: text},
+		Usage:   hew.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens},
 	}, nil
 }

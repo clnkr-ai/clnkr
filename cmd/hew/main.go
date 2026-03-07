@@ -9,7 +9,9 @@ import (
 	"os/signal"
 	"strings"
 
-	hew "github.com/cosgroveb/hew/internal/hew"
+	"github.com/cosgroveb/hew"
+	"github.com/cosgroveb/hew/anthropic"
+	"github.com/cosgroveb/hew/openai"
 )
 
 // version is set at build time via -ldflags.
@@ -89,16 +91,32 @@ Environment:
 
 	var model hew.Model
 	if strings.Contains(*baseURL, "anthropic.com") {
-		model = hew.NewAnthropicModel(*baseURL, apiKey, *modelFlag, systemPrompt)
+		model = anthropic.NewModel(*baseURL, apiKey, *modelFlag, systemPrompt)
 	} else {
-		model = hew.NewOpenAIModel(*baseURL, apiKey, *modelFlag, systemPrompt)
+		model = openai.NewModel(*baseURL, apiKey, *modelFlag, systemPrompt)
 	}
 
 	executor := &hew.CommandExecutor{}
 
-	agent := hew.NewAgent(model, executor, cwd, os.Stdout)
-	agent.Verbose = *verbose || *verboseShort
-	agent.DebugOut = os.Stderr
+	agent := hew.NewAgent(model, executor, cwd)
+
+	showDebug := *verbose || *verboseShort
+	agent.Notify = func(e hew.Event) {
+		switch e := e.(type) {
+		case hew.EventResponse:
+			fmt.Fprintln(os.Stdout, e.Message.Content)
+		case hew.EventCommandStart:
+			fmt.Fprintf(os.Stdout, "--- running: %s ---\n", summarizeCommand(e.Command))
+		case hew.EventCommandDone:
+			fmt.Fprintln(os.Stdout, e.Output)
+			fmt.Fprintln(os.Stdout, "--- done ---")
+		case hew.EventDebug:
+			if showDebug {
+				fmt.Fprintf(os.Stderr, "[hew] %s\n", e.Message)
+			}
+		}
+	}
+
 	if *maxSteps > 0 {
 		agent.MaxSteps = *maxSteps
 	}
@@ -135,4 +153,13 @@ Environment:
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func summarizeCommand(cmd string) string {
+	lines := strings.Split(cmd, "\n")
+	first := lines[0]
+	if len(lines) == 1 {
+		return first
+	}
+	return fmt.Sprintf("%s ... (%d lines)", first, len(lines))
 }
