@@ -13,6 +13,8 @@ make check          # Run lint + tests
 make lint           # Run golangci-lint
 make setup          # Install git hooks
 make fmt            # Format source
+make man            # Generate man page from doc/hew.1.md
+make check-man      # Verify committed man page matches source
 make help           # List all targets
 
 # Run a single test
@@ -78,6 +80,7 @@ hew/                    # core: types, interfaces, Agent, events
 - Version injected at build time via `-ldflags '-X main.version=...'` (defaults to `"dev"`)
 - `max_tokens` is a field on `anthropic.Model`, not hardcoded
 - `HEW_API_KEY` falls back to `ANTHROPIC_API_KEY` when base URL is Anthropic's
+- Man page source is `doc/hew.1.md` (markdown); `doc/hew.1` (troff) is generated via `go-md2man` and committed. Debian packaging references `doc/hew.1` instead of maintaining a separate `debian/hew.1`
 
 ## CI
 
