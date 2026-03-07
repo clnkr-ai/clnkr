@@ -73,14 +73,16 @@ jobs:
           lintian --suppress-tags bad-distribution-in-changes-file,latest-debian-changelog-entry-reuses-existing-version \
             --fail-on error ../*.changes
 
+      - name: Collect build output
+        run: |
+          cp ../hew_*.deb .
+          cp debian/changelog debian-changelog
+
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
           name: deb-amd64
-          path: ../hew_*.deb
-
-      - name: Upload changelog for downstream jobs
-        run: cp debian/changelog debian-changelog
+          path: hew_*.deb
       - uses: actions/upload-artifact@v4
         with:
           name: debian-changelog
@@ -136,11 +138,14 @@ jobs:
           lintian --suppress-tags bad-distribution-in-changes-file,latest-debian-changelog-entry-reuses-existing-version \
             --fail-on error ../*.changes
 
+      - name: Collect build output
+        run: cp ../hew_*.deb .
+
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
           name: deb-arm64
-          path: ../hew_*.deb
+          path: hew_*.deb
 
   binaries:
     needs: debian-arm64
