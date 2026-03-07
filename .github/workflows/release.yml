@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 jobs:
-  debian-prepare:
+  debian:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
       - name: Install Debian tooling
         env:
           DEBIAN_FRONTEND: noninteractive
-        run: sudo apt-get update && sudo apt-get install -y debhelper dpkg-dev git-buildpackage lintian bash-completion
+        run: sudo apt-get update && sudo apt-get install -y debhelper dpkg-dev lintian bash-completion
 
       - name: Configure git and dch environment
         run: |
@@ -83,72 +83,15 @@ jobs:
         with:
           name: deb-amd64
           path: hew_*.deb
-      - uses: actions/upload-artifact@v4
+
+      - name: Upload changelog
+        uses: actions/upload-artifact@v4
         with:
           name: debian-changelog
           path: debian-changelog
 
-  debian-arm64:
-    needs: debian-prepare
-    runs-on: ubuntu-24.04-arm64
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: Install Debian tooling
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: sudo apt-get update && sudo apt-get install -y debhelper dpkg-dev git-buildpackage lintian bash-completion
-
-      - name: Configure git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Download changelog from debian-prepare
-        uses: actions/download-artifact@v4
-        with:
-          name: debian-changelog
-
-      - name: Checkout debian/main and apply changelog
-        run: |
-          git checkout debian/main
-          git merge --no-edit "${{ github.sha }}"
-          cp debian-changelog debian/changelog
-          git add debian/changelog
-          git commit --allow-empty -m "Sync changelog from debian-prepare"
-
-      - name: Generate orig tarball
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          git archive --format=tar.gz --prefix="hew-${VERSION}/" \
-            HEAD -- . ':(exclude)debian' > "../hew_${VERSION}.orig.tar.gz"
-
-      - name: Build arm64 package
-        # -d skips Build-Depends check: golang-go comes from actions/setup-go, not apt
-        run: dpkg-buildpackage -us -uc -d
-
-      - name: Run lintian
-        run: |
-          lintian --suppress-tags bad-distribution-in-changes-file,latest-debian-changelog-entry-reuses-existing-version \
-            --fail-on error ../*.changes
-
-      - name: Collect build output
-        run: cp ../hew_*.deb .
-
-      - name: Upload deb
-        uses: actions/upload-artifact@v4
-        with:
-          name: deb-arm64
-          path: hew_*.deb
-
   binaries:
-    needs: debian-arm64
+    needs: debian
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -214,7 +157,6 @@ jobs:
         run: |
           mkdir -p release
           cp artifacts/deb-amd64/*.deb release/
-          cp artifacts/deb-arm64/*.deb release/
           cp artifacts/binaries/hew-* release/
 
       - name: Generate source tarball
