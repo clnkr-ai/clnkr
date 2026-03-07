@@ -1,10 +1,8 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Overview
 
-hew is a minimal coding agent CLI that queries LLMs and executes bash commands in a loop. Single Go binary, zero external dependencies beyond stdlib. Dual-provider support: Anthropic Messages API and OpenAI-compatible chat completions.
+hew is a coding agent CLI that queries LLMs and executes bash commands in a loop. Single binary, stdlib only. Talks to the Anthropic Messages API and any OpenAI-compatible endpoint.
 
 ## Commands
 
@@ -24,11 +22,23 @@ go test . -v -run TestExtractCommand
 make build VERSION=0.2.0
 ```
 
-**Before committing:** Run `make fmt` then `make check`. Do not commit if either fails.
+<rules>
+- Before committing, run `make fmt` then `make check`. Do not commit if either fails.
+- A PostToolUse hook runs gofmt on Go files after Edit/Write automatically. You do not need to format manually, but `make fmt` and `make check` are still required before commits.
+- Do not add external dependencies. This project is stdlib only.
+- Do not move packages to `internal/`. The core is a public library.
+- Do not add `io.Writer` parameters for output. Output goes through typed events.
+- Do not put policy logic in `Step()`. Keep it in `Run()`. New shared logic goes in `Step()`.
+- Do not add provider-detection logic outside `main.go`.
+- Wrap errors with `fmt.Errorf("context: %w", err)`. Do not use bare error returns or third-party error packages.
+- Adapter tests use external test packages (`package anthropic_test`). Core tests use internal packages (`package hew`). Match the existing pattern in each directory.
+- The `exhaustive` linter is enabled. Switch statements on sealed types (like `Event`) must cover all cases. A `default` branch counts as exhaustive (`default-signifies-exhaustive: true` in `.golangci.yml`).
+- When adding event types: define the struct, add the unexported `event()` method, and the exhaustive linter will catch missing switch cases.
+</rules>
 
 ## Architecture
 
-The core is an importable library at module root (`github.com/cosgroveb/hew`). `cmd/hew/main.go` is the first consumer — a thin CLI entry point that wires components and provides output formatting via the `Notify` callback.
+The core is an importable library at module root (`github.com/cosgroveb/hew`). `cmd/hew/main.go` is the first consumer — a thin CLI that wires components and handles output formatting via the `Notify` callback.
 
 **Package structure:**
 ```
@@ -38,44 +48,39 @@ hew/                    # core: types, interfaces, Agent, events
 └── cmd/hew/            # CLI consumer
 ```
 
-**Two-tier Agent API:**
-- `Step(ctx) (StepResult, error)` — single query-parse-execute cycle, policy-free. For advanced consumers (ToT, research harnesses).
-- `Run(ctx, task) error` — thin policy loop over `Step()`. Handles format error counting (exit on 2 consecutive) and step limits.
+**Two-tier agent API:**
+- `Step(ctx) (StepResult, error)` — one query-parse-execute cycle, no policy. `StepResult` carries the response, parsed action, command output, and execution error.
+- `Run(ctx, task) error` — policy loop over `Step()`. Counts format errors (exits on 2 consecutive) and enforces step limits.
 
-**Event system:** `Notify func(Event)` callback on Agent. Sealed interface (unexported marker method) with five event types: `EventResponse`, `EventCommandStart`, `EventCommandDone`, `EventFormatError`, `EventDebug`. Nil Notify = silent. `cmd/hew/main.go` sets it to print to stdout/stderr.
+**Events:** `Notify func(Event)` callback on Agent. Sealed interface (unexported marker method) with five types: `EventResponse`, `EventCommandStart`, `EventCommandDone`, `EventFormatError`, `EventDebug`. Nil Notify = silent.
 
-**Core interfaces:**
+**Interfaces:**
 - `Model` — `Query(ctx, []Message) (Response, error)` — implemented by `anthropic.Model` and `openai.Model`
 - `Executor` — `Execute(ctx, command, dir) (string, error)` — implemented by `CommandExecutor`
 
-**Provider selection**: `main.go` checks if `--base-url` contains `anthropic.com` → Anthropic adapter, everything else → OpenAI-compatible adapter. Both use raw `net/http` with `httptest` servers in tests.
+**Provider selection:** `main.go` checks if `--base-url` contains `anthropic.com` → Anthropic adapter, everything else → OpenAI adapter. Both use raw `net/http` with `httptest` servers in tests.
 
-**Parser** (`parser.go`): `ExtractCommand` extracts the first `` ```bash `` fenced block via regex. Returns `ErrNoCommand` if none found.
+**Parser** (`parser.go`): `ExtractCommand` pulls the first `` ```bash `` fenced block via regex. Returns `ErrNoCommand` if none found.
 
-**System prompt** (`prompt.go`): Hardcoded base prompt + optional `AGENTS.md` file content from the working directory.
+**System prompt** (`prompt.go`): Hardcoded base prompt + optional `AGENTS.md` content from the working directory.
 
-## Testing Patterns
+## Testing patterns
 
-- Provider adapters tested with `httptest.NewServer` in external test packages (`package anthropic_test`) — black-box, no real API calls
-- Agent loop tested with `fakeModel` and `fakeExecutor` (defined in `agent_test.go`) — deterministic inputs for state machine testing
-- Executor tests are real integration tests that shell out to bash
+- Provider adapters use `httptest.NewServer` in external test packages (`package anthropic_test`) — black-box, no real API calls
+- Agent loop uses `fakeModel` and `fakeExecutor` (in `agent_test.go`) — deterministic inputs for state machine testing
+- Executor tests shell out to bash (real integration tests)
 - macOS `/private/tmp` symlink is handled in executor tests
 
-## Key Design Decisions
+## Design decisions
 
-- Core is a public library, not `internal/` — extensions (TUI, alternative loop strategies) compose onto it
-- `Step()` exposes the loop primitive; `Run()` adds policy. Shared logic lives in `Step()`.
-- Output flows through typed events, not `io.Writer` — consumers control rendering
-- `Messages()` returns a defensive copy of conversation history
-- Version injected at build time: `-ldflags '-X main.version=...'` (defaults to `"dev"`)
-- `max_tokens` is a configurable field on `anthropic.Model`, not hardcoded
-- REPL creates a fresh `signal.NotifyContext` per `Run` call so Ctrl-C cancels the current operation without killing the session
+- `Step()` is the loop primitive; `Run()` adds policy
+- `Messages()` returns a defensive copy
+- Version injected at build time via `-ldflags '-X main.version=...'` (defaults to `"dev"`)
+- `max_tokens` is a field on `anthropic.Model`, not hardcoded
 - `HEW_API_KEY` falls back to `ANTHROPIC_API_KEY` when base URL is Anthropic's
 
 ## CI
 
-GitHub Actions runs on push to `main` and PRs targeting `main`. Single job: lint (golangci-lint with exhaustive, gofmt, govet, errcheck, staticcheck, unused), test (with `-race`), build.
+GitHub Actions runs on push to `main` and PRs targeting `main`. Single job: lint, test (with `-race`), build.
 
 **Local setup:** Run `make setup` to install the pre-commit hook (enforces gofmt). golangci-lint is required for `make lint` and `make check` — install with `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` or `brew install golangci-lint`.
-
-**Format enforcement:** Three layers — Claude Code PostToolUse hook formats `.go` files on edit, git pre-commit hook rejects unformatted files, CI golangci-lint catches anything remaining.

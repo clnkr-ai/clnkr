@@ -12,7 +12,7 @@ import (
 	"github.com/cosgroveb/hew"
 )
 
-// Model implements hew.Model for OpenAI-compatible chat completions APIs.
+// Model talks to any OpenAI-compatible chat completions API.
 type Model struct {
 	baseURL      string
 	apiKey       string
@@ -21,7 +21,7 @@ type Model struct {
 	client       *http.Client
 }
 
-// NewModel creates an OpenAI-compatible adapter.
+// NewModel sets up an OpenAI-compatible adapter.
 func NewModel(baseURL, apiKey, model, systemPrompt string) *Model {
 	return &Model{
 		baseURL:      baseURL,
