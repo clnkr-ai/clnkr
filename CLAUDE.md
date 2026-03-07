@@ -16,7 +16,7 @@ make fmt            # Format source
 make help           # List all targets
 
 # Run a single test
-go test ./internal/hew/ -v -run TestExtractCommand
+go test . -v -run TestExtractCommand
 
 # Build with explicit version
 make build VERSION=0.2.0
@@ -24,32 +24,46 @@ make build VERSION=0.2.0
 
 ## Architecture
 
-The agent loop lives entirely in `internal/hew/`. `cmd/hew/main.go` is a thin CLI entry point that wires components together.
+The core is an importable library at module root (`github.com/cosgroveb/hew`). `cmd/hew/main.go` is the first consumer — a thin CLI entry point that wires components and provides output formatting via the `Notify` callback.
 
-**Core loop** (`agent.go`): `Query model → ExtractCommand → Execute → append output → repeat`. Exits on `exit` action or step limit. Tracks working directory across `cd` commands (standalone only — compound commands like `cd /tmp && ls` are skipped).
+**Package structure:**
+```
+hew/                    # core: types, interfaces, Agent, events
+├── anthropic/          # Anthropic Messages API adapter
+├── openai/             # OpenAI-compatible adapter
+└── cmd/hew/            # CLI consumer
+```
 
-**Two interfaces drive testability:**
-- `Model` — `Query(ctx, []Message) (Response, error)` — implemented by `AnthropicModel` and `OpenAIModel`
+**Two-tier Agent API:**
+- `Step(ctx) (StepResult, error)` — single query-parse-execute cycle, policy-free. For advanced consumers (ToT, research harnesses).
+- `Run(ctx, task) error` — thin policy loop over `Step()`. Handles format error counting (exit on 2 consecutive) and step limits.
+
+**Event system:** `Notify func(Event)` callback on Agent. Sealed interface (unexported marker method) with five event types: `EventResponse`, `EventCommandStart`, `EventCommandDone`, `EventFormatError`, `EventDebug`. Nil Notify = silent. `cmd/hew/main.go` sets it to print to stdout/stderr.
+
+**Core interfaces:**
+- `Model` — `Query(ctx, []Message) (Response, error)` — implemented by `anthropic.Model` and `openai.Model`
 - `Executor` — `Execute(ctx, command, dir) (string, error)` — implemented by `CommandExecutor`
 
 **Provider selection**: `main.go` checks if `--base-url` contains `anthropic.com` → Anthropic adapter, everything else → OpenAI-compatible adapter. Both use raw `net/http` with `httptest` servers in tests.
 
-**Parser** (`parser.go`): `ExtractCommand` extracts the first `` ```bash `` fenced block via regex. Returns `ErrNoCommand` if none found. The agent tolerates one format error (sends a reminder), exits on two consecutive.
+**Parser** (`parser.go`): `ExtractCommand` extracts the first `` ```bash `` fenced block via regex. Returns `ErrNoCommand` if none found.
 
 **System prompt** (`prompt.go`): Hardcoded base prompt + optional `AGENTS.md` file content from the working directory.
 
-**Debug output** (`--verbose` / `-v`): `[hew]` prefixed lines go to stderr via `DebugOut` writer, keeping stdout clean for piping. Shows token usage, parsed actions, cwd changes.
-
 ## Testing Patterns
 
-- Provider adapters tested with `httptest.NewServer` — no real API calls
-- Agent loop tested with `fakeModel` and `fakeExecutor` (defined in `agent_test.go`)
+- Provider adapters tested with `httptest.NewServer` in external test packages (`package anthropic_test`) — black-box, no real API calls
+- Agent loop tested with `fakeModel` and `fakeExecutor` (defined in `agent_test.go`) — deterministic inputs for state machine testing
 - Executor tests are real integration tests that shell out to bash
 - macOS `/private/tmp` symlink is handled in executor tests
 
 ## Key Design Decisions
 
+- Core is a public library, not `internal/` — extensions (TUI, alternative loop strategies) compose onto it
+- `Step()` exposes the loop primitive; `Run()` adds policy. Shared logic lives in `Step()`.
+- Output flows through typed events, not `io.Writer` — consumers control rendering
+- `Messages()` returns a defensive copy of conversation history
 - Version injected at build time: `-ldflags '-X main.version=...'` (defaults to `"dev"`)
-- `max_tokens` is a configurable field on `AnthropicModel`, not hardcoded
+- `max_tokens` is a configurable field on `anthropic.Model`, not hardcoded
 - REPL creates a fresh `signal.NotifyContext` per `Run` call so Ctrl-C cancels the current operation without killing the session
 - `HEW_API_KEY` falls back to `ANTHROPIC_API_KEY` when base URL is Anthropic's
