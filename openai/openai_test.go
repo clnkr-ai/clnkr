@@ -18,8 +18,8 @@ func TestModel(t *testing.T) {
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
-			json.Unmarshal(body, &gotBody)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.Unmarshal(body, &gotBody)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"choices": []map[string]interface{}{
 					{"message": map[string]string{"role": "assistant", "content": "resp"}},
 				},
@@ -42,7 +42,7 @@ func TestModel(t *testing.T) {
 
 	t.Run("parses response with usage", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"choices": []map[string]interface{}{
 					{"message": map[string]string{"role": "assistant", "content": "hello back"}},
 				},
@@ -66,7 +66,7 @@ func TestModel(t *testing.T) {
 
 	t.Run("returns error on empty choices", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"choices": []interface{}{},
 				"usage":   map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
 			})

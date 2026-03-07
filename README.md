@@ -1,5 +1,7 @@
 # hew
 
+[![CI](https://github.com/cosgroveb/hew/actions/workflows/ci.yml/badge.svg)](https://github.com/cosgroveb/hew/actions/workflows/ci.yml)
+
 A minimal coding agent. Query an LLM, execute bash commands, repeat. Supports the Anthropic Messages API and any OpenAI-compatible endpoint (vLLM, Ollama, LiteLLM, etc.).
 
 ## Install
@@ -82,7 +84,7 @@ The LLM is the agent. hew is the scaffold.
 
 ```bash
 make help       # Show all targets
-make check      # Vet + tests
+make check      # Lint + tests
 make test       # Tests only
 make fmt        # Format source
 ```

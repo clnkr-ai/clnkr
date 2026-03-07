@@ -1,0 +1,13 @@
+linters:
+  disable-all: true
+  enable:
+    - exhaustive
+    - gofmt
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+
+linters-settings:
+  exhaustive:
+    default-signifies-exhaustive: true

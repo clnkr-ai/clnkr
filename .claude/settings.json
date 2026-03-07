@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'f=$(echo \"$CLAUDE_HOOK_INPUT\" | jq -r \".tool_input.file_path // empty\"); [ -n \"$f\" ] && echo \"$f\" | grep -q \"\\.go$\" && gofmt -w \"$f\" || true'"
+          }
+        ]
+      }
+    ]
+  }
+}

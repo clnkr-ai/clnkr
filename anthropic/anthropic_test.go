@@ -20,8 +20,8 @@ func TestModel(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			gotHeaders = r.Header
 			body, _ := io.ReadAll(r.Body)
-			json.Unmarshal(body, &gotBody)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.Unmarshal(body, &gotBody)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"content": []map[string]string{{"type": "text", "text": "response"}},
 				"usage":   map[string]int{"input_tokens": 10, "output_tokens": 20},
 			})
@@ -46,7 +46,7 @@ func TestModel(t *testing.T) {
 
 	t.Run("parses response with usage", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"content": []map[string]string{{"type": "text", "text": "hello back"}},
 				"usage":   map[string]int{"input_tokens": 50, "output_tokens": 30},
 			})
@@ -72,7 +72,7 @@ func TestModel(t *testing.T) {
 	t.Run("returns error on non-200", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error":"invalid key"}`))
+			_, _ = w.Write([]byte(`{"error":"invalid key"}`))
 		}))
 		defer server.Close()
 

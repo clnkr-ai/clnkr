@@ -29,4 +29,3 @@ type Model interface {
 type Executor interface {
 	Execute(ctx context.Context, command string, dir string) (string, error)
 }
-

@@ -3,7 +3,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 BIN := hew
 
 .DEFAULT_GOAL := build
-.PHONY: build install clean test vet fmt check run help
+.PHONY: build install clean test vet fmt lint check run help setup
 
 build: ## Compile binary
 	go build -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/hew/
@@ -23,10 +23,16 @@ vet: ## Run go vet
 fmt: ## Format source code
 	go fmt ./...
 
-check: vet test ## Run vet and tests
+lint: ## Run linters
+	golangci-lint run ./...
+
+check: lint test ## Run lint and tests
 
 run: build ## Build and start REPL
 	./$(BIN)
 
 help: ## Show available targets
 	@grep -E '^[a-z]+:.*##' $(MAKEFILE_LIST) | sort | awk -F ':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
+
+setup: ## Install git hooks
+	ln -sf ../../scripts/pre-commit .git/hooks/pre-commit

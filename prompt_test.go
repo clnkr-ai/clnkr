@@ -22,7 +22,9 @@ func TestLoadPrompt(t *testing.T) {
 	t.Run("appends AGENTS.md when present", func(t *testing.T) {
 		dir := t.TempDir()
 		content := "Always use gofmt before committing."
-		os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(content), 0644)
+		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(content), 0644); err != nil {
+			t.Fatalf("write AGENTS.md: %v", err)
+		}
 
 		prompt := LoadPrompt(dir)
 		if !strings.Contains(prompt, content) {

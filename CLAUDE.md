@@ -11,7 +11,9 @@ hew is a minimal coding agent CLI that queries LLMs and executes bash commands i
 ```bash
 make build          # Compile binary (version from git describe)
 make test           # Run all tests (go test ./... -v)
-make check          # Run vet + tests
+make check          # Run lint + tests
+make lint           # Run golangci-lint
+make setup          # Install git hooks
 make fmt            # Format source
 make help           # List all targets
 
@@ -21,6 +23,8 @@ go test . -v -run TestExtractCommand
 # Build with explicit version
 make build VERSION=0.2.0
 ```
+
+**Before committing:** Run `make fmt` then `make check`. Do not commit if either fails.
 
 ## Architecture
 
@@ -67,3 +71,11 @@ hew/                    # core: types, interfaces, Agent, events
 - `max_tokens` is a configurable field on `anthropic.Model`, not hardcoded
 - REPL creates a fresh `signal.NotifyContext` per `Run` call so Ctrl-C cancels the current operation without killing the session
 - `HEW_API_KEY` falls back to `ANTHROPIC_API_KEY` when base URL is Anthropic's
+
+## CI
+
+GitHub Actions runs on push to `main` and PRs targeting `main`. Single job: lint (golangci-lint with exhaustive, gofmt, govet, errcheck, staticcheck, unused), test (with `-race`), build.
+
+**Local setup:** Run `make setup` to install the pre-commit hook (enforces gofmt). golangci-lint is required for `make lint` and `make check` — install with `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` or `brew install golangci-lint`.
+
+**Format enforcement:** Three layers — Claude Code PostToolUse hook formats `.go` files on edit, git pre-commit hook rejects unformatted files, CI golangci-lint catches anything remaining.

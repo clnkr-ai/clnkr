@@ -20,3 +20,5 @@ Thumbs.db
 
 # Override global gitignore
 !CLAUDE.md
+!.claude/
+.claude/settings.local.json
