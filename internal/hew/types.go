@@ -1,9 +1,6 @@
 package hew
 
-import (
-	"context"
-	"io"
-)
+import "context"
 
 // Message represents a single message in the conversation.
 type Message struct {
@@ -33,8 +30,3 @@ type Executor interface {
 	Execute(ctx context.Context, command string, dir string) (string, error)
 }
 
-// AgentConfig holds runtime configuration for the agent loop.
-type AgentConfig struct {
-	MaxSteps int
-	Out      io.Writer
-}
