@@ -8,18 +8,18 @@ import (
 
 var actionPattern = regexp.MustCompile("(?s)```bash\n(.*?)\n```")
 
-// ErrNoAction indicates the LLM response contained no bash code block.
-var ErrNoAction = errors.New("no bash action found in response")
+// ErrNoCommand indicates the LLM response contained no bash code block.
+var ErrNoCommand = errors.New("no bash command found in response")
 
-// ParseAction extracts the first bash command from a fenced code block in LLM output.
-func ParseAction(output string) (string, error) {
+// ExtractCommand extracts the first bash command from a fenced code block in LLM output.
+func ExtractCommand(output string) (string, error) {
 	matches := actionPattern.FindStringSubmatch(output)
 	if len(matches) < 2 {
-		return "", ErrNoAction
+		return "", ErrNoCommand
 	}
 	action := strings.TrimSpace(matches[1])
 	if action == "" {
-		return "", ErrNoAction
+		return "", ErrNoCommand
 	}
 	return action, nil
 }

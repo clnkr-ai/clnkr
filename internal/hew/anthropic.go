@@ -16,6 +16,7 @@ type AnthropicModel struct {
 	apiKey       string
 	model        string
 	systemPrompt string
+	maxTokens    int
 	client       *http.Client
 }
 
@@ -26,6 +27,7 @@ func NewAnthropicModel(baseURL, apiKey, model, systemPrompt string) *AnthropicMo
 		apiKey:       apiKey,
 		model:        model,
 		systemPrompt: systemPrompt,
+		maxTokens:    4096,
 		client:       &http.Client{Timeout: 120 * time.Second},
 	}
 }
@@ -53,7 +55,7 @@ const maxResponseBytes = 1 << 20 // 1MB
 func (m *AnthropicModel) Query(ctx context.Context, messages []Message) (Response, error) {
 	body, err := json.Marshal(anthropicRequest{
 		Model:     m.model,
-		MaxTokens: 4096,
+		MaxTokens: m.maxTokens,
 		System:    m.systemPrompt,
 		Messages:  messages,
 	})

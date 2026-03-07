@@ -2,7 +2,7 @@ package hew
 
 import "testing"
 
-func TestParseAction(t *testing.T) {
+func TestExtractCommand(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   string
@@ -48,7 +48,7 @@ func TestParseAction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseAction(tt.input)
+			got, err := ExtractCommand(tt.input)
 			if tt.wantErr {
 				if err == nil {
 					t.Error("expected error, got nil")
