@@ -6,7 +6,7 @@ BIN := hew
 .PHONY: build install clean test vet fmt lint check run help setup man check-man
 
 build: ## Compile binary
-	go build -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/hew/
+	go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/hew/
 
 install: ## Install to GOPATH/bin
 	go install -ldflags '$(LDFLAGS)' ./cmd/hew/

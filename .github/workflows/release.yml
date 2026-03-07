@@ -1,0 +1,225 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  debian-prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Debian tooling
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: sudo apt-get update && sudo apt-get install -y debhelper dpkg-dev git-buildpackage lintian bash-completion
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge main into debian/main
+        run: |
+          git checkout debian/main
+          git merge --no-edit "${{ github.sha }}"
+
+      - name: Generate changelog
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gbp dch --new-version="${VERSION}-1" --distribution=unstable --auto --commit
+
+      - name: Generate orig tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          git archive --format=tar.gz --prefix="hew-${VERSION}/" \
+            HEAD -- . ':(exclude)debian' > "../hew_${VERSION}.orig.tar.gz"
+
+      - name: Build amd64 package
+        # -d skips Build-Depends check: golang-go comes from actions/setup-go, not apt
+        run: dpkg-buildpackage -us -uc -d
+
+      - name: Run lintian
+        run: |
+          lintian --suppress-tags bad-distribution-in-changes-file \
+            --fail-on error ../*.changes
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-amd64
+          path: ../hew_*.deb
+
+      - name: Upload changelog for downstream jobs
+        run: cp debian/changelog debian-changelog
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debian-changelog
+          path: debian-changelog
+
+  debian-arm64:
+    needs: debian-prepare
+    runs-on: ubuntu-24.04-arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Debian tooling
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: sudo apt-get update && sudo apt-get install -y debhelper dpkg-dev git-buildpackage lintian bash-completion
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Download changelog from debian-prepare
+        uses: actions/download-artifact@v4
+        with:
+          name: debian-changelog
+
+      - name: Checkout debian/main and apply changelog
+        run: |
+          git checkout debian/main
+          git merge --no-edit "${{ github.sha }}"
+          cp debian-changelog debian/changelog
+          git add debian/changelog
+          git commit --allow-empty -m "Sync changelog from debian-prepare"
+
+      - name: Generate orig tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          git archive --format=tar.gz --prefix="hew-${VERSION}/" \
+            HEAD -- . ':(exclude)debian' > "../hew_${VERSION}.orig.tar.gz"
+
+      - name: Build arm64 package
+        # -d skips Build-Depends check: golang-go comes from actions/setup-go, not apt
+        run: dpkg-buildpackage -us -uc -d
+
+      - name: Run lintian
+        run: |
+          lintian --suppress-tags bad-distribution-in-changes-file \
+            --fail-on error ../*.changes
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-arm64
+          path: ../hew_*.deb
+
+  binaries:
+    needs: debian-arm64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Cross-compile binaries
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for GOOS in linux darwin; do
+            for GOARCH in amd64 arm64; do
+              CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH \
+                go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+                -o "hew-${GOOS}-${GOARCH}" ./cmd/hew/
+            done
+          done
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: hew-*
+
+  release:
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dpkg-dev
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Push debian/main and tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          git checkout debian/main
+          git merge --no-edit "${{ github.sha }}"
+          cp artifacts/debian-changelog/debian-changelog debian/changelog
+          git add debian/changelog
+          git commit --allow-empty -m "Update changelog for ${VERSION}-1"
+          git tag "debian/${VERSION}-1"
+          git push origin debian/main
+          git push origin "debian/${VERSION}-1"
+
+      - name: Collect assets
+        run: |
+          mkdir -p release
+          cp artifacts/deb-amd64/*.deb release/
+          cp artifacts/deb-arm64/*.deb release/
+          cp artifacts/binaries/hew-* release/
+
+      - name: Generate source tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          git archive --format=tar.gz --prefix="hew-${VERSION}/" \
+            -o "release/hew_${VERSION}.orig.tar.gz" "${{ github.sha }}"
+
+      - name: Generate checksums
+        run: |
+          cd release
+          sha256sum * > SHA256SUMS
+
+      - name: Extract release notes
+        run: |
+          dpkg-parsechangelog -l artifacts/debian-changelog/debian-changelog \
+            --show-field Changes > release-notes.txt
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "hew ${VERSION}" \
+            --notes-file release-notes.txt \
+            release/*
