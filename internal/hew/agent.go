@@ -85,18 +85,26 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 		}
 
 		a.updateCwd(action)
+		fmt.Fprintf(a.out, "--- running: %s ---\n", action)
 		output, execErr := a.executor.Execute(ctx, action, a.cwd)
 		if execErr != nil {
 			output += "\n(error: " + execErr.Error() + ")"
 		}
 		fmt.Fprintln(a.out, output)
+		fmt.Fprintln(a.out, "--- done ---")
 		a.messages = append(a.messages, Message{Role: "user", Content: output})
 	}
 }
 
 func (a *Agent) updateCwd(command string) {
+	// Only track standalone cd commands — compound commands (cd /tmp && ls)
+	// change directory in the subprocess but we can't reliably parse them.
 	trimmed := strings.TrimSpace(command)
 	if !strings.HasPrefix(trimmed, "cd ") {
+		return
+	}
+	// Reject compound commands: &&, ||, ;, pipes, or multi-line
+	if strings.ContainsAny(trimmed, "&|;\n") {
 		return
 	}
 	parts := strings.Fields(trimmed)
@@ -105,14 +113,23 @@ func (a *Agent) updateCwd(command string) {
 	}
 	target := parts[1]
 
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+
 	var newCwd string
 	switch {
 	case target == "~":
-		home, err := os.UserHomeDir()
-		if err != nil {
+		if home == "" {
 			return
 		}
 		newCwd = home
+	case strings.HasPrefix(target, "~/"):
+		if home == "" {
+			return
+		}
+		newCwd = filepath.Join(home, target[2:])
 	case filepath.IsAbs(target):
 		newCwd = target
 	default:

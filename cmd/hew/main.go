@@ -68,8 +68,11 @@ Environment:
 		apiKey = os.Getenv("ANTHROPIC_API_KEY")
 	}
 	if apiKey == "" {
-		fmt.Fprintln(os.Stderr, `Error: No API key found.
-Set it with: export HEW_API_KEY=your-api-key`)
+		msg := "Error: No API key found.\nSet it with: export HEW_API_KEY=your-api-key"
+		if strings.Contains(*baseURL, "anthropic.com") {
+			msg += "\nOr set ANTHROPIC_API_KEY when using the default Anthropic endpoint."
+		}
+		fmt.Fprintln(os.Stderr, msg)
 		os.Exit(1)
 	}
 
@@ -89,8 +92,6 @@ Set it with: export HEW_API_KEY=your-api-key`)
 	}
 
 	executor := &hew.CommandExecutor{}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
 
 	agent := hew.NewAgent(model, executor, cwd, os.Stdout)
 	if *maxSteps > 0 {
@@ -98,6 +99,8 @@ Set it with: export HEW_API_KEY=your-api-key`)
 	}
 
 	if taskPrompt != "" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
 		if err := agent.Run(ctx, taskPrompt); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -105,7 +108,8 @@ Set it with: export HEW_API_KEY=your-api-key`)
 		return
 	}
 
-	// REPL mode
+	// REPL mode — fresh context per run so Ctrl-C cancels the current
+	// operation without killing the REPL.
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Print("hew> ")
@@ -116,8 +120,14 @@ Set it with: export HEW_API_KEY=your-api-key`)
 		if input == "" {
 			continue
 		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		if err := agent.Run(ctx, input); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		}
+		stop()
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 }
