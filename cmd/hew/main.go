@@ -104,12 +104,12 @@ Environment:
 	agent.Notify = func(e hew.Event) {
 		switch e := e.(type) {
 		case hew.EventResponse:
-			fmt.Fprintln(os.Stdout, e.Message.Content)
+			fmt.Fprintln(os.Stdout, e.Message.Content) //nolint:errcheck
 		case hew.EventCommandStart:
-			fmt.Fprintf(os.Stdout, "--- running: %s ---\n", summarizeCommand(e.Command))
+			fmt.Fprintf(os.Stdout, "--- running: %s ---\n", summarizeCommand(e.Command)) //nolint:errcheck
 		case hew.EventCommandDone:
-			fmt.Fprintln(os.Stdout, e.Output)
-			fmt.Fprintln(os.Stdout, "--- done ---")
+			fmt.Fprintln(os.Stdout, e.Output)       //nolint:errcheck
+			fmt.Fprintln(os.Stdout, "--- done ---") //nolint:errcheck
 		case hew.EventDebug:
 			if showDebug {
 				fmt.Fprintf(os.Stderr, "[hew] %s\n", e.Message)
