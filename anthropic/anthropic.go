@@ -77,7 +77,7 @@ func (m *Model) Query(ctx context.Context, messages []hew.Message) (hew.Response
 	if err != nil {
 		return hew.Response{}, fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // best-effort cleanup
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
