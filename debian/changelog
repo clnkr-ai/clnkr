@@ -1,3 +1,23 @@
+hew (0.1.2-1) unstable; urgency=medium
+
+  [ Brian Cosgrove ]
+  * Add initial Debian packaging
+  * Add release workflow for Debian packages and cross-platform binaries
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.0.1-1
+  * Restore gbp dch and arm64 deb, fix runner label
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.1.1-1
+
+  [ github-actions[bot] ]
+  * Update CHANGELOG.md for 0.1.1
+  * Stop hardcoding /v1 in OpenAI adapter URL path
+  * Update CHANGELOG.md for 0.1.2
+
+ -- Brian Cosgrove <cosgroveb@gmail.com>  Sun, 08 Mar 2026 05:22:30 +0000
+
 hew (0.1.1-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
