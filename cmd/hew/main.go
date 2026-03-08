@@ -28,8 +28,8 @@ Usage:
 
 Options:
   -p, --prompt string    Task to run (exits after completion)
-  --model string         Model identifier (default: claude-sonnet-4-20250514)
-  --base-url string      LLM API endpoint (default: https://api.anthropic.com)
+  --model string         Model identifier (env: $HEW_MODEL, default: claude-sonnet-4-20250514)
+  --base-url string      LLM endpoint (env: $HEW_BASE_URL, default: https://api.anthropic.com)
   --max-steps int        Maximum agent steps, 0 = default 100 (default: 0)
   -v, --verbose          Show internal decisions (queries, parsing, cwd)
   --version              Print version and exit
@@ -37,13 +37,17 @@ Options:
 Environment:
   HEW_API_KEY            API key for the LLM provider (required)
                          Falls back to ANTHROPIC_API_KEY when using Anthropic endpoint.
+  HEW_MODEL              Model identifier (default: claude-sonnet-4-20250514)
+                         Overridden by --model flag.
+  HEW_BASE_URL           LLM endpoint (default: https://api.anthropic.com)
+                         Overridden by --base-url flag.
 `)
 	}
 
 	prompt := flags.String("p", "", "")
 	promptLong := flags.String("prompt", "", "")
-	modelFlag := flags.String("model", "claude-sonnet-4-20250514", "")
-	baseURL := flags.String("base-url", "https://api.anthropic.com", "")
+	modelFlag := flags.String("model", "", "")
+	baseURL := flags.String("base-url", "", "")
 	maxSteps := flags.Int("max-steps", 0, "")
 	verbose := flags.Bool("verbose", false, "")
 	verboseShort := flags.Bool("v", false, "")
@@ -68,6 +72,33 @@ Environment:
 		taskPrompt = *promptLong
 	}
 
+	// Resolve model: flag > env > default
+	if *modelFlag == "" {
+		if env := os.Getenv("HEW_MODEL"); env != "" {
+			*modelFlag = env
+		} else {
+			*modelFlag = "claude-sonnet-4-20250514"
+		}
+	}
+
+	// Resolve base URL: flag > env > default
+	baseURLSource := "default"
+	if *baseURL == "" {
+		if env := os.Getenv("HEW_BASE_URL"); env != "" {
+			*baseURL = env
+			baseURLSource = "HEW_BASE_URL env var"
+		} else {
+			*baseURL = "https://api.anthropic.com"
+		}
+	} else {
+		baseURLSource = "--base-url flag"
+	}
+	if !strings.HasPrefix(*baseURL, "http://") && !strings.HasPrefix(*baseURL, "https://") {
+		fmt.Fprintf(os.Stderr, "Error: invalid base URL %q (from %s): must start with http:// or https://\n", *baseURL, baseURLSource)
+		os.Exit(1)
+	}
+
+	// Resolve API key: HEW_API_KEY > ANTHROPIC_API_KEY (Anthropic only)
 	apiKey := os.Getenv("HEW_API_KEY")
 	if apiKey == "" && strings.Contains(*baseURL, "anthropic.com") {
 		apiKey = os.Getenv("ANTHROPIC_API_KEY")
