@@ -34,6 +34,7 @@ Options:
   --max-steps int        Maximum agent steps, 0 = default 100 (default: 0)
   -v, --verbose          Show internal decisions (queries, parsing, cwd)
   --event-log string     Write JSONL events to file
+  --load-messages string  Seed conversation from JSON message file
   --trajectory string    Dump message history as JSON on exit
   --version              Print version and exit
 
@@ -57,6 +58,7 @@ Environment:
 	showVersion := flags.Bool("version", false, "")
 	eventLog := flags.String("event-log", "", "")
 	trajectory := flags.String("trajectory", "", "")
+	loadMessages := flags.String("load-messages", "", "")
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -169,6 +171,23 @@ Environment:
 
 	if *maxSteps > 0 {
 		agent.MaxSteps = *maxSteps
+	}
+
+	if *loadMessages != "" {
+		data, err := os.ReadFile(*loadMessages)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot read messages file: %v\n", err)
+			os.Exit(1)
+		}
+		var msgs []hew.Message
+		if err := json.Unmarshal(data, &msgs); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot parse messages file: %v\n", err)
+			os.Exit(1)
+		}
+		if err := agent.AddMessages(msgs); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot load messages: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	if taskPrompt != "" {
