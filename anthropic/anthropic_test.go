@@ -69,17 +69,45 @@ func TestModel(t *testing.T) {
 		}
 	})
 
-	t.Run("returns error on non-200", func(t *testing.T) {
+	t.Run("extracts error message from JSON error response", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"error":"invalid key"}`))
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"type": "error",
+				"error": map[string]interface{}{
+					"type":    "rate_limit_error",
+					"message": "Rate limit exceeded",
+				},
+			})
+		}))
+		defer server.Close()
+
+		m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
+		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
+		if err == nil {
+			t.Fatal("expected error on 429")
+		}
+		want := "api error (status 429): Rate limit exceeded"
+		if err.Error() != want {
+			t.Errorf("got %q, want error containing %q", err.Error(), want)
+		}
+	})
+
+	t.Run("falls back to raw body for non-JSON errors", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("Bad Gateway"))
 		}))
 		defer server.Close()
 
 		m := anthropic.NewModel(server.URL, "bad-key", "claude-test", "sys")
 		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
 		if err == nil {
-			t.Error("expected error on 401")
+			t.Fatal("expected error on 502")
+		}
+		want := "api error (status 502): Bad Gateway"
+		if err.Error() != want {
+			t.Errorf("got %q, want %q", err.Error(), want)
 		}
 	})
 }
