@@ -18,6 +18,7 @@ type Agent struct {
 	executor Executor
 	messages []Message
 	cwd      string
+	started  bool
 	Notify   func(Event)
 	MaxSteps int
 }
@@ -45,6 +46,22 @@ func (a *Agent) Messages() []Message {
 	return cp
 }
 
+// AddMessages prepends msgs to the conversation history.
+// Must be called before Run or Step; returns an error if the agent has already started.
+func (a *Agent) AddMessages(msgs []Message) error {
+	if a.started {
+		return fmt.Errorf("add messages: agent already started")
+	}
+	if len(msgs) == 0 {
+		return nil
+	}
+	combined := make([]Message, len(msgs)+len(a.messages))
+	copy(combined, msgs)
+	copy(combined[len(msgs):], a.messages)
+	a.messages = combined
+	return nil
+}
+
 // summarizeCommand returns a short display form of a command for debug output.
 func summarizeCommand(cmd string) string {
 	lines := strings.Split(cmd, "\n")
@@ -58,6 +75,7 @@ func summarizeCommand(cmd string) string {
 // Step runs one query-parse-execute cycle. It does not enforce step limits
 // or track format errors — that is Run's job.
 func (a *Agent) Step(ctx context.Context) (StepResult, error) {
+	a.started = true
 	a.notify(EventDebug{Message: "querying model..."})
 	resp, err := a.model.Query(ctx, a.messages)
 	if err != nil {

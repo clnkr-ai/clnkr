@@ -225,6 +225,101 @@ func TestMessages(t *testing.T) {
 	})
 }
 
+func TestAddMessages(t *testing.T) {
+	t.Run("prepends to existing history", func(t *testing.T) {
+		agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+		agent.messages = []Message{{Role: "user", Content: "existing"}}
+
+		if err := agent.AddMessages([]Message{
+			{Role: "user", Content: "seed1"},
+			{Role: "assistant", Content: "seed2"},
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		msgs := agent.Messages()
+		if len(msgs) != 3 {
+			t.Fatalf("expected 3 messages, got %d", len(msgs))
+		}
+		if msgs[0].Content != "seed1" {
+			t.Errorf("first message should be seed1, got %q", msgs[0].Content)
+		}
+		if msgs[2].Content != "existing" {
+			t.Errorf("last message should be existing, got %q", msgs[2].Content)
+		}
+	})
+
+	t.Run("works on empty history", func(t *testing.T) {
+		agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+
+		if err := agent.AddMessages([]Message{
+			{Role: "user", Content: "hello"},
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		msgs := agent.Messages()
+		if len(msgs) != 1 {
+			t.Fatalf("expected 1 message, got %d", len(msgs))
+		}
+		if msgs[0].Content != "hello" {
+			t.Errorf("got %q, want %q", msgs[0].Content, "hello")
+		}
+	})
+
+	t.Run("nil slice is no-op", func(t *testing.T) {
+		agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+		agent.messages = []Message{{Role: "user", Content: "existing"}}
+
+		if err := agent.AddMessages(nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		msgs := agent.Messages()
+		if len(msgs) != 1 {
+			t.Fatalf("expected 1 message, got %d", len(msgs))
+		}
+	})
+
+	t.Run("does not alias caller slice", func(t *testing.T) {
+		agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+
+		// Create a slice with spare capacity so naive append would reuse it.
+		caller := make([]Message, 1, 10)
+		caller[0] = Message{Role: "system", Content: "original"}
+
+		if err := agent.AddMessages(caller); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Mutate the caller's slice — must not affect the agent.
+		caller[0].Content = "corrupted"
+
+		msgs := agent.Messages()
+		if msgs[0].Content != "original" {
+			t.Errorf("AddMessages aliased caller slice: got %q, want %q",
+				msgs[0].Content, "original")
+		}
+	})
+
+	t.Run("returns error after Step", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
+		}}
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "hi"})
+
+		if _, err := agent.Step(context.Background()); err != nil {
+			t.Fatalf("unexpected Step error: %v", err)
+		}
+
+		err := agent.AddMessages([]Message{{Role: "user", Content: "late"}})
+		if err == nil {
+			t.Fatal("expected error calling AddMessages after Step")
+		}
+	})
+}
+
 func TestAgent(t *testing.T) {
 	t.Run("single step then exit", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
