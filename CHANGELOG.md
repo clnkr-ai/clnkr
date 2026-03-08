@@ -1,0 +1,55 @@
+# Changelog
+
+## 0.1.1 (2026-03-08)
+
+- Add SECURITY.md, artifact attestation, changelog generation, and Homebrew tap
+
+## 0.1.0 (2026-03-08)
+
+- Address review feedback and update docs for orchestration flags
+- Add --load-messages flag to seed conversation from file
+- Add --trajectory flag to dump message history on exit
+- Add --event-log flag to write JSONL events to file
+- Add ProcessGroup field to CommandExecutor for child isolation
+- Add AddMessages to seed agent conversation history
+- Add worktree directory preference to CLAUDE.md
+- Add HEW_BASE_URL and HEW_MODEL env vars
+
+## 0.0.2 (2026-03-07)
+
+- Restore gbp dch and arm64 deb, fix runner label
+
+## 0.0.1 (2026-03-07)
+
+- Make release job idempotent for reruns
+- Add devscripts to CI apt install for dch
+- Drop arm64 deb job, arm64 runners unavailable on free plan
+- Fix artifact upload: copy debs into workspace before upload
+- Fix release CI: use dch instead of gbp dch, real maintainer identity
+- Fix gbp dch: specify --debian-branch=debian/main
+- Add release workflow for Debian packages and cross-platform binaries
+- Add MIT license and trimpath to Makefile
+- Add man page generated from markdown via go-md2man
+- Fix CI: upgrade to golangci-lint v2 with action v7
+- Tighten docs and comments, remove AI-isms
+- Add GitHub Actions CI with golangci-lint
+- Update CLAUDE.md for library-first architecture
+- Restructure hew as an importable library with composable agent API
+- Add README
+- Add CLAUDE.md for Claude Code context
+- Send debug output to stderr, add -v alias, truncate long commands
+- Add --verbose flag for debug output
+- Add Makefile with help target and gitignore
+- Fix review findings: cwd tracking, REPL context, output formatting
+- Remove unused AgentConfig, clean up types
+- Add CLI with REPL, single-prompt mode, and custom help
+- Add agent loop with cwd tracking and step limits
+- Apply golang review: rename ParseAction to ExtractCommand, make max_tokens configurable
+- Add OpenAI-compatible chat completions adapter
+- Add Anthropic Messages API adapter
+- Add system prompt with AGENTS.md loading
+- Add command executor with timeout and directory support
+- Add action parser with fenced bash block extraction
+- Scaffold project with types and directory structure
+- init
+
