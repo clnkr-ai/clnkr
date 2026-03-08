@@ -2,7 +2,10 @@ package hew
 
 import (
 	"context"
+	"os"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -56,6 +59,27 @@ func TestCommandExecutor(t *testing.T) {
 		_, err := exec.Execute(ctx, "echo hello", "/tmp")
 		if err == nil {
 			t.Error("expected error from cancelled context, got nil")
+		}
+	})
+
+	t.Run("process group assigns new pgid", func(t *testing.T) {
+		pgExec := &CommandExecutor{Timeout: 5 * time.Second, ProcessGroup: true}
+
+		parentPgid, err := syscall.Getpgid(os.Getpid())
+		if err != nil {
+			t.Fatalf("failed to get parent pgid: %v", err)
+		}
+
+		out, err := pgExec.Execute(ctx, "ps -o pgid= -p $$", "/tmp")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		childPgid, err := strconv.Atoi(strings.TrimSpace(out))
+		if err != nil {
+			t.Fatalf("failed to parse child pgid %q: %v", strings.TrimSpace(out), err)
+		}
+		if childPgid == parentPgid {
+			t.Errorf("child pgid %d should differ from parent pgid %d", childPgid, parentPgid)
 		}
 	})
 }

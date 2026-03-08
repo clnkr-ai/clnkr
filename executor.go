@@ -4,12 +4,14 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
 )
 
 // CommandExecutor shells out to bash.
 type CommandExecutor struct {
-	Timeout time.Duration
+	Timeout      time.Duration
+	ProcessGroup bool
 }
 
 // Execute runs a command in dir and returns combined stdout/stderr.
@@ -29,6 +31,10 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 		"GIT_PAGER=cat",
 		"LESS=-R",
 	)
+
+	if e.ProcessGroup {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
 
 	out, err := cmd.CombinedOutput()
 	return string(out), err
