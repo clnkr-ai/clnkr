@@ -64,6 +64,29 @@ func TestModel(t *testing.T) {
 		}
 	})
 
+	t.Run("posts to base URL plus chat/completions", func(t *testing.T) {
+		var gotPath string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"message": map[string]string{"role": "assistant", "content": "ok"}},
+				},
+				"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
+			})
+		}))
+		defer server.Close()
+
+		m := openai.NewModel(server.URL+"/v1beta/openai", "test-key", "gemini-2.0-flash", "sys")
+		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gotPath != "/v1beta/openai/chat/completions" {
+			t.Errorf("got path %q, want %q", gotPath, "/v1beta/openai/chat/completions")
+		}
+	})
+
 	t.Run("returns error on empty choices", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
