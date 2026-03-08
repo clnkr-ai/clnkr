@@ -2,7 +2,9 @@
 
 ## 0.1.2 (2026-03-08)
 
+- Update CHANGELOG.md for 0.1.2
 - Stop hardcoding /v1 in OpenAI adapter URL path
+- Update CHANGELOG.md for 0.1.1
 
 ## 0.1.1 (2026-03-08)
 
