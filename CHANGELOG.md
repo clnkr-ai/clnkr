@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 (2026-03-08)
+
+- Extract human-readable message from API error responses
+- Rename CLAUDE.md to AGENTS.md, symlink CLAUDE.md for compatibility
+- Update CHANGELOG.md for 0.1.2
+
 ## 0.1.2 (2026-03-08)
 
 - Update CHANGELOG.md for 0.1.2
