@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -32,6 +33,7 @@ Options:
   --base-url string      LLM endpoint (env: $HEW_BASE_URL, default: https://api.anthropic.com)
   --max-steps int        Maximum agent steps, 0 = default 100 (default: 0)
   -v, --verbose          Show internal decisions (queries, parsing, cwd)
+  --event-log string     Write JSONL events to file
   --version              Print version and exit
 
 Environment:
@@ -52,6 +54,7 @@ Environment:
 	verbose := flags.Bool("verbose", false, "")
 	verboseShort := flags.Bool("v", false, "")
 	showVersion := flags.Bool("version", false, "")
+	eventLog := flags.String("event-log", "", "")
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -118,6 +121,17 @@ Environment:
 		os.Exit(1)
 	}
 
+	var eventLogFile *os.File
+	if *eventLog != "" {
+		var err error
+		eventLogFile, err = os.OpenFile(*eventLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot open event log: %v\n", err)
+			os.Exit(1)
+		}
+		defer eventLogFile.Close() //nolint:errcheck
+	}
+
 	systemPrompt := hew.LoadPrompt(cwd)
 
 	var model hew.Model
@@ -145,6 +159,9 @@ Environment:
 			if showDebug {
 				fmt.Fprintf(os.Stderr, "[hew] %s\n", e.Message)
 			}
+		}
+		if eventLogFile != nil {
+			writeEventLog(eventLogFile, e)
 		}
 	}
 
@@ -184,6 +201,43 @@ Environment:
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+type jsonEvent struct {
+	Type    string      `json:"type"`
+	Payload interface{} `json:"payload"`
+}
+
+func writeEventLog(f *os.File, e hew.Event) {
+	var je jsonEvent
+	switch e := e.(type) {
+	case hew.EventResponse:
+		je = jsonEvent{Type: "response", Payload: e}
+	case hew.EventCommandStart:
+		je = jsonEvent{Type: "command_start", Payload: e}
+	case hew.EventCommandDone:
+		je = jsonEvent{Type: "command_done", Payload: struct {
+			Output string `json:"output"`
+			Err    string `json:"err,omitempty"`
+		}{Output: e.Output, Err: errString(e.Err)}}
+	case hew.EventFormatError:
+		je = jsonEvent{Type: "format_error", Payload: e}
+	case hew.EventDebug:
+		je = jsonEvent{Type: "debug", Payload: e}
+	}
+	data, err := json.Marshal(je)
+	if err != nil {
+		return
+	}
+	data = append(data, '\n')
+	f.Write(data) //nolint:errcheck
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func summarizeCommand(cmd string) string {
