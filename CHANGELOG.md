@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 (2026-03-08)
+
+- Stop hardcoding /v1 in OpenAI adapter URL path
+
 ## 0.1.1 (2026-03-08)
 
 - Add SECURITY.md, artifact attestation, changelog generation, and Homebrew tap
