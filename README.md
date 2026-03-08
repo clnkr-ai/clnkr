@@ -38,13 +38,16 @@ Point `--base-url` at any OpenAI-compatible endpoint:
 
 ```bash
 # vLLM
-hew --base-url http://gpu-host:8000 --model my-model
+hew --base-url http://gpu-host:8000/v1 --model my-model
 
 # Ollama
-hew --base-url http://localhost:11434 --model llama3
+hew --base-url http://localhost:11434/v1 --model llama3
 
 # LiteLLM
-hew --base-url http://proxy:4000 --model gpt-4o
+hew --base-url http://proxy:4000/v1 --model gpt-4o
+
+# Gemini (free tier)
+hew --base-url https://generativelanguage.googleapis.com/v1beta/openai --model gemini-2.0-flash
 ```
 
 ### Flags

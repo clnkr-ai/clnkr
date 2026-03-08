@@ -62,7 +62,7 @@ func (m *Model) Query(ctx context.Context, messages []hew.Message) (hew.Response
 		return hew.Response{}, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", m.baseURL+"/v1/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", m.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return hew.Response{}, fmt.Errorf("create request: %w", err)
 	}
