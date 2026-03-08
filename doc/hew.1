@@ -6,7 +6,7 @@ hew \- a minimal coding agent
 
 
 .SH SYNOPSIS
-\fBhew\fP [\fB-p\fP \fItask\fP] [\fB--model\fP \fIname\fP] [\fB--base-url\fP \fIurl\fP] [\fB--max-steps\fP \fIn\fP] [\fB-v\fP|\fB--verbose\fP] [\fB--version\fP]
+\fBhew\fP [\fB-p\fP \fItask\fP] [\fB--model\fP \fIname\fP] [\fB--base-url\fP \fIurl\fP] [\fB--max-steps\fP \fIn\fP] [\fB--load-messages\fP \fIfile\fP] [\fB--event-log\fP \fIfile\fP] [\fB--trajectory\fP \fIfile\fP] [\fB-v\fP|\fB--verbose\fP] [\fB--version\fP]
 
 
 .SH DESCRIPTION
@@ -35,6 +35,18 @@ LLM API endpoint (default: https://api.anthropic.com). If the URL contains "anth
 .TP
 \fB--max-steps\fP \fIn\fP
 Maximum agent iterations. 0 uses the default of 100.
+
+.TP
+\fB--load-messages\fP \fIfile\fP
+Read a JSON array of messages from \fIfile\fP and prepend them to the conversation before starting. The format matches \fB--trajectory\fP output, so one agent's trajectory can seed another agent's context.
+
+.TP
+\fB--event-log\fP \fIfile\fP
+Write every agent event as a JSONL line to \fIfile\fP\&. Each line is a JSON object with "type" and "payload" fields. Uses O_APPEND for atomic writes, safe to tail from another process.
+
+.TP
+\fB--trajectory\fP \fIfile\fP
+After the task finishes, write the full message history as pretty-printed JSON to \fIfile\fP\&. Written before exit, even on error. Only applies to single-task mode (\fB-p\fP), not the REPL.
 
 .TP
 \fB-v\fP, \fB--verbose\fP

@@ -33,10 +33,10 @@ Options:
   --base-url string      LLM endpoint (env: $HEW_BASE_URL, default: https://api.anthropic.com)
   --max-steps int        Maximum agent steps, 0 = default 100 (default: 0)
   -v, --verbose          Show internal decisions (queries, parsing, cwd)
-  --event-log string     Write JSONL events to file
-  --load-messages string  Seed conversation from JSON message file
-  --trajectory string    Dump message history as JSON on exit
-  --version              Print version and exit
+  --load-messages string  Seed conversation from JSON file (e.g. from --trajectory)
+  --event-log string      Write JSONL events to file (streams in real time)
+  --trajectory string     Write message history as JSON on exit (single-task mode only)
+  --version               Print version and exit
 
 Environment:
   HEW_API_KEY            API key for the LLM provider (required)
@@ -130,7 +130,7 @@ Environment:
 		var err error
 		eventLogFile, err = os.OpenFile(*eventLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot open event log: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error: cannot open event log %q: %v\n", *eventLog, err)
 			os.Exit(1)
 		}
 		defer eventLogFile.Close() //nolint:errcheck
@@ -159,6 +159,8 @@ Environment:
 		case hew.EventCommandDone:
 			fmt.Fprintln(os.Stdout, e.Output)       //nolint:errcheck
 			fmt.Fprintln(os.Stdout, "--- done ---") //nolint:errcheck
+		case hew.EventFormatError:
+			// handled by agent loop; nothing to print
 		case hew.EventDebug:
 			if showDebug {
 				fmt.Fprintf(os.Stderr, "[hew] %s\n", e.Message)
@@ -176,18 +178,23 @@ Environment:
 	if *loadMessages != "" {
 		data, err := os.ReadFile(*loadMessages)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot read messages file: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error: cannot read messages file %q: %v\n", *loadMessages, err)
 			os.Exit(1)
 		}
 		var msgs []hew.Message
 		if err := json.Unmarshal(data, &msgs); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot parse messages file: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error: cannot parse messages file %q: %v\n", *loadMessages, err)
 			os.Exit(1)
 		}
 		if err := agent.AddMessages(msgs); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: cannot load messages: %v\n", err)
 			os.Exit(1)
 		}
+	}
+
+	if *trajectory != "" && taskPrompt == "" {
+		fmt.Fprintln(os.Stderr, "Error: --trajectory requires -p (single-task mode)")
+		os.Exit(1)
 	}
 
 	if taskPrompt != "" {
@@ -199,10 +206,16 @@ Environment:
 			data, err := json.MarshalIndent(msgs, "", "  ")
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: cannot marshal trajectory: %v\n", err)
+				if runErr != nil {
+					fmt.Fprintf(os.Stderr, "Error: %v\n", runErr)
+				}
 				os.Exit(1)
 			}
 			if err := os.WriteFile(*trajectory, data, 0o644); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: cannot write trajectory: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Error: cannot write trajectory %q: %v\n", *trajectory, err)
+				if runErr != nil {
+					fmt.Fprintf(os.Stderr, "Error: %v\n", runErr)
+				}
 				os.Exit(1)
 			}
 		}
@@ -238,8 +251,8 @@ Environment:
 }
 
 type jsonEvent struct {
-	Type    string      `json:"type"`
-	Payload interface{} `json:"payload"`
+	Type    string `json:"type"`
+	Payload any    `json:"payload"`
 }
 
 func writeEventLog(f *os.File, e hew.Event) {

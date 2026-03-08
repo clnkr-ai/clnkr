@@ -76,11 +76,14 @@ hew/                    # core: types, interfaces, Agent, events
 ## Design decisions
 
 - `Step()` is the loop primitive; `Run()` adds policy
-- `Messages()` returns a defensive copy
+- `Messages()` returns a defensive copy; `AddMessages()` prepends seed messages (errors after first `Step()`)
 - Version injected at build time via `-ldflags '-X main.version=...'` (defaults to `"dev"`)
 - `max_tokens` is a field on `anthropic.Model`, not hardcoded
 - `HEW_API_KEY` falls back to `ANTHROPIC_API_KEY` when base URL is Anthropic's
 - Man page source is `doc/hew.1.md` (markdown); `doc/hew.1` (troff) is generated via `go-md2man` and committed. Debian packaging references `doc/hew.1` instead of maintaining a separate `debian/hew.1`
+- `--event-log` uses `O_APPEND` for atomic JSONL writes; serialization lives in `main.go`, not the library
+- `--trajectory` writes before checking `runErr` so failed runs still produce output
+- `--trajectory` output and `--load-messages` input use the same JSON format (array of `{role, content}` objects)
 
 ## Worktrees
 

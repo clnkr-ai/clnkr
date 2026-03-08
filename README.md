@@ -50,12 +50,15 @@ hew --base-url http://proxy:4000 --model gpt-4o
 ### Flags
 
 ```
--p, --prompt string    Task to run (exits after completion)
---model string         Model identifier (default: claude-sonnet-4-20250514)
---base-url string      LLM API endpoint (default: https://api.anthropic.com)
---max-steps int        Maximum agent steps (default: 100)
--v, --verbose          Show internal decisions on stderr
---version              Print version and exit
+-p, --prompt string      Task to run (exits after completion)
+--model string           Model identifier (default: claude-sonnet-4-20250514)
+--base-url string        LLM API endpoint (default: https://api.anthropic.com)
+--max-steps int          Maximum agent steps (default: 100)
+--load-messages string   Seed conversation from JSON file (e.g. from --trajectory)
+--event-log string       Write JSONL events to file (streams in real time)
+--trajectory string      Write message history as JSON on exit (single-task mode only)
+-v, --verbose            Show internal decisions on stderr
+--version                Print version and exit
 ```
 
 ### Environment variables
@@ -64,6 +67,26 @@ hew --base-url http://proxy:4000 --model gpt-4o
 |----------|-------------|
 | `HEW_API_KEY` | API key for the LLM provider (required) |
 | `ANTHROPIC_API_KEY` | Fallback when using the default Anthropic endpoint |
+| `HEW_MODEL` | Model identifier (overridden by `--model`) |
+| `HEW_BASE_URL` | LLM endpoint (overridden by `--base-url`) |
+
+### Agent orchestration
+
+A parent process can spawn hew as a child agent and monitor or chain runs:
+
+```bash
+# Watch events in real time
+hew -p "fix the build" --event-log /tmp/events.jsonl &
+tail -f /tmp/events.jsonl | jq .
+
+# Save a run's conversation, then feed it to a second agent
+hew -p "investigate the bug" --trajectory /tmp/investigation.json
+hew -p "write a fix based on the investigation" --load-messages /tmp/investigation.json
+```
+
+`--event-log` streams one JSON object per line as events happen (O_APPEND, safe to tail).
+`--trajectory` writes the full message array as pretty-printed JSON when the task ends — even if it failed.
+`--load-messages` reads that same format and prepends the messages before starting, so one agent's output becomes another's context.
 
 ### Project-specific instructions
 
