@@ -87,6 +87,65 @@ func TestModel(t *testing.T) {
 		}
 	})
 
+	t.Run("extracts error message from JSON error response", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": map[string]interface{}{
+					"code":    429,
+					"message": "Rate limit exceeded",
+				},
+			})
+		}))
+		defer server.Close()
+
+		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
+		if err == nil {
+			t.Fatal("expected error on 429")
+		}
+		want := "api error (status 429): Rate limit exceeded"
+		if err.Error() != want {
+			t.Errorf("got %q, want error containing %q", err.Error(), want)
+		}
+	})
+
+	t.Run("extracts error message from array-wrapped response", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`[{"error":{"code":429,"message":"Quota exceeded"}}]`))
+		}))
+		defer server.Close()
+
+		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
+		if err == nil {
+			t.Fatal("expected error on 429")
+		}
+		want := "api error (status 429): Quota exceeded"
+		if err.Error() != want {
+			t.Errorf("got %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("falls back to raw body for non-JSON errors", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("Bad Gateway"))
+		}))
+		defer server.Close()
+
+		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
+		if err == nil {
+			t.Fatal("expected error on 502")
+		}
+		want := "api error (status 502): Bad Gateway"
+		if err.Error() != want {
+			t.Errorf("got %q, want error containing %q", err.Error(), want)
+		}
+	})
+
 	t.Run("returns error on empty choices", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{

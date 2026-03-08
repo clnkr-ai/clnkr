@@ -54,6 +54,29 @@ type response struct {
 
 const maxResponseBytes = 1 << 20 // 1MB
 
+// extractErrorMessage pulls the message from an API error response body.
+// Handles both {"error":{"message":"..."}} and [{...}] array-wrapped forms.
+// Falls back to the raw body if parsing fails.
+func extractErrorMessage(body []byte) string {
+	type errorBody struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	var single errorBody
+	if err := json.Unmarshal(body, &single); err == nil && single.Error.Message != "" {
+		return single.Error.Message
+	}
+
+	var arr []errorBody
+	if err := json.Unmarshal(body, &arr); err == nil && len(arr) > 0 && arr[0].Error.Message != "" {
+		return arr[0].Error.Message
+	}
+
+	return string(body)
+}
+
 func (m *Model) Query(ctx context.Context, messages []hew.Message) (hew.Response, error) {
 	body, err := json.Marshal(request{
 		Model:     m.model,
@@ -84,7 +107,7 @@ func (m *Model) Query(ctx context.Context, messages []hew.Message) (hew.Response
 		return hew.Response{}, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return hew.Response{}, fmt.Errorf("api error (status %d): %s", resp.StatusCode, respBody)
+		return hew.Response{}, fmt.Errorf("api error (status %d): %s", resp.StatusCode, extractErrorMessage(respBody))
 	}
 
 	var apiResp response
