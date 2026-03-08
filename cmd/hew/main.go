@@ -34,6 +34,7 @@ Options:
   --max-steps int        Maximum agent steps, 0 = default 100 (default: 0)
   -v, --verbose          Show internal decisions (queries, parsing, cwd)
   --event-log string     Write JSONL events to file
+  --trajectory string    Dump message history as JSON on exit
   --version              Print version and exit
 
 Environment:
@@ -55,6 +56,7 @@ Environment:
 	verboseShort := flags.Bool("v", false, "")
 	showVersion := flags.Bool("version", false, "")
 	eventLog := flags.String("event-log", "", "")
+	trajectory := flags.String("trajectory", "", "")
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -172,8 +174,21 @@ Environment:
 	if taskPrompt != "" {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
-		if err := agent.Run(ctx, taskPrompt); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		runErr := agent.Run(ctx, taskPrompt)
+		if *trajectory != "" {
+			msgs := agent.Messages()
+			data, err := json.MarshalIndent(msgs, "", "  ")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: cannot marshal trajectory: %v\n", err)
+				os.Exit(1)
+			}
+			if err := os.WriteFile(*trajectory, data, 0o644); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: cannot write trajectory: %v\n", err)
+				os.Exit(1)
+			}
+		}
+		if runErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", runErr)
 			os.Exit(1)
 		}
 		return
