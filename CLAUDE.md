@@ -82,6 +82,10 @@ hew/                    # core: types, interfaces, Agent, events
 - `HEW_API_KEY` falls back to `ANTHROPIC_API_KEY` when base URL is Anthropic's
 - Man page source is `doc/hew.1.md` (markdown); `doc/hew.1` (troff) is generated via `go-md2man` and committed. Debian packaging references `doc/hew.1` instead of maintaining a separate `debian/hew.1`
 
+## Worktrees
+
+Worktree directory: `~/.config/superpowers/worktrees/hew/`
+
 ## CI
 
 GitHub Actions runs on push to `main` and PRs targeting `main`. Single job: lint, test (with `-race`), build.
