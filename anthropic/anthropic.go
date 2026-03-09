@@ -30,7 +30,7 @@ func NewModel(baseURL, apiKey, model, systemPrompt string) *Model {
 		model:        model,
 		systemPrompt: systemPrompt,
 		maxTokens:    4096,
-		client:       &http.Client{Timeout: 120 * time.Second},
+		client:       &http.Client{Timeout: 240 * time.Second},
 	}
 }
 
