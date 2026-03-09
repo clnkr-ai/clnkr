@@ -1,0 +1,208 @@
+package main
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+
+	hew "github.com/cosgroveb/hew"
+)
+
+func TestChatAppendEventResponse(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.appendEvent(hew.EventResponse{
+		Message: hew.Message{Role: "assistant", Content: "hello world"},
+	})
+
+	content := c.content.String()
+	if !strings.Contains(content, "hello world") {
+		t.Errorf("content should contain response text, got: %q", content)
+	}
+}
+
+func TestChatStreamingBuffer(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.appendToken("Hello")
+	if !c.streaming {
+		t.Error("expected streaming=true after first token")
+	}
+	if c.streamBuf.String() != "Hello" {
+		t.Errorf("streamBuf: got %q, want %q", c.streamBuf.String(), "Hello")
+	}
+
+	c.appendToken(" world")
+	if c.streamBuf.String() != "Hello world" {
+		t.Errorf("streamBuf: got %q, want %q", c.streamBuf.String(), "Hello world")
+	}
+
+	c.commitStream("Hello world!")
+	if c.streaming {
+		t.Error("expected streaming=false after commit")
+	}
+	if c.streamBuf.Len() != 0 {
+		t.Error("streamBuf should be empty after commit")
+	}
+	if !strings.Contains(c.content.String(), "Hello world!") {
+		t.Errorf("committed content should contain authoritative text, got: %q", c.content.String())
+	}
+}
+
+func TestChatStreamingDroppedTokensRecoveredOnCommit(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	// Simulate partial streaming (some tokens dropped)
+	c.appendToken("Hello")
+	c.appendToken(" world")
+
+	// Commit with full authoritative content
+	c.commitStream("Hello world and goodbye")
+
+	content := c.content.String()
+	if !strings.Contains(content, "Hello world and goodbye") {
+		t.Errorf("committed content should have authoritative text, got: %q", content)
+	}
+}
+
+func TestChatPendingCommandBuffer(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.appendEvent(hew.EventCommandStart{Command: "ls -la", Dir: "/tmp"})
+	if c.pendingCmd == "" {
+		t.Error("pendingCmd should be set after EventCommandStart")
+	}
+	if strings.Contains(c.content.String(), "ls -la") {
+		t.Error("pending command should not be in committed content")
+	}
+
+	c.appendEvent(hew.EventCommandDone{Output: "total 0\n", Err: nil})
+	if c.pendingCmd != "" {
+		t.Error("pendingCmd should be cleared after EventCommandDone")
+	}
+	if !strings.Contains(c.content.String(), "ls -la") {
+		t.Error("committed content should contain the command after EventCommandDone")
+	}
+}
+
+func TestChatBufferInvariant(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	// Stream some tokens — pendingCmd must be empty during streaming
+	c.appendToken("hello")
+	if c.pendingCmd != "" {
+		t.Error("pendingCmd must be empty while streaming")
+	}
+	if c.streamBuf.Len() == 0 {
+		t.Error("streamBuf should be non-empty after appendToken")
+	}
+
+	// Commit stream, then start a command — streamBuf must be empty during command
+	c.commitStream("hello")
+	c.appendEvent(hew.EventCommandStart{Command: "ls", Dir: "."})
+	if c.streamBuf.Len() != 0 {
+		t.Error("streamBuf must be empty while command is pending")
+	}
+	if c.pendingCmd == "" {
+		t.Error("pendingCmd should be non-empty after EventCommandStart")
+	}
+}
+
+func TestChatResetStreamingState(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.appendToken("partial")
+	if !c.streaming {
+		t.Error("expected streaming=true")
+	}
+
+	c.resetStreaming()
+	if c.streaming {
+		t.Error("expected streaming=false after reset")
+	}
+	if c.streamBuf.Len() != 0 {
+		t.Error("streamBuf should be empty after reset")
+	}
+}
+
+func TestChatFormatError(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.appendEvent(hew.EventFormatError{})
+	content := c.content.String()
+	if !strings.Contains(content, "format error") {
+		t.Errorf("content should contain format error text, got: %q", content)
+	}
+}
+
+func TestChatDebugVerbose(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, true) // verbose=true
+
+	c.appendEvent(hew.EventDebug{Message: "test debug"})
+	content := c.content.String()
+	if !strings.Contains(content, "test debug") {
+		t.Errorf("verbose mode should show debug messages, got: %q", content)
+	}
+}
+
+func TestChatDebugNonVerbose(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false) // verbose=false
+
+	c.appendEvent(hew.EventDebug{Message: "test debug"})
+	content := c.content.String()
+	if strings.Contains(content, "test debug") {
+		t.Errorf("non-verbose mode should not show debug messages, got: %q", content)
+	}
+}
+
+func TestTruncateOutput(t *testing.T) {
+	short := "line1\nline2\nline3"
+	if got := truncateOutput(short, 5); got != short {
+		t.Errorf("short output should be unchanged, got: %q", got)
+	}
+
+	var lines []string
+	for i := range 30 {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	long := strings.Join(lines, "\n")
+	got := truncateOutput(long, 20)
+	if !strings.HasSuffix(got, "... (10 more lines)") {
+		t.Errorf("expected truncation suffix, got: %q", got)
+	}
+	// Should contain the first 20 lines
+	if !strings.Contains(got, "line 0") || !strings.Contains(got, "line 19") {
+		t.Error("truncated output should contain the first 20 lines")
+	}
+	if strings.Contains(got, "line 20\n") {
+		t.Error("truncated output should not contain line 20")
+	}
+}
+
+func TestChatDebugResetsStreaming(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.appendToken("partial")
+	if !c.streaming {
+		t.Error("expected streaming=true")
+	}
+
+	// "querying model..." signal resets streaming state
+	c.appendEvent(hew.EventDebug{Message: "querying model..."})
+	if c.streaming {
+		t.Error("expected streaming=false after 'querying model...' debug event")
+	}
+	if c.streamBuf.Len() != 0 {
+		t.Error("streamBuf should be empty after streaming reset")
+	}
+}
