@@ -16,12 +16,22 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: golangci/golangci-lint-action@v7
+      - name: Lint core
+        uses: golangci/golangci-lint-action@v7
         with:
           version: v2.11.1
 
-      - name: Test
+      - name: Lint TUI
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.11.1
+          working-directory: cmd/hui
+
+      - name: Test core
         run: go test -race ./... -v
 
+      - name: Test TUI
+        run: cd cmd/hui && go test -race ./... -v
+
       - name: Build
-        run: make build
+        run: make build-all
