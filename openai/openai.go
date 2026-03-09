@@ -28,7 +28,7 @@ func NewModel(baseURL, apiKey, model, systemPrompt string) *Model {
 		apiKey:       apiKey,
 		model:        model,
 		systemPrompt: systemPrompt,
-		client:       &http.Client{Timeout: 120 * time.Second},
+		client:       &http.Client{Timeout: 240 * time.Second},
 	}
 }
 
