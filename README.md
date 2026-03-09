@@ -4,6 +4,9 @@
 
 A minimal coding agent. Query an LLM, execute bash commands, repeat. Supports the Anthropic Messages API and any OpenAI-compatible endpoint (vLLM, Ollama, LiteLLM, etc.).
 
+<img width="512" height="512" alt="Isildur cut the Ring (the ring here is bash -jokeexplainer)from his hand with the hilt-shard of his father's sword, and took it for his own." src="https://github.com/user-attachments/assets/7c9d648c-f5b9-4610-a311-04f5af37b364" />
+
+
 ## Install
 
 ```bash
