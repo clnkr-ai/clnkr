@@ -156,8 +156,11 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Test
+      - name: Test core
         run: go test -race ./...
+
+      - name: Test TUI
+        run: cd cmd/hui && go test -race ./...
 
       - name: Cross-compile binaries
         run: |
@@ -167,6 +170,9 @@ jobs:
               CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH \
                 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
                 -o "hew-${GOOS}-${GOARCH}" ./cmd/hew/
+              CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH \
+                go -C cmd/hui build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+                -o "../../hui-${GOOS}-${GOARCH}" .
             done
           done
 
@@ -174,7 +180,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: binaries
-          path: hew-*
+          path: |
+            hew-*
+            hui-*
 
   release:
     needs: [debian-amd64, debian-arm64, binaries]
@@ -241,6 +249,7 @@ jobs:
           cp artifacts/deb-amd64/*.deb release/
           cp artifacts/deb-arm64/*.deb release/
           cp artifacts/binaries/hew-* release/
+          cp artifacts/binaries/hui-* release/
 
       - name: Generate source tarball
         run: |
