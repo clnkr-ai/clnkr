@@ -11,15 +11,18 @@ VERSION := $(DEB_VERSION_UPSTREAM)
 
 override_dh_auto_build:
 	go build -trimpath -ldflags '-s -w -X main.version=$(VERSION)' -o hew ./cmd/hew
+	cd cmd/hui && go build -trimpath -ldflags '-s -w -X main.version=$(VERSION)' -o ../../hui .
 
 override_dh_auto_test:
 	go test ./...
+	cd cmd/hui && go test ./...
 
 override_dh_auto_install:
 	install -D -m 0755 hew debian/hew/usr/bin/hew
+	install -D -m 0755 hui debian/hew/usr/bin/hui
 
 override_dh_auto_clean:
-	rm -f hew
+	rm -f hew hui
 
 override_dh_dwz:
 	# dwz fails on Go binaries
