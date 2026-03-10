@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 (2026-03-10)
+
+- Overhaul system prompt and replace exit signal with <done/> tag
+- Double HTTP client timeout to 240 seconds
+- Isildur claimed the Tool as his own
+- Update CHANGELOG.md for 0.2.0
+
 ## 0.2.0 (2026-03-09)
 
 - Build and release hui TUI binary alongside hew (#2)
