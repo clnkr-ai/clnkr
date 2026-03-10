@@ -74,9 +74,9 @@ func TestStep(t *testing.T) {
 		}
 	})
 
-	t.Run("returns exit action", func(t *testing.T) {
+	t.Run("returns done action", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: "Done!\n\n```bash\nexit\n```"}},
+			{Message: Message{Role: "assistant", Content: "All done.\n\n<done/>"}},
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -86,11 +86,11 @@ func TestStep(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result.Action != "exit" {
-			t.Errorf("got action %q, want %q", result.Action, "exit")
+		if result.Action != DoneSignal {
+			t.Errorf("got action %q, want %q", result.Action, DoneSignal)
 		}
 		if result.Output != "" {
-			t.Errorf("expected empty output for exit, got %q", result.Output)
+			t.Errorf("expected empty output for done, got %q", result.Output)
 		}
 	})
 
@@ -176,7 +176,7 @@ func TestStep(t *testing.T) {
 
 	t.Run("nil Notify is safe", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
+			{Message: Message{Role: "assistant", Content: "All done.\n\n<done/>"}},
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -187,8 +187,8 @@ func TestStep(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result.Action != "exit" {
-			t.Errorf("got action %q, want %q", result.Action, "exit")
+		if result.Action != DoneSignal {
+			t.Errorf("got action %q, want %q", result.Action, DoneSignal)
 		}
 	})
 }
@@ -304,7 +304,7 @@ func TestAddMessages(t *testing.T) {
 
 	t.Run("returns error after Step", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
+			{Message: Message{Role: "assistant", Content: "All done.\n\n<done/>"}},
 		}}
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
 		agent.messages = append(agent.messages, Message{Role: "user", Content: "hi"})
@@ -324,7 +324,7 @@ func TestAgent(t *testing.T) {
 	t.Run("single step then exit", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: "Let me check\n\n```bash\nls\n```"}},
-			{Message: Message{Role: "assistant", Content: "Done!\n\n```bash\nexit\n```"}},
+			{Message: Message{Role: "assistant", Content: "Done!\n\nAll done.\n\n<done/>"}},
 		}}
 		executor := &fakeExecutor{outputs: []string{"file1.go\n"}}
 
@@ -366,7 +366,7 @@ func TestAgent(t *testing.T) {
 
 	t.Run("default max steps is 100", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
+			{Message: Message{Role: "assistant", Content: "All done.\n\n<done/>"}},
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -385,7 +385,7 @@ func TestAgent(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: "```bash\ncd " + subDir + "\n```"}},
 			{Message: Message{Role: "assistant", Content: "```bash\nls\n```"}},
-			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
+			{Message: Message{Role: "assistant", Content: "All done.\n\n<done/>"}},
 		}}
 		executor := &fakeExecutor{outputs: []string{"", "files"}}
 
@@ -405,7 +405,7 @@ func TestAgent(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: "```bash\ncd " + nonexistent + "\n```"}},
 			{Message: Message{Role: "assistant", Content: "```bash\nls\n```"}},
-			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
+			{Message: Message{Role: "assistant", Content: "All done.\n\n<done/>"}},
 		}}
 		executor := &fakeExecutor{outputs: []string{"", "files"}}
 
@@ -422,7 +422,7 @@ func TestAgent(t *testing.T) {
 	t.Run("format error then recovery", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: "no code block"}},
-			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
+			{Message: Message{Role: "assistant", Content: "All done.\n\n<done/>"}},
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -453,7 +453,7 @@ func TestAgent(t *testing.T) {
 	t.Run("emits events for output", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: "```bash\necho hi\n```"}, Usage: Usage{InputTokens: 10, OutputTokens: 5}},
-			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
+			{Message: Message{Role: "assistant", Content: "All done.\n\n<done/>"}},
 		}}
 		executor := &fakeExecutor{outputs: []string{"hi\n"}}
 		notify, events := collectEvents()
@@ -502,7 +502,7 @@ func TestAgent(t *testing.T) {
 		startDir := t.TempDir()
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: "```bash\ncd /tmp && ls\n```"}},
-			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
+			{Message: Message{Role: "assistant", Content: "All done.\n\n<done/>"}},
 		}}
 		executor := &fakeExecutor{outputs: []string{"stuff"}}
 
@@ -524,7 +524,7 @@ func TestAgent(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: "```bash\ncd ~\n```"}},
 			{Message: Message{Role: "assistant", Content: "```bash\nls\n```"}},
-			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
+			{Message: Message{Role: "assistant", Content: "All done.\n\n<done/>"}},
 		}}
 		executor := &fakeExecutor{outputs: []string{"", "files"}}
 
@@ -541,7 +541,7 @@ func TestAgent(t *testing.T) {
 	t.Run("execution error appended to output", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: "```bash\nfalse\n```"}},
-			{Message: Message{Role: "assistant", Content: "```bash\nexit\n```"}},
+			{Message: Message{Role: "assistant", Content: "All done.\n\n<done/>"}},
 		}}
 		failExecutor := &fakeExecutor{outputs: []string{""}}
 

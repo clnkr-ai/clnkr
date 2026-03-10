@@ -14,8 +14,8 @@ func TestLoadPrompt(t *testing.T) {
 		if !strings.Contains(prompt, "```bash") {
 			t.Error("base prompt should contain bash code block instructions")
 		}
-		if !strings.Contains(prompt, "exit") {
-			t.Error("base prompt should contain exit instructions")
+		if !strings.Contains(prompt, "<done/>") {
+			t.Error("base prompt should contain done signal instructions")
 		}
 	})
 

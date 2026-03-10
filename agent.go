@@ -12,6 +12,9 @@ import (
 // DefaultMaxSteps caps agent iterations when MaxSteps is not set.
 const DefaultMaxSteps = 100
 
+// DoneSignal is the marker the model emits (outside any code block) to signal task completion.
+const DoneSignal = "<done/>"
+
 // Agent runs the query-parse-execute loop.
 type Agent struct {
 	model    Model
@@ -85,23 +88,23 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	a.messages = append(a.messages, resp.Message)
 	a.notify(EventResponse{Message: resp.Message, Usage: resp.Usage})
 
+	if strings.Contains(resp.Message.Content, DoneSignal) {
+		a.notify(EventDebug{Message: "done signal received"})
+		return StepResult{Response: resp, Action: DoneSignal}, nil
+	}
+
 	action, err := ExtractCommand(resp.Message.Content)
 	if errors.Is(err, ErrNoCommand) {
 		a.notify(EventDebug{Message: "no bash block found"})
 		a.notify(EventFormatError{})
 		a.messages = append(a.messages, Message{
 			Role:    "user",
-			Content: "Your response did not include a bash code block. Include exactly one ```bash block, or ```bash\nexit\n``` to finish.",
+			Content: "Your response did not include a bash code block. Include exactly one ```bash block, or include <done/> (with no code block) when finished.",
 		})
 		return StepResult{Response: resp}, nil
 	}
 	if err != nil {
 		return StepResult{}, fmt.Errorf("parse action: %w", err)
-	}
-
-	if action == "exit" {
-		a.notify(EventDebug{Message: "parsed action: exit"})
-		return StepResult{Response: resp, Action: "exit"}, nil
 	}
 
 	a.notify(EventDebug{Message: fmt.Sprintf("parsed action: %s", summarizeCommand(action))})
@@ -132,7 +135,7 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 			return err
 		}
 
-		if result.Action == "exit" {
+		if result.Action == DoneSignal {
 			return nil
 		}
 
@@ -153,7 +156,7 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 			a.notify(EventDebug{Message: "step limit reached, requesting summary"})
 			a.messages = append(a.messages, Message{
 				Role:    "user",
-				Content: "Step limit reached. Summarize your progress and exit.",
+				Content: "Step limit reached. Summarize your progress and include <done/> to finish.",
 			})
 			resp, err := a.model.Query(ctx, a.messages)
 			if err != nil {

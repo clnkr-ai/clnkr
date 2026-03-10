@@ -40,7 +40,7 @@ func (EventDebug) event()        {}
 // StepResult is the outcome of one Step call.
 type StepResult struct {
 	Response Response // the LLM response
-	Action   string   // parsed command, "exit" for exit, "" for format error
+	Action   string   // parsed command, DoneSignal for completion, "" for format error
 	Output   string   // command output, "" if no command ran
 	ExecErr  error    // nil if command succeeded or didn't run
 }
