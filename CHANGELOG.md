@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 (2026-03-11)
+
+- Promote planning workflow to system prompt with hui-only opt-out
+- Add multi-layer binary symmetry enforcement system
+- fix: add missing session auto-save to hui conversational mode
+- Update CHANGELOG.md for 0.3.1
+- Update CHANGELOG.md for 0.3.0
+- Add session persistence as composable session/ package
+
 ## 0.3.1 (2026-03-11)
 
 - fix: add missing session auto-save to hui conversational mode
