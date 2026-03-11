@@ -98,6 +98,28 @@ hew -p "write a fix based on the investigation" --load-messages /tmp/investigati
 
 Place an `AGENTS.md` file in your working directory. Its contents are appended to the system prompt, giving the LLM project-specific context.
 
+## Session Persistence
+
+When using hew or hui in conversational mode (no `-p` flag), sessions are
+automatically saved to `$XDG_STATE_HOME/hew/projects/` on exit.
+
+Resume a session:
+
+```bash
+hew --continue   # Load most recent session
+hui --continue   # Load in TUI
+```
+
+List all sessions for the current project:
+
+```bash
+hew --list-sessions
+hui --list-sessions
+```
+
+Sessions are tied to their original working directory. You can only resume a
+session from the same project directory where it was created.
+
 ## How it works
 
 hew runs a loop:
