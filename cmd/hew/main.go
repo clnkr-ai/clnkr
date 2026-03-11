@@ -163,7 +163,7 @@ Environment:
 		defer eventLogFile.Close() //nolint:errcheck
 	}
 
-	systemPrompt := hew.LoadPrompt(cwd)
+	systemPrompt := hew.LoadPromptWithOptions(cwd, hew.PromptOptions{})
 
 	var model hew.Model
 	if strings.Contains(*baseURL, "anthropic.com") {

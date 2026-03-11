@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-func TestLoadPrompt(t *testing.T) {
+func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 	t.Run("base prompt only", func(t *testing.T) {
 		dir := t.TempDir()
-		prompt := LoadPrompt(dir)
+		prompt := LoadPromptWithOptions(dir, PromptOptions{})
 		if !strings.Contains(prompt, "```bash") {
 			t.Error("base prompt should contain bash code block instructions")
 		}
@@ -26,7 +26,7 @@ func TestLoadPrompt(t *testing.T) {
 			t.Fatalf("write AGENTS.md: %v", err)
 		}
 
-		prompt := LoadPrompt(dir)
+		prompt := LoadPromptWithOptions(dir, PromptOptions{})
 		if !strings.Contains(prompt, content) {
 			t.Error("prompt should include AGENTS.md content")
 		}
@@ -34,9 +34,65 @@ func TestLoadPrompt(t *testing.T) {
 
 	t.Run("ignores missing AGENTS.md", func(t *testing.T) {
 		dir := t.TempDir()
-		prompt := LoadPrompt(dir)
+		prompt := LoadPromptWithOptions(dir, PromptOptions{})
 		if prompt == "" {
 			t.Error("prompt should not be empty without AGENTS.md")
+		}
+	})
+}
+
+func TestLoadPromptWithOptions(t *testing.T) {
+	t.Run("includes planning workflow by default", func(t *testing.T) {
+		dir := t.TempDir()
+		prompt := LoadPromptWithOptions(dir, PromptOptions{})
+		if !strings.Contains(prompt, "<planning-workflow>") {
+			t.Error("prompt should include planning workflow by default")
+		}
+		if !strings.Contains(prompt, "Agent Orchestration Patterns") {
+			t.Error("prompt should include orchestration patterns by default")
+		}
+	})
+
+	t.Run("excludes planning workflow when disabled", func(t *testing.T) {
+		dir := t.TempDir()
+		prompt := LoadPromptWithOptions(dir, PromptOptions{DisablePlanningWorkflow: true})
+		if strings.Contains(prompt, "<planning-workflow>") {
+			t.Error("prompt should not include planning workflow when disabled")
+		}
+		if strings.Contains(prompt, "Agent Orchestration Patterns") {
+			t.Error("prompt should not include orchestration patterns when disabled")
+		}
+	})
+
+	t.Run("still includes AGENTS.md when present", func(t *testing.T) {
+		dir := t.TempDir()
+		content := "Project-specific instructions here."
+		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(content), 0644); err != nil {
+			t.Fatalf("write AGENTS.md: %v", err)
+		}
+
+		prompt := LoadPromptWithOptions(dir, PromptOptions{})
+		if !strings.Contains(prompt, content) {
+			t.Error("prompt should include AGENTS.md content")
+		}
+		if !strings.Contains(prompt, "<planning-workflow>") {
+			t.Error("prompt should include planning workflow")
+		}
+	})
+
+	t.Run("AGENTS.md without planning workflow", func(t *testing.T) {
+		dir := t.TempDir()
+		content := "Project-specific instructions here."
+		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(content), 0644); err != nil {
+			t.Fatalf("write AGENTS.md: %v", err)
+		}
+
+		prompt := LoadPromptWithOptions(dir, PromptOptions{DisablePlanningWorkflow: true})
+		if !strings.Contains(prompt, content) {
+			t.Error("prompt should include AGENTS.md content")
+		}
+		if strings.Contains(prompt, "<planning-workflow>") {
+			t.Error("prompt should not include planning workflow when disabled")
 		}
 	})
 }

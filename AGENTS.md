@@ -99,6 +99,100 @@ hew/                    # core: types, interfaces, Agent, events (root go.mod, s
 - `--continue` loads the most recent session for the current project directory (conversational mode only)
 - `--list-sessions` displays all saved sessions for the current project
 - Sessions auto-save on exit in conversational mode (no `-p` flag); stored in `$XDG_STATE_HOME/hew/projects/`
+
+## Binary Symmetry Requirements
+
+hew ships two binaries that MUST have identical user-facing behavior:
+
+**cmd/hew/** — Plain CLI, stdlib only
+**cmd/hui/** — TUI frontend with bubbletea, falls back to plain-text for non-TTY
+
+### Why This Matters
+
+In CI and automation, both binaries are used interchangeably (`hew` for scripts, `hui` for interactive sessions). Missing a feature in one breaks the contract. Example: hui was missing auto-save on exit, breaking CI workflows that relied on `--continue`.
+
+### Symmetric Behaviors (MUST have both)
+
+**Flag Parity** — Both binaries accept identical flags with identical semantics:
+- `-p, --prompt` — single-task mode prompt
+- `--model` — LLM model identifier (env: $HEW_MODEL, default: claude-sonnet-4-20250514)
+- `--base-url` — API endpoint (env: $HEW_BASE_URL, default: https://api.anthropic.com)
+- `--max-steps` — agent step limit (0 = use default 100)
+- `-v, --verbose` — debug output to stderr
+- `--load-messages` — seed conversation from JSON file (e.g., from previous --trajectory)
+- `--event-log` — write JSONL events to file (streams in real time)
+- `--trajectory` — write message history as JSON on exit (single-task mode only)
+- `--continue` — resume latest session for current project directory (conversational mode only)
+- `--list-sessions` — list all saved sessions for current project
+- `--version` — print version and exit
+
+Flag defaults and env var fallbacks must be identical. Example: both should default to Anthropic if HEW_BASE_URL is not set.
+
+**Session Persistence** — Both binaries MUST:
+- Auto-save to disk in conversational mode (no -p flag) on clean exit
+- Auto-save to disk on SIGINT (Ctrl-C) if any messages exist
+- Load sessions via `--continue` (resume most recent for project directory)
+- Support `--list-sessions` to enumerate all saved sessions
+- Use the same `session` package for storage/retrieval (XDG state directory)
+
+Failure mode: If one binary auto-saves but the other doesn't, `--continue` breaks downstream workflows.
+
+**Event Handling** — Both binaries MUST:
+- Wire `agent.Notify` to a callback that processes all events
+- Handle all five event types: EventResponse, EventCommandStart, EventCommandDone, EventFormatError, EventDebug
+- Write all events to `--event-log` if provided
+- Display user-facing output (responses, command output, errors) consistently to user
+
+Behavioral difference allowed: TUI may render in color/pagination, CLI uses plain text. The *content* must be the same.
+
+**Error Reporting** — Both binaries MUST:
+- Report errors to stderr (not stdout)
+- Use exit code 0 on success, 1 on runtime error
+- Surface validation errors early (missing API key, invalid base URL)
+- Surface agent.Run() errors before exit
+
+**Provider Selection** — Both binaries MUST:
+- Use identical adapter selection: if `--base-url` contains "anthropic.com" → Anthropic, else → OpenAI
+- Fall back to `ANTHROPIC_API_KEY` when base URL is Anthropic and HEW_API_KEY is unset
+- Apply the same env var precedence: `--base-url` flag > HEW_BASE_URL env > default
+- Validate base URL format early (must start with http:// or https://)
+
+**Intentional Asymmetries** (these are fine):
+- TUI rendering: color, pagination, interactive widgets, keybindings
+- CLI output formatting: plain text only, concise layout
+- Non-behavioral configuration: internal variable naming (eventLog vs eventLogPath)
+
+### Detecting Asymmetries
+
+When making a change:
+
+1. **Identify what changed**: Flag parsing? Session behavior? Event handling? Provider logic?
+2. **Check the other binary**: Does it have corresponding logic?
+3. **Run the review**: Use `/review-symmetry` skill during code review to audit differences
+4. **Document if intentional**: If asymmetry is intentional (TUI-only feature), note it in the commit message
+
+Example git diff check:
+```bash
+git diff HEAD -- cmd/hew/main.go cmd/hui/main.go
+```
+
+If you added code to one binary, trace the equivalent logic in the other. If missing, it's usually a bug.
+
+### Review Process
+
+Code reviews should verify binary symmetry. Use `/review-symmetry` skill:
+```
+[During code review]: @review-symmetry
+
+[Skill reviews PR, compares both binaries, reports differences]
+```
+
+The skill will:
+1. Enumerate all behavioral changes in both binaries
+2. Cross-check that both have corresponding behaviors
+3. Distinguish bugs (missing behavior) from intentional asymmetries (TUI-specific UI)
+4. Report which asymmetries block merge (vs. which are acceptable)
+
 ## Worktrees
 
 Worktree directory: `~/.config/superpowers/worktrees/hew/`
@@ -109,240 +203,4 @@ GitHub Actions runs on push to `main` and PRs targeting `main`. Single job: lint
 
 **Local setup:** Run `make setup` to install the pre-commit hook (enforces gofmt). golangci-lint is required for `make lint` and `make check` — install with `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` or `brew install golangci-lint`.
 
-## Executing Plans
-
-### Overview
-
-Load plan, review critically, execute tasks until complete, spawn Code Review Subagents between batches.
-
-**Core principle:** Batch execution with checkpoints for Subagent Review.
-
-### The Process
-
-#### Step 1: Load and Review Plan
-1. Read plan file
-2. Review critically - identify any questions or concerns about the plan
-3. If concerns: Raise them with your human partner before starting
-4. If no concerns: Create TodoWrite and proceed
-
-**[Agent Sub-Adventure]** Running autonomously? Spawn a **reviewer agent** to critique the plan instead of consulting a human. See Agent Orchestration Patterns.
-
-#### Step 2: Execute Batch
-**Default: First 3 tasks**
-
-For each task:
-1. Mark as in_progress
-2. Follow each step exactly (plan has bite-sized steps)
-3. Run verifications as specified
-4. Mark as completed
-
-#### Step 3: Report
-When batch complete:
-- Show what was implemented
-- Show verification output
-- Say: "Ready for feedback."
-
-**[Agent Sub-Adventure]** Running autonomously? Spawn a **reviewer agent** to critique your batch work and decide whether to proceed to the next batch or iterate. See Agent Orchestration Patterns.
-
-#### Step 4: Continue
-Based on feedback:
-- Apply changes if needed
-- Execute next batch
-- Repeat until complete
-
-#### Step 5: Complete Development
-
-After all tasks complete and verified:
-- Announce: "I'm done."
-- Wait for the human
-
-**[Agent Sub-Adventure]** Running autonomously? Spawn a **test runner agent** to validate the complete implementation before declaring completion. See Agent Orchestration Patterns.
-
-### When to Stop and Ask for Help
-
-**STOP executing immediately when:**
-- Hit a blocker mid-batch (missing dependency, test fails, instruction unclear)
-- Plan has critical gaps preventing starting
-- You don't understand an instruction
-- Verification fails repeatedly
-
-**Ask for clarification rather than guessing.**
-
-### When to Revisit Earlier Steps
-
-**Return to Review (Step 1) when:**
-- Partner updates the plan based on your feedback
-- Fundamental approach needs rethinking
-
-**Don't force through blockers** - stop and ask.
-
-### Remember
-- Review plan critically first
-- Follow plan steps exactly
-- Don't skip verifications
-- Between batches: just report and wait
-- Stop when blocked, don't guess
-
-## Agent Orchestration Patterns
-
-Instead of waiting for human feedback or checkpoints, agents running under hew can spawn child hew processes as specialized workers. This enables autonomous, multi-step workflows with agent-driven verification and course correction.
-
-### How It Works
-
-When you need feedback, verification, or specialized handling, spawn a child hew instance:
-
-1. **Spawn the child** with `hew -p "specific task" --load-messages /tmp/previous.json --trajectory /tmp/result.json`
-2. **Seed its context** using `--load-messages` to feed it your conversation history
-3. **Capture results** via `--trajectory` to get the full conversation as JSON
-4. **Parse the output** to decide next steps
-
-### Why This Pattern
-
-- **Autonomy**: No waiting for humans between steps
-- **Specialization**: Different agents can excel at different roles (reviewing code, testing, investigating)
-- **Isolation**: Each agent starts fresh with clear context boundaries
-- **Traceability**: Every agent run is saved; you can audit decisions
-
-### The Reviewer Agent
-
-**Role**: Critique an approach, implementation, or decision. Catch issues before they compound.
-
-**When to use**: After completing a major step (design, first implementation, significant refactor), spawn a reviewer to evaluate your work.
-
-**Mechanics**:
-- You provide the conversation history via `--load-messages` (your investigation, solution attempt, etc.)
-- The reviewer reads your work and provides critical feedback: correctness, edge cases, style, safety
-- Use the reviewer's output to decide: proceed, iterate, or take a different approach
-
-**Example prompt**:
-```bash
-hew -p "You are a senior software architect. Study the project's conventions and architecture. Review the approach in the conversation history. Critique the design, identify potential issues (correctness, edge cases, style, security), and suggest improvements. Do NOT implement fixes — only critique." \
-  --load-messages /tmp/my_investigation.json \
-  --trajectory /tmp/review_feedback.json
-```
-
-**Parsing results**: Read `review_feedback.json` and extract the reviewer's assessment. If it identifies blocking issues, iterate. If it's minor feedback, decide whether to incorporate it before proceeding.
-
-**Success criteria**: You receive actionable feedback without the reviewer taking over implementation.
-
-### The Investigator Agent
-
-**Role**: Deep-dive into a problem, gather information, explore root causes. Separate investigation from solution.
-
-**When to use**: When you need to understand a bug, explore a codebase section, or diagnose why something failed.
-
-**Mechanics**:
-- Spawn an investigator with access to the same codebase and tools
-- The investigator explores, gathers findings, and reports back
-- You or a downstream agent (e.g., fix-writer) uses those findings to build a solution
-
-**Example prompt**:
-```bash
-hew -p "You are an experienced systems engineer. Study the project's conventions and architecture. Investigate why the database connection pool is exhausting. Explore the codebase, check configuration, review logs, and identify the root cause. Provide detailed findings but do NOT implement a fix." \
-  --load-messages /tmp/problem_context.json \
-  --trajectory /tmp/investigation_findings.json
-```
-
-**Parsing results**: The investigator's findings become input for the next agent (perhaps a fix-writer). Extract key details: suspected root cause, evidence, affected code paths.
-
-**Success criteria**: You get a thorough investigation with evidence, not premature conclusions.
-
-### The Test Runner Agent
-
-**Role**: Validate a solution through comprehensive testing. Catch regressions and edge cases.
-
-**When to use**: After you've implemented a fix or feature, spawn a test runner to verify it works correctly.
-
-**Mechanics**:
-- Provide the implementation + prior investigation/context via `--load-messages`
-- The test runner designs and executes tests: unit tests, integration tests, edge cases, existing test suites
-- Captures failures and reports coverage gaps
-- You iterate based on test results
-
-**Example prompt**:
-```bash
-hew -p "You are a Senior Staff Engineer, QA. Study the project's conventions, testing patterns, and architecture. Test the implementation in the conversation history. Run the existing test suite, write new tests to cover edge cases, test with malformed input, and verify nothing regressed. Report failures, coverage gaps, and recommendations." \
-  --load-messages /tmp/implementation_with_context.json \
-  --trajectory /tmp/test_results.json
-```
-
-**Parsing results**: Extract test results, failure messages, and coverage feedback. If tests fail, the failures guide your next iteration. If all pass, move to integration/deployment checks.
-
-**Success criteria**: You have comprehensive test coverage and confidence that the implementation is solid.
-
-### Putting It Together: Multi-Agent Workflows
-
-You can chain these agents to build autonomous workflows:
-
-**Example: Investigate → Review → Implement → Test**
-1. Spawn an investigator to understand the problem
-2. Load investigation results, spawn a reviewer to critique potential approaches
-3. Based on feedback, implement a solution
-4. Spawn a test runner to validate the implementation
-5. If tests fail, iterate; if they pass, you're done
-
-**Example: Parallel Investigation**
-1. Spawn 3 investigator agents in parallel, each focusing on a different angle (logs, code, metrics)
-2. Merge findings from all three
-3. Spawn a reviewer to synthesize a unified hypothesis
-4. Implement and test from there
-
-Each agent gets a clean context via `--load-messages`, and you stitch results together by reading their `--trajectory` outputs.
-
-### When NOT to Spawn an Agent
-
-- **Trivial or one-off tasks**: If you can do it in one bash command, do it.
-- **Tight feedback loops**: If you need real-time interaction (debugging a flaky test), stay in the current agent.
-- **High overhead**: Spawning an agent has latency; use sparingly in time-sensitive workflows.
-
-### Execute Autonomously (alias: `yolo`)
-
-**Trigger phrases:**
-- "Execute Autonomously [plan]"
-- "yolo [plan]"
-
-When you encounter a plan or someone asks you to run it autonomously, follow this procedure:
-
-**Step 1: Review Plan**
-- Spawn a **reviewer agent**:
-  ```bash
-  hew -p "You are a senior software architect. Study the project's conventions and architecture. Review this plan: [plan text]. Identify any risks, gaps, or assumptions. Do NOT execute — only critique." \
-    --trajectory /tmp/plan_review.json
-  ```
-- Parse the review. If blocking issues found, report them and stop. If minor concerns, proceed.
-
-**Step 2: Execute Batch (Phase 1)**
-- Execute the tasks in the first phase exactly as specified.
-- Run verifications as stated in the plan.
-
-**Step 3: Batch Checkpoint**
-- Spawn a **reviewer agent**:
-  ```bash
-  hew -p "You are a senior software architect. Study the project's conventions and architecture. Review my work in this conversation. Did I execute Phase 1 correctly? Are there issues or regressions? Should I proceed to Phase 2, or iterate current phase?" \
-    --load-messages /tmp/phase1_work.json \
-    --trajectory /tmp/phase1_review.json
-  ```
-- Parse feedback. If "iterate," loop back to Step 2 with corrections. If "proceed," continue.
-
-**Step 4: Execute Next Batch**
-- Execute Phase 2 tasks (or next phase).
-- Repeat Steps 3-4 for remaining phases.
-
-**Step 5: Final Validation**
-- Spawn a **test runner agent**:
-  ```bash
-  hew -p "You are a Senior Staff Engineer, QA. Study the project's conventions, testing patterns, and architecture. Test the complete implementation. Run the test suite, write new tests for edge cases, verify no regressions. Report pass/fail and coverage gaps." \
-    --load-messages /tmp/final_work.json \
-    --trajectory /tmp/final_tests.json
-  ```
-- If tests pass: report completion. If tests fail: iterate on failures.
-
-**Success**: You have executed the plan end-to-end with agent-driven reviews at each checkpoint, and full test validation at the end.
-
-#### Why This Works
-
-- **No human waiting**: Each checkpoint is an agent decision, not a blocking human review
-- **Autonomous, not reckless**: Reviewers catch issues before compounding
-- **Traceable**: Every agent decision is saved in trajectory files
-- **Iterative**: Failures trigger loops, not crashes
 
