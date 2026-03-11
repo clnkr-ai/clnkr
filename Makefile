@@ -40,15 +40,20 @@ check: lint test ## Run lint and tests
 run: build-hew ## Build and start TUI
 	./hew
 
-man: ## Generate man page from markdown
+man: ## Generate man pages from markdown
 	go-md2man -in doc/hew.1.md -out doc/hew.1
+	go-md2man -in doc/hu.1.md -out doc/hu.1
 
-check-man: ## Verify committed man page is up-to-date
+check-man: ## Verify committed man pages are up-to-date
 	@cp doc/hew.1 doc/hew.1.bak
 	@go-md2man -in doc/hew.1.md -out doc/hew.1
 	@diff -q doc/hew.1 doc/hew.1.bak >/dev/null 2>&1 || (echo "error: doc/hew.1 is out of date; run 'make man'" && mv doc/hew.1.bak doc/hew.1 && exit 1)
 	@mv doc/hew.1.bak doc/hew.1
-	@echo "man page is up-to-date"
+	@cp doc/hu.1 doc/hu.1.bak
+	@go-md2man -in doc/hu.1.md -out doc/hu.1
+	@diff -q doc/hu.1 doc/hu.1.bak >/dev/null 2>&1 || (echo "error: doc/hu.1 is out of date; run 'make man'" && mv doc/hu.1.bak doc/hu.1 && exit 1)
+	@mv doc/hu.1.bak doc/hu.1
+	@echo "man pages are up-to-date"
 
 help: ## Show available targets
 	@grep -E '^[a-z][-a-z]+:.*##' $(MAKEFILE_LIST) | sort | awk -F ':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
