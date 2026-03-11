@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1 (2026-03-11)
+
+- fix: add missing session auto-save to hui conversational mode
+- docs: add session persistence documentation and integration tests
+- feat: add session persistence to hui TUI
+- feat: add session persistence to hew CLI
+- feat: core session persistence library
+
 ## 0.3.0 (2026-03-11)
 
 - Add session persistence as composable session/ package
