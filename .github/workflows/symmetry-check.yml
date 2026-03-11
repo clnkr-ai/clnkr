@@ -1,0 +1,67 @@
+name: Binary Symmetry Check
+
+on:
+  pull_request:
+    paths:
+      - 'cmd/hew/**'
+      - 'cmd/hui/**'
+      - '.github/workflows/symmetry-check.yml'
+
+jobs:
+  symmetry:
+    runs-on: ubuntu-latest
+    name: Check hew/hui parity
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check flag parity
+        run: |
+          echo "Checking flag parity between cmd/hew and cmd/hui..."
+
+          # Extract all flags declared in both binaries
+          hew_flags=$(grep -oP 'flags\.\w+\("([^"]+)"' cmd/hew/main.go | cut -d'"' -f2 | sort -u)
+          hui_flags=$(grep -oP 'flags\.\w+\("([^"]+)"' cmd/hui/main.go | cut -d'"' -f2 | sort -u)
+
+          # Find differences
+          hew_only=$(echo "$hew_flags" | grep -Fxvf <(echo "$hui_flags") || true)
+          hui_only=$(echo "$hui_flags" | grep -Fxvf <(echo "$hew_flags") || true)
+
+          if [ -n "$hew_only" ] || [ -n "$hui_only" ]; then
+            echo "::error::Binary flag asymmetry detected!"
+            if [ -n "$hew_only" ]; then
+              echo "::error::Flags in cmd/hew but not cmd/hui: $hew_only"
+            fi
+            if [ -n "$hui_only" ]; then
+              echo "::error::Flags in cmd/hui but not cmd/hew: $hui_only"
+            fi
+            exit 1
+          fi
+
+          echo "✓ Flags are symmetric across both binaries"
+
+      - name: Check session operations
+        run: |
+          echo "Checking session operations..."
+
+          # Both should have session.SaveSession in conversational mode
+          hew_has_save=$(grep -c "session.SaveSession" cmd/hew/main.go || echo 0)
+          hui_has_save=$(grep -c "session.SaveSession" cmd/hui/main.go || echo 0)
+
+          if [ "$hew_has_save" -eq 0 ] || [ "$hui_has_save" -eq 0 ]; then
+            echo "::error::Session auto-save asymmetry: hew=$hew_has_save, hui=$hui_has_save"
+            exit 1
+          fi
+
+          echo "✓ Session persistence is symmetric"
+
+      - name: Report
+        if: success()
+        run: |
+          echo "## Binary Symmetry Check ✓"
+          echo ""
+          echo "- Flags are symmetric across cmd/hew and cmd/hui"
+          echo "- Session persistence is symmetric"
+          echo ""
+          echo "For comprehensive symmetry audit, see code review comments."
