@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2 (2026-03-11)
+
+- Fix: prevent empty content blocks in message history
+- Update CHANGELOG.md for 0.2.1
+
 ## 0.2.1 (2026-03-10)
 
 - Overhaul system prompt and replace exit signal with <done/> tag
