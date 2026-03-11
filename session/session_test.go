@@ -183,7 +183,7 @@ func TestListSessionsEmpty(t *testing.T) {
 func TestSessionDirDefaultsToLocalState(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", "")
 	// Unset XDG_STATE_HOME to test fallback
-	os.Unsetenv("XDG_STATE_HOME")
+	_ = os.Unsetenv("XDG_STATE_HOME")
 
 	dir, err := session.SessionDir("/tmp/test")
 	if err != nil {
