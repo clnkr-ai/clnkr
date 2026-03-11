@@ -51,6 +51,12 @@ func TestLoadPromptWithOptions(t *testing.T) {
 		if !strings.Contains(prompt, "Agent Orchestration Patterns") {
 			t.Error("prompt should include orchestration patterns by default")
 		}
+		if !strings.Contains(prompt, "Brainstorming Ideas Into Designs") {
+			t.Error("prompt should include brainstorming section by default")
+		}
+		if !strings.Contains(prompt, "Writing Plans") {
+			t.Error("prompt should include writing plans section by default")
+		}
 	})
 
 	t.Run("excludes planning workflow when disabled", func(t *testing.T) {
@@ -61,6 +67,12 @@ func TestLoadPromptWithOptions(t *testing.T) {
 		}
 		if strings.Contains(prompt, "Agent Orchestration Patterns") {
 			t.Error("prompt should not include orchestration patterns when disabled")
+		}
+		if strings.Contains(prompt, "Brainstorming Ideas Into Designs") {
+			t.Error("prompt should not include brainstorming section when disabled")
+		}
+		if strings.Contains(prompt, "Writing Plans") {
+			t.Error("prompt should not include writing plans section when disabled")
 		}
 	})
 
