@@ -118,7 +118,14 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 		output += "\n(error: " + execErr.Error() + ")"
 	}
 	a.notify(EventCommandDone{Output: output, Err: execErr})
-	a.messages = append(a.messages, Message{Role: "user", Content: output})
+
+	// Only add message if output is non-empty; Anthropic API rejects empty content blocks.
+	// If command produced no output, use a placeholder to keep the conversation flowing.
+	content := output
+	if content == "" {
+		content = "(command completed with no output)"
+	}
+	a.messages = append(a.messages, Message{Role: "user", Content: content})
 
 	return StepResult{Response: resp, Action: action, Output: output, ExecErr: execErr}, nil
 }
