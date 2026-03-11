@@ -40,6 +40,7 @@ Options:
   --trajectory string     Write message history as JSON on exit (single-task mode only)
   --continue              Resume most recent session for this project
   --list-sessions         List all saved sessions for this project
+  --disable-planning-workflow  Omit planning workflow instructions from system prompt
   --version               Print version and exit
 
 Environment:
@@ -65,6 +66,7 @@ Environment:
 	loadMessages := flags.String("load-messages", "", "")
 	continueFlag := flags.Bool("continue", false, "")
 	listSessions := flags.Bool("list-sessions", false, "")
+	disablePlanningWorkflow := flags.Bool("disable-planning-workflow", false, "")
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -164,7 +166,7 @@ Environment:
 		defer eventLogFile.Close() //nolint:errcheck
 	}
 
-	systemPrompt := hew.LoadPrompt(cwd)
+	systemPrompt := hew.LoadPromptWithOptions(cwd, hew.PromptOptions{DisablePlanningWorkflow: *disablePlanningWorkflow})
 
 	var llm hew.Model
 	if strings.Contains(*baseURL, "anthropic.com") {
