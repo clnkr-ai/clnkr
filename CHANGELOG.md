@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 (2026-03-11)
+
+- Add session persistence as composable session/ package
+- Add Agent Orchestration Patterns section to AGENTS.md
+- Update CHANGELOG.md for 0.2.2
+
 ## 0.2.2 (2026-03-11)
 
 - Fix: prevent empty content blocks in message history
