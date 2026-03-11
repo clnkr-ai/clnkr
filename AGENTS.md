@@ -50,6 +50,7 @@ The core is an importable library at module root (`github.com/cosgroveb/hew`). T
 hew/                    # core: types, interfaces, Agent, events (root go.mod, stdlib only)
 ├── anthropic/          # Anthropic Messages API adapter
 ├── openai/             # OpenAI-compatible adapter
+├── session/            # Session persistence (XDG state, save/load/list)
 ├── cmd/hew/            # Plain CLI (under root go.mod, no external deps)
 └── cmd/hui/            # TUI frontend (own go.mod with charm deps)
 ```
@@ -95,6 +96,9 @@ hew/                    # core: types, interfaces, Agent, events (root go.mod, s
 - `--trajectory` writes before checking `runErr` so failed runs still produce output
 - `--trajectory` output and `--load-messages` input use the same JSON format (array of `{role, content}` objects)
 
+- `--continue` loads the most recent session for the current project directory (conversational mode only)
+- `--list-sessions` displays all saved sessions for the current project
+- Sessions auto-save on exit in conversational mode (no `-p` flag); stored in `$XDG_STATE_HOME/hew/projects/`
 ## Worktrees
 
 Worktree directory: `~/.config/superpowers/worktrees/hew/`
