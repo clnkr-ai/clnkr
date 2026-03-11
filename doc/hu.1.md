@@ -45,6 +45,9 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 **-v**, **--verbose**
 : Show internal decisions (queries, parsing, working directory).
 
+**--disable-planning-workflow**
+: Omit the planning workflow instructions from the system prompt.
+
 **--version**
 : Print version and exit.
 
