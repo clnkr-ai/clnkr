@@ -14,6 +14,7 @@ import (
 	hew "github.com/cosgroveb/hew"
 	"github.com/cosgroveb/hew/anthropic"
 	"github.com/cosgroveb/hew/openai"
+	"github.com/cosgroveb/hew/session"
 )
 
 // version is set at build time via -ldflags.
@@ -37,6 +38,8 @@ Options:
   --load-messages string  Seed conversation from JSON file (e.g. from --trajectory)
   --event-log string      Write JSONL events to file (streams in real time)
   --trajectory string     Write message history as JSON on exit (single-task mode only)
+  --continue              Resume most recent session for this project
+  --list-sessions         List all saved sessions for this project
   --version               Print version and exit
 
 Environment:
@@ -60,6 +63,8 @@ Environment:
 	eventLogPath := flags.String("event-log", "", "")
 	trajectory := flags.String("trajectory", "", "")
 	loadMessages := flags.String("load-messages", "", "")
+	continueFlag := flags.Bool("continue", false, "")
+	listSessions := flags.Bool("list-sessions", false, "")
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -71,6 +76,28 @@ Environment:
 
 	if *showVersion {
 		fmt.Printf("hew %s\n", version)
+		os.Exit(0)
+	}
+
+	if *listSessions {
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot get working directory: %v\n", err)
+			os.Exit(1)
+		}
+		sessions, err := session.ListSessions(cwd)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot list sessions: %v\n", err)
+			os.Exit(1)
+		}
+		if len(sessions) == 0 {
+			fmt.Println("No sessions found for this project.")
+			os.Exit(0)
+		}
+		fmt.Println("Saved sessions:")
+		for i, s := range sessions {
+			fmt.Printf("  %d. %s (%d messages) - %s\n", i+1, s.Filename, s.Messages, s.Created.Format("2006-01-02 15:04:05"))
+		}
 		os.Exit(0)
 	}
 
@@ -168,6 +195,27 @@ Environment:
 			fmt.Fprintf(os.Stderr, "Error: cannot load messages: %v\n", err)
 			os.Exit(1)
 		}
+	}
+
+	if *continueFlag {
+		if *trajectory != "" {
+			fmt.Fprintln(os.Stderr, "Error: --continue and --trajectory are mutually exclusive")
+			os.Exit(1)
+		}
+		msgs, err := session.LoadLatestSession(cwd)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot load session: %v\n", err)
+			os.Exit(1)
+		}
+		if msgs == nil {
+			fmt.Fprintf(os.Stderr, "Error: no session found for this project.\nRun 'hui --list-sessions' to see available sessions.\n")
+			os.Exit(1)
+		}
+		if err := agent.AddMessages(msgs); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot resume session: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "[Resumed session with %d messages]\n", len(msgs))
 	}
 
 	// TTY detection: if stdout is not a terminal, use plain-text rendering
