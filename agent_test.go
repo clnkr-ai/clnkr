@@ -191,6 +191,33 @@ func TestStep(t *testing.T) {
 			t.Errorf("got action %q, want %q", result.Action, DoneSignal)
 		}
 	})
+
+	t.Run("empty command output never produces empty messages", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: "```bash\ntouch /tmp/test\n```"}},
+		}}
+		executor := &fakeExecutor{outputs: []string{""}} // Empty output
+
+		agent := NewAgent(model, executor, "/tmp")
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "create file"})
+
+		_, err := agent.Step(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify that the message was appended but is not empty
+		lastMsg := agent.messages[len(agent.messages)-1]
+		if lastMsg.Role != "user" {
+			t.Errorf("last message role should be user, got %q", lastMsg.Role)
+		}
+		if lastMsg.Content == "" {
+			t.Error("message content must not be empty (violates Anthropic API)")
+		}
+		if lastMsg.Content != "(command completed with no output)" {
+			t.Errorf("empty output should use placeholder, got %q", lastMsg.Content)
+		}
+	})
 }
 
 func TestMessages(t *testing.T) {
