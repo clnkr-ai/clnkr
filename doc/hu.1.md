@@ -1,28 +1,28 @@
-hew 1 "hew" "User Commands"
+hu 1 "hu" "User Commands"
 ==========================
 
 # NAME
 
-hew - a minimal coding agent (TUI)
+hu - a minimal coding agent (plain CLI)
 
 # SYNOPSIS
 
-**hew** [**-p** *task*] [**--model** *name*] [**--base-url** *url*] [**--max-steps** *n*] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**--version**]
+**hu** [**-p** *task*] [**--model** *name*] [**--base-url** *url*] [**--max-steps** *n*] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**--version**]
 
 # DESCRIPTION
 
-**hew** is a minimal coding agent with a terminal user interface (TUI), built with bubbletea. It queries LLMs and executes bash commands in an iterative loop. It supports both Anthropic and OpenAI-compatible APIs.
+**hu** is a minimal coding agent that queries LLMs and executes bash commands in an iterative loop. It supports both Anthropic and OpenAI-compatible APIs.
 
-In default mode, **hew** starts the TUI. With **-p**, it runs a single task and exits. When stdout is not a TTY, **hew** falls back to plain-text rendering.
+In default mode, **hu** starts an interactive REPL. With **-p**, it runs a single task and exits.
 
-A plain CLI variant is available as **hu**(1).
+**hu** is the plain CLI variant of the hew project, with no external dependencies beyond the Go standard library. A TUI variant is available as **hew**(1).
 
 Project-specific instructions are loaded from an **AGENTS.md** file in the current working directory, if present.
 
 # OPTIONS
 
 **-p**, **--prompt** *task*
-: Run the given task and exit. Without this flag, hew starts the TUI.
+: Run the given task and exit. Without this flag, hu starts in conversational REPL mode.
 
 **--model** *name*
 : LLM model identifier (default: claude-sonnet-4-20250514).
@@ -45,14 +45,14 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 **-v**, **--verbose**
 : Show internal decisions (queries, parsing, working directory).
 
+**--version**
+: Print version and exit.
+
 **--continue**
 : Resume the most recent session for the current project directory.
 
 **--list-sessions**
 : List all saved sessions for the current project directory.
-
-**--version**
-: Print version and exit.
 
 # ENVIRONMENT
 
@@ -75,10 +75,10 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 **1**
 : Error (no API key, step limit reached, etc.).
 
+# SEE ALSO
+
+**hew**(1)
+
 # AUTHOR
 
 Brian Cosgrove <cosgroveb@gmail.com>
-
-# SEE ALSO
-
-**hu**(1)

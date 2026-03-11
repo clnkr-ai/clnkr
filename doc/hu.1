@@ -1,22 +1,22 @@
 .nh
-.TH hew 1 "hew" "User Commands"
+.TH hu 1 "hu" "User Commands"
 
 .SH NAME
-hew \- a minimal coding agent (TUI)
+hu \- a minimal coding agent (plain CLI)
 
 
 .SH SYNOPSIS
-\fBhew\fP [\fB-p\fP \fItask\fP] [\fB--model\fP \fIname\fP] [\fB--base-url\fP \fIurl\fP] [\fB--max-steps\fP \fIn\fP] [\fB--load-messages\fP \fIfile\fP] [\fB--event-log\fP \fIfile\fP] [\fB--trajectory\fP \fIfile\fP] [\fB-v\fP|\fB--verbose\fP] [\fB--version\fP]
+\fBhu\fP [\fB-p\fP \fItask\fP] [\fB--model\fP \fIname\fP] [\fB--base-url\fP \fIurl\fP] [\fB--max-steps\fP \fIn\fP] [\fB--load-messages\fP \fIfile\fP] [\fB--event-log\fP \fIfile\fP] [\fB--trajectory\fP \fIfile\fP] [\fB-v\fP|\fB--verbose\fP] [\fB--version\fP]
 
 
 .SH DESCRIPTION
-\fBhew\fP is a minimal coding agent with a terminal user interface (TUI), built with bubbletea. It queries LLMs and executes bash commands in an iterative loop. It supports both Anthropic and OpenAI-compatible APIs.
+\fBhu\fP is a minimal coding agent that queries LLMs and executes bash commands in an iterative loop. It supports both Anthropic and OpenAI-compatible APIs.
 
 .PP
-In default mode, \fBhew\fP starts the TUI. With \fB-p\fP, it runs a single task and exits. When stdout is not a TTY, \fBhew\fP falls back to plain-text rendering.
+In default mode, \fBhu\fP starts an interactive REPL. With \fB-p\fP, it runs a single task and exits.
 
 .PP
-A plain CLI variant is available as \fBhu\fP(1).
+\fBhu\fP is the plain CLI variant of the hew project, with no external dependencies beyond the Go standard library. A TUI variant is available as \fBhew\fP(1).
 
 .PP
 Project-specific instructions are loaded from an \fBAGENTS.md\fP file in the current working directory, if present.
@@ -25,7 +25,7 @@ Project-specific instructions are loaded from an \fBAGENTS.md\fP file in the cur
 .SH OPTIONS
 .TP
 \fB-p\fP, \fB--prompt\fP \fItask\fP
-Run the given task and exit. Without this flag, hew starts the TUI.
+Run the given task and exit. Without this flag, hu starts in conversational REPL mode.
 
 .TP
 \fB--model\fP \fIname\fP
@@ -56,16 +56,16 @@ After the task finishes, write the full message history as pretty-printed JSON t
 Show internal decisions (queries, parsing, working directory).
 
 .TP
+\fB--version\fP
+Print version and exit.
+
+.TP
 \fB--continue\fP
 Resume the most recent session for the current project directory.
 
 .TP
 \fB--list-sessions\fP
 List all saved sessions for the current project directory.
-
-.TP
-\fB--version\fP
-Print version and exit.
 
 
 .SH ENVIRONMENT
@@ -94,10 +94,10 @@ Success.
 Error (no API key, step limit reached, etc.).
 
 
+.SH SEE ALSO
+\fBhew\fP(1)
+
+
 .SH AUTHOR
 Brian Cosgrove cosgroveb@gmail.com
 \[la]mailto:cosgroveb@gmail.com\[ra]
-
-
-.SH SEE ALSO
-\fBhu\fP(1)
