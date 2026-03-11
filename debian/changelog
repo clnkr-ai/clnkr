@@ -1,3 +1,50 @@
+hew (0.4.0-1) unstable; urgency=medium
+
+  [ Brian Cosgrove ]
+  * Add initial Debian packaging
+  * Add release workflow for Debian packages and cross-platform binaries
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.0.1-1
+  * Restore gbp dch and arm64 deb, fix runner label
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.1.1-1
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.1.2-1
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.1.3-1
+  * Build and ship both hew and hui binaries in debian package
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.2.0-1
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.2.1-1
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.2.2-1
+  * Add session persistence as composable session/ package
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.3.0-1
+
+  [ github-actions[bot] ]
+  * Update CHANGELOG.md for 0.3.0
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.3.1-1
+
+  [ github-actions[bot] ]
+  * Update CHANGELOG.md for 0.3.1
+  * fix: add missing session auto-save to hui conversational mode
+  * Add multi-layer binary symmetry enforcement system
+  * Promote planning workflow to system prompt with hui-only opt-out
+
+ -- Brian Cosgrove <cosgroveb@gmail.com>  Wed, 11 Mar 2026 19:33:28 +0000
+
 hew (0.3.1-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
