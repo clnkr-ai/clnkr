@@ -1,8 +1,16 @@
 # Changelog
 
+## 0.4.2 (2026-03-11)
+
+- Load AGENTS.md from three layered locations
+- fix: suppress errcheck on os.Unsetenv in session test
+- Revert "Add multi-layer binary symmetry enforcement system"
+- Update CHANGELOG.md for 0.4.1
+
 ## 0.4.1 (2026-03-11)
 
 - Add brainstorming and writing-plans sections to planning workflow prompt
+- Update CHANGELOG.md for 0.4.0
 
 ## 0.4.0 (2026-03-11)
 
