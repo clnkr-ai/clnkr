@@ -160,7 +160,7 @@ jobs:
         run: go test -race ./...
 
       - name: Test TUI
-        run: cd cmd/hui && go test -race ./...
+        run: cd cmd/hew && go test -race ./...
 
       - name: Cross-compile binaries
         run: |
@@ -169,10 +169,10 @@ jobs:
             for GOARCH in amd64 arm64; do
               CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH \
                 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
-                -o "hew-${GOOS}-${GOARCH}" ./cmd/hew/
+                -o "hu-${GOOS}-${GOARCH}" ./cmd/hu/
               CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH \
-                go -C cmd/hui build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
-                -o "../../hui-${GOOS}-${GOARCH}" .
+                go -C cmd/hew build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+                -o "../../hew-${GOOS}-${GOARCH}" .
             done
           done
 
@@ -181,8 +181,8 @@ jobs:
         with:
           name: binaries
           path: |
+            hu-*
             hew-*
-            hui-*
 
   release:
     needs: [debian-amd64, debian-arm64, binaries]
@@ -248,8 +248,8 @@ jobs:
           mkdir -p release
           cp artifacts/deb-amd64/*.deb release/
           cp artifacts/deb-arm64/*.deb release/
+          cp artifacts/binaries/hu-* release/
           cp artifacts/binaries/hew-* release/
-          cp artifacts/binaries/hui-* release/
 
       - name: Generate source tarball
         run: |
