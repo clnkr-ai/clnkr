@@ -51,6 +51,9 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 **--list-sessions**
 : List all saved sessions for the current project directory.
 
+**--disable-planning-workflow**
+: Omit the planning workflow instructions from the system prompt.
+
 **--version**
 : Print version and exit.
 
