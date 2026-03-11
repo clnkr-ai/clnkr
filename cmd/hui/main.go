@@ -307,6 +307,16 @@ func runTUI(agent *hew.Agent, taskPrompt, trajectory, modelName, cwd string, eve
 		os.Exit(1)
 	}
 
+	// Auto-save session on exit (conversational mode)
+	if msgs := agent.Messages(); len(msgs) > 0 {
+		if err := session.SaveSession(cwd, msgs); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", err)
+		} else {
+			dir, _ := session.SessionDir(cwd)
+			fmt.Fprintf(os.Stderr, "[Session saved to %s]\n", dir)
+		}
+	}
+
 	if fm.agentErr != nil {
 		os.Exit(1)
 	}
