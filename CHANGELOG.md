@@ -2,6 +2,8 @@
 
 ## 0.5.0 (2026-03-11)
 
+- Add --disable-planning-workflow flag to hu, update both man pages
+- Update CHANGELOG.md for 0.5.0
 - Add hu(1) man page, update hew(1) for TUI
 - Rename binaries: hew (plain CLI) -> hu, hui (TUI) -> hew
 - Update CHANGELOG.md for 0.4.2
