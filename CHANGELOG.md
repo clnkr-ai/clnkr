@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 (2026-03-11)
+
+- Add hu(1) man page, update hew(1) for TUI
+- Rename binaries: hew (plain CLI) -> hu, hui (TUI) -> hew
+- Update CHANGELOG.md for 0.4.2
+
 ## 0.4.2 (2026-03-11)
 
 - Load AGENTS.md from three layered locations
