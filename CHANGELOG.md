@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 (2026-03-11)
+
+- Add brainstorming and writing-plans sections to planning workflow prompt
+
 ## 0.4.0 (2026-03-11)
 
 - Promote planning workflow to system prompt with hui-only opt-out
