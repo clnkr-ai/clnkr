@@ -54,5 +54,4 @@ help: ## Show available targets
 	@grep -E '^[a-z][-a-z]+:.*##' $(MAKEFILE_LIST) | sort | awk -F ':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
 
 setup: ## Install git hooks
-	git config core.hooksPath .githooks
-	chmod +x .githooks/pre-commit
+	ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
