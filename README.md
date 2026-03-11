@@ -4,13 +4,19 @@
 
 A minimal coding agent. Query an LLM, execute bash commands, repeat. Supports the Anthropic Messages API and any OpenAI-compatible endpoint (vLLM, Ollama, LiteLLM, etc.).
 
+Ships two binaries: **hew** (TUI) and **hu** (plain CLI).
+
 <img width="512" height="512" alt="Isildur cut the Ring (the ring here is bash -jokeexplainer)from his hand with the hilt-shard of his father's sword, and took it for his own." src="https://github.com/user-attachments/assets/7c9d648c-f5b9-4610-a311-04f5af37b364" />
 
 
 ## Install
 
 ```bash
-go install github.com/cosgroveb/hew/cmd/hew@latest
+# Plain CLI only (stdlib, no external deps)
+go install github.com/cosgroveb/hew/cmd/hu@latest
+
+# TUI requires building from source (due to replace directive)
+make build-hew
 ```
 
 Or build from source:
@@ -18,7 +24,7 @@ Or build from source:
 ```bash
 git clone https://github.com/cosgroveb/hew.git
 cd hew
-make build
+make build-all
 ```
 
 ## Usage
@@ -78,16 +84,16 @@ hew --base-url https://generativelanguage.googleapis.com/v1beta/openai --model g
 
 ### Agent orchestration
 
-A parent process can spawn hew as a child agent and monitor or chain runs:
+A parent process can spawn hu as a child agent and monitor or chain runs:
 
 ```bash
 # Watch events in real time
-hew -p "fix the build" --event-log /tmp/events.jsonl &
+hu -p "fix the build" --event-log /tmp/events.jsonl &
 tail -f /tmp/events.jsonl | jq .
 
 # Save a run's conversation, then feed it to a second agent
-hew -p "investigate the bug" --trajectory /tmp/investigation.json
-hew -p "write a fix based on the investigation" --load-messages /tmp/investigation.json
+hu -p "investigate the bug" --trajectory /tmp/investigation.json
+hu -p "write a fix based on the investigation" --load-messages /tmp/investigation.json
 ```
 
 `--event-log` streams one JSON object per line as events happen (O_APPEND, safe to tail).
@@ -100,21 +106,21 @@ Place an `AGENTS.md` file in your working directory. Its contents are appended t
 
 ## Session Persistence
 
-When using hew or hui in conversational mode (no `-p` flag), sessions are
+When using hew or hu in conversational mode (no `-p` flag), sessions are
 automatically saved to `$XDG_STATE_HOME/hew/projects/` on exit.
 
 Resume a session:
 
 ```bash
-hew --continue   # Load most recent session
-hui --continue   # Load in TUI
+hew --continue   # Load most recent session (TUI)
+hu --continue    # Load most recent session (plain CLI)
 ```
 
 List all sessions for the current project:
 
 ```bash
 hew --list-sessions
-hui --list-sessions
+hu --list-sessions
 ```
 
 Sessions are tied to their original working directory. You can only resume a
