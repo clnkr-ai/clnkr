@@ -447,10 +447,32 @@ type PromptOptions struct {
 // workflow prompt unless opts.DisablePlanningWorkflow is true.
 func LoadPromptWithOptions(dir string, opts PromptOptions) string {
 	prompt := basePrompt
-	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
-	if err == nil && len(data) > 0 {
+
+	// Layer 1: Global user instructions ($HOME/AGENTS.md)
+	if home, err := os.UserHomeDir(); err == nil {
+		if data, err := os.ReadFile(filepath.Join(home, "AGENTS.md")); err == nil && len(data) > 0 {
+			prompt += "\n\n<user-instructions>\n" + string(data) + "\n</user-instructions>"
+		}
+	}
+
+	// Layer 2: hew-specific user config ($XDG_CONFIG_HOME/hew/AGENTS.md)
+	configDir := os.Getenv("XDG_CONFIG_HOME")
+	if configDir == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			configDir = filepath.Join(home, ".config")
+		}
+	}
+	if configDir != "" {
+		if data, err := os.ReadFile(filepath.Join(configDir, "hew", "AGENTS.md")); err == nil && len(data) > 0 {
+			prompt += "\n\n<config-instructions>\n" + string(data) + "\n</config-instructions>"
+		}
+	}
+
+	// Layer 3: Project-local instructions (working directory AGENTS.md)
+	if data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")); err == nil && len(data) > 0 {
 		prompt += "\n\n<project-instructions>\n" + string(data) + "\n</project-instructions>"
 	}
+
 	if !opts.DisablePlanningWorkflow {
 		prompt += "\n" + PlanningWorkflowPrompt
 	}
