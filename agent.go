@@ -88,46 +88,67 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	a.messages = append(a.messages, resp.Message)
 	a.notify(EventResponse{Message: resp.Message, Usage: resp.Usage})
 
-	if strings.Contains(resp.Message.Content, DoneSignal) {
-		a.notify(EventDebug{Message: "done signal received"})
-		return StepResult{Response: resp, Action: DoneSignal}, nil
-	}
+	actions, parseErr := ExtractCommands(resp.Message.Content)
+	hasDone := strings.Contains(resp.Message.Content, DoneSignal)
 
-	action, err := ExtractCommand(resp.Message.Content)
-	if errors.Is(err, ErrNoCommand) {
+	if errors.Is(parseErr, ErrNoCommand) {
+		if hasDone {
+			a.notify(EventDebug{Message: "done signal received"})
+			return StepResult{Response: resp, Action: DoneSignal}, nil
+		}
 		a.notify(EventDebug{Message: "no bash block found"})
 		a.notify(EventFormatError{})
 		a.messages = append(a.messages, Message{
 			Role:    "user",
-			Content: "Your response did not include a bash code block. Include exactly one ```bash block, or include <done/> (with no code block) when finished.",
+			Content: "Your response did not include a bash code block. Include one or more ```bash blocks, or include <done/> (with no code block) when finished.",
 		})
 		return StepResult{Response: resp}, nil
 	}
-	if err != nil {
-		return StepResult{}, fmt.Errorf("parse action: %w", err)
+	if parseErr != nil {
+		return StepResult{}, fmt.Errorf("parse action: %w", parseErr)
 	}
 
-	a.notify(EventDebug{Message: fmt.Sprintf("parsed action: %s", summarizeCommand(action))})
-	a.updateCwd(action)
-	a.notify(EventDebug{Message: fmt.Sprintf("cwd: %s", a.cwd)})
-	a.notify(EventCommandStart{Command: action, Dir: a.cwd})
+	a.notify(EventDebug{Message: fmt.Sprintf("parsed %d bash block(s)", len(actions))})
 
-	output, execErr := a.executor.Execute(ctx, action, a.cwd)
-	if execErr != nil {
-		a.notify(EventDebug{Message: fmt.Sprintf("command error: %v", execErr)})
-		output += "\n(error: " + execErr.Error() + ")"
+	var combinedOutput string
+	var lastErr error
+	for _, action := range actions {
+		a.notify(EventDebug{Message: fmt.Sprintf("parsed action: %s", summarizeCommand(action))})
+		a.updateCwd(action)
+		a.notify(EventDebug{Message: fmt.Sprintf("cwd: %s", a.cwd)})
+		a.notify(EventCommandStart{Command: action, Dir: a.cwd})
+
+		output, execErr := a.executor.Execute(ctx, action, a.cwd)
+		if execErr != nil {
+			a.notify(EventDebug{Message: fmt.Sprintf("command error: %v", execErr)})
+			output += "\n(error: " + execErr.Error() + ")"
+			lastErr = execErr
+		}
+		a.notify(EventCommandDone{Output: output, Err: execErr})
+
+		if combinedOutput != "" && output != "" {
+			combinedOutput += "\n"
+		}
+		combinedOutput += output
 	}
-	a.notify(EventCommandDone{Output: output, Err: execErr})
 
 	// Only add message if output is non-empty; Anthropic API rejects empty content blocks.
-	// If command produced no output, use a placeholder to keep the conversation flowing.
-	content := output
+	// If commands produced no output, use a placeholder to keep the conversation flowing.
+	content := combinedOutput
 	if content == "" {
 		content = "(command completed with no output)"
 	}
 	a.messages = append(a.messages, Message{Role: "user", Content: content})
 
-	return StepResult{Response: resp, Action: action, Output: output, ExecErr: execErr}, nil
+	result := StepResult{Response: resp, Action: actions[0], Output: combinedOutput, ExecErr: lastErr}
+
+	// If the response also contained <done/>, signal completion after executing commands.
+	if hasDone {
+		a.notify(EventDebug{Message: "done signal received"})
+		result.Action = DoneSignal
+	}
+
+	return result, nil
 }
 
 // Run loops Step until exit or step limit. Message history persists across calls.
