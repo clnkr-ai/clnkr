@@ -436,87 +436,80 @@ After saving the plan, offer execution choice:
 </planning-workflow>`
 
 // RLMWorkflowPrompt contains instructions for recursive task decomposition
-// by spawning child hew processes. It is only included in the system prompt
+// by spawning child hu processes. It is only included in the system prompt
 // when explicitly enabled via PromptOptions.
 const RLMWorkflowPrompt = `
-## Recursive decomposition
+## Task decomposition via child processes
 
-Most tasks fit in a single context. Use decomposition only when:
-- A file exceeds ~5,000 lines and you need to process most of it
-- A task spans 10+ files or requires cross-referencing large outputs
-- You notice yourself losing track of details across repeated tool calls
+You have the ability to spawn child agents (hu processes) that execute
+subtasks independently and return results. This is your primary strategy
+for tasks involving large codebases or large data sets.
 
-Do not decompose simple tasks. If you can solve it in a few bash steps, do that.
+### When to decompose
 
-### The pattern: inspect, chunk, dispatch, collect, aggregate
+**Estimate first.** Before writing any solution that iterates over files
+or symbols, estimate the scale:
+- How many items will you iterate over?
+- How large is the search space for each item?
+- What is the expected wall-clock time?
 
-**1. Inspect.** Measure before you read. Never cat a giant file into context.
+**Decompose when ANY of these apply:**
+- Your approach would iterate over more than ~50 items against a large corpus
+- Processing would take longer than ~30 seconds sequentially
+- The output of intermediate steps would exceed ~2,000 lines
+- You need to cross-reference results across 10+ files
+
+**Do not attempt naive sequential approaches on large codebases.**
+A while-loop grepping 1,000 symbols across a kernel tree will be killed.
+Decompose instead.
+
+### How to decompose
+
+1. **Assess scope**: Run a fast command to measure the problem
+   (e.g., count files, count symbols, measure directory size).
+
+2. **Partition**: Split the work into chunks of roughly equal size.
+   Partition by directory, by file, or by symbol range — whatever
+   produces balanced chunks of 50-200 items each.
+
+3. **Dispatch child agents**: For each chunk, spawn a child hu process:
 ` + "```bash" + `
-wc -l bigfile.c                          # how big?
-head -100 bigfile.c                      # structure?
-grep -n 'function\|def \|class ' bigfile.c  # landmarks?
-find src/ -name '*.go' | wc -l           # how many files?
-` + "```" + `
-
-**2. Chunk.** Split into pieces a child can handle in ≤10 steps.
-` + "```bash" + `
-split -l 500 -d bigfile.c /tmp/chunk-
-find src/ -name '*.go' > /tmp/filelist.txt
-` + "```" + `
-
-**3. Seed context.** Write a JSON messages file for each child.
-Each child starts fresh with no shared state — give it everything it needs.
-` + "```bash" + `
-for f in /tmp/chunk-*; do
-  content=$(cat "$f" | jq -Rs .)
-  echo "[{\"role\":\"user\",\"content\":$content}]" > "${f}-seed.json"
-done
-` + "```" + `
-
-**4. Verify one first.** Run a single child and check its output before fanning out.
-` + "```bash" + `
-hu -p "Count all TODO comments in this code. Reply with just the number." \
-  --load-messages /tmp/chunk-00-seed.json \
-  --trajectory /tmp/result-00.json \
+hu -p "In drivers/gpu/drm/amd/, find all EXPORT_SYMBOL declarations. \
+For each, check whether the symbol appears anywhere else in the repo. \
+Output only symbols with zero external references, one per line." \
+  --trajectory /tmp/result-chunk-0.json \
   --max-steps 10
-
-jq -r '.messages[-1].content' /tmp/result-00.json
 ` + "```" + `
-If the result is wrong or empty, fix your instruction or seed before dispatching more.
+   Child instructions must be precise and mechanical.
+   Children do not have decomposition instructions. They execute and return.
 
-**5. Dispatch the batch.** Run children sequentially. No more than 10 per batch.
+4. **Validate one first**: Run a single child and check its output
+   before dispatching the full batch. If the result is wrong or empty,
+   fix your instruction before fanning out.
+
+5. **Collect and merge**: Read each child's output, deduplicate,
+   and produce the final result:
 ` + "```bash" + `
-for f in /tmp/chunk-*-seed.json; do
-  id=$(basename "$f" -seed.json)
-  hu -p "Count all TODO comments in this code. Reply with just the number." \
-    --load-messages "$f" \
-    --trajectory "/tmp/result-${id}.json" \
-    --max-steps 10
+for f in /tmp/result-chunk-*.json; do
+  jq -r '.[-1].content' "$f" 2>/dev/null >> /tmp/all-results.txt
 done
+sort -u /tmp/all-results.txt
 ` + "```" + `
 
-**6. Collect and handle failures.**
-` + "```bash" + `
-for f in /tmp/result-*.json; do
-  answer=$(jq -r '.messages[-1].content' "$f" 2>/dev/null)
-  if [ -z "$answer" ] || [ "$answer" = "null" ]; then
-    echo "FAILED: $f" >> /tmp/failures.txt
-  else
-    echo "$answer" >> /tmp/results.txt
-  fi
-done
-` + "```" + `
-Re-dispatch failures with adjusted instructions or smaller chunks.
+6. **Clean up**: Remove temp files.
 
-**7. Aggregate.** Combine results in bash (sum, concat, sort -u). For complex
-aggregation, dispatch one more child with collected results as its seed.
+### Critical rules
 
-### Key constraints
-- Keep child instructions precise and mechanical: "extract X", "count Y",
-  "apply these diffs". Vague instructions produce unreliable results.
-- Children do not have these decomposition instructions. They solve their
-  subtask directly. This naturally limits recursion depth.
-- Clean up temp files when done: rm /tmp/chunk-* /tmp/result-* /tmp/*-seed.json`
+- **Children are cheap, retries are expensive.** Prefer more smaller
+  chunks over fewer larger ones.
+- **Never write a sequential loop over hundreds of items.** If you
+  catch yourself writing ` + "`" + `while read symbol; do grep ... ; done` + "`" + ` over
+  a large list, stop and decompose instead.
+- **Validate child output.** Spot-check a sample of child results
+  before merging. If a child returned garbage, re-dispatch that chunk.
+- **Prefer child agents over complex bash pipelines** for tasks involving
+  search + filter + cross-reference. Bash pipelines are fine for simple
+  transformations, but multi-stage analysis benefits from decomposition.`
 
 // PromptOptions configures system prompt generation.
 type PromptOptions struct {
