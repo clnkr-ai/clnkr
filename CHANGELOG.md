@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.4 (2026-03-14)
+
+- Strengthen RLM prompt: require hu -p for subtasks, ban inline for-loops
+- Update CHANGELOG.md for 0.5.3
+
 ## 0.5.3 (2026-03-14)
 
 - Execute all bash blocks in a single LLM response
