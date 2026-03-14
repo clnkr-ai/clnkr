@@ -125,7 +125,7 @@ func TestLoadPromptWithOptions_RLMWorkflow(t *testing.T) {
 	t.Run("excludes RLM workflow by default", func(t *testing.T) {
 		dir := t.TempDir()
 		prompt := LoadPromptWithOptions(dir, PromptOptions{})
-		if strings.Contains(prompt, "Recursive decomposition") {
+		if strings.Contains(prompt, "Task decomposition via child processes") {
 			t.Error("prompt should not include RLM workflow by default")
 		}
 	})
@@ -133,11 +133,11 @@ func TestLoadPromptWithOptions_RLMWorkflow(t *testing.T) {
 	t.Run("includes RLM workflow when enabled", func(t *testing.T) {
 		dir := t.TempDir()
 		prompt := LoadPromptWithOptions(dir, PromptOptions{EnableRLMWorkflow: true})
-		if !strings.Contains(prompt, "Recursive decomposition") {
-			t.Error("prompt should include Recursive decomposition when RLM enabled")
+		if !strings.Contains(prompt, "Task decomposition via child processes") {
+			t.Error("prompt should include Task decomposition via child processes when RLM enabled")
 		}
-		if !strings.Contains(prompt, "inspect, chunk, dispatch, collect, aggregate") {
-			t.Error("prompt should include the decomposition pattern when RLM enabled")
+		if !strings.Contains(prompt, "Decompose when ANY of these apply") {
+			t.Error("prompt should include the decomposition triggers when RLM enabled")
 		}
 	})
 
@@ -145,7 +145,7 @@ func TestLoadPromptWithOptions_RLMWorkflow(t *testing.T) {
 		dir := t.TempDir()
 		prompt := LoadPromptWithOptions(dir, PromptOptions{EnableRLMWorkflow: true})
 		planIdx := strings.Index(prompt, "<planning-workflow>")
-		rlmIdx := strings.Index(prompt, "Recursive decomposition")
+		rlmIdx := strings.Index(prompt, "Task decomposition via child processes")
 		if planIdx >= rlmIdx {
 			t.Error("RLM workflow should appear after planning workflow")
 		}
@@ -160,7 +160,7 @@ func TestLoadPromptWithOptions_RLMWorkflow(t *testing.T) {
 		if strings.Contains(prompt, "<planning-workflow>") {
 			t.Error("planning workflow should be excluded when disabled")
 		}
-		if !strings.Contains(prompt, "Recursive decomposition") {
+		if !strings.Contains(prompt, "Task decomposition via child processes") {
 			t.Error("RLM workflow should be included regardless of planning workflow setting")
 		}
 	})
