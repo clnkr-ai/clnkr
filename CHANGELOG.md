@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2 (2026-03-14)
+
+- Rewrite --rlm prompt based on eval results
+- Update CHANGELOG.md for 0.5.1
+- Update CHANGELOG.md for 0.5.1
+
 ## 0.5.1 (2026-03-14)
 
 - Add --rlm flag for recursive decomposition workflow
