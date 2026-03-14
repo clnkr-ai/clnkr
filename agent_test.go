@@ -220,6 +220,146 @@ func TestStep(t *testing.T) {
 	})
 }
 
+func TestStepMultiBlock(t *testing.T) {
+	t.Run("executes all bash blocks sequentially", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: "Step 1:\n\n```bash\necho hello\n```\n\nStep 2:\n\n```bash\necho world\n```"}},
+		}}
+		executor := &fakeExecutor{outputs: []string{"hello\n", "world\n"}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "greet"})
+
+		result, err := agent.Step(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if executor.calls != 2 {
+			t.Errorf("expected 2 commands, got %d", executor.calls)
+		}
+		if executor.gotCmds[0] != "echo hello" {
+			t.Errorf("first command: got %q, want %q", executor.gotCmds[0], "echo hello")
+		}
+		if executor.gotCmds[1] != "echo world" {
+			t.Errorf("second command: got %q, want %q", executor.gotCmds[1], "echo world")
+		}
+		if result.Action != "echo hello" {
+			t.Errorf("Action should be first command, got %q", result.Action)
+		}
+		wantOutput := "hello\n\nworld\n"
+		if result.Output != wantOutput {
+			t.Errorf("combined output: got %q, want %q", result.Output, wantOutput)
+		}
+	})
+
+	t.Run("continues after command error", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: "```bash\nfalse\n```\n\n```bash\necho cleanup\n```"}},
+		}}
+		executor := &fakeExecutor{outputs: []string{"", "cleaned\n"}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "do it"})
+
+		result, err := agent.Step(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if executor.calls != 2 {
+			t.Errorf("expected 2 commands even with error, got %d", executor.calls)
+		}
+		// ExecErr should be nil because the second command succeeded (fakeExecutor returns nil error for valid outputs)
+		if result.ExecErr != nil {
+			t.Errorf("expected nil ExecErr from last command, got %v", result.ExecErr)
+		}
+	})
+
+	t.Run("emits events for each command", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: "```bash\necho a\n```\n\n```bash\necho b\n```"}},
+		}}
+		executor := &fakeExecutor{outputs: []string{"a\n", "b\n"}}
+		notify, events := collectEvents()
+
+		agent := NewAgent(model, executor, "/tmp")
+		agent.Notify = notify
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "two commands"})
+
+		_, err := agent.Step(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		cmdStarts := 0
+		cmdDones := 0
+		for _, e := range *events {
+			switch e.(type) {
+			case EventCommandStart:
+				cmdStarts++
+			case EventCommandDone:
+				cmdDones++
+			}
+		}
+		if cmdStarts != 2 {
+			t.Errorf("expected 2 EventCommandStart, got %d", cmdStarts)
+		}
+		if cmdDones != 2 {
+			t.Errorf("expected 2 EventCommandDone, got %d", cmdDones)
+		}
+	})
+
+	t.Run("done signal after commands", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: "```bash\necho final\n```\n\nAll done.\n\n<done/>"}},
+		}}
+		executor := &fakeExecutor{outputs: []string{"final\n"}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "finish"})
+
+		result, err := agent.Step(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if executor.calls != 1 {
+			t.Errorf("expected 1 command executed before done, got %d", executor.calls)
+		}
+		if result.Action != DoneSignal {
+			t.Errorf("expected DoneSignal action, got %q", result.Action)
+		}
+		if result.Output != "final\n" {
+			t.Errorf("expected output %q, got %q", "final\n", result.Output)
+		}
+	})
+
+	t.Run("combined output appended as single message", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: "```bash\necho a\n```\n\n```bash\necho b\n```"}},
+		}}
+		executor := &fakeExecutor{outputs: []string{"a\n", "b\n"}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "two"})
+
+		_, err := agent.Step(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Messages: initial user, assistant response, combined output
+		if len(agent.messages) != 3 {
+			t.Fatalf("expected 3 messages, got %d", len(agent.messages))
+		}
+		last := agent.messages[2]
+		if last.Role != "user" {
+			t.Errorf("last message role should be user, got %q", last.Role)
+		}
+		if last.Content != "a\n\nb\n" {
+			t.Errorf("last message content: got %q, want %q", last.Content, "a\n\nb\n")
+		}
+	})
+}
+
 func TestMessages(t *testing.T) {
 	t.Run("returns copy of messages", func(t *testing.T) {
 		agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
