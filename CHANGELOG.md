@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.6 (2026-03-14)
+
+- Add grep flag guidance to RLM child instruction rules
+- Update CHANGELOG.md for 0.5.5
+
 ## 0.5.5 (2026-03-14)
 
 - Prescriptive child instructions in RLM prompt
