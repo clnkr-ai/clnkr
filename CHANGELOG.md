@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.5 (2026-03-14)
+
+- Prescriptive child instructions in RLM prompt
+- Update CHANGELOG.md for 0.5.4
+
 ## 0.5.4 (2026-03-14)
 
 - Strengthen RLM prompt: require hu -p for subtasks, ban inline for-loops
