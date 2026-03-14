@@ -500,16 +500,17 @@ sort -u /tmp/all-results.txt
 
 ### Critical rules
 
+- **You MUST use hu -p for subtasks, not bash for-loops.** Do not write
+  ` + "`" + `for dir in ...; do grep ... ; done` + "`" + ` or
+  ` + "`" + `while read symbol; do grep ... ; done` + "`" + ` inline.
+  Each chunk MUST be processed by a child ` + "`" + `hu -p` + "`" + ` process.
+  Bash for-loops over large data sets fill your context window with
+  intermediate output and will be killed. Child processes have their
+  own context and only return the final answer.
 - **Children are cheap, retries are expensive.** Prefer more smaller
   chunks over fewer larger ones.
-- **Never write a sequential loop over hundreds of items.** If you
-  catch yourself writing ` + "`" + `while read symbol; do grep ... ; done` + "`" + ` over
-  a large list, stop and decompose instead.
 - **Validate child output.** Spot-check a sample of child results
-  before merging. If a child returned garbage, re-dispatch that chunk.
-- **Prefer child agents over complex bash pipelines** for tasks involving
-  search + filter + cross-reference. Bash pipelines are fine for simple
-  transformations, but multi-stage analysis benefits from decomposition.`
+  before merging. If a child returned garbage, re-dispatch that chunk.`
 
 // PromptOptions configures system prompt generation.
 type PromptOptions struct {
