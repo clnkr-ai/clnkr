@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.3 (2026-03-14)
+
+- Execute all bash blocks in a single LLM response
+- Update CHANGELOG.md for 0.5.2
+- Update CHANGELOG.md for 0.5.2
+
 ## 0.5.2 (2026-03-14)
 
 - Rewrite --rlm prompt based on eval results
