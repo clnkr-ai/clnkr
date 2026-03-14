@@ -37,6 +37,7 @@ Options:
   --load-messages string  Seed conversation from JSON file (e.g. from --trajectory)
   --event-log string      Write JSONL events to file (streams in real time)
   --trajectory string     Write message history as JSON on exit (single-task mode only)
+  --rlm                   Enable recursive decomposition workflow in system prompt
   --continue              Resume most recent session for this project
   --list-sessions         List all saved sessions for this project
   --disable-planning-workflow  Omit planning workflow instructions from system prompt
@@ -63,6 +64,7 @@ Environment:
 	eventLog := flags.String("event-log", "", "")
 	trajectory := flags.String("trajectory", "", "")
 	loadMessages := flags.String("load-messages", "", "")
+	rlmFlag := flags.Bool("rlm", false, "")
 	continueFlag := flags.Bool("continue", false, "")
 	listSessions := flags.Bool("list-sessions", false, "")
 	disablePlanningWorkflow := flags.Bool("disable-planning-workflow", false, "")
@@ -165,7 +167,10 @@ Environment:
 		defer eventLogFile.Close() //nolint:errcheck
 	}
 
-	systemPrompt := hew.LoadPromptWithOptions(cwd, hew.PromptOptions{DisablePlanningWorkflow: *disablePlanningWorkflow})
+	systemPrompt := hew.LoadPromptWithOptions(cwd, hew.PromptOptions{
+		DisablePlanningWorkflow: *disablePlanningWorkflow,
+		EnableRLMWorkflow:       *rlmFlag,
+	})
 
 	var model hew.Model
 	if strings.Contains(*baseURL, "anthropic.com") {
