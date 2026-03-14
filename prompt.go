@@ -435,11 +435,98 @@ After saving the plan, offer execution choice:
 **[Agent Sub-Adventure]** Running autonomously? Use the Execute Autonomously workflow from the Agent Orchestration Patterns section to implement the plan end-to-end with reviewer checkpoints.
 </planning-workflow>`
 
+// RLMWorkflowPrompt contains instructions for recursive task decomposition
+// by spawning child hew processes. It is only included in the system prompt
+// when explicitly enabled via PromptOptions.
+const RLMWorkflowPrompt = `
+## Recursive decomposition
+
+Most tasks fit in a single context. Use decomposition only when:
+- A file exceeds ~5,000 lines and you need to process most of it
+- A task spans 10+ files or requires cross-referencing large outputs
+- You notice yourself losing track of details across repeated tool calls
+
+Do not decompose simple tasks. If you can solve it in a few bash steps, do that.
+
+### The pattern: inspect, chunk, dispatch, collect, aggregate
+
+**1. Inspect.** Measure before you read. Never cat a giant file into context.
+` + "```bash" + `
+wc -l bigfile.c                          # how big?
+head -100 bigfile.c                      # structure?
+grep -n 'function\|def \|class ' bigfile.c  # landmarks?
+find src/ -name '*.go' | wc -l           # how many files?
+` + "```" + `
+
+**2. Chunk.** Split into pieces a child can handle in ≤10 steps.
+` + "```bash" + `
+split -l 500 -d bigfile.c /tmp/chunk-
+find src/ -name '*.go' > /tmp/filelist.txt
+` + "```" + `
+
+**3. Seed context.** Write a JSON messages file for each child.
+Each child starts fresh with no shared state — give it everything it needs.
+` + "```bash" + `
+for f in /tmp/chunk-*; do
+  content=$(cat "$f" | jq -Rs .)
+  echo "[{\"role\":\"user\",\"content\":$content}]" > "${f}-seed.json"
+done
+` + "```" + `
+
+**4. Verify one first.** Run a single child and check its output before fanning out.
+` + "```bash" + `
+hu -p "Count all TODO comments in this code. Reply with just the number." \
+  --load-messages /tmp/chunk-00-seed.json \
+  --trajectory /tmp/result-00.json \
+  --max-steps 10
+
+jq -r '.messages[-1].content' /tmp/result-00.json
+` + "```" + `
+If the result is wrong or empty, fix your instruction or seed before dispatching more.
+
+**5. Dispatch the batch.** Run children sequentially. No more than 10 per batch.
+` + "```bash" + `
+for f in /tmp/chunk-*-seed.json; do
+  id=$(basename "$f" -seed.json)
+  hu -p "Count all TODO comments in this code. Reply with just the number." \
+    --load-messages "$f" \
+    --trajectory "/tmp/result-${id}.json" \
+    --max-steps 10
+done
+` + "```" + `
+
+**6. Collect and handle failures.**
+` + "```bash" + `
+for f in /tmp/result-*.json; do
+  answer=$(jq -r '.messages[-1].content' "$f" 2>/dev/null)
+  if [ -z "$answer" ] || [ "$answer" = "null" ]; then
+    echo "FAILED: $f" >> /tmp/failures.txt
+  else
+    echo "$answer" >> /tmp/results.txt
+  fi
+done
+` + "```" + `
+Re-dispatch failures with adjusted instructions or smaller chunks.
+
+**7. Aggregate.** Combine results in bash (sum, concat, sort -u). For complex
+aggregation, dispatch one more child with collected results as its seed.
+
+### Key constraints
+- Keep child instructions precise and mechanical: "extract X", "count Y",
+  "apply these diffs". Vague instructions produce unreliable results.
+- Children do not have these decomposition instructions. They solve their
+  subtask directly. This naturally limits recursion depth.
+- Clean up temp files when done: rm /tmp/chunk-* /tmp/result-* /tmp/*-seed.json`
+
 // PromptOptions configures system prompt generation.
 type PromptOptions struct {
 	// DisablePlanningWorkflow omits the planning and orchestration
 	// workflow instructions from the system prompt.
 	DisablePlanningWorkflow bool
+
+	// EnableRLMWorkflow includes the recursive decomposition workflow
+	// instructions in the system prompt.
+	EnableRLMWorkflow bool
 }
 
 // LoadPromptWithOptions returns the system prompt with configurable options.
@@ -475,6 +562,9 @@ func LoadPromptWithOptions(dir string, opts PromptOptions) string {
 
 	if !opts.DisablePlanningWorkflow {
 		prompt += "\n" + PlanningWorkflowPrompt
+	}
+	if opts.EnableRLMWorkflow {
+		prompt += "\n" + RLMWorkflowPrompt
 	}
 	return prompt
 }

@@ -121,6 +121,51 @@ func TestLoadPromptWithOptions(t *testing.T) {
 	})
 }
 
+func TestLoadPromptWithOptions_RLMWorkflow(t *testing.T) {
+	t.Run("excludes RLM workflow by default", func(t *testing.T) {
+		dir := t.TempDir()
+		prompt := LoadPromptWithOptions(dir, PromptOptions{})
+		if strings.Contains(prompt, "Recursive decomposition") {
+			t.Error("prompt should not include RLM workflow by default")
+		}
+	})
+
+	t.Run("includes RLM workflow when enabled", func(t *testing.T) {
+		dir := t.TempDir()
+		prompt := LoadPromptWithOptions(dir, PromptOptions{EnableRLMWorkflow: true})
+		if !strings.Contains(prompt, "Recursive decomposition") {
+			t.Error("prompt should include Recursive decomposition when RLM enabled")
+		}
+		if !strings.Contains(prompt, "inspect, chunk, dispatch, collect, aggregate") {
+			t.Error("prompt should include the decomposition pattern when RLM enabled")
+		}
+	})
+
+	t.Run("RLM workflow appears after planning workflow", func(t *testing.T) {
+		dir := t.TempDir()
+		prompt := LoadPromptWithOptions(dir, PromptOptions{EnableRLMWorkflow: true})
+		planIdx := strings.Index(prompt, "<planning-workflow>")
+		rlmIdx := strings.Index(prompt, "Recursive decomposition")
+		if planIdx >= rlmIdx {
+			t.Error("RLM workflow should appear after planning workflow")
+		}
+	})
+
+	t.Run("RLM workflow works with planning disabled", func(t *testing.T) {
+		dir := t.TempDir()
+		prompt := LoadPromptWithOptions(dir, PromptOptions{
+			DisablePlanningWorkflow: true,
+			EnableRLMWorkflow:       true,
+		})
+		if strings.Contains(prompt, "<planning-workflow>") {
+			t.Error("planning workflow should be excluded when disabled")
+		}
+		if !strings.Contains(prompt, "Recursive decomposition") {
+			t.Error("RLM workflow should be included regardless of planning workflow setting")
+		}
+	})
+}
+
 func TestLoadPromptWithOptions_LayeredAgentsMD(t *testing.T) {
 	t.Run("loads HOME AGENTS.md", func(t *testing.T) {
 		home := t.TempDir()
