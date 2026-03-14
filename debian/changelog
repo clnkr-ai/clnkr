@@ -1,3 +1,94 @@
+hew (0.5.6-1) unstable; urgency=medium
+
+  [ Brian Cosgrove ]
+  * Add initial Debian packaging
+  * Add release workflow for Debian packages and cross-platform binaries
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.0.1-1
+  * Restore gbp dch and arm64 deb, fix runner label
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.1.1-1
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.1.2-1
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.1.3-1
+  * Build and ship both hew and hui binaries in debian package
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.2.0-1
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.2.1-1
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.2.2-1
+  * feat: core session persistence library
+  * feat: add session persistence to hew CLI
+  * feat: add session persistence to hui TUI
+  * docs: add session persistence documentation and integration tests
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.3.0-1
+  * fix: add missing session auto-save to hui conversational mode
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.3.1-1
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.4.0-1
+  * Add brainstorming and writing-plans sections to planning workflow prompt
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.4.1-1
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.4.2-1
+
+  [ github-actions[bot] ]
+  * Update CHANGELOG.md for 0.4.2
+  * Rename binaries: hew (plain CLI) -> hu, hui (TUI) -> hew
+  * Add hu(1) man page, update hew(1) for TUI
+  * debian: update packaging for binary rename (hew→hu, hui→hew)
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.5.0-1
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.5.0-1
+  * Add --rlm flag for recursive decomposition workflow
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.5.1-1
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.5.1-1
+  * Rewrite --rlm prompt based on eval results
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.5.2-1
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.5.2-1
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.5.3-1
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.5.4-1
+
+  [ github-actions[bot] ]
+  * Update changelog for 0.5.5-1
+
+  [ github-actions[bot] ]
+  * Update CHANGELOG.md for 0.5.5
+  * Add grep flag guidance to RLM child instruction rules
+
+ -- Brian Cosgrove <cosgroveb@gmail.com>  Sat, 14 Mar 2026 22:24:06 +0000
+
 hew (0.5.5-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
