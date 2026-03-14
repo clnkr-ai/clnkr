@@ -472,20 +472,34 @@ Decompose instead.
    Partition by directory, by file, or by symbol range — whatever
    produces balanced chunks of 50-200 items each.
 
-3. **Dispatch child agents**: For each chunk, spawn a child hu process:
-` + "```bash" + `
-hu -p "In drivers/gpu/drm/amd/, find all EXPORT_SYMBOL declarations. \
-For each, check whether the symbol appears anywhere else in the repo. \
-Output only symbols with zero external references, one per line." \
-  --trajectory /tmp/result-chunk-0.json \
-  --max-steps 10
-` + "```" + `
-   Child instructions must be precise and mechanical.
-   Children do not have decomposition instructions. They execute and return.
+3. **Dispatch child agents**: For each chunk, spawn a child hu process.
 
-4. **Validate one first**: Run a single child and check its output
-   before dispatching the full batch. If the result is wrong or empty,
-   fix your instruction before fanning out.
+   Child instructions must specify the exact algorithm, not just the goal.
+   Children invent bad bash when given vague instructions. Tell them
+   the exact commands, flags, expected format at each step, and how to
+   produce the final output.
+
+   Bad (child will pick wrong flags):
+   ` + "`" + `"Search the repo for references to each symbol. Output unreferenced ones."` + "`" + `
+
+   Good (prescriptive algorithm):
+` + "```bash" + `
+hu -p "Read /tmp/chunk_aa (one symbol per line). For each symbol, run:
+  grep -rw --include='*.c' --include='*.h' -l \"\$sym\" . --exclude-dir=.git \
+    | grep -v drivers/gpu/drm/ | head -1
+If grep returns no output, print the symbol name to stdout.
+Final output: bare symbol names, one per line, nothing else." \
+  --trajectory /tmp/result_aa.json --max-steps 10
+` + "```" + `
+
+   Rules for child instructions:
+   - Specify exact commands, flags, and pipes
+   - State the expected output format of each command
+   - Process items one at a time in a loop, not all at once with -f
+   - Never assume the child knows domain conventions
+
+4. **Validate one first**: Run a single child with 2-3 items and verify
+   its output format before dispatching the full batch.
 
 5. **Collect and merge**: Read each child's output, deduplicate,
    and produce the final result:
