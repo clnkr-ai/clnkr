@@ -485,9 +485,10 @@ Decompose instead.
    Good (prescriptive algorithm):
 ` + "```bash" + `
 hu -p "Read /tmp/chunk_aa (one symbol per line). For each symbol, run:
-  grep -rw --include='*.c' --include='*.h' -l \"\$sym\" . --exclude-dir=.git \
-    | grep -v drivers/gpu/drm/ | head -1
-If grep returns no output, print the symbol name to stdout.
+  grep -rw --include='*.c' --include='*.h' -l \"\$sym\" . \
+    --exclude-dir=.git --exclude-dir=drm \
+    | head -1
+If grep returns no output (exit 1), print the symbol name to stdout.
 Final output: bare symbol names, one per line, nothing else." \
   --trajectory /tmp/result_aa.json --max-steps 10
 ` + "```" + `
@@ -497,6 +498,8 @@ Final output: bare symbol names, one per line, nothing else." \
    - State the expected output format of each command
    - Process items one at a time in a loop, not all at once with -f
    - Never assume the child knows domain conventions
+   - To exclude directories from grep, use --exclude-dir=NAME (not --exclude)
+   - To filter output by path, pipe through grep -v 'path/'
 
 4. **Validate one first**: Run a single child with 2-3 items and verify
    its output format before dispatching the full batch.
