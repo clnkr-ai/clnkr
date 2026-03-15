@@ -42,53 +42,7 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 }
 
 func TestLoadPromptWithOptions(t *testing.T) {
-	t.Run("includes planning workflow by default", func(t *testing.T) {
-		dir := t.TempDir()
-		prompt := LoadPromptWithOptions(dir, PromptOptions{})
-		if !strings.Contains(prompt, "<planning-workflow>") {
-			t.Error("prompt should include planning workflow by default")
-		}
-		if !strings.Contains(prompt, "Agent Orchestration Patterns") {
-			t.Error("prompt should include orchestration patterns by default")
-		}
-		if !strings.Contains(prompt, "Brainstorming Ideas Into Designs") {
-			t.Error("prompt should include brainstorming section by default")
-		}
-		if !strings.Contains(prompt, "Writing Plans") {
-			t.Error("prompt should include writing plans section by default")
-		}
-		if !strings.Contains(prompt, "HARD-GATE") {
-			t.Error("prompt should include brainstorming hard gate by default")
-		}
-		if !strings.Contains(prompt, "Bite-Sized Task Granularity") {
-			t.Error("prompt should include writing plans task granularity by default")
-		}
-	})
-
-	t.Run("excludes planning workflow when disabled", func(t *testing.T) {
-		dir := t.TempDir()
-		prompt := LoadPromptWithOptions(dir, PromptOptions{DisablePlanningWorkflow: true})
-		if strings.Contains(prompt, "<planning-workflow>") {
-			t.Error("prompt should not include planning workflow when disabled")
-		}
-		if strings.Contains(prompt, "Agent Orchestration Patterns") {
-			t.Error("prompt should not include orchestration patterns when disabled")
-		}
-		if strings.Contains(prompt, "Brainstorming Ideas Into Designs") {
-			t.Error("prompt should not include brainstorming section when disabled")
-		}
-		if strings.Contains(prompt, "Writing Plans") {
-			t.Error("prompt should not include writing plans section when disabled")
-		}
-		if strings.Contains(prompt, "HARD-GATE") {
-			t.Error("prompt should not include brainstorming hard gate when disabled")
-		}
-		if strings.Contains(prompt, "Bite-Sized Task Granularity") {
-			t.Error("prompt should not include writing plans task granularity when disabled")
-		}
-	})
-
-	t.Run("still includes AGENTS.md when present", func(t *testing.T) {
+	t.Run("default includes base prompt and AGENTS.md", func(t *testing.T) {
 		dir := t.TempDir()
 		content := "Project-specific instructions here."
 		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(content), 0644); err != nil {
@@ -96,72 +50,66 @@ func TestLoadPromptWithOptions(t *testing.T) {
 		}
 
 		prompt := LoadPromptWithOptions(dir, PromptOptions{})
-		if !strings.Contains(prompt, content) {
-			t.Error("prompt should include AGENTS.md content")
+		if !strings.Contains(prompt, "```bash") {
+			t.Error("default prompt should contain base prompt")
 		}
-		if !strings.Contains(prompt, "<planning-workflow>") {
-			t.Error("prompt should include planning workflow")
+		if !strings.Contains(prompt, content) {
+			t.Error("default prompt should include AGENTS.md content")
 		}
 	})
 
-	t.Run("AGENTS.md without planning workflow", func(t *testing.T) {
+	t.Run("OmitSystemPrompt returns empty string", func(t *testing.T) {
 		dir := t.TempDir()
-		content := "Project-specific instructions here."
+		content := "Should not appear."
 		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(content), 0644); err != nil {
 			t.Fatalf("write AGENTS.md: %v", err)
 		}
 
-		prompt := LoadPromptWithOptions(dir, PromptOptions{DisablePlanningWorkflow: true})
-		if !strings.Contains(prompt, content) {
-			t.Error("prompt should include AGENTS.md content")
-		}
-		if strings.Contains(prompt, "<planning-workflow>") {
-			t.Error("prompt should not include planning workflow when disabled")
+		prompt := LoadPromptWithOptions(dir, PromptOptions{OmitSystemPrompt: true})
+		if prompt != "" {
+			t.Errorf("OmitSystemPrompt should return empty string, got %d bytes", len(prompt))
 		}
 	})
-}
 
-func TestLoadPromptWithOptions_RLMWorkflow(t *testing.T) {
-	t.Run("excludes RLM workflow by default", func(t *testing.T) {
+	t.Run("SystemPromptAppend appends after AGENTS.md layers", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
 		dir := t.TempDir()
-		prompt := LoadPromptWithOptions(dir, PromptOptions{})
-		if strings.Contains(prompt, "Task decomposition via child processes") {
-			t.Error("prompt should not include RLM workflow by default")
+		projectContent := "Project layer content."
+		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(projectContent), 0644); err != nil {
+			t.Fatalf("write AGENTS.md: %v", err)
+		}
+
+		appendText := "Extra instructions appended at the end."
+		prompt := LoadPromptWithOptions(dir, PromptOptions{SystemPromptAppend: appendText})
+
+		if !strings.Contains(prompt, appendText) {
+			t.Error("prompt should contain appended text")
+		}
+
+		// Verify append comes after project instructions
+		projectIdx := strings.Index(prompt, projectContent)
+		appendIdx := strings.Index(prompt, appendText)
+		if projectIdx >= appendIdx {
+			t.Error("appended text should appear after project instructions")
+		}
+
+		// Verify it's at the very end
+		if !strings.HasSuffix(prompt, appendText) {
+			t.Error("appended text should be at the end of the prompt")
 		}
 	})
 
-	t.Run("includes RLM workflow when enabled", func(t *testing.T) {
-		dir := t.TempDir()
-		prompt := LoadPromptWithOptions(dir, PromptOptions{EnableRLMWorkflow: true})
-		if !strings.Contains(prompt, "Task decomposition via child processes") {
-			t.Error("prompt should include Task decomposition via child processes when RLM enabled")
-		}
-		if !strings.Contains(prompt, "Decompose when ANY of these apply") {
-			t.Error("prompt should include the decomposition triggers when RLM enabled")
-		}
-	})
-
-	t.Run("RLM workflow appears after planning workflow", func(t *testing.T) {
-		dir := t.TempDir()
-		prompt := LoadPromptWithOptions(dir, PromptOptions{EnableRLMWorkflow: true})
-		planIdx := strings.Index(prompt, "<planning-workflow>")
-		rlmIdx := strings.Index(prompt, "Task decomposition via child processes")
-		if planIdx >= rlmIdx {
-			t.Error("RLM workflow should appear after planning workflow")
-		}
-	})
-
-	t.Run("RLM workflow works with planning disabled", func(t *testing.T) {
+	t.Run("OmitSystemPrompt with SystemPromptAppend returns only the appended text", func(t *testing.T) {
 		dir := t.TempDir()
 		prompt := LoadPromptWithOptions(dir, PromptOptions{
-			DisablePlanningWorkflow: true,
-			EnableRLMWorkflow:       true,
+			OmitSystemPrompt:   true,
+			SystemPromptAppend: "custom prompt only",
 		})
-		if strings.Contains(prompt, "<planning-workflow>") {
-			t.Error("planning workflow should be excluded when disabled")
-		}
-		if !strings.Contains(prompt, "Task decomposition via child processes") {
-			t.Error("RLM workflow should be included regardless of planning workflow setting")
+		if prompt != "custom prompt only" {
+			t.Errorf("expected only appended text, got %q", prompt)
 		}
 	})
 }
