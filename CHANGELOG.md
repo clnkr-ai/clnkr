@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0 (2026-03-15)
+
+- Remove hardcoded workflow prompts, add system prompt control flags
+- Update CHANGELOG.md for 0.5.6
+
 ## 0.5.6 (2026-03-14)
 
 - Add grep flag guidance to RLM child instruction rules
