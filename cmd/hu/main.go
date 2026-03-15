@@ -26,48 +26,60 @@ func main() {
 
 Usage:
   hu                     Start conversational mode
-  hu -p "task"          Run a single task and exit
+  hu -p "task"           Run a single task and exit
 
-Options:
-  -p, --prompt string    Task to run (exits after completion)
-  --model string         Model identifier (env: $HEW_MODEL, default: claude-sonnet-4-20250514)
-  --base-url string      LLM endpoint (env: $HEW_BASE_URL, default: https://api.anthropic.com)
-  --max-steps int        Maximum agent steps, 0 = default 100 (default: 0)
-  -v, --verbose          Show internal decisions (queries, parsing, cwd)
-  --load-messages string  Seed conversation from JSON file (e.g. from --trajectory)
-  --event-log string      Write JSONL events to file (streams in real time)
-  --trajectory string     Write message history as JSON on exit (single-task mode only)
-  --rlm                   Enable recursive decomposition workflow in system prompt
-  --continue              Resume most recent session for this project
-  --list-sessions         List all saved sessions for this project
-  --disable-planning-workflow  Omit planning workflow instructions from system prompt
-  --version               Print version and exit
+Core:
+  -p, --prompt string       Task to run (exits after completion)
+  -m, --model string        Model identifier (env: $HEW_MODEL, default: claude-sonnet-4-20250514)
+  -u, --base-url string     LLM endpoint (env: $HEW_BASE_URL, default: https://api.anthropic.com)
+      --max-steps int       Maximum agent steps (default: 100)
+  -v, --verbose             Show internal decisions
+
+Sessions:
+  -c, --continue            Resume most recent session for this project
+  -l, --list-sessions       List saved sessions for this project
+
+System prompt:
+  -S, --no-system-prompt              Skip the built-in system prompt entirely
+      --system-prompt-append string   Append text to the built-in system prompt
+      --dump-system-prompt            Print the composed system prompt and exit
+
+Debugging:
+      --load-messages string   Seed conversation from a JSON file
+      --event-log string       Stream JSONL events to file during execution
+      --trajectory string      Save message history as JSON on exit (single-task only)
+
+  -V, --version             Print version and exit
 
 Environment:
-  HEW_API_KEY            API key for the LLM provider (required)
-                         Falls back to ANTHROPIC_API_KEY when using Anthropic endpoint.
-  HEW_MODEL              Model identifier (default: claude-sonnet-4-20250514)
-                         Overridden by --model flag.
-  HEW_BASE_URL           LLM endpoint (default: https://api.anthropic.com)
-                         Overridden by --base-url flag.
+  HEW_API_KEY     API key for the LLM provider (required)
+  HEW_MODEL       Model identifier override
+  HEW_BASE_URL    LLM endpoint override
 `)
 	}
 
 	prompt := flags.String("p", "", "")
 	promptLong := flags.String("prompt", "", "")
 	modelFlag := flags.String("model", "", "")
+	modelShort := flags.String("m", "", "")
 	baseURL := flags.String("base-url", "", "")
+	baseURLShort := flags.String("u", "", "")
 	maxSteps := flags.Int("max-steps", 0, "")
 	verbose := flags.Bool("verbose", false, "")
 	verboseShort := flags.Bool("v", false, "")
 	showVersion := flags.Bool("version", false, "")
+	showVersionShort := flags.Bool("V", false, "")
 	eventLog := flags.String("event-log", "", "")
 	trajectory := flags.String("trajectory", "", "")
 	loadMessages := flags.String("load-messages", "", "")
-	rlmFlag := flags.Bool("rlm", false, "")
 	continueFlag := flags.Bool("continue", false, "")
+	continueShort := flags.Bool("c", false, "")
 	listSessions := flags.Bool("list-sessions", false, "")
-	disablePlanningWorkflow := flags.Bool("disable-planning-workflow", false, "")
+	listSessionsShort := flags.Bool("l", false, "")
+	noSystemPrompt := flags.Bool("no-system-prompt", false, "")
+	noSystemPromptShort := flags.Bool("S", false, "")
+	systemPromptAppend := flags.String("system-prompt-append", "", "")
+	dumpSystemPrompt := flags.Bool("dump-system-prompt", false, "")
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -77,12 +89,12 @@ Environment:
 		os.Exit(1)
 	}
 
-	if *showVersion {
+	if *showVersion || *showVersionShort {
 		fmt.Printf("hu %s\n", version)
 		os.Exit(0)
 	}
 
-	if *listSessions {
+	if *listSessions || *listSessionsShort {
 		cwd, err := os.Getwd()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: cannot get working directory: %v\n", err)
@@ -111,6 +123,9 @@ Environment:
 	}
 
 	// Resolve model: flag > env > default
+	if *modelShort != "" {
+		*modelFlag = *modelShort
+	}
 	if *modelFlag == "" {
 		if env := os.Getenv("HEW_MODEL"); env != "" {
 			*modelFlag = env
@@ -120,6 +135,9 @@ Environment:
 	}
 
 	// Resolve base URL: flag > env > default
+	if *baseURLShort != "" {
+		*baseURL = *baseURLShort
+	}
 	baseURLSource := "default"
 	if *baseURL == "" {
 		if env := os.Getenv("HEW_BASE_URL"); env != "" {
@@ -168,9 +186,14 @@ Environment:
 	}
 
 	systemPrompt := hew.LoadPromptWithOptions(cwd, hew.PromptOptions{
-		DisablePlanningWorkflow: *disablePlanningWorkflow,
-		EnableRLMWorkflow:       *rlmFlag,
+		OmitSystemPrompt:   *noSystemPrompt || *noSystemPromptShort,
+		SystemPromptAppend: *systemPromptAppend,
 	})
+
+	if *dumpSystemPrompt {
+		fmt.Print(systemPrompt)
+		os.Exit(0)
+	}
 
 	var model hew.Model
 	if strings.Contains(*baseURL, "anthropic.com") {
@@ -226,7 +249,7 @@ Environment:
 		}
 	}
 
-	if *continueFlag {
+	if *continueFlag || *continueShort {
 		if *trajectory != "" {
 			fmt.Fprintln(os.Stderr, "Error: --continue and --trajectory are mutually exclusive")
 			os.Exit(1)
