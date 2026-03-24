@@ -141,14 +141,15 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 			a.notify(EventDebug{Message: "done signal received"})
 			return StepResult{Response: resp, Action: DoneSignal}, nil
 		}
-		if !strings.Contains(resp.Message.Content, "```bash") && strings.TrimSpace(resp.Message.Content) != "" {
+		hasPriorCommandResult := hasCommandResult(a.messages)
+		if !hasPriorCommandResult && !strings.Contains(resp.Message.Content, "```bash") && strings.TrimSpace(resp.Message.Content) != "" {
 			a.notify(EventDebug{Message: "awaiting user clarification"})
 			return StepResult{Response: resp, Action: ClarifySignal}, nil
 		}
 		a.notify(EventDebug{Message: "no bash block found"})
 		a.notify(EventFormatError{})
 		reminder := "Your response did not include a bash code block. Include one or more ```bash blocks, or include <done/> (with no code block) when finished."
-		if hasCommandResult(a.messages) {
+		if hasPriorCommandResult {
 			a.notify(EventDebug{Message: "post-command no-op guard triggered"})
 			reminder = "After commands have run, do not ask the user for more pasted command output or clarification without acting. Inspect the working tree and the prior [command]/[stdout]/[stderr] results already in the conversation, then continue with a ```bash block, or include <done/> when finished."
 		}
