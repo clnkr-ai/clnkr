@@ -15,6 +15,9 @@ const DefaultMaxSteps = 100
 // DoneSignal is the marker the model emits (outside any code block) to signal task completion.
 const DoneSignal = "<done/>"
 
+// ErrClarificationNeeded means the model stopped to request more user input.
+var ErrClarificationNeeded = errors.New("clarification needed")
+
 // Agent runs the query-parse-execute loop.
 type Agent struct {
 	model    Model
@@ -96,6 +99,10 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 			a.notify(EventDebug{Message: "done signal received"})
 			return StepResult{Response: resp, Action: DoneSignal}, nil
 		}
+		if !strings.Contains(resp.Message.Content, "```bash") && strings.TrimSpace(resp.Message.Content) != "" {
+			a.notify(EventDebug{Message: "awaiting user clarification"})
+			return StepResult{Response: resp, Action: ClarifySignal}, nil
+		}
 		a.notify(EventDebug{Message: "no bash block found"})
 		a.notify(EventFormatError{})
 		a.messages = append(a.messages, Message{
@@ -165,6 +172,9 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 
 		if result.Action == DoneSignal {
 			return nil
+		}
+		if result.Action == ClarifySignal {
+			return ErrClarificationNeeded
 		}
 
 		if result.Action == "" {
