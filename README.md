@@ -121,7 +121,6 @@ hew executes commands with structured results in the core: command text, exit co
 ```
 
 This is intentional. The only downstream machine consumers are hew and hu, so the protocol is optimized for model readability rather than external XML tooling. In practice, weaker models follow explicit flat delimiters more reliably than nested structure, while the frontends still receive fully structured events.
-This is intentional. The only downstream machine consumers are hew and hu, so the protocol favors a simpler model-facing format over external XML tooling. The frontends still receive fully structured events.
 
 ### Project-specific instructions
 
