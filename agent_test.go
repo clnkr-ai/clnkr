@@ -405,7 +405,7 @@ func TestStepMultiBlock(t *testing.T) {
 		}
 	})
 
-	t.Run("done signal after commands", func(t *testing.T) {
+	t.Run("done signal after commands is ignored for that turn", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: "```bash\necho final\n```\n\nAll done.\n\n<done/>"}},
 		}}
@@ -421,8 +421,8 @@ func TestStepMultiBlock(t *testing.T) {
 		if executor.calls != 1 {
 			t.Errorf("expected 1 command executed before done, got %d", executor.calls)
 		}
-		if result.Action != DoneSignal {
-			t.Errorf("expected DoneSignal action, got %q", result.Action)
+		if result.Action != "echo final" {
+			t.Errorf("expected first command action, got %q", result.Action)
 		}
 		want := mustCommandPayload(t, CommandResult{Command: "echo final", Stdout: "final\n", ExitCode: 0})
 		if result.Output != want {
