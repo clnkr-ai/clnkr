@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -18,6 +19,8 @@ import (
 
 // version is set at build time via -ldflags.
 var version = "dev"
+
+const exitClarificationNeeded = 2
 
 func main() {
 	flags := flag.NewFlagSet("hu", flag.ContinueOnError)
@@ -298,6 +301,10 @@ Environment:
 			}
 		}
 		if runErr != nil {
+			if errors.Is(runErr, hew.ErrClarificationNeeded) {
+				fmt.Fprintln(os.Stderr, "Clarification needed.")
+				os.Exit(exitClarificationNeeded)
+			}
 			fmt.Fprintf(os.Stderr, "Error: %v\n", runErr)
 			os.Exit(1)
 		}
@@ -318,6 +325,10 @@ Environment:
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		if err := agent.Run(ctx, input); err != nil {
+			if errors.Is(err, hew.ErrClarificationNeeded) {
+				stop()
+				continue
+			}
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		}
 		stop()

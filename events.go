@@ -31,6 +31,9 @@ type EventDebug struct {
 	Message string
 }
 
+// ClarifySignal marks a step where the agent is waiting for more user input.
+const ClarifySignal = "<clarify/>"
+
 func (EventResponse) event()     {}
 func (EventCommandStart) event() {}
 func (EventCommandDone) event()  {}
