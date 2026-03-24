@@ -2,6 +2,7 @@ package hew
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -94,9 +95,29 @@ func TestStep(t *testing.T) {
 		}
 	})
 
-	t.Run("returns empty action on format error", func(t *testing.T) {
+	t.Run("returns clarify action on plain text question", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: "no code block here"}},
+			{Message: Message{Role: "assistant", Content: "What directory should I inspect?"}},
+		}}
+
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "do something"})
+
+		result, err := agent.Step(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Action != ClarifySignal {
+			t.Errorf("expected clarify action, got %q", result.Action)
+		}
+		if len(agent.messages) != 2 {
+			t.Fatalf("expected no reminder message, got %d messages", len(agent.messages))
+		}
+	})
+
+	t.Run("returns empty action on malformed bash response", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: "I'll act now.\n\n```bash\n```"}},
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -109,7 +130,6 @@ func TestStep(t *testing.T) {
 		if result.Action != "" {
 			t.Errorf("expected empty action on format error, got %q", result.Action)
 		}
-		// Should have appended reminder to messages
 		last := agent.messages[len(agent.messages)-1]
 		if !strings.Contains(last.Content, "bash") {
 			t.Error("format error reminder should mention bash")
@@ -508,6 +528,28 @@ func TestAgent(t *testing.T) {
 		}
 	})
 
+	t.Run("returns after clarification request", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: "Which repo should I inspect?"}},
+		}}
+
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		err := agent.Run(context.Background(), "debug this")
+		if !errors.Is(err, ErrClarificationNeeded) {
+			t.Fatalf("expected ErrClarificationNeeded, got %v", err)
+		}
+		if model.calls != 1 {
+			t.Fatalf("expected one model call, got %d", model.calls)
+		}
+		msgs := agent.Messages()
+		if len(msgs) != 2 {
+			t.Fatalf("expected 2 messages, got %d", len(msgs))
+		}
+		if msgs[1].Role != "assistant" || msgs[1].Content != "Which repo should I inspect?" {
+			t.Fatalf("unexpected assistant clarification message: %#v", msgs[1])
+		}
+	})
+
 	t.Run("respects max steps", func(t *testing.T) {
 		responses := make([]Response, 12)
 		outputs := make([]string, 10)
@@ -588,7 +630,7 @@ func TestAgent(t *testing.T) {
 
 	t.Run("format error then recovery", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: "no code block"}},
+			{Message: Message{Role: "assistant", Content: "```bash\n```"}},
 			{Message: Message{Role: "assistant", Content: "All done.\n\n<done/>"}},
 		}}
 
@@ -606,8 +648,8 @@ func TestAgent(t *testing.T) {
 
 	t.Run("exits on consecutive format errors", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: "no block"}},
-			{Message: Message{Role: "assistant", Content: "still no block"}},
+			{Message: Message{Role: "assistant", Content: "```bash\n```"}},
+			{Message: Message{Role: "assistant", Content: "```bash\n```"}},
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")

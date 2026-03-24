@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -129,7 +130,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.chat.streaming {
 			m.chat.commitPartialStream()
 		}
-		if msg.err != nil {
+		if msg.err != nil && !errors.Is(msg.err, hew.ErrClarificationNeeded) {
 			m.chat.content.WriteString(
 				m.styles.Chat.Warning.Render(fmt.Sprintf("\n%s Agent error: %s", iconError, msg.err)),
 			)

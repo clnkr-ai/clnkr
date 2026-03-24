@@ -99,6 +99,7 @@ hu -p "write a fix based on the investigation" --load-messages /tmp/investigatio
 `--event-log` streams one JSON object per line as events happen (O_APPEND, safe to tail).
 `--trajectory` writes the full message array as pretty-printed JSON when the task ends — even if it failed.
 `--load-messages` reads that same format and prepends the messages before starting, so one agent's output becomes another's context.
+If a single-task run stops to ask for clarification, the process exits with status `2` after printing the question, so callers can distinguish "needs input" from "done".
 
 ### Project-specific instructions
 
@@ -131,9 +132,10 @@ session from the same project directory where it was created.
 hew runs a loop:
 
 1. Send conversation history to the LLM
-2. Extract a bash command from the response (fenced `` ```bash `` block)
-3. Execute it and append the output to the conversation
-4. Repeat until the LLM sends `exit`
+2. If the model asks a plain-text clarification question, return control to the user
+3. Otherwise extract bash commands from fenced `` ```bash `` blocks
+4. Execute them and append the output to the conversation
+5. Repeat until the LLM sends `<done/>`
 
 The LLM is the agent. hew is the scaffold.
 
