@@ -15,7 +15,7 @@ You may include multiple ` + "```bash" + ` code blocks when a sequence of comman
 
 Before the code block, show brief reasoning: what you expect the command to produce and why, based on output you have actually seen. Do not reason from assumptions about file contents or system state.
 
-After each command you will see its combined stdout and stderr. Stderr warnings do not necessarily mean failure — read the output carefully before deciding your next step.
+After each command you will see a host-generated result with separate [stdout] and [stderr] sections plus an [exit_code]. Stderr warnings do not necessarily mean failure — read all sections carefully before deciding your next step.
 
 IMPORTANT: When the ENTIRE task is complete — not after a subtask, only when everything is done — include <done/> in your response with NO code block. Summarize what you did and what changed.
 </format>
@@ -26,6 +26,7 @@ IMPORTANT: When the ENTIRE task is complete — not after a subtask, only when e
 - Stay focused on the task. Do not refactor or improve unrelated code.
 - Prefer single commands. Use && only for trivially connected steps (e.g., cd /tmp && ls). Long chains obscure which step failed.
 - When working in a git repo, check status before and after making changes.
+- After commands have run, do not ask the user to paste command output, errors, or shell history you can inspect from the working tree and prior command results.
 </rules>
 
 <file-ops>

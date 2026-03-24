@@ -20,12 +20,20 @@ type Response struct {
 	Usage   Usage
 }
 
+// CommandResult captures the outcome of one shell command execution.
+type CommandResult struct {
+	Command  string
+	Stdout   string
+	Stderr   string
+	ExitCode int
+}
+
 // Model sends messages to an LLM and returns a response.
 type Model interface {
 	Query(ctx context.Context, messages []Message) (Response, error)
 }
 
-// Executor runs a shell command and returns its output.
+// Executor runs a shell command and returns its structured result.
 type Executor interface {
-	Execute(ctx context.Context, command string, dir string) (string, error)
+	Execute(ctx context.Context, command string, dir string) (CommandResult, error)
 }

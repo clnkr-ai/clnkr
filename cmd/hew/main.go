@@ -383,7 +383,12 @@ func runPlain(agent *hew.Agent, taskPrompt, trajectory string, eventLog *os.File
 		case hew.EventCommandStart:
 			fmt.Fprintf(os.Stdout, "--- running: %s ---\n", summarizeCommand(ev.Command)) //nolint:errcheck
 		case hew.EventCommandDone:
-			fmt.Fprintln(os.Stdout, ev.Output)      //nolint:errcheck
+			if ev.Stdout != "" {
+				fmt.Fprint(os.Stdout, ev.Stdout) //nolint:errcheck
+			}
+			if ev.Stderr != "" {
+				fmt.Fprint(os.Stderr, ev.Stderr) //nolint:errcheck
+			}
 			fmt.Fprintln(os.Stdout, "--- done ---") //nolint:errcheck
 		case hew.EventFormatError:
 			// handled by agent loop

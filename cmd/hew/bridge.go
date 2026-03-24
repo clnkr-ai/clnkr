@@ -58,9 +58,12 @@ func writeEventLog(f *os.File, e hew.Event) {
 		je = jsonEvent{Type: "command_start", Payload: ev}
 	case hew.EventCommandDone:
 		je = jsonEvent{Type: "command_done", Payload: struct {
-			Output string `json:"output"`
-			Err    string `json:"err,omitempty"`
-		}{Output: ev.Output, Err: errString(ev.Err)}}
+			Command  string `json:"command"`
+			Stdout   string `json:"stdout"`
+			Stderr   string `json:"stderr"`
+			ExitCode int    `json:"exit_code"`
+			Err      string `json:"err,omitempty"`
+		}{Command: ev.Command, Stdout: ev.Stdout, Stderr: ev.Stderr, ExitCode: ev.ExitCode, Err: errString(ev.Err)}}
 	case hew.EventFormatError:
 		je = jsonEvent{Type: "format_error", Payload: ev}
 	case hew.EventDebug:

@@ -88,10 +88,21 @@ func (c *chatModel) appendEvent(e hew.Event) {
 			icon = iconError
 			style = c.styles.Chat.CommandError
 		}
-		c.content.WriteString(style.Render(fmt.Sprintf("%s ran: %s", icon, summarizeCommand(c.lastCmd))))
+		command := c.lastCmd
+		if ev.Command != "" {
+			command = ev.Command
+		}
+		c.content.WriteString(style.Render(fmt.Sprintf("%s ran: %s", icon, summarizeCommand(command))))
 		c.content.WriteString("\n")
-		if ev.Output != "" {
-			c.content.WriteString(c.styles.Chat.CommandOutput.Render(truncateOutput(ev.Output, 20)))
+		output := ev.Stdout
+		if ev.Stderr != "" {
+			if output != "" {
+				output += "\n"
+			}
+			output += ev.Stderr
+		}
+		if output != "" {
+			c.content.WriteString(c.styles.Chat.CommandOutput.Render(truncateOutput(output, 20)))
 			c.content.WriteString("\n")
 		}
 		c.content.WriteString("\n")

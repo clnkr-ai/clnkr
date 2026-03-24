@@ -1,7 +1,10 @@
 package hew
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
@@ -14,8 +17,8 @@ type CommandExecutor struct {
 	ProcessGroup bool
 }
 
-// Execute runs a command in dir and returns combined stdout/stderr.
-func (e *CommandExecutor) Execute(ctx context.Context, command string, dir string) (string, error) {
+// Execute runs a command in dir and returns separated stdout/stderr plus exit code.
+func (e *CommandExecutor) Execute(ctx context.Context, command string, dir string) (CommandResult, error) {
 	timeout := e.Timeout
 	if timeout == 0 {
 		timeout = 30 * time.Second
@@ -36,6 +39,28 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
 
-	out, err := cmd.CombinedOutput()
-	return string(out), err
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	result := CommandResult{Command: command}
+	err := cmd.Run()
+	result.Stdout = stdout.String()
+	result.Stderr = stderr.String()
+
+	if cmd.ProcessState != nil {
+		result.ExitCode = cmd.ProcessState.ExitCode()
+	}
+
+	if err == nil {
+		return result, nil
+	}
+
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		result.ExitCode = exitErr.ExitCode()
+	}
+
+	return result, fmt.Errorf("run command: %w", err)
 }

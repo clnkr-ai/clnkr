@@ -261,7 +261,7 @@ func TestModelEventResponseUpdatesStatus(t *testing.T) {
 func TestModelCommandDoneIncrementsStep(t *testing.T) {
 	m := setupModel()
 	m = updateModel(t, m, eventMsg{event: hew.EventCommandStart{Command: "ls", Dir: "."}})
-	m = updateModel(t, m, eventMsg{event: hew.EventCommandDone{Output: "ok", Err: nil}})
+	m = updateModel(t, m, eventMsg{event: hew.EventCommandDone{Command: "ls", Stdout: "ok", ExitCode: 0, Err: nil}})
 
 	if m.status.stepCount != 1 {
 		t.Errorf("stepCount = %d, want 1", m.status.stepCount)
@@ -329,7 +329,7 @@ func TestModelDiffOverlayBlocksOtherKeys(t *testing.T) {
 func TestModelTracksFilesFromCommands(t *testing.T) {
 	m := setupModel()
 	m = updateModel(t, m, eventMsg{event: hew.EventCommandStart{Command: "touch newfile.go", Dir: "."}})
-	m = updateModel(t, m, eventMsg{event: hew.EventCommandDone{Output: "", Err: nil}})
+	m = updateModel(t, m, eventMsg{event: hew.EventCommandDone{Command: "touch newfile.go", ExitCode: 0, Err: nil}})
 
 	if len(m.files.files) != 1 {
 		t.Errorf("expected 1 tracked file, got %d: %v", len(m.files.files), m.files.files)
