@@ -189,7 +189,7 @@ func (m *model) routeEvent(e hew.Event) {
 		m.status.updateFromResponse(ev.Usage)
 	case hew.EventCommandDone:
 		m.status.incrementStep()
-		m.files.trackFromCommand(lastCmd, ev.Output)
+		m.files.trackFromCommand(lastCmd, ev.Stdout)
 	case hew.EventCommandStart, hew.EventFormatError, hew.EventDebug:
 		// handled by chat.appendEvent only
 	default:

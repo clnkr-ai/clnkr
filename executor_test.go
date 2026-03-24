@@ -19,8 +19,14 @@ func TestCommandExecutor(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if strings.TrimSpace(out) != "hello" {
-			t.Errorf("got %q, want %q", out, "hello")
+		if strings.TrimSpace(out.Stdout) != "hello" {
+			t.Errorf("got %q, want %q", out.Stdout, "hello")
+		}
+		if out.Stderr != "" {
+			t.Errorf("expected empty stderr, got %q", out.Stderr)
+		}
+		if out.ExitCode != 0 {
+			t.Errorf("expected exit code 0, got %d", out.ExitCode)
 		}
 	})
 
@@ -29,7 +35,7 @@ func TestCommandExecutor(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		trimmed := strings.TrimSpace(out)
+		trimmed := strings.TrimSpace(out.Stdout)
 		if trimmed != "/tmp" && trimmed != "/private/tmp" {
 			t.Errorf("got %q, want /tmp or /private/tmp", trimmed)
 		}
@@ -40,8 +46,11 @@ func TestCommandExecutor(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if strings.TrimSpace(out) != "error" {
-			t.Errorf("got %q, want %q", out, "error")
+		if out.Stdout != "" {
+			t.Errorf("expected empty stdout, got %q", out.Stdout)
+		}
+		if strings.TrimSpace(out.Stderr) != "error" {
+			t.Errorf("got %q, want %q", out.Stderr, "error")
 		}
 	})
 
@@ -72,14 +81,30 @@ func TestCommandExecutor(t *testing.T) {
 
 		out, err := pgExec.Execute(ctx, "ps -o pgid= -p $$", "/tmp")
 		if err != nil {
+			if strings.Contains(out.Stderr, "Operation not permitted") {
+				t.Skip("ps is not permitted in this sandbox")
+			}
 			t.Fatalf("unexpected error: %v", err)
 		}
-		childPgid, err := strconv.Atoi(strings.TrimSpace(out))
+		childPgid, err := strconv.Atoi(strings.TrimSpace(out.Stdout))
 		if err != nil {
-			t.Fatalf("failed to parse child pgid %q: %v", strings.TrimSpace(out), err)
+			t.Fatalf("failed to parse child pgid %q: %v", strings.TrimSpace(out.Stdout), err)
 		}
 		if childPgid == parentPgid {
 			t.Errorf("child pgid %d should differ from parent pgid %d", childPgid, parentPgid)
+		}
+	})
+
+	t.Run("returns exit code on failure", func(t *testing.T) {
+		out, err := exec.Execute(ctx, "echo nope >&2; exit 7", "/tmp")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if out.ExitCode != 7 {
+			t.Errorf("expected exit code 7, got %d", out.ExitCode)
+		}
+		if strings.TrimSpace(out.Stderr) != "nope" {
+			t.Errorf("expected stderr %q, got %q", "nope", out.Stderr)
 		}
 	})
 }

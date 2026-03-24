@@ -95,8 +95,8 @@ func TestWriteEventLogAllTypes(t *testing.T) {
 			Usage:   hew.Usage{InputTokens: 10, OutputTokens: 5},
 		}, `"type":"response"`},
 		{"command_start", hew.EventCommandStart{Command: "ls", Dir: "/tmp"}, `"type":"command_start"`},
-		{"command_done_ok", hew.EventCommandDone{Output: "file.txt", Err: nil}, `"type":"command_done"`},
-		{"command_done_err", hew.EventCommandDone{Output: "", Err: fmt.Errorf("exit 1")}, `"err":"exit 1"`},
+		{"command_done_ok", hew.EventCommandDone{Command: "ls", Stdout: "file.txt", ExitCode: 0, Err: nil}, `"type":"command_done"`},
+		{"command_done_err", hew.EventCommandDone{Command: "false", ExitCode: 1, Err: fmt.Errorf("exit 1")}, `"err":"exit 1"`},
 		{"format_error", hew.EventFormatError{}, `"type":"format_error"`},
 		{"debug", hew.EventDebug{Message: "test"}, `"type":"debug"`},
 	}

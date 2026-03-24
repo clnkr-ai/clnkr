@@ -62,14 +62,20 @@ hew/                    # core: types, interfaces, Agent, events (root go.mod, s
 **Multi-module:** `cmd/hew/` has its own `go.mod`. Root `go test ./...` does not descend into it. Use `make test` to test both modules. `go install github.com/cosgroveb/hew/cmd/hew@latest` does NOT work due to replace directive — use `make build-hew` or install from releases.
 
 **Two-tier agent API:**
-- `Step(ctx) (StepResult, error)` — one query-parse-execute cycle, no policy. `StepResult` carries the response, parsed action, command output, and execution error.
+- `Step(ctx) (StepResult, error)` — one query-parse-execute cycle, no policy. `StepResult` carries the response, parsed action, formatted command output payload(s), and execution error.
 - `Run(ctx, task) error` — policy loop over `Step()`. Counts format errors (exits on 2 consecutive) and enforces step limits.
 
 **Events:** `Notify func(Event)` callback on Agent. Sealed interface (unexported marker method) with five types: `EventResponse`, `EventCommandStart`, `EventCommandDone`, `EventFormatError`, `EventDebug`. Nil Notify = silent.
 
 **Interfaces:**
 - `Model` — `Query(ctx, []Message) (Response, error)` — implemented by `anthropic.Model` and `openai.Model`
-- `Executor` — `Execute(ctx, command, dir) (string, error)` — implemented by `CommandExecutor`
+- `Executor` — `Execute(ctx, command, dir) (CommandResult, error)` — implemented by `CommandExecutor`
+
+**Command result protocol:** The core feeds command results back to the model as a flat tagged text envelope with `[command]`, `[exit_code]`, `[stdout]`, and `[stderr]` sections. This is a deliberate tradeoff:
+- `stdout` and `stderr` stay separated in the core and in events.
+- The protocol is host-generated and deterministic; models only consume it.
+- We intentionally do not use nested XML here. The only downstream machine parsers are `hu` and `hew`, so we prefer a simpler model-facing format with explicit flat delimiters.
+- Explicit closing tags are retained for all sections because redundant boundaries are easier for weaker models to follow than implicit section termination.
 
 **Provider selection:** `main.go` checks if `--base-url` contains `anthropic.com` → Anthropic adapter, everything else → OpenAI adapter. Both use raw `net/http` with `httptest` servers in tests.
 
@@ -88,6 +94,7 @@ hew/                    # core: types, interfaces, Agent, events (root go.mod, s
 
 - `Step()` is the loop primitive; `Run()` adds policy
 - `Messages()` returns a defensive copy; `AddMessages()` prepends seed messages (errors after first `Step()`)
+- Command execution returns structured `stdout`, `stderr`, and `exit_code`; frontends render from events, but the model sees a flat tagged transcript optimized for readability rather than a formal XML schema
 - Version injected at build time via `-ldflags '-X main.version=...'` (defaults to `"dev"`)
 - `max_tokens` is a field on `anthropic.Model`, not hardcoded
 - `HEW_API_KEY` falls back to `ANTHROPIC_API_KEY` when base URL is Anthropic's
@@ -108,5 +115,3 @@ Worktree directory: `~/.config/superpowers/worktrees/hew/`
 GitHub Actions runs on push to `main` and PRs targeting `main`. Single job: lint, test (with `-race`), build.
 
 **Local setup:** Run `make setup` to install the pre-commit hook (enforces gofmt). golangci-lint is required for `make lint` and `make check` — install with `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` or `brew install golangci-lint`.
-
-
