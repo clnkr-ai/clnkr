@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.1 (2026-03-24)
+
+- Clarify before exploring without a task
+- Ignore mixed done signal until next turn
+- Fix clarification guard after squash merge
+- Make command output clearly not human input
+- Handle clarification as a distinct paused state
+- Update CHANGELOG.md for 0.6.0
+
 ## 0.6.0 (2026-03-15)
 
 - Remove hardcoded workflow prompts, add system prompt control flags
