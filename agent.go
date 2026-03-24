@@ -201,12 +201,6 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 
 	result := StepResult{Response: resp, Action: actions[0], Output: combinedOutput, ExecErr: lastErr}
 
-	// If the response also contained <done/>, signal completion after executing commands.
-	if hasDone {
-		a.notify(EventDebug{Message: "done signal received"})
-		result.Action = DoneSignal
-	}
-
 	return result, nil
 }
 
