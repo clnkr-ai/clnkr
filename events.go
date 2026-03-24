@@ -19,8 +19,11 @@ type EventCommandStart struct {
 
 // EventCommandDone fires after a command finishes.
 type EventCommandDone struct {
-	Output string
-	Err    error
+	Command  string
+	Stdout   string
+	Stderr   string
+	ExitCode int
+	Err      error
 }
 
 // EventFormatError fires when the LLM response has no bash block.
@@ -44,6 +47,6 @@ func (EventDebug) event()        {}
 type StepResult struct {
 	Response Response // the LLM response
 	Action   string   // parsed command, DoneSignal for completion, "" for format error
-	Output   string   // command output, "" if no command ran
+	Output   string   // formatted command output payload(s), "" if no command ran
 	ExecErr  error    // nil if command succeeded or didn't run
 }

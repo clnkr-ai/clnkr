@@ -101,6 +101,28 @@ hu -p "write a fix based on the investigation" --load-messages /tmp/investigatio
 `--load-messages` reads that same format and prepends the messages before starting, so one agent's output becomes another's context.
 If a single-task run stops to ask for clarification, the process exits with status `2` after printing the question, so callers can distinguish "needs input" from "done".
 
+### Command result format
+
+hew executes commands with structured results in the core: command text, exit code, stdout, and stderr are captured separately. When those results are fed back into the model, hew uses a flat tagged text format:
+
+```text
+[command]
+...
+[/command]
+[exit_code]
+...
+[/exit_code]
+[stdout]
+...
+[/stdout]
+[stderr]
+...
+[/stderr]
+```
+
+This is intentional. The only downstream machine consumers are hew and hu, so the protocol is optimized for model readability rather than external XML tooling. In practice, weaker models follow explicit flat delimiters more reliably than nested structure, while the frontends still receive fully structured events.
+This is intentional. The only downstream machine consumers are hew and hu, so the protocol favors a simpler model-facing format over external XML tooling. The frontends still receive fully structured events.
+
 ### Project-specific instructions
 
 Place an `AGENTS.md` file in your working directory. Its contents are appended to the system prompt, giving the LLM project-specific context.

@@ -80,7 +80,7 @@ func TestChatPendingCommandBuffer(t *testing.T) {
 		t.Error("pending command should not be in committed content")
 	}
 
-	c.appendEvent(hew.EventCommandDone{Output: "total 0\n", Err: nil})
+	c.appendEvent(hew.EventCommandDone{Command: "ls -la", Stdout: "total 0\n", ExitCode: 0, Err: nil})
 	if c.pendingCmd != "" {
 		t.Error("pendingCmd should be cleared after EventCommandDone")
 	}
