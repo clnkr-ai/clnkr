@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0 (2026-03-26)
+
+- Replace bash fence parser with structured JSON turn protocol
+- Run SLOC check as part of make lint
+- Cap core library at 500 SLOC
+- Update CHANGELOG.md for 0.6.1
+
 ## 0.6.1 (2026-03-24)
 
 - Clarify before exploring without a task
