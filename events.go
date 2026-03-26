@@ -1,8 +1,6 @@
 package hew
 
 // Event is a sealed interface for agent events.
-// Only types in this package can implement it (unexported marker method).
-// The compiler enforces the seal; the exhaustive linter catches missing switch cases.
 type Event interface{ event() }
 
 // EventResponse fires when the model returns a response.
@@ -26,27 +24,26 @@ type EventCommandDone struct {
 	Err      error
 }
 
-// EventFormatError fires when the LLM response has no bash block.
-type EventFormatError struct{}
-
-// EventDebug carries internal diagnostic messages.
-type EventDebug struct {
-	Message string
+// EventProtocolFailure fires when the model response fails protocol parsing.
+type EventProtocolFailure struct {
+	Reason string // machine-readable reason from errorToReason()
+	Raw    string // model's original response text
 }
 
-// ClarifySignal marks a step where the agent is waiting for more user input.
-const ClarifySignal = "<clarify/>"
+// EventDebug carries internal diagnostic messages.
+type EventDebug struct{ Message string }
 
-func (EventResponse) event()     {}
-func (EventCommandStart) event() {}
-func (EventCommandDone) event()  {}
-func (EventFormatError) event()  {}
-func (EventDebug) event()        {}
+func (EventResponse) event()        {}
+func (EventCommandStart) event()    {}
+func (EventCommandDone) event()     {}
+func (EventProtocolFailure) event() {}
+func (EventDebug) event()           {}
 
 // StepResult is the outcome of one Step call.
 type StepResult struct {
-	Response Response // the LLM response
-	Action   string   // parsed command, DoneSignal for completion, "" for format error
-	Output   string   // formatted command output payload(s), "" if no command ran
-	ExecErr  error    // nil if command succeeded or didn't run
+	Response Response
+	Turn     Turn
+	ParseErr error
+	Output   string
+	ExecErr  error
 }

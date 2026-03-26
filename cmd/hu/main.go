@@ -224,8 +224,10 @@ Environment:
 				fmt.Fprint(os.Stderr, e.Stderr) //nolint:errcheck
 			}
 			fmt.Fprintln(os.Stdout, "--- done ---") //nolint:errcheck
-		case hew.EventFormatError:
-			// handled by agent loop; nothing to print
+		case hew.EventProtocolFailure:
+			if showDebug {
+				fmt.Fprintf(os.Stderr, "[hu] protocol error: %s\n", e.Reason) //nolint:errcheck
+			}
 		case hew.EventDebug:
 			if showDebug {
 				fmt.Fprintf(os.Stderr, "[hu] %s\n", e.Message)
@@ -374,10 +376,15 @@ func writeEventLog(f *os.File, e hew.Event) {
 			ExitCode int    `json:"exit_code"`
 			Err      string `json:"err,omitempty"`
 		}{Command: e.Command, Stdout: e.Stdout, Stderr: e.Stderr, ExitCode: e.ExitCode, Err: errString(e.Err)}}
-	case hew.EventFormatError:
-		je = jsonEvent{Type: "format_error", Payload: e}
+	case hew.EventProtocolFailure:
+		je = jsonEvent{Type: "protocol_failure", Payload: struct {
+			Reason string `json:"reason"`
+			Raw    string `json:"raw"`
+		}{Reason: e.Reason, Raw: e.Raw}}
 	case hew.EventDebug:
 		je = jsonEvent{Type: "debug", Payload: e}
+	default:
+		return
 	}
 	data, err := json.Marshal(je)
 	if err != nil {

@@ -10,13 +10,16 @@ hu \- a minimal coding agent (plain CLI)
 
 
 .SH DESCRIPTION
-\fBhu\fP is a minimal coding agent that queries LLMs and executes bash commands in an iterative loop. It supports both Anthropic and OpenAI-compatible APIs.
+\fBhu\fP is a minimal coding agent that queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.
 
 .PP
 In default mode, \fBhu\fP starts an interactive REPL. With \fB-p\fP, it runs a single task and exits.
 
 .PP
 \fBhu\fP is the plain CLI variant of the hew project, with no external dependencies beyond the Go standard library. A TUI variant is available as \fBhew\fP(1).
+
+.PP
+The agent communicates through JSON turns: \fBact\fP (execute a command), \fBclarify\fP (ask the user), and \fBdone\fP (signal completion).
 
 .PP
 Project-specific instructions are loaded from an \fBAGENTS.md\fP file in the current working directory, if present.
@@ -54,10 +57,6 @@ After the task finishes, write the full message history as pretty-printed JSON t
 .TP
 \fB-v\fP, \fB--verbose\fP
 Show internal decisions (queries, parsing, working directory).
-
-.TP
-\fB--disable-planning-workflow\fP
-Omit the planning workflow instructions from the system prompt.
 
 .TP
 \fB--version\fP

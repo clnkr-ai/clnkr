@@ -390,8 +390,10 @@ func runPlain(agent *hew.Agent, taskPrompt, trajectory string, eventLog *os.File
 				fmt.Fprint(os.Stderr, ev.Stderr) //nolint:errcheck
 			}
 			fmt.Fprintln(os.Stdout, "--- done ---") //nolint:errcheck
-		case hew.EventFormatError:
-			// handled by agent loop
+		case hew.EventProtocolFailure:
+			if verbose {
+				fmt.Fprintf(os.Stderr, "[hew] protocol error: %s\n", ev.Reason)
+			}
 		case hew.EventDebug:
 			if verbose {
 				fmt.Fprintf(os.Stderr, "[hew] %s\n", ev.Message)

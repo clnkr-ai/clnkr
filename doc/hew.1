@@ -10,10 +10,13 @@ hew \- a minimal coding agent (TUI)
 
 
 .SH DESCRIPTION
-\fBhew\fP is a minimal coding agent with a terminal user interface (TUI), built with bubbletea. It queries LLMs and executes bash commands in an iterative loop. It supports both Anthropic and OpenAI-compatible APIs.
+\fBhew\fP is a minimal coding agent with a terminal user interface (TUI), built with bubbletea. It queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.
 
 .PP
 In default mode, \fBhew\fP starts the TUI. With \fB-p\fP, it runs a single task and exits. When stdout is not a TTY, \fBhew\fP falls back to plain-text rendering.
+
+.PP
+The agent communicates through JSON turns: \fBact\fP (execute a command), \fBclarify\fP (ask the user), and \fBdone\fP (signal completion).
 
 .PP
 A plain CLI variant is available as \fBhu\fP(1).
@@ -62,10 +65,6 @@ Resume the most recent session for the current project directory.
 .TP
 \fB--list-sessions\fP
 List all saved sessions for the current project directory.
-
-.TP
-\fB--disable-planning-workflow\fP
-Omit the planning workflow instructions from the system prompt.
 
 .TP
 \fB--version\fP

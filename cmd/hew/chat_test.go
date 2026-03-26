@@ -131,14 +131,14 @@ func TestChatResetStreamingState(t *testing.T) {
 	}
 }
 
-func TestChatFormatError(t *testing.T) {
+func TestChatProtocolFailure(t *testing.T) {
 	s := defaultStyles(true)
 	c := newChatModel(80, 24, s, false)
 
-	c.appendEvent(hew.EventFormatError{})
+	c.appendEvent(hew.EventProtocolFailure{Reason: "parse_error", Raw: "not json"})
 	content := c.content.String()
-	if !strings.Contains(content, "format error") {
-		t.Errorf("content should contain format error text, got: %q", content)
+	if !strings.Contains(content, "parse_error") {
+		t.Errorf("content should contain protocol error reason, got: %q", content)
 	}
 }
 

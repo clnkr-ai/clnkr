@@ -20,7 +20,7 @@ make check-man      # Verify committed man page matches source
 make help           # List all targets
 
 # Run a single test
-go test . -v -run TestExtractCommand
+go test . -v -run TestParseTurn
 
 # Build with explicit version
 make build-all VERSION=0.2.0
@@ -62,16 +62,18 @@ hew/                    # core: types, interfaces, Agent, events (root go.mod, s
 **Multi-module:** `cmd/hew/` has its own `go.mod`. Root `go test ./...` does not descend into it. Use `make test` to test both modules. `go install github.com/cosgroveb/hew/cmd/hew@latest` does NOT work due to replace directive — use `make build-hew` or install from releases.
 
 **Two-tier agent API:**
-- `Step(ctx) (StepResult, error)` — one query-parse-execute cycle, no policy. `StepResult` carries the response, parsed action, formatted command output payload(s), and execution error.
-- `Run(ctx, task) error` — policy loop over `Step()`. Counts format errors (exits on 2 consecutive) and enforces step limits.
+- `Step(ctx) (StepResult, error)` — one query-parse-execute cycle, no policy. `StepResult` carries the response, parsed protocol `Turn`, formatted command output payload, and execution error.
+- `Run(ctx, task) error` — policy loop over `Step()`. Counts protocol failures (exits on 3 consecutive) and enforces step limits.
 
-**Events:** `Notify func(Event)` callback on Agent. Sealed interface (unexported marker method) with five types: `EventResponse`, `EventCommandStart`, `EventCommandDone`, `EventFormatError`, `EventDebug`. Nil Notify = silent.
+**Structured turn protocol** (`protocol.go`): Models respond with one JSON object per turn. Three turn types: `act` (execute a command), `clarify` (ask for user input), `done` (task complete). `ParseTurn` extracts JSON from model output (handling prose wrapping and code fences), validates required fields, and returns a typed `Turn`. Each `act` turn carries a single command.
+
+**Events:** `Notify func(Event)` callback on Agent. Sealed interface (unexported marker method) with five types: `EventResponse`, `EventCommandStart`, `EventCommandDone`, `EventProtocolFailure`, `EventDebug`. Nil Notify = silent.
 
 **Interfaces:**
 - `Model` — `Query(ctx, []Message) (Response, error)` — implemented by `anthropic.Model` and `openai.Model`
 - `Executor` — `Execute(ctx, command, dir) (CommandResult, error)` — implemented by `CommandExecutor`
 
-**Command result protocol:** The core feeds command results back to the model as a flat tagged text envelope with `[command]`, `[exit_code]`, `[stdout]`, and `[stderr]` sections. This is a deliberate tradeoff:
+**Command result protocol (host-to-model):** The core feeds command results back to the model as a flat tagged text envelope with `[command]`, `[exit_code]`, `[stdout]`, and `[stderr]` sections. This is a deliberate tradeoff:
 - `stdout` and `stderr` stay separated in the core and in events.
 - The protocol is host-generated and deterministic; models only consume it.
 - We intentionally do not use nested XML here. The only downstream machine parsers are `hu` and `hew`, so we prefer a simpler model-facing format with explicit flat delimiters.
@@ -79,9 +81,7 @@ hew/                    # core: types, interfaces, Agent, events (root go.mod, s
 
 **Provider selection:** `main.go` checks if `--base-url` contains `anthropic.com` → Anthropic adapter, everything else → OpenAI adapter. Both use raw `net/http` with `httptest` servers in tests.
 
-**Parser** (`parser.go`): `ExtractCommand` pulls the first `` ```bash `` fenced block via regex. Returns `ErrNoCommand` if none found.
-
-**System prompt** (`prompt.go`): Hardcoded base prompt + optional `AGENTS.md` content from the working directory.
+**System prompt** (`prompt.go`): Hardcoded base prompt teaching the JSON turn protocol + optional `AGENTS.md` content from the working directory.
 
 ## Testing patterns
 
@@ -94,6 +94,7 @@ hew/                    # core: types, interfaces, Agent, events (root go.mod, s
 
 - `Step()` is the loop primitive; `Run()` adds policy
 - `Messages()` returns a defensive copy; `AddMessages()` prepends seed messages (errors after first `Step()`)
+- Model-to-host direction uses structured JSON turns (`protocol.go`); host-to-model direction uses flat tagged text for command results
 - Command execution returns structured `stdout`, `stderr`, and `exit_code`; frontends render from events, but the model sees a flat tagged transcript optimized for readability rather than a formal XML schema
 - Version injected at build time via `-ldflags '-X main.version=...'` (defaults to `"dev"`)
 - `max_tokens` is a field on `anthropic.Model`, not hardcoded

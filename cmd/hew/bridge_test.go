@@ -97,7 +97,7 @@ func TestWriteEventLogAllTypes(t *testing.T) {
 		{"command_start", hew.EventCommandStart{Command: "ls", Dir: "/tmp"}, `"type":"command_start"`},
 		{"command_done_ok", hew.EventCommandDone{Command: "ls", Stdout: "file.txt", ExitCode: 0, Err: nil}, `"type":"command_done"`},
 		{"command_done_err", hew.EventCommandDone{Command: "false", ExitCode: 1, Err: fmt.Errorf("exit 1")}, `"err":"exit 1"`},
-		{"format_error", hew.EventFormatError{}, `"type":"format_error"`},
+		{"protocol_failure", hew.EventProtocolFailure{Reason: "parse_error", Raw: "bad"}, `"type":"protocol_failure"`},
 		{"debug", hew.EventDebug{Message: "test"}, `"type":"debug"`},
 	}
 
