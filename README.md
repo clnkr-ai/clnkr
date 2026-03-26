@@ -1,10 +1,10 @@
-# hew
+# clnkr
 
-[![CI](https://github.com/cosgroveb/hew/actions/workflows/ci.yml/badge.svg)](https://github.com/cosgroveb/hew/actions/workflows/ci.yml)
+[![CI](https://github.com/clnkr-ai/clnkr/actions/workflows/ci.yml/badge.svg)](https://github.com/clnkr-ai/clnkr/actions/workflows/ci.yml)
 
 A minimal coding agent. Query an LLM, execute bash commands, repeat. Supports the Anthropic Messages API and any OpenAI-compatible endpoint (vLLM, Ollama, LiteLLM, etc.).
 
-Ships two binaries: **hew** (TUI) and **hu** (plain CLI).
+Ships two binaries: **clnkr** (TUI) and **clnku** (plain CLI). A **clnk** symlink points to clnkr for convenience.
 
 <img width="512" height="512" alt="Isildur cut the Ring (the ring here is bash -jokeexplainer)from his hand with the hilt-shard of his father's sword, and took it for his own." src="https://github.com/user-attachments/assets/7c9d648c-f5b9-4610-a311-04f5af37b364" />
 
@@ -13,17 +13,17 @@ Ships two binaries: **hew** (TUI) and **hu** (plain CLI).
 
 ```bash
 # Plain CLI only (stdlib, no external deps)
-go install github.com/cosgroveb/hew/cmd/hu@latest
+go install github.com/clnkr-ai/clnkr/cmd/clnku@latest
 
 # TUI requires building from source (due to replace directive)
-make build-hew
+make build-clnkr
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/cosgroveb/hew.git
-cd hew
+git clone https://github.com/clnkr-ai/clnkr.git
+cd clnkr
 make build-all
 ```
 
@@ -32,13 +32,13 @@ make build-all
 Set your API key and run:
 
 ```bash
-export HEW_API_KEY=your-api-key
+export CLNKR_API_KEY=your-api-key
 
 # Conversational mode
-hew
+clnkr
 
 # Single task
-hew -p "find all TODO comments in this project"
+clnkr -p "find all TODO comments in this project"
 ```
 
 ### OpenAI-compatible providers
@@ -47,16 +47,16 @@ Point `--base-url` at any OpenAI-compatible endpoint:
 
 ```bash
 # vLLM
-hew --base-url http://gpu-host:8000/v1 --model my-model
+clnkr --base-url http://gpu-host:8000/v1 --model my-model
 
 # Ollama
-hew --base-url http://localhost:11434/v1 --model llama3
+clnkr --base-url http://localhost:11434/v1 --model llama3
 
 # LiteLLM
-hew --base-url http://proxy:4000/v1 --model gpt-4o
+clnkr --base-url http://proxy:4000/v1 --model gpt-4o
 
 # Gemini (free tier)
-hew --base-url https://generativelanguage.googleapis.com/v1beta/openai --model gemini-2.0-flash
+clnkr --base-url https://generativelanguage.googleapis.com/v1beta/openai --model gemini-2.0-flash
 ```
 
 ### Flags
@@ -77,23 +77,23 @@ hew --base-url https://generativelanguage.googleapis.com/v1beta/openai --model g
 
 | Variable | Description |
 |----------|-------------|
-| `HEW_API_KEY` | API key for the LLM provider (required) |
+| `CLNKR_API_KEY` | API key for the LLM provider (required) |
 | `ANTHROPIC_API_KEY` | Fallback when using the default Anthropic endpoint |
-| `HEW_MODEL` | Model identifier (overridden by `--model`) |
-| `HEW_BASE_URL` | LLM endpoint (overridden by `--base-url`) |
+| `CLNKR_MODEL` | Model identifier (overridden by `--model`) |
+| `CLNKR_BASE_URL` | LLM endpoint (overridden by `--base-url`) |
 
 ### Agent orchestration
 
-A parent process can spawn hu as a child agent and monitor or chain runs:
+A parent process can spawn clnku as a child agent and monitor or chain runs:
 
 ```bash
 # Watch events in real time
-hu -p "fix the build" --event-log /tmp/events.jsonl &
+clnku -p "fix the build" --event-log /tmp/events.jsonl &
 tail -f /tmp/events.jsonl | jq .
 
 # Save a run's conversation, then feed it to a second agent
-hu -p "investigate the bug" --trajectory /tmp/investigation.json
-hu -p "write a fix based on the investigation" --load-messages /tmp/investigation.json
+clnku -p "investigate the bug" --trajectory /tmp/investigation.json
+clnku -p "write a fix based on the investigation" --load-messages /tmp/investigation.json
 ```
 
 `--event-log` streams one JSON object per line as events happen (O_APPEND, safe to tail).
@@ -103,7 +103,7 @@ If a single-task run stops to ask for clarification, the process exits with stat
 
 ### Command result format
 
-hew executes commands with structured results in the core: command text, exit code, stdout, and stderr are captured separately. When those results are fed back into the model, hew uses a flat tagged text format:
+clnkr executes commands with structured results in the core: command text, exit code, stdout, and stderr are captured separately. When those results are fed back into the model, clnkr uses a flat tagged text format:
 
 ```text
 [command]
@@ -120,7 +120,7 @@ hew executes commands with structured results in the core: command text, exit co
 [/stderr]
 ```
 
-This is intentional. The only downstream machine consumers are hew and hu, so the protocol is optimized for model readability rather than external XML tooling. In practice, weaker models follow explicit flat delimiters more reliably than nested structure, while the frontends still receive fully structured events.
+This is intentional. The only downstream machine consumers are clnkr and clnku, so the protocol is optimized for model readability rather than external XML tooling. In practice, weaker models follow explicit flat delimiters more reliably than nested structure, while the frontends still receive fully structured events.
 
 ### Project-specific instructions
 
@@ -128,21 +128,21 @@ Place an `AGENTS.md` file in your working directory. Its contents are appended t
 
 ## Session Persistence
 
-When using hew or hu in conversational mode (no `-p` flag), sessions are
-automatically saved to `$XDG_STATE_HOME/hew/projects/` on exit.
+When using clnkr or clnku in conversational mode (no `-p` flag), sessions are
+automatically saved to `$XDG_STATE_HOME/clnkr/projects/` on exit.
 
 Resume a session:
 
 ```bash
-hew --continue   # Load most recent session (TUI)
-hu --continue    # Load most recent session (plain CLI)
+clnkr --continue   # Load most recent session (TUI)
+clnku --continue    # Load most recent session (plain CLI)
 ```
 
 List all sessions for the current project:
 
 ```bash
-hew --list-sessions
-hu --list-sessions
+clnkr --list-sessions
+clnku --list-sessions
 ```
 
 Sessions are tied to their original working directory. You can only resume a
@@ -150,7 +150,7 @@ session from the same project directory where it was created.
 
 ## How it works
 
-hew runs a loop using a structured JSON turn protocol:
+clnkr runs a loop using a structured JSON turn protocol:
 
 1. Send conversation history to the LLM
 2. Parse the model's JSON response into a typed turn (`clarify`, `act`, or `done`)
@@ -159,7 +159,7 @@ hew runs a loop using a structured JSON turn protocol:
 5. If `done`: exit with the model's summary
 6. Repeat until done or step limit
 
-The LLM is the agent. hew is the scaffold.
+The LLM is the agent. clnkr is the scaffold.
 
 ## Development
 

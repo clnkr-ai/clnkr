@@ -157,7 +157,7 @@ Environment:
 		os.Exit(1)
 	}
 
-	// Resolve API key: HEW_API_KEY > ANTHROPIC_API_KEY (Anthropic only)
+	// Resolve API key: CLNKR_API_KEY > ANTHROPIC_API_KEY (Anthropic only)
 	apiKey := os.Getenv("CLNKR_API_KEY")
 	if apiKey == "" && strings.Contains(*baseURL, "anthropic.com") {
 		apiKey = os.Getenv("ANTHROPIC_API_KEY")

@@ -1,22 +1,22 @@
 .nh
-.TH hu 1 "hu" "User Commands"
+.TH clnku 1 "clnku" "User Commands"
 
 .SH NAME
-hu \- a minimal coding agent (plain CLI)
+clnku \- a minimal coding agent (plain CLI)
 
 
 .SH SYNOPSIS
-\fBhu\fP [\fB-p\fP \fItask\fP] [\fB--model\fP \fIname\fP] [\fB--base-url\fP \fIurl\fP] [\fB--max-steps\fP \fIn\fP] [\fB--load-messages\fP \fIfile\fP] [\fB--event-log\fP \fIfile\fP] [\fB--trajectory\fP \fIfile\fP] [\fB-v\fP|\fB--verbose\fP] [\fB--version\fP]
+\fBclnku\fP [\fB-p\fP \fItask\fP] [\fB--model\fP \fIname\fP] [\fB--base-url\fP \fIurl\fP] [\fB--max-steps\fP \fIn\fP] [\fB--load-messages\fP \fIfile\fP] [\fB--event-log\fP \fIfile\fP] [\fB--trajectory\fP \fIfile\fP] [\fB-v\fP|\fB--verbose\fP] [\fB--version\fP]
 
 
 .SH DESCRIPTION
-\fBhu\fP is a minimal coding agent that queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.
+\fBclnku\fP is a minimal coding agent that queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.
 
 .PP
-In default mode, \fBhu\fP starts an interactive REPL. With \fB-p\fP, it runs a single task and exits.
+In default mode, \fBclnku\fP starts an interactive REPL. With \fB-p\fP, it runs a single task and exits.
 
 .PP
-\fBhu\fP is the plain CLI variant of the hew project, with no external dependencies beyond the Go standard library. A TUI variant is available as \fBhew\fP(1).
+\fBclnku\fP is the plain CLI variant of the clnkr project, with no external dependencies beyond the Go standard library. A TUI variant is available as \fBclnkr\fP(1).
 
 .PP
 The agent communicates through JSON turns: \fBact\fP (execute a command), \fBclarify\fP (ask the user), and \fBdone\fP (signal completion).
@@ -28,7 +28,7 @@ Project-specific instructions are loaded from an \fBAGENTS.md\fP file in the cur
 .SH OPTIONS
 .TP
 \fB-p\fP, \fB--prompt\fP \fItask\fP
-Run the given task and exit. Without this flag, hu starts in conversational REPL mode.
+Run the given task and exit. Without this flag, clnku starts in conversational REPL mode.
 
 .TP
 \fB--model\fP \fIname\fP
@@ -73,7 +73,7 @@ List all saved sessions for the current project directory.
 
 .SH ENVIRONMENT
 .TP
-\fBHEW_API_KEY\fP
+\fBCLNKR_API_KEY\fP
 API key for the LLM provider (required).
 
 .TP
@@ -98,7 +98,7 @@ Error (no API key, step limit reached, etc.).
 
 
 .SH SEE ALSO
-\fBhew\fP(1)
+\fBclnkr\fP(1)
 
 
 .SH AUTHOR

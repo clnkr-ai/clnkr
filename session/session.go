@@ -23,7 +23,7 @@ type SessionInfo struct {
 }
 
 type sessionFile struct {
-	Created  string        `json:"created"`
+	Created  string          `json:"created"`
 	Messages []clnkr.Message `json:"messages"`
 }
 
