@@ -1,5 +1,5 @@
-# Flag list sourced from cmd/hew/main.go — update when flags change.
-_hew()
+# Flag list sourced from cmd/clnkr/main.go — update when flags change.
+_clnkr()
 {
     local cur prev opts
     COMPREPLY=()
@@ -18,5 +18,6 @@ _hew()
         COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
     fi
 }
-complete -F _hew hew
-complete -F _hew hu
+complete -F _clnkr clnkr
+complete -F _clnkr clnku
+complete -F _clnkr clnk

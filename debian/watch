@@ -1,4 +1,4 @@
 version=4
 # Uncomment when project is publicly released on GitHub:
-# opts=filenamemangle=s/.+\/v?(\d\S+)\.tar\.gz/hew-$1\.tar\.gz/ \
-#   https://github.com/cosgroveb/hew/tags .*/v?(\d\S+)\.tar\.gz
+# opts=filenamemangle=s/.+\/v?(\d\S+)\.tar\.gz/clnkr-$1\.tar\.gz/ \
+#   https://github.com/clnkr-ai/clnkr/tags .*/v?(\d\S+)\.tar\.gz

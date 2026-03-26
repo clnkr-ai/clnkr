@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: hew
+Upstream-Name: clnkr
 Upstream-Contact: Brian Cosgrove <bcosgrove@gmail.com>
-Source: https://github.com/cosgroveb/hew
+Source: https://github.com/clnkr-ai/clnkr
 
 Files: *
 Copyright: 2025-2026 Brian Cosgrove <bcosgrove@gmail.com>

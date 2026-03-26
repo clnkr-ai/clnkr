@@ -10,19 +10,19 @@ VERSION := $(DEB_VERSION_UPSTREAM)
 	dh $@ --with bash-completion
 
 override_dh_auto_build:
-	go build -trimpath -ldflags '-s -w -X main.version=$(VERSION)' -o hu ./cmd/hu
-	cd cmd/hew && go build -trimpath -ldflags '-s -w -X main.version=$(VERSION)' -o ../../hew .
+	go build -trimpath -ldflags '-s -w -X main.version=$(VERSION)' -o clnku ./cmd/clnku
+	cd cmd/clnkr && go build -trimpath -ldflags '-s -w -X main.version=$(VERSION)' -o ../../clnkr .
 
 override_dh_auto_test:
 	go test ./...
-	cd cmd/hew && go test ./...
+	cd cmd/clnkr && go test ./...
 
 override_dh_auto_install:
-	install -D -m 0755 hu debian/hew/usr/bin/hu
-	install -D -m 0755 hew debian/hew/usr/bin/hew
+	install -D -m 0755 clnku debian/clnkr/usr/bin/clnku
+	install -D -m 0755 clnkr debian/clnkr/usr/bin/clnkr
 
 override_dh_auto_clean:
-	rm -f hu hew
+	rm -f clnku clnkr
 
 override_dh_dwz:
 	# dwz fails on Go binaries
