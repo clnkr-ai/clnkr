@@ -25,13 +25,13 @@ jobs:
         uses: golangci/golangci-lint-action@v7
         with:
           version: v2.11.1
-          working-directory: cmd/hew
+          working-directory: cmd/clnkr
 
       - name: Test core
         run: go test -race ./... -v
 
       - name: Test TUI
-        run: cd cmd/hew && go test -race ./... -v
+        run: cd cmd/clnkr && go test -race ./... -v
 
       - name: Build
         run: make build-all
