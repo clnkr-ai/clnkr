@@ -11,9 +11,11 @@ hew - a minimal coding agent (TUI)
 
 # DESCRIPTION
 
-**hew** is a minimal coding agent with a terminal user interface (TUI), built with bubbletea. It queries LLMs and executes bash commands in an iterative loop. It supports both Anthropic and OpenAI-compatible APIs.
+**hew** is a minimal coding agent with a terminal user interface (TUI), built with bubbletea. It queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.
 
 In default mode, **hew** starts the TUI. With **-p**, it runs a single task and exits. When stdout is not a TTY, **hew** falls back to plain-text rendering.
+
+The agent communicates through JSON turns: **act** (execute a command), **clarify** (ask the user), and **done** (signal completion).
 
 A plain CLI variant is available as **hu**(1).
 
@@ -50,9 +52,6 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 
 **--list-sessions**
 : List all saved sessions for the current project directory.
-
-**--disable-planning-workflow**
-: Omit the planning workflow instructions from the system prompt.
 
 **--version**
 : Print version and exit.

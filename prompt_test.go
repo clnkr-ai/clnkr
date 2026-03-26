@@ -8,19 +8,26 @@ import (
 )
 
 func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
-	t.Run("base prompt only", func(t *testing.T) {
+	t.Run("base prompt teaches JSON protocol", func(t *testing.T) {
 		dir := t.TempDir()
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 		prompt := LoadPromptWithOptions(dir, PromptOptions{})
-		if !strings.Contains(prompt, "```bash") {
-			t.Error("base prompt should contain bash code block instructions")
+		if !strings.Contains(prompt, `"type":"act"`) {
+			t.Error("prompt should teach the json protocol")
 		}
-		if !strings.Contains(prompt, "<done/>") {
-			t.Error("base prompt should contain done signal instructions")
+		if strings.Contains(prompt, "```bash") {
+			t.Error("prompt should not instruct fenced bash blocks")
+		}
+		if strings.Contains(prompt, "<done/>") {
+			t.Error("prompt should not reference done signal")
 		}
 	})
 
 	t.Run("appends AGENTS.md when present", func(t *testing.T) {
 		dir := t.TempDir()
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 		content := "Always use gofmt before committing."
 		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(content), 0644); err != nil {
 			t.Fatalf("write AGENTS.md: %v", err)
@@ -34,6 +41,8 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 
 	t.Run("ignores missing AGENTS.md", func(t *testing.T) {
 		dir := t.TempDir()
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 		prompt := LoadPromptWithOptions(dir, PromptOptions{})
 		if prompt == "" {
 			t.Error("prompt should not be empty without AGENTS.md")
@@ -41,17 +50,53 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 	})
 }
 
+// extractAllJSONObjects finds all top-level JSON objects in text.
+func extractAllJSONObjects(text string) []string {
+	var objects []string
+	remaining := text
+	for {
+		jsonStr, err := extractJSON(remaining)
+		if err != nil {
+			break
+		}
+		objects = append(objects, jsonStr)
+		idx := strings.Index(remaining, jsonStr)
+		remaining = remaining[idx+len(jsonStr):]
+	}
+	return objects
+}
+
+func TestPromptExamplesParseSuccessfully(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	prompt := LoadPromptWithOptions(dir, PromptOptions{})
+
+	examples := extractAllJSONObjects(prompt)
+	if len(examples) < 3 {
+		t.Fatalf("prompt should contain at least 3 turn examples, found %d", len(examples))
+	}
+	for i, ex := range examples {
+		_, err := ParseTurn(ex)
+		if err != nil {
+			t.Errorf("example %d failed ParseTurn: %v\n  input: %s", i, err, ex)
+		}
+	}
+}
+
 func TestLoadPromptWithOptions(t *testing.T) {
 	t.Run("default includes base prompt and AGENTS.md", func(t *testing.T) {
 		dir := t.TempDir()
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 		content := "Project-specific instructions here."
 		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(content), 0644); err != nil {
 			t.Fatalf("write AGENTS.md: %v", err)
 		}
 
 		prompt := LoadPromptWithOptions(dir, PromptOptions{})
-		if !strings.Contains(prompt, "```bash") {
-			t.Error("default prompt should contain base prompt")
+		if !strings.Contains(prompt, `"type":"act"`) {
+			t.Error("default prompt should contain JSON protocol")
 		}
 		if !strings.Contains(prompt, content) {
 			t.Error("default prompt should include AGENTS.md content")
