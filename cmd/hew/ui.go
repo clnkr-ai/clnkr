@@ -190,7 +190,7 @@ func (m *model) routeEvent(e hew.Event) {
 	case hew.EventCommandDone:
 		m.status.incrementStep()
 		m.files.trackFromCommand(lastCmd, ev.Stdout)
-	case hew.EventCommandStart, hew.EventFormatError, hew.EventDebug:
+	case hew.EventCommandStart, hew.EventProtocolFailure, hew.EventDebug:
 		// handled by chat.appendEvent only
 	default:
 	}

@@ -150,13 +150,14 @@ session from the same project directory where it was created.
 
 ## How it works
 
-hew runs a loop:
+hew runs a loop using a structured JSON turn protocol:
 
 1. Send conversation history to the LLM
-2. If the model asks a plain-text clarification question, return control to the user
-3. Otherwise extract bash commands from fenced `` ```bash `` blocks
-4. Execute them and append the output to the conversation
-5. Repeat until the LLM sends `<done/>`
+2. Parse the model's JSON response into a typed turn (`clarify`, `act`, or `done`)
+3. If `clarify`: return control to the user for more input
+4. If `act`: execute the bash command and append structured output to the conversation
+5. If `done`: exit with the model's summary
+6. Repeat until done or step limit
 
 The LLM is the agent. hew is the scaffold.
 
