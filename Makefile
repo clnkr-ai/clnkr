@@ -12,9 +12,13 @@ build-clnkr: ## Build TUI binary (clnkr)
 
 build-all: build-clnku build-clnkr ## Build both binaries
 
-install: build-all ## Install both binaries
-	go install -ldflags '$(LDFLAGS)' ./cmd/clnku/
-	cd cmd/clnkr && go install -ldflags '$(LDFLAGS)' .
+PREFIX ?= /usr/local
+
+install: build-all ## Install both binaries and clnk symlink
+	install -d $(DESTDIR)$(PREFIX)/bin
+	install -m 755 clnkr $(DESTDIR)$(PREFIX)/bin/clnkr
+	install -m 755 clnku $(DESTDIR)$(PREFIX)/bin/clnku
+	ln -sf clnkr $(DESTDIR)$(PREFIX)/bin/clnk
 
 clean: ## Remove build artifacts
 	rm -f clnku clnkr
