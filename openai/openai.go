@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/cosgroveb/hew"
+	"github.com/clnkr-ai/clnkr"
 )
 
 // Model talks to any OpenAI-compatible chat completions API.
@@ -33,8 +33,8 @@ func NewModel(baseURL, apiKey, model, systemPrompt string) *Model {
 }
 
 type request struct {
-	Model    string        `json:"model"`
-	Messages []hew.Message `json:"messages"`
+	Model    string          `json:"model"`
+	Messages []clnkr.Message `json:"messages"`
 }
 
 type response struct {
@@ -75,48 +75,48 @@ func extractErrorMessage(body []byte) string {
 	return string(body)
 }
 
-func (m *Model) Query(ctx context.Context, messages []hew.Message) (hew.Response, error) {
-	allMessages := make([]hew.Message, 0, len(messages)+1)
-	allMessages = append(allMessages, hew.Message{Role: "system", Content: m.systemPrompt})
+func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
+	allMessages := make([]clnkr.Message, 0, len(messages)+1)
+	allMessages = append(allMessages, clnkr.Message{Role: "system", Content: m.systemPrompt})
 	allMessages = append(allMessages, messages...)
 
 	body, err := json.Marshal(request{Model: m.model, Messages: allMessages})
 	if err != nil {
-		return hew.Response{}, fmt.Errorf("marshal request: %w", err)
+		return clnkr.Response{}, fmt.Errorf("marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", m.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return hew.Response{}, fmt.Errorf("create request: %w", err)
+		return clnkr.Response{}, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+m.apiKey)
 
 	resp, err := m.client.Do(req)
 	if err != nil {
-		return hew.Response{}, fmt.Errorf("send request: %w", err)
+		return clnkr.Response{}, fmt.Errorf("send request: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort cleanup
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
-		return hew.Response{}, fmt.Errorf("read response: %w", err)
+		return clnkr.Response{}, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return hew.Response{}, fmt.Errorf("api error (status %d): %s", resp.StatusCode, extractErrorMessage(respBody))
+		return clnkr.Response{}, fmt.Errorf("api error (status %d): %s", resp.StatusCode, extractErrorMessage(respBody))
 	}
 
 	var apiResp response
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return hew.Response{}, fmt.Errorf("unmarshal response: %w", err)
+		return clnkr.Response{}, fmt.Errorf("unmarshal response: %w", err)
 	}
 	if len(apiResp.Choices) == 0 {
-		return hew.Response{}, fmt.Errorf("no choices in response")
+		return clnkr.Response{}, fmt.Errorf("no choices in response")
 	}
 
 	choice := apiResp.Choices[0]
-	return hew.Response{
-		Message: hew.Message{Role: choice.Message.Role, Content: choice.Message.Content},
-		Usage:   hew.Usage{InputTokens: apiResp.Usage.PromptTokens, OutputTokens: apiResp.Usage.CompletionTokens},
+	return clnkr.Response{
+		Message: clnkr.Message{Role: choice.Message.Role, Content: choice.Message.Content},
+		Usage:   clnkr.Usage{InputTokens: apiResp.Usage.PromptTokens, OutputTokens: apiResp.Usage.CompletionTokens},
 	}, nil
 }

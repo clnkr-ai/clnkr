@@ -6,7 +6,7 @@ import (
 	"os"
 
 	tea "charm.land/bubbletea/v2"
-	hew "github.com/cosgroveb/hew"
+	clnkr "github.com/clnkr-ai/clnkr"
 )
 
 // eventChSize is the buffer capacity for the agent->TUI event channel.
@@ -16,9 +16,9 @@ import (
 // burst token delivery without backpressuring the SSE read loop.
 const eventChSize = 256
 
-type eventMsg struct{ event hew.Event }
+type eventMsg struct{ event clnkr.Event }
 
-func eventBridge(ch <-chan hew.Event) tea.Cmd {
+func eventBridge(ch <-chan clnkr.Event) tea.Cmd {
 	return func() tea.Msg {
 		e, ok := <-ch
 		if !ok {
@@ -31,8 +31,8 @@ func eventBridge(ch <-chan hew.Event) tea.Cmd {
 // makeNotify returns a Notify function for the agent. It writes to the
 // event log synchronously (never dropped), then sends to the TUI channel
 // with a non-blocking send (may drop under buffer pressure).
-func makeNotify(ch chan<- hew.Event, eventLog *os.File) func(hew.Event) {
-	return func(e hew.Event) {
+func makeNotify(ch chan<- clnkr.Event, eventLog *os.File) func(clnkr.Event) {
+	return func(e clnkr.Event) {
 		if eventLog != nil {
 			writeEventLog(eventLog, e)
 		}
@@ -49,14 +49,14 @@ type jsonEvent struct {
 }
 
 // writeEventLog writes a single event as a JSONL line to the event log file.
-func writeEventLog(f *os.File, e hew.Event) {
+func writeEventLog(f *os.File, e clnkr.Event) {
 	var je jsonEvent
 	switch ev := e.(type) {
-	case hew.EventResponse:
+	case clnkr.EventResponse:
 		je = jsonEvent{Type: "response", Payload: ev}
-	case hew.EventCommandStart:
+	case clnkr.EventCommandStart:
 		je = jsonEvent{Type: "command_start", Payload: ev}
-	case hew.EventCommandDone:
+	case clnkr.EventCommandDone:
 		je = jsonEvent{Type: "command_done", Payload: struct {
 			Command  string `json:"command"`
 			Stdout   string `json:"stdout"`
@@ -64,12 +64,12 @@ func writeEventLog(f *os.File, e hew.Event) {
 			ExitCode int    `json:"exit_code"`
 			Err      string `json:"err,omitempty"`
 		}{Command: ev.Command, Stdout: ev.Stdout, Stderr: ev.Stderr, ExitCode: ev.ExitCode, Err: errString(ev.Err)}}
-	case hew.EventProtocolFailure:
+	case clnkr.EventProtocolFailure:
 		je = jsonEvent{Type: "protocol_failure", Payload: struct {
 			Reason string `json:"reason"`
 			Raw    string `json:"raw"`
 		}{Reason: ev.Reason, Raw: ev.Raw}}
-	case hew.EventDebug:
+	case clnkr.EventDebug:
 		je = jsonEvent{Type: "debug", Payload: ev}
 	default:
 		return

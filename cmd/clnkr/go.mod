@@ -1,8 +1,8 @@
-module github.com/cosgroveb/hew/cmd/hew
+module github.com/clnkr-ai/clnkr/cmd/clnkr
 
 go 1.25.6
 
-replace github.com/cosgroveb/hew => ../../
+replace github.com/clnkr-ai/clnkr => ../../
 
 require (
 	charm.land/bubbles/v2 v2.0.0
@@ -10,7 +10,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.1
 	github.com/charmbracelet/glamour v0.10.0
 	github.com/charmbracelet/x/term v0.2.2
-	github.com/cosgroveb/hew v0.1.3
+	github.com/clnkr-ai/clnkr v0.1.3
 )
 
 require (

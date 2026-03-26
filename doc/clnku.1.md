@@ -1,30 +1,30 @@
-hew 1 "hew" "User Commands"
+clnku 1 "clnku" "User Commands"
 ==========================
 
 # NAME
 
-hew - a minimal coding agent (TUI)
+clnku - a minimal coding agent (plain CLI)
 
 # SYNOPSIS
 
-**hew** [**-p** *task*] [**--model** *name*] [**--base-url** *url*] [**--max-steps** *n*] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**--version**]
+**clnku** [**-p** *task*] [**--model** *name*] [**--base-url** *url*] [**--max-steps** *n*] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**--version**]
 
 # DESCRIPTION
 
-**hew** is a minimal coding agent with a terminal user interface (TUI), built with bubbletea. It queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.
+**clnku** is a minimal coding agent that queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.
 
-In default mode, **hew** starts the TUI. With **-p**, it runs a single task and exits. When stdout is not a TTY, **hew** falls back to plain-text rendering.
+In default mode, **clnku** starts an interactive REPL. With **-p**, it runs a single task and exits.
+
+**clnku** is the plain CLI variant of the clnkr project, with no external dependencies beyond the Go standard library. A TUI variant is available as **clnkr**(1).
 
 The agent communicates through JSON turns: **act** (execute a command), **clarify** (ask the user), and **done** (signal completion).
-
-A plain CLI variant is available as **hu**(1).
 
 Project-specific instructions are loaded from an **AGENTS.md** file in the current working directory, if present.
 
 # OPTIONS
 
 **-p**, **--prompt** *task*
-: Run the given task and exit. Without this flag, hew starts the TUI.
+: Run the given task and exit. Without this flag, clnku starts in conversational REPL mode.
 
 **--model** *name*
 : LLM model identifier (default: claude-sonnet-4-20250514).
@@ -47,18 +47,18 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 **-v**, **--verbose**
 : Show internal decisions (queries, parsing, working directory).
 
+**--version**
+: Print version and exit.
+
 **--continue**
 : Resume the most recent session for the current project directory.
 
 **--list-sessions**
 : List all saved sessions for the current project directory.
 
-**--version**
-: Print version and exit.
-
 # ENVIRONMENT
 
-**HEW_API_KEY**
+**CLNKR_API_KEY**
 : API key for the LLM provider (required).
 
 **ANTHROPIC_API_KEY**
@@ -77,10 +77,10 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 **1**
 : Error (no API key, step limit reached, etc.).
 
+# SEE ALSO
+
+**clnkr**(1)
+
 # AUTHOR
 
 Brian Cosgrove <cosgroveb@gmail.com>
-
-# SEE ALSO
-
-**hu**(1)

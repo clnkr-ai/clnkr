@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/viewport"
-	hew "github.com/cosgroveb/hew"
+	clnkr "github.com/clnkr-ai/clnkr"
 )
 
 type chatModel struct {
@@ -67,21 +67,21 @@ func (c *chatModel) resetStreaming() {
 	c.streaming = false
 }
 
-func (c *chatModel) appendEvent(e hew.Event) {
+func (c *chatModel) appendEvent(e clnkr.Event) {
 	switch ev := e.(type) {
-	case hew.EventResponse:
+	case clnkr.EventResponse:
 		c.pendingQuery = ""
 		if c.streaming {
 			c.commitStream(ev.Message.Content)
 		} else {
 			c.writeRendered(ev.Message.Content)
 		}
-	case hew.EventCommandStart:
+	case clnkr.EventCommandStart:
 		c.lastCmd = ev.Command
 		c.pendingCmd = c.styles.Chat.CommandPending.Render(
 			fmt.Sprintf("%s running: %s", iconPending, summarizeCommand(ev.Command)),
 		)
-	case hew.EventCommandDone:
+	case clnkr.EventCommandDone:
 		icon := iconSuccess
 		style := c.styles.Chat.CommandSuccess
 		if ev.Err != nil {
@@ -108,12 +108,12 @@ func (c *chatModel) appendEvent(e hew.Event) {
 		c.content.WriteString("\n")
 		c.pendingCmd = ""
 		c.lastCmd = ""
-	case hew.EventProtocolFailure:
+	case clnkr.EventProtocolFailure:
 		c.content.WriteString(c.styles.Chat.Warning.Render(
 			fmt.Sprintf("%s Protocol error: %s", iconWarning, ev.Reason),
 		))
 		c.content.WriteString("\n\n")
-	case hew.EventDebug:
+	case clnkr.EventDebug:
 		if ev.Message == "querying model..." {
 			c.resetStreaming()
 			c.pendingQuery = c.styles.Chat.CommandPending.Render(
@@ -122,7 +122,7 @@ func (c *chatModel) appendEvent(e hew.Event) {
 		}
 		if c.verbose {
 			c.content.WriteString(c.styles.Chat.Debug.Render(
-				fmt.Sprintf("[hew] %s", ev.Message),
+				fmt.Sprintf("[clnkr] %s", ev.Message),
 			))
 			c.content.WriteString("\n")
 		}
@@ -161,7 +161,7 @@ func (c *chatModel) resize(width, height int) {
 }
 
 // summarizeCommand returns a short display form of a command.
-// Matches the core library's summarizeCommand behavior.
+// Matches the core library behavior.
 func summarizeCommand(cmd string) string {
 	lines := strings.Split(cmd, "\n")
 	first := lines[0]

@@ -56,8 +56,8 @@ jobs:
       - name: Generate orig tarball
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          git archive --format=tar.gz --prefix="hew-${VERSION}/" \
-            HEAD -- . ':(exclude)debian' > "../hew_${VERSION}.orig.tar.gz"
+          git archive --format=tar.gz --prefix="clnkr-${VERSION}/" \
+            HEAD -- . ':(exclude)debian' > "../clnkr_${VERSION}.orig.tar.gz"
 
       - name: Build amd64 package
         # -d skips Build-Depends check: golang-go comes from actions/setup-go, not apt
@@ -70,14 +70,14 @@ jobs:
 
       - name: Collect build output
         run: |
-          cp ../hew_*.deb .
+          cp ../clnkr_*.deb .
           cp debian/changelog debian-changelog
 
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
           name: deb-amd64
-          path: hew_*.deb
+          path: clnkr_*.deb
 
       - name: Upload changelog
         uses: actions/upload-artifact@v4
@@ -126,8 +126,8 @@ jobs:
       - name: Generate orig tarball
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          git archive --format=tar.gz --prefix="hew-${VERSION}/" \
-            HEAD -- . ':(exclude)debian' > "../hew_${VERSION}.orig.tar.gz"
+          git archive --format=tar.gz --prefix="clnkr-${VERSION}/" \
+            HEAD -- . ':(exclude)debian' > "../clnkr_${VERSION}.orig.tar.gz"
 
       - name: Build arm64 package
         # -d skips Build-Depends check: golang-go comes from actions/setup-go, not apt
@@ -139,13 +139,13 @@ jobs:
             --fail-on error ../*.changes
 
       - name: Collect build output
-        run: cp ../hew_*.deb .
+        run: cp ../clnkr_*.deb .
 
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
           name: deb-arm64
-          path: hew_*.deb
+          path: clnkr_*.deb
 
   binaries:
     runs-on: ubuntu-latest
@@ -160,7 +160,7 @@ jobs:
         run: go test -race ./...
 
       - name: Test TUI
-        run: cd cmd/hew && go test -race ./...
+        run: cd cmd/clnkr && go test -race ./...
 
       - name: Cross-compile binaries
         run: |
@@ -169,10 +169,10 @@ jobs:
             for GOARCH in amd64 arm64; do
               CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH \
                 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
-                -o "hu-${GOOS}-${GOARCH}" ./cmd/hu/
+                -o "clnku-${GOOS}-${GOARCH}" ./cmd/clnku/
               CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH \
-                go -C cmd/hew build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
-                -o "../../hew-${GOOS}-${GOARCH}" .
+                go -C cmd/clnkr build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+                -o "../../clnkr-${GOOS}-${GOARCH}" .
             done
           done
 
@@ -181,8 +181,8 @@ jobs:
         with:
           name: binaries
           path: |
-            hu-*
-            hew-*
+            clnku-*
+            clnkr-*
 
   release:
     needs: [debian-amd64, debian-arm64, binaries]
@@ -248,14 +248,14 @@ jobs:
           mkdir -p release
           cp artifacts/deb-amd64/*.deb release/
           cp artifacts/deb-arm64/*.deb release/
-          cp artifacts/binaries/hu-* release/
-          cp artifacts/binaries/hew-* release/
+          cp artifacts/binaries/clnku-* release/
+          cp artifacts/binaries/clnkr-* release/
 
       - name: Generate source tarball
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          git archive --format=tar.gz --prefix="hew-${VERSION}/" \
-            -o "release/hew_${VERSION}.orig.tar.gz" "${{ github.sha }}"
+          git archive --format=tar.gz --prefix="clnkr-${VERSION}/" \
+            -o "release/clnkr_${VERSION}.orig.tar.gz" "${{ github.sha }}"
 
       - name: Generate checksums
         run: |
@@ -280,7 +280,7 @@ jobs:
           # Delete any existing release from a failed run
           gh release delete "${GITHUB_REF_NAME}" --yes 2>/dev/null || true
           gh release create "${GITHUB_REF_NAME}" \
-            --title "hew ${VERSION}" \
+            --title "clnkr ${VERSION}" \
             --notes-file release-notes.txt \
             release/*
 
@@ -289,15 +289,15 @@ jobs:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          SHA=$(curl -sL "https://github.com/cosgroveb/hew/archive/refs/tags/v${VERSION}.tar.gz" | sha256sum | awk '{print $1}')
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/cosgroveb/homebrew-tap.git" /tmp/tap
+          SHA=$(curl -sL "https://github.com/clnkr-ai/clnkr/archive/refs/tags/v${VERSION}.tar.gz" | sha256sum | awk '{print $1}')
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/clnkr-ai/homebrew-tap.git" /tmp/tap
           cd /tmp/tap
-          sed -i "s|url \".*\"|url \"https://github.com/cosgroveb/hew/archive/refs/tags/v${VERSION}.tar.gz\"|" Formula/hew.rb
-          sed -i "s|sha256 \".*\"|sha256 \"${SHA}\"|" Formula/hew.rb
+          sed -i "s|url \".*\"|url \"https://github.com/clnkr-ai/clnkr/archive/refs/tags/v${VERSION}.tar.gz\"|" Formula/clnkr.rb
+          sed -i "s|sha256 \".*\"|sha256 \"${SHA}\"|" Formula/clnkr.rb
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/hew.rb
+          git add Formula/clnkr.rb
           git diff --cached --quiet || {
-            git commit -m "Update hew to ${VERSION}"
+            git commit -m "Update clnkr to ${VERSION}"
             git push
           }

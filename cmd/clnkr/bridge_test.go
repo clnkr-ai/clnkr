@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	hew "github.com/cosgroveb/hew"
+	clnkr "github.com/clnkr-ai/clnkr"
 )
 
 func TestEventBridgeDeliversEvents(t *testing.T) {
-	ch := make(chan hew.Event, eventChSize)
-	ch <- hew.EventDebug{Message: "hello"}
+	ch := make(chan clnkr.Event, eventChSize)
+	ch <- clnkr.EventDebug{Message: "hello"}
 
 	cmd := eventBridge(ch)
 	msg := cmd()
@@ -20,7 +20,7 @@ func TestEventBridgeDeliversEvents(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected eventMsg, got %T", msg)
 	}
-	dbg, ok := em.event.(hew.EventDebug)
+	dbg, ok := em.event.(clnkr.EventDebug)
 	if !ok {
 		t.Fatalf("expected EventDebug, got %T", em.event)
 	}
@@ -30,7 +30,7 @@ func TestEventBridgeDeliversEvents(t *testing.T) {
 }
 
 func TestEventBridgeReturnsNilOnClose(t *testing.T) {
-	ch := make(chan hew.Event, eventChSize)
+	ch := make(chan clnkr.Event, eventChSize)
 	close(ch)
 
 	cmd := eventBridge(ch)
@@ -42,23 +42,23 @@ func TestEventBridgeReturnsNilOnClose(t *testing.T) {
 }
 
 func TestNotifyNonBlockingWhenFull(t *testing.T) {
-	ch := make(chan hew.Event, 2)
-	ch <- hew.EventDebug{Message: "1"}
-	ch <- hew.EventDebug{Message: "2"}
+	ch := make(chan clnkr.Event, 2)
+	ch <- clnkr.EventDebug{Message: "1"}
+	ch <- clnkr.EventDebug{Message: "2"}
 
 	notify := makeNotify(ch, nil)
-	notify(hew.EventDebug{Message: "dropped"})
+	notify(clnkr.EventDebug{Message: "dropped"})
 
 	e1 := <-ch
 	e2 := <-ch
-	if e1.(hew.EventDebug).Message != "1" || e2.(hew.EventDebug).Message != "2" {
+	if e1.(clnkr.EventDebug).Message != "1" || e2.(clnkr.EventDebug).Message != "2" {
 		t.Error("channel contents were modified")
 	}
 }
 
 func TestNotifyWritesEventLogWhenChannelFull(t *testing.T) {
-	ch := make(chan hew.Event, 1)
-	ch <- hew.EventDebug{Message: "fill"}
+	ch := make(chan clnkr.Event, 1)
+	ch <- clnkr.EventDebug{Message: "fill"}
 
 	f, err := os.CreateTemp("", "eventlog")
 	if err != nil {
@@ -68,7 +68,7 @@ func TestNotifyWritesEventLogWhenChannelFull(t *testing.T) {
 	defer f.Close()           //nolint:errcheck
 
 	notify := makeNotify(ch, f)
-	notify(hew.EventDebug{Message: "logged"})
+	notify(clnkr.EventDebug{Message: "logged"})
 
 	if _, err := f.Seek(0, 0); err != nil {
 		t.Fatal(err)
@@ -87,18 +87,18 @@ func TestNotifyWritesEventLogWhenChannelFull(t *testing.T) {
 func TestWriteEventLogAllTypes(t *testing.T) {
 	events := []struct {
 		name     string
-		event    hew.Event
+		event    clnkr.Event
 		wantType string
 	}{
-		{"response", hew.EventResponse{
-			Message: hew.Message{Role: "assistant", Content: "hello"},
-			Usage:   hew.Usage{InputTokens: 10, OutputTokens: 5},
+		{"response", clnkr.EventResponse{
+			Message: clnkr.Message{Role: "assistant", Content: "hello"},
+			Usage:   clnkr.Usage{InputTokens: 10, OutputTokens: 5},
 		}, `"type":"response"`},
-		{"command_start", hew.EventCommandStart{Command: "ls", Dir: "/tmp"}, `"type":"command_start"`},
-		{"command_done_ok", hew.EventCommandDone{Command: "ls", Stdout: "file.txt", ExitCode: 0, Err: nil}, `"type":"command_done"`},
-		{"command_done_err", hew.EventCommandDone{Command: "false", ExitCode: 1, Err: fmt.Errorf("exit 1")}, `"err":"exit 1"`},
-		{"protocol_failure", hew.EventProtocolFailure{Reason: "parse_error", Raw: "bad"}, `"type":"protocol_failure"`},
-		{"debug", hew.EventDebug{Message: "test"}, `"type":"debug"`},
+		{"command_start", clnkr.EventCommandStart{Command: "ls", Dir: "/tmp"}, `"type":"command_start"`},
+		{"command_done_ok", clnkr.EventCommandDone{Command: "ls", Stdout: "file.txt", ExitCode: 0, Err: nil}, `"type":"command_done"`},
+		{"command_done_err", clnkr.EventCommandDone{Command: "false", ExitCode: 1, Err: fmt.Errorf("exit 1")}, `"err":"exit 1"`},
+		{"protocol_failure", clnkr.EventProtocolFailure{Reason: "parse_error", Raw: "bad"}, `"type":"protocol_failure"`},
+		{"debug", clnkr.EventDebug{Message: "test"}, `"type":"debug"`},
 	}
 
 	for _, tc := range events {

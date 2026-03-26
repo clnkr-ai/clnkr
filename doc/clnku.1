@@ -1,25 +1,25 @@
 .nh
-.TH hew 1 "hew" "User Commands"
+.TH clnku 1 "clnku" "User Commands"
 
 .SH NAME
-hew \- a minimal coding agent (TUI)
+clnku \- a minimal coding agent (plain CLI)
 
 
 .SH SYNOPSIS
-\fBhew\fP [\fB-p\fP \fItask\fP] [\fB--model\fP \fIname\fP] [\fB--base-url\fP \fIurl\fP] [\fB--max-steps\fP \fIn\fP] [\fB--load-messages\fP \fIfile\fP] [\fB--event-log\fP \fIfile\fP] [\fB--trajectory\fP \fIfile\fP] [\fB-v\fP|\fB--verbose\fP] [\fB--version\fP]
+\fBclnku\fP [\fB-p\fP \fItask\fP] [\fB--model\fP \fIname\fP] [\fB--base-url\fP \fIurl\fP] [\fB--max-steps\fP \fIn\fP] [\fB--load-messages\fP \fIfile\fP] [\fB--event-log\fP \fIfile\fP] [\fB--trajectory\fP \fIfile\fP] [\fB-v\fP|\fB--verbose\fP] [\fB--version\fP]
 
 
 .SH DESCRIPTION
-\fBhew\fP is a minimal coding agent with a terminal user interface (TUI), built with bubbletea. It queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.
+\fBclnku\fP is a minimal coding agent that queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.
 
 .PP
-In default mode, \fBhew\fP starts the TUI. With \fB-p\fP, it runs a single task and exits. When stdout is not a TTY, \fBhew\fP falls back to plain-text rendering.
+In default mode, \fBclnku\fP starts an interactive REPL. With \fB-p\fP, it runs a single task and exits.
+
+.PP
+\fBclnku\fP is the plain CLI variant of the clnkr project, with no external dependencies beyond the Go standard library. A TUI variant is available as \fBclnkr\fP(1).
 
 .PP
 The agent communicates through JSON turns: \fBact\fP (execute a command), \fBclarify\fP (ask the user), and \fBdone\fP (signal completion).
-
-.PP
-A plain CLI variant is available as \fBhu\fP(1).
 
 .PP
 Project-specific instructions are loaded from an \fBAGENTS.md\fP file in the current working directory, if present.
@@ -28,7 +28,7 @@ Project-specific instructions are loaded from an \fBAGENTS.md\fP file in the cur
 .SH OPTIONS
 .TP
 \fB-p\fP, \fB--prompt\fP \fItask\fP
-Run the given task and exit. Without this flag, hew starts the TUI.
+Run the given task and exit. Without this flag, clnku starts in conversational REPL mode.
 
 .TP
 \fB--model\fP \fIname\fP
@@ -59,6 +59,10 @@ After the task finishes, write the full message history as pretty-printed JSON t
 Show internal decisions (queries, parsing, working directory).
 
 .TP
+\fB--version\fP
+Print version and exit.
+
+.TP
 \fB--continue\fP
 Resume the most recent session for the current project directory.
 
@@ -66,14 +70,10 @@ Resume the most recent session for the current project directory.
 \fB--list-sessions\fP
 List all saved sessions for the current project directory.
 
-.TP
-\fB--version\fP
-Print version and exit.
-
 
 .SH ENVIRONMENT
 .TP
-\fBHEW_API_KEY\fP
+\fBCLNKR_API_KEY\fP
 API key for the LLM provider (required).
 
 .TP
@@ -97,10 +97,10 @@ Success.
 Error (no API key, step limit reached, etc.).
 
 
+.SH SEE ALSO
+\fBclnkr\fP(1)
+
+
 .SH AUTHOR
 Brian Cosgrove cosgroveb@gmail.com
 \[la]mailto:cosgroveb@gmail.com\[ra]
-
-
-.SH SEE ALSO
-\fBhu\fP(1)

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cosgroveb/hew"
-	"github.com/cosgroveb/hew/session"
+	"github.com/clnkr-ai/clnkr"
+	"github.com/clnkr-ai/clnkr/session"
 )
 
 func TestNormalizeProjectPath(t *testing.T) {
@@ -58,7 +58,7 @@ func TestSessionDir(t *testing.T) {
 		t.Fatalf("SessionDir: %v", err)
 	}
 
-	want := "/tmp/test-state/hew/projects/"
+	want := "/tmp/test-state/clnkr/projects/"
 	if len(dir) <= len(want) || dir[:len(want)] != want {
 		t.Errorf("SessionDir: got %q, want prefix %q", dir, want)
 	}
@@ -80,7 +80,7 @@ func TestSaveAndLoadSession(t *testing.T) {
 	}
 
 	// Save a session
-	original := []hew.Message{
+	original := []clnkr.Message{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi there"},
 	}
@@ -118,7 +118,7 @@ func TestSaveMultipleAndLoadLatest(t *testing.T) {
 	projectDir := "/tmp/test-project-multi"
 
 	for i := 0; i < 3; i++ {
-		msgs := []hew.Message{
+		msgs := []clnkr.Message{
 			{Role: "user", Content: fmt.Sprintf("msg %d", i)},
 		}
 		if err := session.SaveSession(projectDir, msgs); err != nil {
@@ -144,7 +144,7 @@ func TestListSessions(t *testing.T) {
 	projectDir := "/tmp/test-project-list"
 
 	for i := 0; i < 3; i++ {
-		msgs := []hew.Message{
+		msgs := []clnkr.Message{
 			{Role: "user", Content: fmt.Sprintf("msg %d", i)},
 		}
 		if err := session.SaveSession(projectDir, msgs); err != nil {
@@ -191,7 +191,7 @@ func TestSessionDirDefaultsToLocalState(t *testing.T) {
 	}
 
 	home, _ := os.UserHomeDir()
-	want := filepath.Join(home, ".local", "state", "hew", "projects")
+	want := filepath.Join(home, ".local", "state", "clnkr", "projects")
 	if len(dir) <= len(want) || dir[:len(want)] != want {
 		t.Errorf("SessionDir without XDG: got %q, want prefix %q", dir, want)
 	}

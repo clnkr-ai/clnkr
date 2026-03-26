@@ -5,15 +5,15 @@ import (
 	"strings"
 	"testing"
 
-	hew "github.com/cosgroveb/hew"
+	clnkr "github.com/clnkr-ai/clnkr"
 )
 
 func TestChatAppendEventResponse(t *testing.T) {
 	s := defaultStyles(true)
 	c := newChatModel(80, 24, s, false)
 
-	c.appendEvent(hew.EventResponse{
-		Message: hew.Message{Role: "assistant", Content: "hello world"},
+	c.appendEvent(clnkr.EventResponse{
+		Message: clnkr.Message{Role: "assistant", Content: "hello world"},
 	})
 
 	content := c.content.String()
@@ -72,7 +72,7 @@ func TestChatPendingCommandBuffer(t *testing.T) {
 	s := defaultStyles(true)
 	c := newChatModel(80, 24, s, false)
 
-	c.appendEvent(hew.EventCommandStart{Command: "ls -la", Dir: "/tmp"})
+	c.appendEvent(clnkr.EventCommandStart{Command: "ls -la", Dir: "/tmp"})
 	if c.pendingCmd == "" {
 		t.Error("pendingCmd should be set after EventCommandStart")
 	}
@@ -80,7 +80,7 @@ func TestChatPendingCommandBuffer(t *testing.T) {
 		t.Error("pending command should not be in committed content")
 	}
 
-	c.appendEvent(hew.EventCommandDone{Command: "ls -la", Stdout: "total 0\n", ExitCode: 0, Err: nil})
+	c.appendEvent(clnkr.EventCommandDone{Command: "ls -la", Stdout: "total 0\n", ExitCode: 0, Err: nil})
 	if c.pendingCmd != "" {
 		t.Error("pendingCmd should be cleared after EventCommandDone")
 	}
@@ -104,7 +104,7 @@ func TestChatBufferInvariant(t *testing.T) {
 
 	// Commit stream, then start a command — streamBuf must be empty during command
 	c.commitStream("hello")
-	c.appendEvent(hew.EventCommandStart{Command: "ls", Dir: "."})
+	c.appendEvent(clnkr.EventCommandStart{Command: "ls", Dir: "."})
 	if c.streamBuf.Len() != 0 {
 		t.Error("streamBuf must be empty while command is pending")
 	}
@@ -135,7 +135,7 @@ func TestChatProtocolFailure(t *testing.T) {
 	s := defaultStyles(true)
 	c := newChatModel(80, 24, s, false)
 
-	c.appendEvent(hew.EventProtocolFailure{Reason: "parse_error", Raw: "not json"})
+	c.appendEvent(clnkr.EventProtocolFailure{Reason: "parse_error", Raw: "not json"})
 	content := c.content.String()
 	if !strings.Contains(content, "parse_error") {
 		t.Errorf("content should contain protocol error reason, got: %q", content)
@@ -146,7 +146,7 @@ func TestChatDebugVerbose(t *testing.T) {
 	s := defaultStyles(true)
 	c := newChatModel(80, 24, s, true) // verbose=true
 
-	c.appendEvent(hew.EventDebug{Message: "test debug"})
+	c.appendEvent(clnkr.EventDebug{Message: "test debug"})
 	content := c.content.String()
 	if !strings.Contains(content, "test debug") {
 		t.Errorf("verbose mode should show debug messages, got: %q", content)
@@ -157,7 +157,7 @@ func TestChatDebugNonVerbose(t *testing.T) {
 	s := defaultStyles(true)
 	c := newChatModel(80, 24, s, false) // verbose=false
 
-	c.appendEvent(hew.EventDebug{Message: "test debug"})
+	c.appendEvent(clnkr.EventDebug{Message: "test debug"})
 	content := c.content.String()
 	if strings.Contains(content, "test debug") {
 		t.Errorf("non-verbose mode should not show debug messages, got: %q", content)
@@ -198,7 +198,7 @@ func TestChatDebugResetsStreaming(t *testing.T) {
 	}
 
 	// "querying model..." signal resets streaming state
-	c.appendEvent(hew.EventDebug{Message: "querying model..."})
+	c.appendEvent(clnkr.EventDebug{Message: "querying model..."})
 	if c.streaming {
 		t.Error("expected streaming=false after 'querying model...' debug event")
 	}

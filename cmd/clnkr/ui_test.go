@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	hew "github.com/cosgroveb/hew"
+	clnkr "github.com/clnkr-ai/clnkr"
 )
 
 func setupModel() model {
@@ -37,11 +37,11 @@ func updateModel(t *testing.T, m model, msg tea.Msg) model {
 
 func TestModelHandlesEventResponse(t *testing.T) {
 	m := setupModel()
-	m = updateModel(t, m, eventMsg{event: hew.EventDebug{Message: "querying model..."}})
+	m = updateModel(t, m, eventMsg{event: clnkr.EventDebug{Message: "querying model..."}})
 
-	msg := eventMsg{event: hew.EventResponse{
-		Message: hew.Message{Role: "assistant", Content: "full response"},
-		Usage:   hew.Usage{InputTokens: 100, OutputTokens: 50},
+	msg := eventMsg{event: clnkr.EventResponse{
+		Message: clnkr.Message{Role: "assistant", Content: "full response"},
+		Usage:   clnkr.Usage{InputTokens: 100, OutputTokens: 50},
 	}}
 	um := updateModel(t, m, msg)
 
@@ -98,7 +98,7 @@ func TestModelAgentDonePreservesError(t *testing.T) {
 
 func TestModelAgentDoneCommitsStreamBuffer(t *testing.T) {
 	m := setupModel()
-	m = updateModel(t, m, eventMsg{event: hew.EventDebug{Message: "querying model..."}})
+	m = updateModel(t, m, eventMsg{event: clnkr.EventDebug{Message: "querying model..."}})
 
 	um := updateModel(t, m, agentDoneMsg{err: fmt.Errorf("connection lost")})
 
@@ -245,9 +245,9 @@ func TestModelViewContainsStatusBar(t *testing.T) {
 
 func TestModelEventResponseUpdatesStatus(t *testing.T) {
 	m := setupModel()
-	m = updateModel(t, m, eventMsg{event: hew.EventResponse{
-		Message: hew.Message{Role: "assistant", Content: "hi"},
-		Usage:   hew.Usage{InputTokens: 500, OutputTokens: 200},
+	m = updateModel(t, m, eventMsg{event: clnkr.EventResponse{
+		Message: clnkr.Message{Role: "assistant", Content: "hi"},
+		Usage:   clnkr.Usage{InputTokens: 500, OutputTokens: 200},
 	}})
 
 	if m.status.inputTokens != 500 {
@@ -260,8 +260,8 @@ func TestModelEventResponseUpdatesStatus(t *testing.T) {
 
 func TestModelCommandDoneIncrementsStep(t *testing.T) {
 	m := setupModel()
-	m = updateModel(t, m, eventMsg{event: hew.EventCommandStart{Command: "ls", Dir: "."}})
-	m = updateModel(t, m, eventMsg{event: hew.EventCommandDone{Command: "ls", Stdout: "ok", ExitCode: 0, Err: nil}})
+	m = updateModel(t, m, eventMsg{event: clnkr.EventCommandStart{Command: "ls", Dir: "."}})
+	m = updateModel(t, m, eventMsg{event: clnkr.EventCommandDone{Command: "ls", Stdout: "ok", ExitCode: 0, Err: nil}})
 
 	if m.status.stepCount != 1 {
 		t.Errorf("stepCount = %d, want 1", m.status.stepCount)
@@ -328,8 +328,8 @@ func TestModelDiffOverlayBlocksOtherKeys(t *testing.T) {
 
 func TestModelTracksFilesFromCommands(t *testing.T) {
 	m := setupModel()
-	m = updateModel(t, m, eventMsg{event: hew.EventCommandStart{Command: "touch newfile.go", Dir: "."}})
-	m = updateModel(t, m, eventMsg{event: hew.EventCommandDone{Command: "touch newfile.go", ExitCode: 0, Err: nil}})
+	m = updateModel(t, m, eventMsg{event: clnkr.EventCommandStart{Command: "touch newfile.go", Dir: "."}})
+	m = updateModel(t, m, eventMsg{event: clnkr.EventCommandDone{Command: "touch newfile.go", ExitCode: 0, Err: nil}})
 
 	if len(m.files.files) != 1 {
 		t.Errorf("expected 1 tracked file, got %d: %v", len(m.files.files), m.files.files)
