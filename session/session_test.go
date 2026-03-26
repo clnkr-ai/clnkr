@@ -58,7 +58,7 @@ func TestSessionDir(t *testing.T) {
 		t.Fatalf("SessionDir: %v", err)
 	}
 
-	want := "/tmp/test-state/hew/projects/"
+	want := "/tmp/test-state/clnkr/projects/"
 	if len(dir) <= len(want) || dir[:len(want)] != want {
 		t.Errorf("SessionDir: got %q, want prefix %q", dir, want)
 	}
@@ -191,7 +191,7 @@ func TestSessionDirDefaultsToLocalState(t *testing.T) {
 	}
 
 	home, _ := os.UserHomeDir()
-	want := filepath.Join(home, ".local", "state", "hew", "projects")
+	want := filepath.Join(home, ".local", "state", "clnkr", "projects")
 	if len(dir) <= len(want) || dir[:len(want)] != want {
 		t.Errorf("SessionDir without XDG: got %q, want prefix %q", dir, want)
 	}
