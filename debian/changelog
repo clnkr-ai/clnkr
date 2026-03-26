@@ -1,4 +1,4 @@
-hew (0.7.0-1) unstable; urgency=medium
+clnkr (0.7.0-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -100,7 +100,7 @@ hew (0.7.0-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Thu, 26 Mar 2026 17:22:54 +0000
 
-hew (0.6.1-1) unstable; urgency=medium
+clnkr (0.6.1-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -201,7 +201,7 @@ hew (0.6.1-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Tue, 24 Mar 2026 14:00:45 +0000
 
-hew (0.6.0-1) unstable; urgency=medium
+clnkr (0.6.0-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -295,7 +295,7 @@ hew (0.6.0-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Sun, 15 Mar 2026 01:00:34 +0000
 
-hew (0.5.6-1) unstable; urgency=medium
+clnkr (0.5.6-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -386,7 +386,7 @@ hew (0.5.6-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Sat, 14 Mar 2026 22:24:06 +0000
 
-hew (0.5.5-1) unstable; urgency=medium
+clnkr (0.5.5-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -474,7 +474,7 @@ hew (0.5.5-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Sat, 14 Mar 2026 22:11:45 +0000
 
-hew (0.5.4-1) unstable; urgency=medium
+clnkr (0.5.4-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -559,7 +559,7 @@ hew (0.5.4-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Sat, 14 Mar 2026 21:46:35 +0000
 
-hew (0.5.3-1) unstable; urgency=medium
+clnkr (0.5.3-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -644,7 +644,7 @@ hew (0.5.3-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Sat, 14 Mar 2026 20:53:42 +0000
 
-hew (0.5.2-1) unstable; urgency=medium
+clnkr (0.5.2-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -726,7 +726,7 @@ hew (0.5.2-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Sat, 14 Mar 2026 19:45:30 +0000
 
-hew (0.5.2-1) unstable; urgency=medium
+clnkr (0.5.2-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -798,7 +798,7 @@ hew (0.5.2-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Sat, 14 Mar 2026 19:42:29 +0000
 
-hew (0.5.1-1) unstable; urgency=medium
+clnkr (0.5.1-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -870,7 +870,7 @@ hew (0.5.1-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Sat, 14 Mar 2026 17:32:45 +0000
 
-hew (0.5.1-1) unstable; urgency=medium
+clnkr (0.5.1-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -935,7 +935,7 @@ hew (0.5.1-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Sat, 14 Mar 2026 17:28:21 +0000
 
-hew (0.5.0-1) unstable; urgency=medium
+clnkr (0.5.0-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -1005,7 +1005,7 @@ hew (0.5.0-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Wed, 11 Mar 2026 21:11:22 +0000
 
-hew (0.5.0-1) unstable; urgency=medium
+clnkr (0.5.0-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -1068,7 +1068,7 @@ hew (0.5.0-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Wed, 11 Mar 2026 21:05:55 +0000
 
-hew (0.4.2-1) unstable; urgency=medium
+clnkr (0.4.2-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -1123,7 +1123,7 @@ hew (0.4.2-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Wed, 11 Mar 2026 19:53:24 +0000
 
-hew (0.4.1-1) unstable; urgency=medium
+clnkr (0.4.1-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -1169,7 +1169,7 @@ hew (0.4.1-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Wed, 11 Mar 2026 19:38:09 +0000
 
-hew (0.4.0-1) unstable; urgency=medium
+clnkr (0.4.0-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -1216,7 +1216,7 @@ hew (0.4.0-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Wed, 11 Mar 2026 19:33:28 +0000
 
-hew (0.3.1-1) unstable; urgency=medium
+clnkr (0.3.1-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -1255,7 +1255,7 @@ hew (0.3.1-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Wed, 11 Mar 2026 19:11:24 +0000
 
-hew (0.3.0-1) unstable; urgency=medium
+clnkr (0.3.0-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -1291,7 +1291,7 @@ hew (0.3.0-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Wed, 11 Mar 2026 19:01:50 +0000
 
-hew (0.2.2-1) unstable; urgency=medium
+clnkr (0.2.2-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -1323,7 +1323,7 @@ hew (0.2.2-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Wed, 11 Mar 2026 14:38:33 +0000
 
-hew (0.2.1-1) unstable; urgency=medium
+clnkr (0.2.1-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -1354,7 +1354,7 @@ hew (0.2.1-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Tue, 10 Mar 2026 03:25:18 +0000
 
-hew (0.2.0-1) unstable; urgency=medium
+clnkr (0.2.0-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -1382,7 +1382,7 @@ hew (0.2.0-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Mon, 09 Mar 2026 14:21:34 +0000
 
-hew (0.1.3-1) unstable; urgency=medium
+clnkr (0.1.3-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -1405,7 +1405,7 @@ hew (0.1.3-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Sun, 08 Mar 2026 05:41:45 +0000
 
-hew (0.1.2-1) unstable; urgency=medium
+clnkr (0.1.2-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -1425,7 +1425,7 @@ hew (0.1.2-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Sun, 08 Mar 2026 05:22:30 +0000
 
-hew (0.1.1-1) unstable; urgency=medium
+clnkr (0.1.1-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
   * Add initial Debian packaging
@@ -1438,13 +1438,13 @@ hew (0.1.1-1) unstable; urgency=medium
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Sun, 08 Mar 2026 05:02:44 +0000
 
-hew (0.0.1-1) unstable; urgency=medium
+clnkr (0.0.1-1) unstable; urgency=medium
 
   * Release 0.0.1
 
  -- Brian Cosgrove <cosgroveb@gmail.com>  Sat, 07 Mar 2026 22:58:56 +0000
 
-hew (0.0.1-1) unstable; urgency=low
+clnkr (0.0.1-1) unstable; urgency=low
 
   * Initial packaging.
 
