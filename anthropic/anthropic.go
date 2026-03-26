@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/cosgroveb/hew"
+	"github.com/clnkr-ai/clnkr"
 )
 
 // Model talks to the Anthropic Messages API.
@@ -38,7 +38,7 @@ type request struct {
 	Model     string        `json:"model"`
 	MaxTokens int           `json:"max_tokens"`
 	System    string        `json:"system,omitempty"`
-	Messages  []hew.Message `json:"messages"`
+	Messages  []clnkr.Message `json:"messages"`
 }
 
 type response struct {
@@ -77,7 +77,7 @@ func extractErrorMessage(body []byte) string {
 	return string(body)
 }
 
-func (m *Model) Query(ctx context.Context, messages []hew.Message) (hew.Response, error) {
+func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
 	body, err := json.Marshal(request{
 		Model:     m.model,
 		MaxTokens: m.maxTokens,
@@ -85,12 +85,12 @@ func (m *Model) Query(ctx context.Context, messages []hew.Message) (hew.Response
 		Messages:  messages,
 	})
 	if err != nil {
-		return hew.Response{}, fmt.Errorf("marshal request: %w", err)
+		return clnkr.Response{}, fmt.Errorf("marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", m.baseURL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
-		return hew.Response{}, fmt.Errorf("create request: %w", err)
+		return clnkr.Response{}, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", m.apiKey)
@@ -98,21 +98,21 @@ func (m *Model) Query(ctx context.Context, messages []hew.Message) (hew.Response
 
 	resp, err := m.client.Do(req)
 	if err != nil {
-		return hew.Response{}, fmt.Errorf("send request: %w", err)
+		return clnkr.Response{}, fmt.Errorf("send request: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort cleanup
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
-		return hew.Response{}, fmt.Errorf("read response: %w", err)
+		return clnkr.Response{}, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return hew.Response{}, fmt.Errorf("api error (status %d): %s", resp.StatusCode, extractErrorMessage(respBody))
+		return clnkr.Response{}, fmt.Errorf("api error (status %d): %s", resp.StatusCode, extractErrorMessage(respBody))
 	}
 
 	var apiResp response
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return hew.Response{}, fmt.Errorf("unmarshal response: %w", err)
+		return clnkr.Response{}, fmt.Errorf("unmarshal response: %w", err)
 	}
 
 	var text string
@@ -121,8 +121,8 @@ func (m *Model) Query(ctx context.Context, messages []hew.Message) (hew.Response
 			text += block.Text
 		}
 	}
-	return hew.Response{
-		Message: hew.Message{Role: "assistant", Content: text},
-		Usage:   hew.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens},
+	return clnkr.Response{
+		Message: clnkr.Message{Role: "assistant", Content: text},
+		Usage:   clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens},
 	}, nil
 }

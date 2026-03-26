@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cosgroveb/hew"
+	"github.com/clnkr-ai/clnkr"
 )
 
 // SessionInfo holds metadata about a saved session.
@@ -24,7 +24,7 @@ type SessionInfo struct {
 
 type sessionFile struct {
 	Created  string        `json:"created"`
-	Messages []hew.Message `json:"messages"`
+	Messages []clnkr.Message `json:"messages"`
 }
 
 // NormalizeProjectPath converts an absolute working directory to a unique,
@@ -64,7 +64,7 @@ func SessionDir(pwd string) (string, error) {
 }
 
 // SaveSession writes the message history to an atomic session file.
-func SaveSession(pwd string, messages []hew.Message) error {
+func SaveSession(pwd string, messages []clnkr.Message) error {
 	dir, err := SessionDir(pwd)
 	if err != nil {
 		return fmt.Errorf("save session: %w", err)
@@ -114,7 +114,7 @@ func SaveSession(pwd string, messages []hew.Message) error {
 
 // LoadLatestSession loads the most recent session for the given working directory.
 // Returns nil, nil if no sessions exist.
-func LoadLatestSession(pwd string) ([]hew.Message, error) {
+func LoadLatestSession(pwd string) ([]clnkr.Message, error) {
 	dir, err := SessionDir(pwd)
 	if err != nil {
 		return nil, fmt.Errorf("load latest session: %w", err)

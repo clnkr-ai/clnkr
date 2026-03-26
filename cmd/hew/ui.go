@@ -8,7 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	hew "github.com/cosgroveb/hew"
+	clnkr "github.com/clnkr-ai/clnkr"
 )
 
 // Compile-time assertion that model implements tea.Model.
@@ -37,7 +37,7 @@ type tickMsg time.Time
 // model fields are stale after that copy. This struct is allocated once and
 // shared via pointer.
 type shared struct {
-	agent    *hew.Agent
+	agent    *clnkr.Agent
 	program  *tea.Program
 	eventLog *os.File
 	cwd      string
@@ -51,7 +51,7 @@ type model struct {
 	files     fileTracker
 	styles    *styles
 	shared    *shared
-	eventCh   <-chan hew.Event
+	eventCh   <-chan clnkr.Event
 	cancel    context.CancelFunc
 	width     int
 	height    int
@@ -66,7 +66,7 @@ type model struct {
 }
 
 type modelOpts struct {
-	eventCh   <-chan hew.Event
+	eventCh   <-chan clnkr.Event
 	styles    *styles
 	verbose   bool
 	cancel    context.CancelFunc
@@ -130,7 +130,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.chat.streaming {
 			m.chat.commitPartialStream()
 		}
-		if msg.err != nil && !errors.Is(msg.err, hew.ErrClarificationNeeded) {
+		if msg.err != nil && !errors.Is(msg.err, clnkr.ErrClarificationNeeded) {
 			m.chat.content.WriteString(
 				m.styles.Chat.Warning.Render(fmt.Sprintf("\n%s Agent error: %s", iconError, msg.err)),
 			)
@@ -179,18 +179,18 @@ func (m *model) recalcLayout() {
 }
 
 // routeEvent dispatches a core library event to the appropriate sub-models.
-func (m *model) routeEvent(e hew.Event) {
+func (m *model) routeEvent(e clnkr.Event) {
 	// Capture lastCmd before appendEvent clears it on EventCommandDone
 	lastCmd := m.chat.lastCmd
 
 	m.chat.appendEvent(e)
 	switch ev := e.(type) {
-	case hew.EventResponse:
+	case clnkr.EventResponse:
 		m.status.updateFromResponse(ev.Usage)
-	case hew.EventCommandDone:
+	case clnkr.EventCommandDone:
 		m.status.incrementStep()
 		m.files.trackFromCommand(lastCmd, ev.Stdout)
-	case hew.EventCommandStart, hew.EventProtocolFailure, hew.EventDebug:
+	case clnkr.EventCommandStart, clnkr.EventProtocolFailure, clnkr.EventDebug:
 		// handled by chat.appendEvent only
 	default:
 	}
@@ -339,7 +339,7 @@ func (m model) startTask(task string) (tea.Model, tea.Cmd) {
 	m.cancel = cancel
 
 	// Set up event channel for this run
-	eventCh := make(chan hew.Event, eventChSize)
+	eventCh := make(chan clnkr.Event, eventChSize)
 	m.eventCh = eventCh
 	m.shared.agent.Notify = makeNotify(eventCh, m.shared.eventLog)
 

@@ -1,4 +1,4 @@
-package hew
+package clnkr
 
 // Event is a sealed interface for agent events.
 type Event interface{ event() }

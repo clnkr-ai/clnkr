@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cosgroveb/hew"
-	"github.com/cosgroveb/hew/session"
+	"github.com/clnkr-ai/clnkr"
+	"github.com/clnkr-ai/clnkr/session"
 )
 
 func TestSessionRoundTrip(t *testing.T) {
@@ -24,7 +24,7 @@ func TestSessionRoundTrip(t *testing.T) {
 	}
 
 	// Save a session
-	testMsgs := []hew.Message{
+	testMsgs := []clnkr.Message{
 		{Role: "user", Content: "test prompt"},
 		{Role: "assistant", Content: "test response"},
 	}
@@ -68,14 +68,14 @@ func TestSessionIsolationBetweenProjects(t *testing.T) {
 	proj2 := "/tmp/project-beta"
 
 	// Save to project 1
-	if err := session.SaveSession(proj1, []hew.Message{
+	if err := session.SaveSession(proj1, []clnkr.Message{
 		{Role: "user", Content: "alpha"},
 	}); err != nil {
 		t.Fatalf("SaveSession proj1: %v", err)
 	}
 
 	// Save to project 2
-	if err := session.SaveSession(proj2, []hew.Message{
+	if err := session.SaveSession(proj2, []clnkr.Message{
 		{Role: "user", Content: "beta"},
 	}); err != nil {
 		t.Fatalf("SaveSession proj2: %v", err)
