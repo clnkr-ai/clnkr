@@ -179,18 +179,18 @@ func TestLoadPromptWithOptions_LayeredAgentsMD(t *testing.T) {
 		}
 	})
 
-	t.Run("loads XDG_CONFIG_HOME hew AGENTS.md", func(t *testing.T) {
+	t.Run("loads XDG_CONFIG_HOME clnkr AGENTS.md", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
 		configDir := t.TempDir()
 		t.Setenv("XDG_CONFIG_HOME", configDir)
 
-		hewConfigDir := filepath.Join(configDir, "hew")
-		if err := os.MkdirAll(hewConfigDir, 0755); err != nil {
+		clnkrConfigDir := filepath.Join(configDir, "clnkr")
+		if err := os.MkdirAll(clnkrConfigDir, 0755); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
-		content := "Hew-specific config instructions."
-		if err := os.WriteFile(filepath.Join(hewConfigDir, "AGENTS.md"), []byte(content), 0644); err != nil {
+		content := "Clnkr-specific config instructions."
+		if err := os.WriteFile(filepath.Join(clnkrConfigDir, "AGENTS.md"), []byte(content), 0644); err != nil {
 			t.Fatalf("write AGENTS.md: %v", err)
 		}
 
@@ -217,12 +217,12 @@ func TestLoadPromptWithOptions_LayeredAgentsMD(t *testing.T) {
 		}
 
 		// XDG config AGENTS.md
-		hewConfigDir := filepath.Join(configDir, "hew")
-		if err := os.MkdirAll(hewConfigDir, 0755); err != nil {
+		clnkrConfigDir := filepath.Join(configDir, "clnkr")
+		if err := os.MkdirAll(clnkrConfigDir, 0755); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
 		configContent := "Config layer."
-		if err := os.WriteFile(filepath.Join(hewConfigDir, "AGENTS.md"), []byte(configContent), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(clnkrConfigDir, "AGENTS.md"), []byte(configContent), 0644); err != nil {
 			t.Fatalf("write: %v", err)
 		}
 
@@ -260,18 +260,18 @@ func TestLoadPromptWithOptions_LayeredAgentsMD(t *testing.T) {
 		t.Setenv("HOME", home)
 		t.Setenv("XDG_CONFIG_HOME", "")
 
-		hewConfigDir := filepath.Join(home, ".config", "hew")
-		if err := os.MkdirAll(hewConfigDir, 0755); err != nil {
+		clnkrConfigDir := filepath.Join(home, ".config", "clnkr")
+		if err := os.MkdirAll(clnkrConfigDir, 0755); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
 		content := "Default config path."
-		if err := os.WriteFile(filepath.Join(hewConfigDir, "AGENTS.md"), []byte(content), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(clnkrConfigDir, "AGENTS.md"), []byte(content), 0644); err != nil {
 			t.Fatalf("write: %v", err)
 		}
 
 		prompt := LoadPromptWithOptions(t.TempDir(), PromptOptions{})
 		if !strings.Contains(prompt, content) {
-			t.Error("prompt should load from $HOME/.config/hew/AGENTS.md when XDG_CONFIG_HOME is unset")
+			t.Error("prompt should load from $HOME/.config/clnkr/AGENTS.md when XDG_CONFIG_HOME is unset")
 		}
 	})
 

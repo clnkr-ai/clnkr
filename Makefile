@@ -2,38 +2,38 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
 .DEFAULT_GOAL := build-all
-.PHONY: build-hu build-hew build-all install clean test vet fmt lint sloc check run help setup man check-man
+.PHONY: build-clnku build-clnkr build-all install clean test vet fmt lint sloc check run help setup man check-man
 
-build-hu: ## Build plain CLI binary (hu)
-	go build -trimpath -ldflags '$(LDFLAGS)' -o hu ./cmd/hu/
+build-clnku: ## Build plain CLI binary (clnku)
+	go build -trimpath -ldflags '$(LDFLAGS)' -o clnku ./cmd/clnku/
 
-build-hew: ## Build TUI binary (hew)
-	cd cmd/hew && go build -trimpath -ldflags '$(LDFLAGS)' -o ../../hew .
+build-clnkr: ## Build TUI binary (clnkr)
+	cd cmd/clnkr && go build -trimpath -ldflags '$(LDFLAGS)' -o ../../clnkr .
 
-build-all: build-hu build-hew ## Build both binaries
+build-all: build-clnku build-clnkr ## Build both binaries
 
 install: build-all ## Install both binaries
-	go install -ldflags '$(LDFLAGS)' ./cmd/hu/
-	cd cmd/hew && go install -ldflags '$(LDFLAGS)' .
+	go install -ldflags '$(LDFLAGS)' ./cmd/clnku/
+	cd cmd/clnkr && go install -ldflags '$(LDFLAGS)' .
 
 clean: ## Remove build artifacts
-	rm -f hu hew
+	rm -f clnku clnkr
 
 test: ## Run all tests
 	go test ./... -v
-	cd cmd/hew && go test ./... -v
+	cd cmd/clnkr && go test ./... -v
 
 vet: ## Run go vet
 	go vet ./...
-	cd cmd/hew && go vet ./...
+	cd cmd/clnkr && go vet ./...
 
 fmt: ## Format source code
 	go fmt ./...
-	cd cmd/hew && go fmt ./...
+	cd cmd/clnkr && go fmt ./...
 
 lint: sloc ## Run linters
 	golangci-lint run ./...
-	cd cmd/hew && golangci-lint run ./...
+	cd cmd/clnkr && golangci-lint run ./...
 
 CORE_SLOC_LIMIT := 500
 CORE_FILES := $(filter-out %_test.go,$(wildcard *.go))
@@ -47,22 +47,22 @@ sloc: ## Check core library stays under $(CORE_SLOC_LIMIT) SLOC
 
 check: lint sloc test ## Run lint, SLOC check, and tests
 
-run: build-hew ## Build and start TUI
-	./hew
+run: build-clnkr ## Build and start TUI
+	./clnkr
 
 man: ## Generate man pages from markdown
-	go-md2man -in doc/hew.1.md -out doc/hew.1
-	go-md2man -in doc/hu.1.md -out doc/hu.1
+	go-md2man -in doc/clnkr.1.md -out doc/clnkr.1
+	go-md2man -in doc/clnku.1.md -out doc/clnku.1
 
 check-man: ## Verify committed man pages are up-to-date
-	@cp doc/hew.1 doc/hew.1.bak
-	@go-md2man -in doc/hew.1.md -out doc/hew.1
-	@diff -q doc/hew.1 doc/hew.1.bak >/dev/null 2>&1 || (echo "error: doc/hew.1 is out of date; run 'make man'" && mv doc/hew.1.bak doc/hew.1 && exit 1)
-	@mv doc/hew.1.bak doc/hew.1
-	@cp doc/hu.1 doc/hu.1.bak
-	@go-md2man -in doc/hu.1.md -out doc/hu.1
-	@diff -q doc/hu.1 doc/hu.1.bak >/dev/null 2>&1 || (echo "error: doc/hu.1 is out of date; run 'make man'" && mv doc/hu.1.bak doc/hu.1 && exit 1)
-	@mv doc/hu.1.bak doc/hu.1
+	@cp doc/clnkr.1 doc/clnkr.1.bak
+	@go-md2man -in doc/clnkr.1.md -out doc/clnkr.1
+	@diff -q doc/clnkr.1 doc/clnkr.1.bak >/dev/null 2>&1 || (echo "error: doc/clnkr.1 is out of date; run 'make man'" && mv doc/clnkr.1.bak doc/clnkr.1 && exit 1)
+	@mv doc/clnkr.1.bak doc/clnkr.1
+	@cp doc/clnku.1 doc/clnku.1.bak
+	@go-md2man -in doc/clnku.1.md -out doc/clnku.1
+	@diff -q doc/clnku.1 doc/clnku.1.bak >/dev/null 2>&1 || (echo "error: doc/clnku.1 is out of date; run 'make man'" && mv doc/clnku.1.bak doc/clnku.1 && exit 1)
+	@mv doc/clnku.1.bak doc/clnku.1
 	@echo "man pages are up-to-date"
 
 help: ## Show available targets
