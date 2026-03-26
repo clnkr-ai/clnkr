@@ -21,7 +21,6 @@ coverage.out
 .DS_Store
 Thumbs.db
 
-# Override global gitignore
-!CLAUDE.md
-!.claude/
-.claude/settings.local.json
+# Claude Code
+.claude/
+!.claude/settings.json
