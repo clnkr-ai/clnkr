@@ -33,7 +33,7 @@ func NewModel(baseURL, apiKey, model, systemPrompt string) *Model {
 }
 
 type request struct {
-	Model    string        `json:"model"`
+	Model    string          `json:"model"`
 	Messages []clnkr.Message `json:"messages"`
 }
 

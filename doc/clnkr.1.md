@@ -1,30 +1,30 @@
-hew 1 "hew" "User Commands"
+clnkr 1 "clnkr" "User Commands"
 ==========================
 
 # NAME
 
-hew - a minimal coding agent (TUI)
+clnkr - a minimal coding agent (TUI)
 
 # SYNOPSIS
 
-**hew** [**-p** *task*] [**--model** *name*] [**--base-url** *url*] [**--max-steps** *n*] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**--version**]
+**clnkr** [**-p** *task*] [**--model** *name*] [**--base-url** *url*] [**--max-steps** *n*] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**--version**]
 
 # DESCRIPTION
 
-**hew** is a minimal coding agent with a terminal user interface (TUI), built with bubbletea. It queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.
+**clnkr** is a minimal coding agent with a terminal user interface (TUI), built with bubbletea. It queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.
 
-In default mode, **hew** starts the TUI. With **-p**, it runs a single task and exits. When stdout is not a TTY, **hew** falls back to plain-text rendering.
+In default mode, **clnkr** starts the TUI. With **-p**, it runs a single task and exits. When stdout is not a TTY, **clnkr** falls back to plain-text rendering.
 
 The agent communicates through JSON turns: **act** (execute a command), **clarify** (ask the user), and **done** (signal completion).
 
-A plain CLI variant is available as **hu**(1).
+A plain CLI variant is available as **clnku**(1).
 
 Project-specific instructions are loaded from an **AGENTS.md** file in the current working directory, if present.
 
 # OPTIONS
 
 **-p**, **--prompt** *task*
-: Run the given task and exit. Without this flag, hew starts the TUI.
+: Run the given task and exit. Without this flag, clnkr starts the TUI.
 
 **--model** *name*
 : LLM model identifier (default: claude-sonnet-4-20250514).
@@ -58,7 +58,7 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 
 # ENVIRONMENT
 
-**HEW_API_KEY**
+**CLNKR_API_KEY**
 : API key for the LLM provider (required).
 
 **ANTHROPIC_API_KEY**
@@ -83,4 +83,4 @@ Brian Cosgrove <cosgroveb@gmail.com>
 
 # SEE ALSO
 
-**hu**(1)
+**clnku**(1)
