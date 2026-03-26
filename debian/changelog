@@ -1,3 +1,9 @@
+clnkr (0.8.0-1) unstable; urgency=medium
+
+  * Add clnk symlink to install target
+
+ -- Brian Cosgrove <cosgroveb@gmail.com>  Thu, 26 Mar 2026 23:23:32 +0000
+
 clnkr (0.7.0-1) unstable; urgency=medium
 
   [ Brian Cosgrove ]
