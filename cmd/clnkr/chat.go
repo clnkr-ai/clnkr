@@ -122,7 +122,7 @@ func (c *chatModel) appendEvent(e clnkr.Event) {
 		}
 		if c.verbose {
 			c.content.WriteString(c.styles.Chat.Debug.Render(
-				fmt.Sprintf("[hew] %s", ev.Message),
+				fmt.Sprintf("[clnkr] %s", ev.Message),
 			))
 			c.content.WriteString("\n")
 		}
@@ -161,7 +161,7 @@ func (c *chatModel) resize(width, height int) {
 }
 
 // summarizeCommand returns a short display form of a command.
-// Matches the core library's summarizeCommand behavior.
+// Matches the core library behavior.
 func summarizeCommand(cmd string) string {
 	lines := strings.Split(cmd, "\n")
 	first := lines[0]

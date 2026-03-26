@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 )
 
-const basePrompt = `You are hew, an expert software engineer that solves problems using bash commands. Be concise.
+const basePrompt = `You are an expert software engineer that solves problems using bash commands. Be concise.
 
 <protocol>
 Every response must be exactly one JSON object. Three turn types:
@@ -71,7 +71,7 @@ func LoadPromptWithOptions(dir string, opts PromptOptions) string {
 		}
 	}
 	if configDir != "" {
-		if data, err := os.ReadFile(filepath.Join(configDir, "hew", "AGENTS.md")); err == nil && len(data) > 0 {
+		if data, err := os.ReadFile(filepath.Join(configDir, "clnkr", "AGENTS.md")); err == nil && len(data) > 0 {
 			prompt += "\n\n<config-instructions>\n" + string(data) + "\n</config-instructions>"
 		}
 	}

@@ -60,7 +60,7 @@ func SessionDir(pwd string) (string, error) {
 		return "", fmt.Errorf("session dir: %w", err)
 	}
 
-	return filepath.Join(stateDir, "hew", "projects", normalized), nil
+	return filepath.Join(stateDir, "clnkr", "projects", normalized), nil
 }
 
 // SaveSession writes the message history to an atomic session file.

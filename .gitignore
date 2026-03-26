@@ -1,8 +1,8 @@
 # Binaries
-/hu
-/hew
-/cmd/hu/hu
-/cmd/hew/hew
+/clnku
+/clnkr
+/cmd/clnku/clnku
+/cmd/clnkr/clnkr
 
 # Test binary
 *.test
