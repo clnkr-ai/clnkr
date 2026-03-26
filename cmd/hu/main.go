@@ -11,10 +11,10 @@ import (
 	"os/signal"
 	"strings"
 
-	"github.com/cosgroveb/hew"
-	"github.com/cosgroveb/hew/anthropic"
-	"github.com/cosgroveb/hew/openai"
-	"github.com/cosgroveb/hew/session"
+	"github.com/clnkr-ai/clnkr"
+	"github.com/clnkr-ai/clnkr/anthropic"
+	"github.com/clnkr-ai/clnkr/openai"
+	"github.com/clnkr-ai/clnkr/session"
 )
 
 // version is set at build time via -ldflags.
@@ -188,7 +188,7 @@ Environment:
 		defer eventLogFile.Close() //nolint:errcheck
 	}
 
-	systemPrompt := hew.LoadPromptWithOptions(cwd, hew.PromptOptions{
+	systemPrompt := clnkr.LoadPromptWithOptions(cwd, clnkr.PromptOptions{
 		OmitSystemPrompt:   *noSystemPrompt || *noSystemPromptShort,
 		SystemPromptAppend: *systemPromptAppend,
 	})
@@ -198,25 +198,25 @@ Environment:
 		os.Exit(0)
 	}
 
-	var model hew.Model
+	var model clnkr.Model
 	if strings.Contains(*baseURL, "anthropic.com") {
 		model = anthropic.NewModel(*baseURL, apiKey, *modelFlag, systemPrompt)
 	} else {
 		model = openai.NewModel(*baseURL, apiKey, *modelFlag, systemPrompt)
 	}
 
-	executor := &hew.CommandExecutor{}
+	executor := &clnkr.CommandExecutor{}
 
-	agent := hew.NewAgent(model, executor, cwd)
+	agent := clnkr.NewAgent(model, executor, cwd)
 
 	showDebug := *verbose || *verboseShort
-	agent.Notify = func(e hew.Event) {
+	agent.Notify = func(e clnkr.Event) {
 		switch e := e.(type) {
-		case hew.EventResponse:
+		case clnkr.EventResponse:
 			fmt.Fprintln(os.Stdout, e.Message.Content) //nolint:errcheck
-		case hew.EventCommandStart:
+		case clnkr.EventCommandStart:
 			fmt.Fprintf(os.Stdout, "--- running: %s ---\n", summarizeCommand(e.Command)) //nolint:errcheck
-		case hew.EventCommandDone:
+		case clnkr.EventCommandDone:
 			if e.Stdout != "" {
 				fmt.Fprint(os.Stdout, e.Stdout) //nolint:errcheck
 			}
@@ -224,11 +224,11 @@ Environment:
 				fmt.Fprint(os.Stderr, e.Stderr) //nolint:errcheck
 			}
 			fmt.Fprintln(os.Stdout, "--- done ---") //nolint:errcheck
-		case hew.EventProtocolFailure:
+		case clnkr.EventProtocolFailure:
 			if showDebug {
 				fmt.Fprintf(os.Stderr, "[hu] protocol error: %s\n", e.Reason) //nolint:errcheck
 			}
-		case hew.EventDebug:
+		case clnkr.EventDebug:
 			if showDebug {
 				fmt.Fprintf(os.Stderr, "[hu] %s\n", e.Message)
 			}
@@ -248,7 +248,7 @@ Environment:
 			fmt.Fprintf(os.Stderr, "Error: cannot read messages file %q: %v\n", *loadMessages, err)
 			os.Exit(1)
 		}
-		var msgs []hew.Message
+		var msgs []clnkr.Message
 		if err := json.Unmarshal(data, &msgs); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: cannot parse messages file %q: %v\n", *loadMessages, err)
 			os.Exit(1)
@@ -308,7 +308,7 @@ Environment:
 			}
 		}
 		if runErr != nil {
-			if errors.Is(runErr, hew.ErrClarificationNeeded) {
+			if errors.Is(runErr, clnkr.ErrClarificationNeeded) {
 				fmt.Fprintln(os.Stderr, "Clarification needed.")
 				os.Exit(exitClarificationNeeded)
 			}
@@ -332,7 +332,7 @@ Environment:
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		if err := agent.Run(ctx, input); err != nil {
-			if errors.Is(err, hew.ErrClarificationNeeded) {
+			if errors.Is(err, clnkr.ErrClarificationNeeded) {
 				stop()
 				continue
 			}
@@ -361,14 +361,14 @@ type jsonEvent struct {
 	Payload any    `json:"payload"`
 }
 
-func writeEventLog(f *os.File, e hew.Event) {
+func writeEventLog(f *os.File, e clnkr.Event) {
 	var je jsonEvent
 	switch e := e.(type) {
-	case hew.EventResponse:
+	case clnkr.EventResponse:
 		je = jsonEvent{Type: "response", Payload: e}
-	case hew.EventCommandStart:
+	case clnkr.EventCommandStart:
 		je = jsonEvent{Type: "command_start", Payload: e}
-	case hew.EventCommandDone:
+	case clnkr.EventCommandDone:
 		je = jsonEvent{Type: "command_done", Payload: struct {
 			Command  string `json:"command"`
 			Stdout   string `json:"stdout"`
@@ -376,12 +376,12 @@ func writeEventLog(f *os.File, e hew.Event) {
 			ExitCode int    `json:"exit_code"`
 			Err      string `json:"err,omitempty"`
 		}{Command: e.Command, Stdout: e.Stdout, Stderr: e.Stderr, ExitCode: e.ExitCode, Err: errString(e.Err)}}
-	case hew.EventProtocolFailure:
+	case clnkr.EventProtocolFailure:
 		je = jsonEvent{Type: "protocol_failure", Payload: struct {
 			Reason string `json:"reason"`
 			Raw    string `json:"raw"`
 		}{Reason: e.Reason, Raw: e.Raw}}
-	case hew.EventDebug:
+	case clnkr.EventDebug:
 		je = jsonEvent{Type: "debug", Payload: e}
 	default:
 		return

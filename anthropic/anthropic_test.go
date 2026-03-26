@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/cosgroveb/hew"
-	"github.com/cosgroveb/hew/anthropic"
+	"github.com/clnkr-ai/clnkr"
+	"github.com/clnkr-ai/clnkr/anthropic"
 )
 
 func TestModel(t *testing.T) {
@@ -29,7 +29,7 @@ func TestModel(t *testing.T) {
 		defer server.Close()
 
 		m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys prompt")
-		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hello"}})
+		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hello"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -54,7 +54,7 @@ func TestModel(t *testing.T) {
 		defer server.Close()
 
 		m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
-		resp, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
+		resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -83,7 +83,7 @@ func TestModel(t *testing.T) {
 		defer server.Close()
 
 		m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
-		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
+		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
 		if err == nil {
 			t.Fatal("expected error on 429")
 		}
@@ -101,7 +101,7 @@ func TestModel(t *testing.T) {
 		defer server.Close()
 
 		m := anthropic.NewModel(server.URL, "bad-key", "claude-test", "sys")
-		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
+		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
 		if err == nil {
 			t.Fatal("expected error on 502")
 		}

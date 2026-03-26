@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/cosgroveb/hew"
-	"github.com/cosgroveb/hew/openai"
+	"github.com/clnkr-ai/clnkr"
+	"github.com/clnkr-ai/clnkr/openai"
 )
 
 func TestModel(t *testing.T) {
@@ -29,7 +29,7 @@ func TestModel(t *testing.T) {
 		defer server.Close()
 
 		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys prompt")
-		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hello"}})
+		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hello"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -52,7 +52,7 @@ func TestModel(t *testing.T) {
 		defer server.Close()
 
 		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-		resp, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
+		resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -78,7 +78,7 @@ func TestModel(t *testing.T) {
 		defer server.Close()
 
 		m := openai.NewModel(server.URL+"/v1beta/openai", "test-key", "gemini-2.0-flash", "sys")
-		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
+		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -100,7 +100,7 @@ func TestModel(t *testing.T) {
 		defer server.Close()
 
 		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
+		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
 		if err == nil {
 			t.Fatal("expected error on 429")
 		}
@@ -118,7 +118,7 @@ func TestModel(t *testing.T) {
 		defer server.Close()
 
 		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
+		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
 		if err == nil {
 			t.Fatal("expected error on 429")
 		}
@@ -136,7 +136,7 @@ func TestModel(t *testing.T) {
 		defer server.Close()
 
 		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
+		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
 		if err == nil {
 			t.Fatal("expected error on 502")
 		}
@@ -156,7 +156,7 @@ func TestModel(t *testing.T) {
 		defer server.Close()
 
 		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-		_, err := m.Query(context.Background(), []hew.Message{{Role: "user", Content: "hi"}})
+		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
 		if err == nil {
 			t.Error("expected error on empty choices")
 		}

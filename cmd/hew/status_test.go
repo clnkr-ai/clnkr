@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	hew "github.com/cosgroveb/hew"
+	clnkr "github.com/clnkr-ai/clnkr"
 )
 
 func newTestStatus() statusModel {
@@ -23,7 +23,7 @@ func TestStatusRendersModelName(t *testing.T) {
 
 func TestStatusRendersTokenCounts(t *testing.T) {
 	st := newTestStatus()
-	st.updateFromResponse(hew.Usage{InputTokens: 1200, OutputTokens: 800})
+	st.updateFromResponse(clnkr.Usage{InputTokens: 1200, OutputTokens: 800})
 	view := st.view(80)
 	if !strings.Contains(view, "1.2k in") {
 		t.Errorf("should show input tokens, got: %q", view)
@@ -35,8 +35,8 @@ func TestStatusRendersTokenCounts(t *testing.T) {
 
 func TestStatusTokenCountsCumulative(t *testing.T) {
 	st := newTestStatus()
-	st.updateFromResponse(hew.Usage{InputTokens: 500, OutputTokens: 300})
-	st.updateFromResponse(hew.Usage{InputTokens: 700, OutputTokens: 200})
+	st.updateFromResponse(clnkr.Usage{InputTokens: 500, OutputTokens: 300})
+	st.updateFromResponse(clnkr.Usage{InputTokens: 700, OutputTokens: 200})
 
 	if st.inputTokens != 1200 {
 		t.Errorf("inputTokens = %d, want 1200", st.inputTokens)
