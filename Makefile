@@ -2,7 +2,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
 .DEFAULT_GOAL := build-all
-.PHONY: build-hu build-hew build-all install clean test vet fmt lint check run help setup man check-man
+.PHONY: build-hu build-hew build-all install clean test vet fmt lint sloc check run help setup man check-man
 
 build-hu: ## Build plain CLI binary (hu)
 	go build -trimpath -ldflags '$(LDFLAGS)' -o hu ./cmd/hu/
@@ -35,7 +35,17 @@ lint: ## Run linters
 	golangci-lint run ./...
 	cd cmd/hew && golangci-lint run ./...
 
-check: lint test ## Run lint and tests
+CORE_SLOC_LIMIT := 500
+CORE_FILES := $(filter-out %_test.go,$(wildcard *.go))
+
+sloc: ## Check core library stays under $(CORE_SLOC_LIMIT) SLOC
+	@sloc=$$(cloc --quiet --csv $(CORE_FILES) | tail -1 | cut -d, -f5); \
+	echo "core library: $$sloc / $(CORE_SLOC_LIMIT) SLOC"; \
+	if [ "$$sloc" -gt $(CORE_SLOC_LIMIT) ]; then \
+		echo "error: core exceeds $(CORE_SLOC_LIMIT) SLOC limit" >&2; exit 1; \
+	fi
+
+check: lint sloc test ## Run lint, SLOC check, and tests
 
 run: build-hew ## Build and start TUI
 	./hew
