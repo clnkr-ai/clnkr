@@ -1,4 +1,4 @@
-package hew
+package clnkr
 
 import (
 	"os"

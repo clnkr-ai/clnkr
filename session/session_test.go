@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cosgroveb/hew"
-	"github.com/cosgroveb/hew/session"
+	"github.com/clnkr-ai/clnkr"
+	"github.com/clnkr-ai/clnkr/session"
 )
 
 func TestNormalizeProjectPath(t *testing.T) {
@@ -80,7 +80,7 @@ func TestSaveAndLoadSession(t *testing.T) {
 	}
 
 	// Save a session
-	original := []hew.Message{
+	original := []clnkr.Message{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi there"},
 	}
@@ -118,7 +118,7 @@ func TestSaveMultipleAndLoadLatest(t *testing.T) {
 	projectDir := "/tmp/test-project-multi"
 
 	for i := 0; i < 3; i++ {
-		msgs := []hew.Message{
+		msgs := []clnkr.Message{
 			{Role: "user", Content: fmt.Sprintf("msg %d", i)},
 		}
 		if err := session.SaveSession(projectDir, msgs); err != nil {
@@ -144,7 +144,7 @@ func TestListSessions(t *testing.T) {
 	projectDir := "/tmp/test-project-list"
 
 	for i := 0; i < 3; i++ {
-		msgs := []hew.Message{
+		msgs := []clnkr.Message{
 			{Role: "user", Content: fmt.Sprintf("msg %d", i)},
 		}
 		if err := session.SaveSession(projectDir, msgs); err != nil {

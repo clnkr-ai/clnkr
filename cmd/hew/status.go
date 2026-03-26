@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	hew "github.com/cosgroveb/hew"
+	clnkr "github.com/clnkr-ai/clnkr"
 )
 
 type statusModel struct {
@@ -30,7 +30,7 @@ func newStatusModel(modelName string, maxSteps int, s *statusStyles) statusModel
 	}
 }
 
-func (s *statusModel) updateFromResponse(u hew.Usage) {
+func (s *statusModel) updateFromResponse(u clnkr.Usage) {
 	s.inputTokens += u.InputTokens
 	s.outputTokens += u.OutputTokens
 }

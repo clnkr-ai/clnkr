@@ -12,10 +12,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
-	hew "github.com/cosgroveb/hew"
-	"github.com/cosgroveb/hew/anthropic"
-	"github.com/cosgroveb/hew/openai"
-	"github.com/cosgroveb/hew/session"
+	clnkr "github.com/clnkr-ai/clnkr"
+	"github.com/clnkr-ai/clnkr/anthropic"
+	"github.com/clnkr-ai/clnkr/openai"
+	"github.com/clnkr-ai/clnkr/session"
 )
 
 // version is set at build time via -ldflags.
@@ -189,7 +189,7 @@ Environment:
 		defer eventLogFile.Close() //nolint:errcheck
 	}
 
-	systemPrompt := hew.LoadPromptWithOptions(cwd, hew.PromptOptions{
+	systemPrompt := clnkr.LoadPromptWithOptions(cwd, clnkr.PromptOptions{
 		OmitSystemPrompt:   *noSystemPrompt || *noSystemPromptShort,
 		SystemPromptAppend: *systemPromptAppend,
 	})
@@ -199,14 +199,14 @@ Environment:
 		os.Exit(0)
 	}
 
-	var llm hew.Model
+	var llm clnkr.Model
 	if strings.Contains(*baseURL, "anthropic.com") {
 		llm = anthropic.NewModel(*baseURL, apiKey, *modelFlag, systemPrompt)
 	} else {
 		llm = openai.NewModel(*baseURL, apiKey, *modelFlag, systemPrompt)
 	}
 
-	agent := hew.NewAgent(llm, &hew.CommandExecutor{}, cwd)
+	agent := clnkr.NewAgent(llm, &clnkr.CommandExecutor{}, cwd)
 	if *maxSteps > 0 {
 		agent.MaxSteps = *maxSteps
 	}
@@ -219,7 +219,7 @@ Environment:
 			fmt.Fprintf(os.Stderr, "Error: cannot read messages file %q: %v\n", *loadMessages, err)
 			os.Exit(1)
 		}
-		var msgs []hew.Message
+		var msgs []clnkr.Message
 		if err := json.Unmarshal(data, &msgs); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: cannot parse messages file %q: %v\n", *loadMessages, err)
 			os.Exit(1)
@@ -260,7 +260,7 @@ Environment:
 	runTUI(agent, taskPrompt, *trajectory, *modelFlag, cwd, eventLogFile, showDebug)
 }
 
-func runTUI(agent *hew.Agent, taskPrompt, trajectory, modelName, cwd string, eventLog *os.File, verbose bool) {
+func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, eventLog *os.File, verbose bool) {
 	s := defaultStyles(true) // TODO: detect actual background
 
 	if taskPrompt != "" {
@@ -268,7 +268,7 @@ func runTUI(agent *hew.Agent, taskPrompt, trajectory, modelName, cwd string, eve
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		eventCh := make(chan hew.Event, eventChSize)
+		eventCh := make(chan clnkr.Event, eventChSize)
 		agent.Notify = makeNotify(eventCh, eventLog)
 
 		m := newModel(modelOpts{
@@ -310,7 +310,7 @@ func runTUI(agent *hew.Agent, taskPrompt, trajectory, modelName, cwd string, eve
 		}
 
 		if fm.agentErr != nil {
-			if errors.Is(fm.agentErr, hew.ErrClarificationNeeded) {
+			if errors.Is(fm.agentErr, clnkr.ErrClarificationNeeded) {
 				fmt.Fprintln(os.Stderr, "Clarification needed.")
 				os.Exit(exitClarificationNeeded)
 			}
@@ -355,7 +355,7 @@ func runTUI(agent *hew.Agent, taskPrompt, trajectory, modelName, cwd string, eve
 	}
 
 	if fm.agentErr != nil {
-		if errors.Is(fm.agentErr, hew.ErrClarificationNeeded) {
+		if errors.Is(fm.agentErr, clnkr.ErrClarificationNeeded) {
 			return
 		}
 		os.Exit(1)
@@ -364,7 +364,7 @@ func runTUI(agent *hew.Agent, taskPrompt, trajectory, modelName, cwd string, eve
 
 // runPlain provides plain-text output for non-TTY environments.
 // Matches hew-core behavior. ~30 lines of duplicated Notify logic.
-func runPlain(agent *hew.Agent, taskPrompt, trajectory string, eventLog *os.File, verbose bool) {
+func runPlain(agent *clnkr.Agent, taskPrompt, trajectory string, eventLog *os.File, verbose bool) {
 	if taskPrompt == "" {
 		fmt.Fprintf(os.Stderr, "Error: non-interactive mode requires -p\n")
 		os.Exit(1)
@@ -373,16 +373,16 @@ func runPlain(agent *hew.Agent, taskPrompt, trajectory string, eventLog *os.File
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	agent.Notify = func(e hew.Event) {
+	agent.Notify = func(e clnkr.Event) {
 		if eventLog != nil {
 			writeEventLog(eventLog, e)
 		}
 		switch ev := e.(type) {
-		case hew.EventResponse:
+		case clnkr.EventResponse:
 			fmt.Fprintln(os.Stdout, ev.Message.Content) //nolint:errcheck
-		case hew.EventCommandStart:
+		case clnkr.EventCommandStart:
 			fmt.Fprintf(os.Stdout, "--- running: %s ---\n", summarizeCommand(ev.Command)) //nolint:errcheck
-		case hew.EventCommandDone:
+		case clnkr.EventCommandDone:
 			if ev.Stdout != "" {
 				fmt.Fprint(os.Stdout, ev.Stdout) //nolint:errcheck
 			}
@@ -390,11 +390,11 @@ func runPlain(agent *hew.Agent, taskPrompt, trajectory string, eventLog *os.File
 				fmt.Fprint(os.Stderr, ev.Stderr) //nolint:errcheck
 			}
 			fmt.Fprintln(os.Stdout, "--- done ---") //nolint:errcheck
-		case hew.EventProtocolFailure:
+		case clnkr.EventProtocolFailure:
 			if verbose {
 				fmt.Fprintf(os.Stderr, "[hew] protocol error: %s\n", ev.Reason)
 			}
-		case hew.EventDebug:
+		case clnkr.EventDebug:
 			if verbose {
 				fmt.Fprintf(os.Stderr, "[hew] %s\n", ev.Message)
 			}
@@ -409,7 +409,7 @@ func runPlain(agent *hew.Agent, taskPrompt, trajectory string, eventLog *os.File
 	}
 
 	if runErr != nil {
-		if errors.Is(runErr, hew.ErrClarificationNeeded) {
+		if errors.Is(runErr, clnkr.ErrClarificationNeeded) {
 			fmt.Fprintln(os.Stderr, "Clarification needed.")
 			os.Exit(exitClarificationNeeded)
 		}
@@ -418,7 +418,7 @@ func runPlain(agent *hew.Agent, taskPrompt, trajectory string, eventLog *os.File
 	}
 }
 
-func writeTrajectory(agent *hew.Agent, path string) {
+func writeTrajectory(agent *clnkr.Agent, path string) {
 	msgs := agent.Messages()
 	data, err := json.MarshalIndent(msgs, "", "  ")
 	if err != nil {
