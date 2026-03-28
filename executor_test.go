@@ -107,4 +107,16 @@ func TestCommandExecutor(t *testing.T) {
 			t.Errorf("expected stderr %q, got %q", "nope", out.Stderr)
 		}
 	})
+
+	t.Run("injects persisted env", func(t *testing.T) {
+		envExec := &CommandExecutor{Timeout: 5 * time.Second}
+		envExec.SetEnv(map[string]string{"NANOCHAT_BASE_DIR": "/tmp/runtime"})
+		out, err := envExec.Execute(ctx, `printf %s "$NANOCHAT_BASE_DIR"`, "/tmp")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if out.Stdout != "/tmp/runtime" {
+			t.Fatalf("got %q, want %q", out.Stdout, "/tmp/runtime")
+		}
+	})
 }

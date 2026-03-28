@@ -48,6 +48,49 @@ var (
 
 var jsonBlock = regexp.MustCompile("(?s)```(?:json)?\\s*\\n(.*?)\\n?```")
 
+func sanitizeJSONEscapes(raw string) string {
+	var b strings.Builder
+	b.Grow(len(raw))
+	inString, escaped := false, false
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		if !inString {
+			if c == '"' {
+				inString = true
+			}
+			b.WriteByte(c)
+			continue
+		}
+		if escaped {
+			if !isJSONEscape(c) {
+				b.WriteByte('\\')
+			}
+			b.WriteByte(c)
+			escaped = false
+			continue
+		}
+		if c == '\\' {
+			b.WriteByte(c)
+			escaped = true
+			continue
+		}
+		if c == '"' {
+			inString = false
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+func isJSONEscape(c byte) bool {
+	switch c {
+	case '"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u':
+		return true
+	default:
+		return false
+	}
+}
+
 // extractJSON finds the JSON object in model output. Tries code fences first,
 // then falls back to brace-matching for bare JSON in prose.
 func extractJSON(raw string) (string, error) {
@@ -100,6 +143,7 @@ func ParseTurn(raw string) (Turn, error) {
 	if err != nil {
 		return nil, err
 	}
+	jsonStr = sanitizeJSONEscapes(jsonStr)
 	var env jsonEnvelope
 	if err := json.Unmarshal([]byte(jsonStr), &env); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
@@ -147,6 +191,13 @@ func errorToReason(err error) string {
 
 // protocolCorrectionMessage returns a tagged-text correction message for the model.
 func protocolCorrectionMessage(err error) string {
-	return fmt.Sprintf("[protocol_error]\nreason: %s\nhint: Respond with a single JSON object: {\"type\":\"act\",\"command\":\"...\"} or {\"type\":\"clarify\",\"question\":\"...\"} or {\"type\":\"done\",\"summary\":\"...\"}.\ndetail: %s\n[/protocol_error]",
-		errorToReason(err), err.Error())
+	hint := "Respond with a single JSON object: {\"type\":\"act\",\"command\":\"...\"} or {\"type\":\"clarify\",\"question\":\"...\"} or {\"type\":\"done\",\"summary\":\"...\"}."
+	switch {
+	case strings.Contains(err.Error(), "invalid character '|' in string escape code"):
+		hint += ` Your command contains \| which is not a valid JSON escape. Use \\| for a literal backslash-pipe, or just | if you do not want a backslash.`
+	case strings.Contains(err.Error(), "invalid character '`' in string escape code"):
+		hint += " Your command contains \\` which is not a valid JSON escape. Use \\\\` for a literal backslash-backtick, or just ` if you do not want a backslash."
+	}
+	return fmt.Sprintf("[protocol_error]\nreason: %s\nhint: %s\ndetail: %s\n[/protocol_error]",
+		errorToReason(err), hint, err.Error())
 }
