@@ -17,7 +17,6 @@ type CommandExecutor struct {
 	Timeout      time.Duration
 	ProcessGroup bool
 	ExtraEnv     map[string]string
-	Analysis     shellAnalysis
 }
 
 func (e *CommandExecutor) SetEnv(env map[string]string) {
@@ -29,10 +28,6 @@ func (e *CommandExecutor) SetEnv(env map[string]string) {
 	for k, v := range env {
 		e.ExtraEnv[k] = v
 	}
-}
-
-func (e *CommandExecutor) SetShellAnalysis(analysis shellAnalysis) {
-	e.Analysis = analysis
 }
 
 // Execute runs a command in dir and returns separated stdout/stderr plus exit code.
@@ -51,14 +46,14 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 	defer cleanup()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", wrapped)
+	cmd.WaitDelay = 500 * time.Millisecond
 	cmd.Dir = dir
 	baseEnv := os.Environ()
 	if e.ExtraEnv != nil {
 		baseEnv = envMapToList(e.ExtraEnv)
 	}
 	cmd.Env = append([]string{}, baseEnv...)
-	// These are appended last. On exec, duplicate keys resolve to the last
-	// occurrence, so these overrides win regardless of what baseEnv contains.
+	// Appended last; exec uses last-wins for duplicate keys.
 	cmd.Env = append(cmd.Env,
 		"PAGER=cat",
 		"MANPAGER=cat",
@@ -104,9 +99,6 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 }
 
 func (e *CommandExecutor) wrapCommand(command string) (string, string, func(), error) {
-	if !e.Analysis.CaptureState {
-		return command, "", func() {}, nil
-	}
 	stateFile, err := os.CreateTemp("", "clnkr-shell-state-")
 	if err != nil {
 		return "", "", nil, fmt.Errorf("create state file: %w", err)
@@ -115,14 +107,13 @@ func (e *CommandExecutor) wrapCommand(command string) (string, string, func(), e
 		_ = os.Remove(stateFile.Name())
 		return "", "", nil, fmt.Errorf("close state file: %w", err)
 	}
-	// env -0 is widely available on Linux/macOS and gives robust null-delimited output.
-	// timeout 2 guards against env -0 blocking (e.g. extremely large envs or stalled procs).
-	wrapped := "trap 'clnkr_status=$?; trap - EXIT; { printf \"%s\\0\" \"$PWD\"; timeout 2 env -0; } > \"$CLNKR_STATE_FILE\"; exit $clnkr_status' EXIT\n" + command
+	// Absolute paths: user command may have mutated PATH.
+	wrapped := "trap 'clnkr_status=$?; trap - EXIT; { /usr/bin/printf \"%s\\0\" \"$PWD\"; /usr/bin/env -0; } > \"$CLNKR_STATE_FILE\"; exit $clnkr_status' EXIT\n" + command
 	return wrapped, stateFile.Name(), func() { _ = os.Remove(stateFile.Name()) }, nil
 }
 
 func (e *CommandExecutor) applyPostState(result CommandResult, stateFile string) (CommandResult, error) {
-	if !e.Analysis.CaptureState || stateFile == "" {
+	if stateFile == "" {
 		return result, nil
 	}
 	data, err := os.ReadFile(stateFile)

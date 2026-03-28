@@ -70,9 +70,10 @@ func formatCommandOutput(result CommandResult) string {
 	return b.String()
 }
 
-type executorStateSetter interface {
+// ExecutorStateSetter is optional. Executors that skip it must populate
+// PostCwd/PostEnv themselves for cross-turn state.
+type ExecutorStateSetter interface {
 	SetEnv(map[string]string)
-	SetShellAnalysis(shellAnalysis)
 }
 
 // Step runs one query-parse-execute cycle. Policy lives in Run.
@@ -100,10 +101,8 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	if !isAct {
 		return StepResult{Response: resp, Turn: turn}, nil
 	}
-	analysis := analyzeShell(act.Command)
-	if setter, ok := a.executor.(executorStateSetter); ok {
+	if setter, ok := a.executor.(ExecutorStateSetter); ok {
 		setter.SetEnv(a.env)
-		setter.SetShellAnalysis(analysis)
 	}
 	a.notify(EventCommandStart{Command: act.Command, Dir: a.cwd})
 

@@ -70,15 +70,16 @@ clnkr/                  # core: types, interfaces, Agent, events (root go.mod, s
 - `Step(ctx) (StepResult, error)` — one query-parse-execute cycle, no policy. `StepResult` carries the response, parsed protocol `Turn`, formatted command output payload, and execution error.
 - `Run(ctx, task) error` — policy loop over `Step()`. Counts protocol failures (exits on 3 consecutive) and enforces step limits.
 
-**Structured turn protocol** (`protocol.go`): Models respond with one JSON object per turn. Three turn types: `act` (execute a command), `clarify` (ask for user input), `done` (task complete). `ParseTurn` extracts JSON from model output (handling prose wrapping and code fences), validates required fields, and returns a typed `Turn`. Each `act` turn carries a single command.
+**Structured turn protocol** (`protocol.go`): Models respond with one JSON object per turn. Three turn types: `act` (execute a command), `clarify` (ask for user input), `done` (task complete). `ParseTurn` extracts JSON from model output (handling prose wrapping and code fences), repairs common invalid JSON escapes (`\|`, `` \` ``, malformed `\uXXXX`) via `sanitizeJSONEscapes`, validates required fields, and returns a typed `Turn`. Each `act` turn carries a single command.
 
 **Events:** `Notify func(Event)` callback on Agent. Sealed interface (unexported marker method) with five types: `EventResponse`, `EventCommandStart`, `EventCommandDone`, `EventProtocolFailure`, `EventDebug`. Nil Notify = silent.
 
 **Interfaces:**
 - `Model` — `Query(ctx, []Message) (Response, error)` — implemented by `anthropic.Model` and `openai.Model`
 - `Executor` — `Execute(ctx, command, dir) (CommandResult, error)` — implemented by `CommandExecutor`
+- `ExecutorStateSetter` (optional) — `SetEnv` — the agent type-asserts the executor to this before each command. Custom executors that skip it must populate `CommandResult.PostCwd`/`PostEnv` themselves
 
-**Command result protocol (host-to-model):** The core feeds command results back to the model as a flat tagged text envelope with `[command]`, `[exit_code]`, `[stdout]`, and `[stderr]` sections. This is a deliberate tradeoff:
+**Command result protocol (host-to-model):** The core feeds command results back to the model as a flat tagged text envelope with `[command]`, `[exit_code]`, `[stdout]`, and `[stderr]` sections. Content inside sections is HTML-entity-escaped (`[` → `&#91;`, `<` → `&lt;`, `&` → `&amp;`) to prevent stdout from breaking section markers. This is a deliberate tradeoff:
 - `stdout` and `stderr` stay separated in the core and in events.
 - The protocol is host-generated and deterministic; models only consume it.
 - We intentionally do not use nested XML here. The only downstream machine parsers are `clnku` and `clnkr`, so we prefer a simpler model-facing format with explicit flat delimiters.
@@ -115,6 +116,7 @@ Workflow:
 
 ## Design decisions
 
+- Shell state (cwd, exported env) persists across turns via EXIT trap + state file. Every command is wrapped unconditionally; the trap costs ~2ms and uses absolute paths (`/usr/bin/env -0`) so it works even if the command modified PATH. Shell locals, functions, and aliases do not persist.
 - `Step()` is the loop primitive; `Run()` adds policy
 - `Messages()` returns a defensive copy; `AddMessages()` prepends seed messages (errors after first `Step()`)
 - Model-to-host direction uses structured JSON turns (`protocol.go`); host-to-model direction uses flat tagged text for command results

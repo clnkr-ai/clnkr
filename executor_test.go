@@ -139,7 +139,6 @@ func TestCommandExecutor(t *testing.T) {
 	t.Run("captures post-command shell state", func(t *testing.T) {
 		stateExec := &CommandExecutor{Timeout: 5 * time.Second}
 		cmd := `export CLNKR_TEST_VAR=ok && cd /tmp && printf done`
-		stateExec.SetShellAnalysis(analyzeShell(cmd))
 		out, err := stateExec.Execute(ctx, cmd, "/")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -155,27 +154,21 @@ func TestCommandExecutor(t *testing.T) {
 		}
 	})
 
-	t.Run("state file stays local to one execution", func(t *testing.T) {
+	t.Run("state file does not leak into PostEnv", func(t *testing.T) {
 		stateExec := &CommandExecutor{Timeout: 5 * time.Second}
 		base := envListToMap(os.Environ())
 		base["BASE"] = "ok"
 		stateExec.SetEnv(base)
-		stateExec.SetShellAnalysis(analyzeShell(`export CLNKR_TEST_VAR=ok && printf done`))
 
-		if _, err := stateExec.Execute(ctx, `export CLNKR_TEST_VAR=ok && printf done`, "/tmp"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got := stateExec.ExtraEnv["CLNKR_STATE_FILE"]; got != "" {
-			t.Fatalf("state file leaked into executor env: %q", got)
-		}
-
-		stateExec.SetShellAnalysis(shellAnalysis{})
-		out, err := stateExec.Execute(ctx, `printf %s "$CLNKR_STATE_FILE"`, "/tmp")
+		out, err := stateExec.Execute(ctx, `export CLNKR_TEST_VAR=ok && printf done`, "/tmp")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if out.Stdout != "" {
-			t.Fatalf("state file leaked into next command env: %q", out.Stdout)
+		if _, ok := out.PostEnv["CLNKR_STATE_FILE"]; ok {
+			t.Fatalf("CLNKR_STATE_FILE leaked into PostEnv: %+v", out.PostEnv)
+		}
+		if got := stateExec.ExtraEnv["CLNKR_STATE_FILE"]; got != "" {
+			t.Fatalf("CLNKR_STATE_FILE leaked into ExtraEnv: %q", got)
 		}
 	})
 
@@ -183,7 +176,6 @@ func TestCommandExecutor(t *testing.T) {
 		stateExec := &CommandExecutor{Timeout: 5 * time.Second}
 
 		cmd1 := `export CLNKR_CHAIN_ONE=one && cd /tmp && printf done`
-		stateExec.SetShellAnalysis(analyzeShell(cmd1))
 		out1, err := stateExec.Execute(ctx, cmd1, "/tmp")
 		if err != nil {
 			t.Fatalf("step 1: %v", err)
@@ -194,7 +186,6 @@ func TestCommandExecutor(t *testing.T) {
 
 		stateExec.SetEnv(out1.PostEnv)
 		cmd2 := `export CLNKR_CHAIN_TWO=two && cd /tmp && printf done`
-		stateExec.SetShellAnalysis(analyzeShell(cmd2))
 		out2, err := stateExec.Execute(ctx, cmd2, "/tmp")
 		if err != nil {
 			t.Fatalf("step 2: %v", err)
@@ -205,7 +196,6 @@ func TestCommandExecutor(t *testing.T) {
 
 		stateExec.SetEnv(out2.PostEnv)
 		cmd3 := `unset CLNKR_CHAIN_ONE && cd /tmp && printf done`
-		stateExec.SetShellAnalysis(analyzeShell(cmd3))
 		out3, err := stateExec.Execute(ctx, cmd3, "/tmp")
 		if err != nil {
 			t.Fatalf("step 3: %v", err)
@@ -219,7 +209,6 @@ func TestCommandExecutor(t *testing.T) {
 
 		stateExec.SetEnv(out3.PostEnv)
 		cmd4 := `printf "%s,%s" "$CLNKR_CHAIN_ONE" "$CLNKR_CHAIN_TWO"`
-		stateExec.SetShellAnalysis(analyzeShell(cmd4))
 		out4, err := stateExec.Execute(ctx, cmd4, "/tmp")
 		if err != nil {
 			t.Fatalf("step 4: %v", err)

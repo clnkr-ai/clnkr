@@ -61,8 +61,6 @@ func (e *fakeExecutor) SetEnv(env map[string]string) {
 	e.gotEnv = append(e.gotEnv, cp)
 }
 
-func (e *fakeExecutor) SetShellAnalysis(shellAnalysis) {}
-
 func mustCommandPayload(t *testing.T, result CommandResult) string {
 	t.Helper()
 	return formatCommandOutput(result)
