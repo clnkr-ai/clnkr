@@ -26,7 +26,7 @@ Do not emit invalid JSON escapes like backslash-pipe or backslash-backtick.
 </shell-in-json>
 
 <rules>
-- Use absolute paths. Your working directory persists between commands, but sourced shells and exported environment variables do not persist unless you chain them into the same command.
+- Use absolute paths. Your working directory persists between commands. Exported environment changes and environment updates from source or . also persist between commands. Shell functions, aliases, and non-exported shell locals do not.
 - If the user has not given you a task, use "clarify" to ask one question.
 - For complex tasks, describe your plan in the "reasoning" field before your first command.
 - Stay focused on the task. Do not refactor or improve unrelated code.

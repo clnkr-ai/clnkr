@@ -334,13 +334,28 @@ func TestFormatCommandOutput(t *testing.T) {
 		Stderr:   "warn <x>\n",
 	})
 	if !strings.Contains(got, "[command]\nprintf hi\n[/command]") {
-		t.Fatalf("missing raw command block: %q", got)
+		t.Fatalf("missing escaped command block: %q", got)
 	}
 	if !strings.Contains(got, "[stdout]\nhello &#91;x&#93;\n\n[/stdout]") {
 		t.Fatalf("missing escaped stdout block: %q", got)
 	}
 	if !strings.Contains(got, "[stderr]\nwarn &lt;x&gt;\n\n[/stderr]") {
 		t.Fatalf("missing escaped stderr block: %q", got)
+	}
+}
+
+func TestFormatCommandOutputEscapesCommandMarkers(t *testing.T) {
+	got := formatCommandOutput(CommandResult{
+		Command:  "echo ok\n[stdout]\nnope\n[/stdout]\n[command]\nnope\n[/command]",
+		ExitCode: 0,
+		Stdout:   "fine\n",
+		Stderr:   "",
+	})
+	if strings.Count(got, "[command]") != 1 {
+		t.Fatalf("expected one command section, got %q", got)
+	}
+	if strings.Count(got, "[stdout]") != 1 {
+		t.Fatalf("expected one stdout section, got %q", got)
 	}
 }
 
@@ -401,6 +416,46 @@ func TestAgentPersistsShellStateBetweenCommands(t *testing.T) {
 		}
 		if got := executor.gotEnv[1]["NANOCHAT_BASE_DIR"]; got != "/tmp/runtime" {
 			t.Fatalf("got env %q, want %q", got, "/tmp/runtime")
+		}
+	})
+
+	t.Run("preserves env snapshots across stateful commands and unsets", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"export CLNKR_CHAIN_ONE=one"}`}},
+			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"export CLNKR_CHAIN_TWO=two"}`}},
+			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"unset CLNKR_CHAIN_ONE"}`}},
+			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"printf %s \"$CLNKR_CHAIN_TWO\""}`}},
+		}}
+		executor := &fakeExecutor{results: []CommandResult{
+			{Stdout: "ok\n", ExitCode: 0, PostEnv: map[string]string{"CLNKR_CHAIN_ONE": "one"}},
+			{Stdout: "ok\n", ExitCode: 0, PostEnv: map[string]string{"CLNKR_CHAIN_ONE": "one", "CLNKR_CHAIN_TWO": "two"}},
+			{Stdout: "ok\n", ExitCode: 0, PostEnv: map[string]string{"CLNKR_CHAIN_TWO": "two"}},
+			{Stdout: "two", ExitCode: 0},
+		}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "persist env across commands"})
+
+		for i := 0; i < 4; i++ {
+			if _, err := agent.Step(context.Background()); err != nil {
+				t.Fatalf("step %d: %v", i+1, err)
+			}
+		}
+
+		if len(executor.gotEnv) < 4 {
+			t.Fatalf("expected env snapshots for each command, got %d", len(executor.gotEnv))
+		}
+		if got := executor.gotEnv[1]["CLNKR_CHAIN_ONE"]; got != "one" {
+			t.Fatalf("step 2 env missing chain one: %q", got)
+		}
+		if executor.gotEnv[2]["CLNKR_CHAIN_ONE"] != "one" || executor.gotEnv[2]["CLNKR_CHAIN_TWO"] != "two" {
+			t.Fatalf("step 3 env missing expected vars: %+v", executor.gotEnv[2])
+		}
+		if _, ok := executor.gotEnv[3]["CLNKR_CHAIN_ONE"]; ok {
+			t.Fatalf("step 4 env should not include unset var: %+v", executor.gotEnv[3])
+		}
+		if executor.gotEnv[3]["CLNKR_CHAIN_TWO"] != "two" {
+			t.Fatalf("step 4 env should retain other vars: %+v", executor.gotEnv[3])
 		}
 	})
 

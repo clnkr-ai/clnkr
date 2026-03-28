@@ -110,7 +110,9 @@ func TestCommandExecutor(t *testing.T) {
 
 	t.Run("injects persisted env", func(t *testing.T) {
 		envExec := &CommandExecutor{Timeout: 5 * time.Second}
-		envExec.SetEnv(map[string]string{"NANOCHAT_BASE_DIR": "/tmp/runtime"})
+		base := envListToMap(os.Environ())
+		base["NANOCHAT_BASE_DIR"] = "/tmp/runtime"
+		envExec.SetEnv(base)
 		out, err := envExec.Execute(ctx, `printf %s "$NANOCHAT_BASE_DIR"`, "/tmp")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -141,7 +143,9 @@ func TestCommandExecutor(t *testing.T) {
 
 	t.Run("state file stays local to one execution", func(t *testing.T) {
 		stateExec := &CommandExecutor{Timeout: 5 * time.Second}
-		stateExec.SetEnv(map[string]string{"BASE": "ok"})
+		base := envListToMap(os.Environ())
+		base["BASE"] = "ok"
+		stateExec.SetEnv(base)
 		stateExec.SetShellAnalysis(analyzeShell(`export CLNKR_TEST_VAR=ok && printf done`))
 
 		if _, err := stateExec.Execute(ctx, `export CLNKR_TEST_VAR=ok && printf done`, "/tmp"); err != nil {
@@ -161,29 +165,56 @@ func TestCommandExecutor(t *testing.T) {
 		}
 	})
 
-	t.Run("captures only env deltas and unsets", func(t *testing.T) {
+	t.Run("captures full env snapshots across stateful commands", func(t *testing.T) {
 		stateExec := &CommandExecutor{Timeout: 5 * time.Second}
-		stateExec.SetEnv(map[string]string{"CLNKR_DELTA_BASE": "base", "CLNKR_DELTA_REMOVE": "gone"})
-		cmd := `export CLNKR_DELTA_BASE=changed CLNKR_DELTA_NEW=new && unset CLNKR_DELTA_REMOVE && printf done`
-		stateExec.SetShellAnalysis(analyzeShell(cmd))
-		out, err := stateExec.Execute(ctx, cmd, "/tmp")
+
+		cmd1 := `export CLNKR_CHAIN_ONE=one && cd /tmp && printf done`
+		stateExec.SetShellAnalysis(analyzeShell(cmd1))
+		out1, err := stateExec.Execute(ctx, cmd1, "/tmp")
 		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+			t.Fatalf("step 1: %v", err)
 		}
-		if out.PostEnv["CLNKR_DELTA_BASE"] != "changed" {
-			t.Fatalf("missing changed delta var: %+v", out.PostEnv)
+		if out1.PostEnv["CLNKR_CHAIN_ONE"] != "one" {
+			t.Fatalf("missing chain var in snapshot: %+v", out1.PostEnv)
 		}
-		if out.PostEnv["CLNKR_DELTA_NEW"] != "new" {
-			t.Fatalf("missing new delta var: %+v", out.PostEnv)
+
+		stateExec.SetEnv(out1.PostEnv)
+		cmd2 := `export CLNKR_CHAIN_TWO=two && cd /tmp && printf done`
+		stateExec.SetShellAnalysis(analyzeShell(cmd2))
+		out2, err := stateExec.Execute(ctx, cmd2, "/tmp")
+		if err != nil {
+			t.Fatalf("step 2: %v", err)
 		}
-		if _, ok := out.PostEnv["HOME"]; ok {
-			t.Fatalf("unexpected full env capture in PostEnv: %+v", out.PostEnv)
+		if out2.PostEnv["CLNKR_CHAIN_ONE"] != "one" || out2.PostEnv["CLNKR_CHAIN_TWO"] != "two" {
+			t.Fatalf("snapshot should include earlier exports: %+v", out2.PostEnv)
 		}
-		if _, ok := out.PostEnv["CLNKR_STATE_FILE"]; ok {
-			t.Fatalf("state file leaked into PostEnv: %+v", out.PostEnv)
+
+		stateExec.SetEnv(out2.PostEnv)
+		cmd3 := `unset CLNKR_CHAIN_ONE && cd /tmp && printf done`
+		stateExec.SetShellAnalysis(analyzeShell(cmd3))
+		out3, err := stateExec.Execute(ctx, cmd3, "/tmp")
+		if err != nil {
+			t.Fatalf("step 3: %v", err)
 		}
-		if _, ok := out.PostEnv["CLNKR_DELTA_REMOVE"]; ok {
-			t.Fatalf("unset variable should not appear in PostEnv: %+v", out.PostEnv)
+		if _, ok := out3.PostEnv["CLNKR_CHAIN_ONE"]; ok {
+			t.Fatalf("unset variable should be removed from snapshot: %+v", out3.PostEnv)
+		}
+		if out3.PostEnv["CLNKR_CHAIN_TWO"] != "two" {
+			t.Fatalf("expected other vars to persist: %+v", out3.PostEnv)
+		}
+
+		stateExec.SetEnv(out3.PostEnv)
+		cmd4 := `printf "%s,%s" "$CLNKR_CHAIN_ONE" "$CLNKR_CHAIN_TWO"`
+		stateExec.SetShellAnalysis(analyzeShell(cmd4))
+		out4, err := stateExec.Execute(ctx, cmd4, "/tmp")
+		if err != nil {
+			t.Fatalf("step 4: %v", err)
+		}
+		if out4.Stdout != ",two" {
+			t.Fatalf("expected unset var to stay cleared, got %q", out4.Stdout)
+		}
+		if _, ok := out3.PostEnv["CLNKR_STATE_FILE"]; ok {
+			t.Fatalf("state file leaked into PostEnv: %+v", out3.PostEnv)
 		}
 	})
 }

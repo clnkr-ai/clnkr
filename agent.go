@@ -63,7 +63,7 @@ var sectionEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;",
 
 func formatCommandOutput(result CommandResult) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[command]\n%s\n[/command]\n", result.Command)
+	fmt.Fprintf(&b, "[command]\n%s\n[/command]\n", sectionEscaper.Replace(result.Command))
 	fmt.Fprintf(&b, "[exit_code]\n%d\n[/exit_code]\n", result.ExitCode)
 	fmt.Fprintf(&b, "[stdout]\n%s\n[/stdout]\n", sectionEscaper.Replace(result.Stdout))
 	fmt.Fprintf(&b, "[stderr]\n%s\n[/stderr]", sectionEscaper.Replace(result.Stderr))
@@ -111,7 +111,8 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	if execResult.PostCwd != "" {
 		a.cwd = execResult.PostCwd
 	}
-	if len(execResult.PostEnv) > 0 {
+	// PostEnv is a full next-turn snapshot; nil means no new snapshot captured.
+	if execResult.PostEnv != nil {
 		a.env = execResult.PostEnv
 	}
 	a.notify(EventDebug{Message: fmt.Sprintf("cwd: %s", a.cwd)})

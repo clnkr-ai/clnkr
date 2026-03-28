@@ -21,8 +21,8 @@ type CommandExecutor struct {
 }
 
 func (e *CommandExecutor) SetEnv(env map[string]string) {
-	e.ExtraEnv = nil
-	if len(env) == 0 {
+	if env == nil {
+		e.ExtraEnv = nil
 		return
 	}
 	e.ExtraEnv = make(map[string]string, len(env))
@@ -52,19 +52,20 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", wrapped)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
+	baseEnv := os.Environ()
+	if e.ExtraEnv != nil {
+		baseEnv = envMapToList(e.ExtraEnv)
+	}
+	cmd.Env = append([]string{}, baseEnv...)
+	cmd.Env = append(cmd.Env,
 		"PAGER=cat",
 		"MANPAGER=cat",
 		"GIT_PAGER=cat",
 		"LESS=-R",
 	)
-	for key, value := range e.ExtraEnv {
-		cmd.Env = append(cmd.Env, key+"="+value)
-	}
 	if stateFile != "" {
 		cmd.Env = append(cmd.Env, "CLNKR_STATE_FILE="+stateFile)
 	}
-	baseEnv := envListToMap(cmd.Env)
 
 	if e.ProcessGroup {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -85,7 +86,7 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 	}
 
 	if err == nil {
-		return e.applyPostState(result, stateFile, baseEnv)
+		return e.applyPostState(result, stateFile)
 	}
 
 	var exitErr *exec.ExitError
@@ -93,7 +94,7 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 		result.ExitCode = exitErr.ExitCode()
 	}
 
-	result, stateErr := e.applyPostState(result, stateFile, baseEnv)
+	result, stateErr := e.applyPostState(result, stateFile)
 	if stateErr != nil {
 		return result, fmt.Errorf("run command: %w (shell state: %v)", err, stateErr)
 	}
@@ -117,7 +118,7 @@ func (e *CommandExecutor) wrapCommand(command string) (string, string, func(), e
 	return wrapped, stateFile.Name(), func() { _ = os.Remove(stateFile.Name()) }, nil
 }
 
-func (e *CommandExecutor) applyPostState(result CommandResult, stateFile string, baseEnv map[string]string) (CommandResult, error) {
+func (e *CommandExecutor) applyPostState(result CommandResult, stateFile string) (CommandResult, error) {
 	if !e.Analysis.CaptureState || stateFile == "" {
 		return result, nil
 	}
@@ -144,16 +145,7 @@ func (e *CommandExecutor) applyPostState(result CommandResult, stateFile string,
 		captured[key] = value
 	}
 	delete(captured, "CLNKR_STATE_FILE")
-
-	delta := make(map[string]string)
-	for key, value := range captured {
-		if base, ok := baseEnv[key]; !ok || base != value {
-			delta[key] = value
-		}
-	}
-	if len(delta) > 0 {
-		result.PostEnv = delta
-	}
+	result.PostEnv = captured
 	return result, nil
 }
 
@@ -167,4 +159,12 @@ func envListToMap(list []string) map[string]string {
 		env[key] = value
 	}
 	return env
+}
+
+func envMapToList(env map[string]string) []string {
+	list := make([]string, 0, len(env))
+	for key, value := range env {
+		list = append(list, key+"="+value)
+	}
+	return list
 }

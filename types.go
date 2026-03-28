@@ -27,7 +27,8 @@ type CommandResult struct {
 	Stderr   string
 	ExitCode int
 	PostCwd  string
-	PostEnv  map[string]string
+	// PostEnv is the full environment snapshot for the next turn; nil means no snapshot captured.
+	PostEnv map[string]string
 }
 
 // Model sends messages to an LLM and returns a response.
