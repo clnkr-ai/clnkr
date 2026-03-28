@@ -1,0 +1,45 @@
+{{ define "main" }}
+  <main>
+    <section class="hero">
+      <p class="eyebrow">clnkr.ai</p>
+      <h1>Just bash.</h1>
+      <p class="lede">{{ .Site.Params.description }}</p>
+      <div class="actions">
+        <a class="button button-primary" href="/docs/">Read the docs</a>
+        <a class="button" href="{{ .Site.Params.repo }}">View on GitHub</a>
+      </div>
+    </section>
+
+    <section class="warning-card">
+      <h2>Warning</h2>
+      <p><code>clnkr</code> executes bash directly and currently has no permissions or sandboxing system. Use it only in environments you are willing to trust and break.</p>
+    </section>
+
+    <section class="content-grid">
+      <article class="panel">
+        <h2>What It Is</h2>
+        <p>A deliberately small coding-agent harness. It loops over model output, runs one shell command at a time, and feeds structured results back into the conversation.</p>
+      </article>
+      <article class="panel">
+        <h2>What It Ships</h2>
+        <p><code>clnkr</code> is the TUI. <code>clnku</code> is the plain CLI. Both talk to Anthropic and OpenAI-compatible endpoints.</p>
+      </article>
+      <article class="panel">
+        <h2>Docs First</h2>
+        <p>The reference docs are generated from the markdown manpages already in the repo. The website does not introduce a separate docs format.</p>
+      </article>
+    </section>
+
+    <section class="doc-list">
+      <h2>Reference</h2>
+      <ul>
+        {{ range where .Site.RegularPages "Section" "docs" }}
+          <li>
+            <a href="{{ .RelPermalink }}">{{ .Title }}</a>
+            <span>{{ .Description }}</span>
+          </li>
+        {{ end }}
+      </ul>
+    </section>
+  </main>
+{{ end }}

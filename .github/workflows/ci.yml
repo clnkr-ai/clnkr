@@ -35,3 +35,9 @@ jobs:
 
       - name: Build
         run: make build-all
+
+      - name: Install Hugo
+        run: go install github.com/gohugoio/hugo@v0.159.1
+
+      - name: Build site
+        run: make site-build

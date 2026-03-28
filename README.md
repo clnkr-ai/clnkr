@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/clnkr-ai/clnkr/actions/workflows/ci.yml/badge.svg)](https://github.com/clnkr-ai/clnkr/actions/workflows/ci.yml)
 
+Warning: `clnkr` executes bash directly and currently has no permissions or sandboxing system; use it only in environments you are willing to trust and break.
+
 A minimal coding agent. Query an LLM, execute bash commands, repeat. Supports the Anthropic Messages API and any OpenAI-compatible endpoint (vLLM, Ollama, LiteLLM, etc.).
 
 Ships two binaries: **clnkr** (TUI) and **clnku** (plain CLI). A **clnk** symlink points to clnkr for convenience.

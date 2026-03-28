@@ -1,0 +1,66 @@
+name: Site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: site
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Hugo
+        run: go install github.com/gohugoio/hugo@v0.159.1
+
+      - name: Build site
+        run: make site-build
+
+      - name: Publish to gh-pages
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          publish_dir="$(mktemp -d)"
+
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch origin gh-pages
+            git worktree add "$publish_dir" origin/gh-pages
+          else
+            git worktree add --detach "$publish_dir"
+            (
+              cd "$publish_dir"
+              git checkout --orphan gh-pages
+            )
+          fi
+
+          find "$publish_dir" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a site/public/. "$publish_dir"/
+
+          (
+            cd "$publish_dir"
+            touch .nojekyll
+            git add -A
+            if git diff --cached --quiet; then
+              echo "No site changes to publish"
+              exit 0
+            fi
+            git commit -m "Deploy site from ${GITHUB_SHA}"
+            git push --force origin HEAD:gh-pages
+          )
