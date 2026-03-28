@@ -10,6 +10,12 @@ type shellAnalysis struct {
 	CaptureState bool
 }
 
+// analyzeShell inspects a shell command for state-mutating builtins and sets
+// CaptureState when post-execution env/cwd capture is needed.
+//
+// Detection scope: ".", "cd", "export", "source", "unset". Indirect forms such
+// as `eval "export FOO=bar"` and `declare -x VAR=val` are not detected; those
+// would require evaluating the argument, not just the callee name.
 func analyzeShell(command string) shellAnalysis {
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "command")
 	if err != nil {

@@ -10,6 +10,20 @@ import (
 	"time"
 )
 
+// envListToMap converts a KEY=VALUE environ slice to a map.
+// Only used in tests; production code uses envMapToList for the reverse direction.
+func envListToMap(list []string) map[string]string {
+	env := make(map[string]string, len(list))
+	for _, item := range list {
+		key, value, ok := strings.Cut(item, "=")
+		if !ok {
+			continue
+		}
+		env[key] = value
+	}
+	return env
+}
+
 func TestCommandExecutor(t *testing.T) {
 	exec := &CommandExecutor{Timeout: 5 * time.Second}
 	ctx := context.Background()

@@ -9,5 +9,4 @@ func TestAnalyzeShell(t *testing.T) {
 			t.Fatal("expected shell state capture to be enabled")
 		}
 	})
-
 }

@@ -57,6 +57,8 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 		baseEnv = envMapToList(e.ExtraEnv)
 	}
 	cmd.Env = append([]string{}, baseEnv...)
+	// These are appended last. On exec, duplicate keys resolve to the last
+	// occurrence, so these overrides win regardless of what baseEnv contains.
 	cmd.Env = append(cmd.Env,
 		"PAGER=cat",
 		"MANPAGER=cat",
@@ -114,7 +116,8 @@ func (e *CommandExecutor) wrapCommand(command string) (string, string, func(), e
 		return "", "", nil, fmt.Errorf("close state file: %w", err)
 	}
 	// env -0 is widely available on Linux/macOS and gives robust null-delimited output.
-	wrapped := "trap 'clnkr_status=$?; trap - EXIT; { printf \"%s\\0\" \"$PWD\"; env -0; } > \"$CLNKR_STATE_FILE\"; exit $clnkr_status' EXIT\n" + command
+	// timeout 2 guards against env -0 blocking (e.g. extremely large envs or stalled procs).
+	wrapped := "trap 'clnkr_status=$?; trap - EXIT; { printf \"%s\\0\" \"$PWD\"; timeout 2 env -0; } > \"$CLNKR_STATE_FILE\"; exit $clnkr_status' EXIT\n" + command
 	return wrapped, stateFile.Name(), func() { _ = os.Remove(stateFile.Name()) }, nil
 }
 
@@ -147,18 +150,6 @@ func (e *CommandExecutor) applyPostState(result CommandResult, stateFile string)
 	delete(captured, "CLNKR_STATE_FILE")
 	result.PostEnv = captured
 	return result, nil
-}
-
-func envListToMap(list []string) map[string]string {
-	env := make(map[string]string, len(list))
-	for _, item := range list {
-		key, value, ok := strings.Cut(item, "=")
-		if !ok {
-			continue
-		}
-		env[key] = value
-	}
-	return env
 }
 
 func envMapToList(env map[string]string) []string {
