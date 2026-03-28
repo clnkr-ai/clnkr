@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>clnku | clnkr</title>
+    <meta name="description" content="Plain CLI manual page">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="wordmark" href="/">clnkr</a>
+        <nav class="site-nav" aria-label="Main">
+          
+            <a href="/docs/">Docs</a>
+          
+            <a href="https://github.com/clnkr-ai/clnkr">GitHub</a>
+          
+        </nav>
+      </header>
+
+      
+  <main class="page">
+    <article class="doc-page">
+      <header class="page-header">
+        <p class="eyebrow">docs</p>
+        <h1>clnku</h1>
+        <p class="page-summary">Plain CLI manual page</p>
+      </header>
+      <div class="doc-body">
+        <blockquote>
+<p>Generated from <a href="https://github.com/clnkr-ai/clnkr/blob/main/doc/clnku.1.md">clnku.1.md</a>.</p>
+</blockquote>
+<h1 id="name">NAME</h1>
+<p>clnku - a minimal coding agent (plain CLI)</p>
+<h1 id="synopsis">SYNOPSIS</h1>
+<p><strong>clnku</strong> [<strong>-p</strong> <em>task</em>] [<strong>&ndash;model</strong> <em>name</em>] [<strong>&ndash;base-url</strong> <em>url</em>] [<strong>&ndash;max-steps</strong> <em>n</em>] [<strong>&ndash;load-messages</strong> <em>file</em>] [<strong>&ndash;event-log</strong> <em>file</em>] [<strong>&ndash;trajectory</strong> <em>file</em>] [<strong>-v</strong>|<strong>&ndash;verbose</strong>] [<strong>&ndash;version</strong>]</p>
+<h1 id="description">DESCRIPTION</h1>
+<p><strong>clnku</strong> is a minimal coding agent that queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.</p>
+<p>In default mode, <strong>clnku</strong> starts an interactive REPL. With <strong>-p</strong>, it runs a single task and exits.</p>
+<p><strong>clnku</strong> is the plain CLI variant of the clnkr project, with no external dependencies beyond the Go standard library. A TUI variant is available as <strong>clnkr</strong>(1).</p>
+<p>The agent communicates through JSON turns: <strong>act</strong> (execute a command), <strong>clarify</strong> (ask the user), and <strong>done</strong> (signal completion).</p>
+<p>Project-specific instructions are loaded from an <strong>AGENTS.md</strong> file in the current working directory, if present.</p>
+<h1 id="options">OPTIONS</h1>
+<dl>
+<dt><strong>-p</strong>, <strong>&ndash;prompt</strong> <em>task</em></dt>
+<dd>Run the given task and exit. Without this flag, clnku starts in conversational REPL mode.</dd>
+<dt><strong>&ndash;model</strong> <em>name</em></dt>
+<dd>LLM model identifier (default: claude-sonnet-4-20250514).</dd>
+<dt><strong>&ndash;base-url</strong> <em>url</em></dt>
+<dd>LLM API endpoint (default: <a href="https://api.anthropic.com">https://api.anthropic.com</a>). If the URL contains &ldquo;anthropic.com&rdquo;, the Anthropic adapter is used; otherwise, the OpenAI-compatible adapter is used.</dd>
+<dt><strong>&ndash;max-steps</strong> <em>n</em></dt>
+<dd>Maximum agent iterations. 0 uses the default of 100.</dd>
+<dt><strong>&ndash;load-messages</strong> <em>file</em></dt>
+<dd>Read a JSON array of messages from <em>file</em> and prepend them to the conversation before starting. The format matches <strong>&ndash;trajectory</strong> output, so one agent&rsquo;s trajectory can seed another agent&rsquo;s context.</dd>
+<dt><strong>&ndash;event-log</strong> <em>file</em></dt>
+<dd>Write every agent event as a JSONL line to <em>file</em>. Each line is a JSON object with &ldquo;type&rdquo; and &ldquo;payload&rdquo; fields. Uses O_APPEND for atomic writes, safe to tail from another process.</dd>
+<dt><strong>&ndash;trajectory</strong> <em>file</em></dt>
+<dd>After the task finishes, write the full message history as pretty-printed JSON to <em>file</em>. Written before exit, even on error. Only applies to single-task mode (<strong>-p</strong>), not the REPL.</dd>
+<dt><strong>-v</strong>, <strong>&ndash;verbose</strong></dt>
+<dd>Show internal decisions (queries, parsing, working directory).</dd>
+<dt><strong>&ndash;version</strong></dt>
+<dd>Print version and exit.</dd>
+<dt><strong>&ndash;continue</strong></dt>
+<dd>Resume the most recent session for the current project directory.</dd>
+<dt><strong>&ndash;list-sessions</strong></dt>
+<dd>List all saved sessions for the current project directory.</dd>
+</dl>
+<h1 id="environment">ENVIRONMENT</h1>
+<dl>
+<dt><strong>CLNKR_API_KEY</strong></dt>
+<dd>API key for the LLM provider (required).</dd>
+<dt><strong>ANTHROPIC_API_KEY</strong></dt>
+<dd>Fallback API key when using the Anthropic endpoint.</dd>
+</dl>
+<h1 id="files">FILES</h1>
+<dl>
+<dt><strong>AGENTS.md</strong></dt>
+<dd>If present in the current directory, its contents are appended to the system prompt as project-specific instructions.</dd>
+</dl>
+<h1 id="exit-status">EXIT STATUS</h1>
+<dl>
+<dt><strong>0</strong></dt>
+<dd>Success.</dd>
+<dt><strong>1</strong></dt>
+<dd>Error (no API key, step limit reached, etc.).</dd>
+</dl>
+<h1 id="see-also">SEE ALSO</h1>
+<p><strong>clnkr</strong>(1)</p>
+<h1 id="author">AUTHOR</h1>
+<p>Brian Cosgrove <a href="mailto:cosgroveb@gmail.com">cosgroveb@gmail.com</a></p>
+
+      </div>
+    </article>
+  </main>
+
+
+      <footer class="site-footer">
+        <p>Minimal harness. Real shell. No permission system yet.</p>
+      </footer>
+    </div>
+  </body>
+</html>

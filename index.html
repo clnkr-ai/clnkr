@@ -1,11 +1,80 @@
 <!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>clnkr</title>
-  <style>body{font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}a{color:#333;font-size:1.2em}</style>
-</head>
-<body>
-  <p>clnkr-ai is <a href="https://github.com/clnkr-ai/clnkr">here</a></p>
-</body>
+<html lang="en">
+  <head>
+	<meta name="generator" content="Hugo 0.159.1">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>clnkr</title>
+    <meta name="description" content="A minimal coding agent. Query an LLM, execute bash commands, repeat.">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="wordmark" href="/">clnkr</a>
+        <nav class="site-nav" aria-label="Main">
+          
+            <a href="/docs/">Docs</a>
+          
+            <a href="https://github.com/clnkr-ai/clnkr">GitHub</a>
+          
+        </nav>
+      </header>
+
+      
+  <main>
+    <section class="hero">
+      <p class="eyebrow">clnkr.ai</p>
+      <h1>Just bash.</h1>
+      <p class="lede">A minimal coding agent. Query an LLM, execute bash commands, repeat.</p>
+      <div class="actions">
+        <a class="button button-primary" href="/docs/">Read the docs</a>
+        <a class="button" href="https://github.com/clnkr-ai/clnkr">View on GitHub</a>
+      </div>
+    </section>
+
+    <section class="warning-card">
+      <h2>Warning</h2>
+      <p><code>clnkr</code> executes bash directly and currently has no permissions or sandboxing system. Use it only in environments you are willing to trust and break.</p>
+    </section>
+
+    <section class="content-grid">
+      <article class="panel">
+        <h2>What It Is</h2>
+        <p>A deliberately small coding-agent harness. It loops over model output, runs one shell command at a time, and feeds structured results back into the conversation.</p>
+      </article>
+      <article class="panel">
+        <h2>What It Ships</h2>
+        <p><code>clnkr</code> is the TUI. <code>clnku</code> is the plain CLI. Both talk to Anthropic and OpenAI-compatible endpoints.</p>
+      </article>
+      <article class="panel">
+        <h2>Docs First</h2>
+        <p>The reference docs are generated from the markdown manpages already in the repo. The website does not introduce a separate docs format.</p>
+      </article>
+    </section>
+
+    <section class="doc-list">
+      <h2>Reference</h2>
+      <ul>
+        
+          <li>
+            <a href="/docs/clnkr/">clnkr</a>
+            <span>Terminal UI manual page</span>
+          </li>
+        
+          <li>
+            <a href="/docs/clnku/">clnku</a>
+            <span>Plain CLI manual page</span>
+          </li>
+        
+      </ul>
+    </section>
+  </main>
+
+
+      <footer class="site-footer">
+        <p>Minimal harness. Real shell. No permission system yet.</p>
+      </footer>
+    </div>
+  </body>
 </html>
