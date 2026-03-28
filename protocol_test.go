@@ -2,6 +2,8 @@ package clnkr
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -26,6 +28,14 @@ func TestParseTurn(t *testing.T) {
 		{
 			name:  "act with reasoning preserved",
 			input: `{"type":"act","command":"echo hi","reasoning":"testing output"}`,
+		},
+		{
+			name:  "repairs invalid pipe escape in command",
+			input: `{"type":"act","command":"grep 'A\|B' file.txt"}`,
+		},
+		{
+			name:  "repairs invalid backtick escape in command",
+			input: "{\"type\":\"act\",\"command\":\"printf \\`hi\\`\"}",
 		},
 		{
 			name:    "invalid json",
@@ -215,6 +225,22 @@ func TestParseTurnReasoningPreserved(t *testing.T) {
 		act := turn.(*ActTurn)
 		if act.Reasoning != "" {
 			t.Errorf("expected empty reasoning, got %q", act.Reasoning)
+		}
+	})
+}
+
+func TestProtocolCorrectionMessage(t *testing.T) {
+	t.Run("mentions invalid pipe escape", func(t *testing.T) {
+		msg := protocolCorrectionMessage(fmt.Errorf("%w: invalid character '|' in string escape code", ErrInvalidJSON))
+		if !strings.Contains(msg, `\|`) || !strings.Contains(msg, `\\|`) {
+			t.Fatalf("expected targeted pipe escape hint, got %q", msg)
+		}
+	})
+
+	t.Run("mentions invalid backtick escape", func(t *testing.T) {
+		msg := protocolCorrectionMessage(fmt.Errorf("%w: invalid character '`' in string escape code", ErrInvalidJSON))
+		if !strings.Contains(msg, "\\`") || !strings.Contains(msg, "\\\\") {
+			t.Fatalf("expected targeted backtick escape hint, got %q", msg)
 		}
 	})
 }

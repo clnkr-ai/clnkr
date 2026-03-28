@@ -32,6 +32,7 @@ type fakeExecutor struct {
 	calls   int
 	gotCmds []string
 	gotDirs []string
+	gotEnv  []map[string]string
 }
 
 func (e *fakeExecutor) Execute(_ context.Context, command string, dir string) (CommandResult, error) {
@@ -50,6 +51,14 @@ func (e *fakeExecutor) Execute(_ context.Context, command string, dir string) (C
 	}
 	e.calls++
 	return result, err
+}
+
+func (e *fakeExecutor) SetEnv(env map[string]string) {
+	cp := make(map[string]string, len(env))
+	for k, v := range env {
+		cp[k] = v
+	}
+	e.gotEnv = append(e.gotEnv, cp)
 }
 
 func mustCommandPayload(t *testing.T, result CommandResult) string {
@@ -327,8 +336,11 @@ func TestFormatCommandOutput(t *testing.T) {
 	if !strings.Contains(payload, "[command]\n") {
 		t.Errorf("payload should contain command section, got %q", payload)
 	}
+	if !strings.Contains(payload, result.Command) {
+		t.Errorf("payload should preserve the raw command echo, got %q", payload)
+	}
 	if !strings.Contains(payload, `&lt;tag&gt;`) || !strings.Contains(payload, `&amp;`) {
-		t.Errorf("payload should escape special characters, got %q", payload)
+		t.Errorf("payload should still escape stdout/stderr, got %q", payload)
 	}
 	if strings.Count(payload, "[stdout]") != 1 {
 		t.Errorf("stdout marker should appear exactly once, got %q", payload)
@@ -369,6 +381,61 @@ func TestMessages(t *testing.T) {
 
 		if agent.messages[0].Content != "hello" {
 			t.Error("mutation of returned slice should not affect agent")
+		}
+	})
+}
+
+func TestAgentAppliesLeadingShellState(t *testing.T) {
+	t.Run("persists export to future commands", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"export NANOCHAT_BASE_DIR=/tmp/runtime && echo ok"}`}},
+			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"printf %s \"$NANOCHAT_BASE_DIR\""}`}},
+		}}
+		executor := &fakeExecutor{results: []CommandResult{{Stdout: "ok\n", ExitCode: 0}, {Stdout: "/tmp/runtime", ExitCode: 0}}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "set env then use it"})
+
+		if _, err := agent.Step(context.Background()); err != nil {
+			t.Fatalf("step 1: %v", err)
+		}
+		if _, err := agent.Step(context.Background()); err != nil {
+			t.Fatalf("step 2: %v", err)
+		}
+		if len(executor.gotEnv) < 2 {
+			t.Fatalf("expected env snapshots for both commands, got %d", len(executor.gotEnv))
+		}
+		if got := executor.gotEnv[1]["NANOCHAT_BASE_DIR"]; got != "/tmp/runtime" {
+			t.Fatalf("got env %q, want %q", got, "/tmp/runtime")
+		}
+	})
+
+	t.Run("persists cd across chained commands", func(t *testing.T) {
+		root := t.TempDir()
+		next := filepath.Join(root, "subdir")
+		if err := os.Mkdir(next, 0755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: fmt.Sprintf(`{"type":"act","command":"cd %s && pwd"}`, next)}},
+			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"pwd"}`}},
+		}}
+		executor := &fakeExecutor{results: []CommandResult{{Stdout: next + "\n", ExitCode: 0}, {Stdout: next + "\n", ExitCode: 0}}}
+
+		agent := NewAgent(model, executor, root)
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "change dir then reuse it"})
+
+		if _, err := agent.Step(context.Background()); err != nil {
+			t.Fatalf("step 1: %v", err)
+		}
+		if _, err := agent.Step(context.Background()); err != nil {
+			t.Fatalf("step 2: %v", err)
+		}
+		if len(executor.gotDirs) < 2 {
+			t.Fatalf("expected two execute calls, got %d", len(executor.gotDirs))
+		}
+		if executor.gotDirs[1] != next {
+			t.Fatalf("got dir %q, want %q", executor.gotDirs[1], next)
 		}
 	})
 }

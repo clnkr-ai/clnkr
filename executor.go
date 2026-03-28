@@ -15,6 +15,18 @@ import (
 type CommandExecutor struct {
 	Timeout      time.Duration
 	ProcessGroup bool
+	ExtraEnv     map[string]string
+}
+
+func (e *CommandExecutor) SetEnv(env map[string]string) {
+	if len(env) == 0 {
+		e.ExtraEnv = nil
+		return
+	}
+	e.ExtraEnv = make(map[string]string, len(env))
+	for k, v := range env {
+		e.ExtraEnv[k] = v
+	}
 }
 
 // Execute runs a command in dir and returns separated stdout/stderr plus exit code.
@@ -34,6 +46,9 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 		"GIT_PAGER=cat",
 		"LESS=-R",
 	)
+	for k, v := range e.ExtraEnv {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
 
 	if e.ProcessGroup {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
