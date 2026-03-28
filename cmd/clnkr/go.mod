@@ -44,6 +44,7 @@ require (
 	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/term v0.36.0 // indirect
+	golang.org/x/term v0.40.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
+	mvdan.cc/sh/v3 v3.13.0 // indirect
 )

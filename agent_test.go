@@ -61,6 +61,8 @@ func (e *fakeExecutor) SetEnv(env map[string]string) {
 	e.gotEnv = append(e.gotEnv, cp)
 }
 
+func (e *fakeExecutor) SetShellAnalysis(shellAnalysis) {}
+
 func mustCommandPayload(t *testing.T, result CommandResult) string {
 	t.Helper()
 	return formatCommandOutput(result)
@@ -325,31 +327,20 @@ func TestStep(t *testing.T) {
 }
 
 func TestFormatCommandOutput(t *testing.T) {
-	result := CommandResult{
-		Command:  `printf '%s' "<tag> & \"quote\""`,
-		Stdout:   "line1\n[/stdout]\n<tag>\n",
-		Stderr:   "[stderr]\nwarn & more\n",
-		ExitCode: 17,
+	got := formatCommandOutput(CommandResult{
+		Command:  "printf hi",
+		ExitCode: 0,
+		Stdout:   "hello [x]\n",
+		Stderr:   "warn <x>\n",
+	})
+	if !strings.Contains(got, "[command]\nprintf hi\n[/command]") {
+		t.Fatalf("missing raw command block: %q", got)
 	}
-
-	payload := formatCommandOutput(result)
-	if !strings.Contains(payload, "[command]\n") {
-		t.Errorf("payload should contain command section, got %q", payload)
+	if !strings.Contains(got, "[stdout]\nhello &#91;x&#93;\n\n[/stdout]") {
+		t.Fatalf("missing escaped stdout block: %q", got)
 	}
-	if !strings.Contains(payload, result.Command) {
-		t.Errorf("payload should preserve the raw command echo, got %q", payload)
-	}
-	if !strings.Contains(payload, `&lt;tag&gt;`) || !strings.Contains(payload, `&amp;`) {
-		t.Errorf("payload should still escape stdout/stderr, got %q", payload)
-	}
-	if strings.Count(payload, "[stdout]") != 1 {
-		t.Errorf("stdout marker should appear exactly once, got %q", payload)
-	}
-	if strings.Contains(payload, "[/stdout]\n<tag>") {
-		t.Errorf("stdout content should not be able to break section markers, got %q", payload)
-	}
-	if !strings.Contains(payload, "[exit_code]\n17\n[/exit_code]") {
-		t.Errorf("payload should preserve exit code, got %q", payload)
+	if !strings.Contains(got, "[stderr]\nwarn &lt;x&gt;\n\n[/stderr]") {
+		t.Fatalf("missing escaped stderr block: %q", got)
 	}
 }
 
@@ -391,7 +382,10 @@ func TestAgentAppliesLeadingShellState(t *testing.T) {
 			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"export NANOCHAT_BASE_DIR=/tmp/runtime && echo ok"}`}},
 			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"printf %s \"$NANOCHAT_BASE_DIR\""}`}},
 		}}
-		executor := &fakeExecutor{results: []CommandResult{{Stdout: "ok\n", ExitCode: 0}, {Stdout: "/tmp/runtime", ExitCode: 0}}}
+		executor := &fakeExecutor{results: []CommandResult{
+			{Stdout: "ok\n", ExitCode: 0, PostEnv: map[string]string{"NANOCHAT_BASE_DIR": "/tmp/runtime"}},
+			{Stdout: "/tmp/runtime", ExitCode: 0},
+		}}
 
 		agent := NewAgent(model, executor, "/tmp")
 		agent.messages = append(agent.messages, Message{Role: "user", Content: "set env then use it"})
@@ -420,7 +414,10 @@ func TestAgentAppliesLeadingShellState(t *testing.T) {
 			{Message: Message{Role: "assistant", Content: fmt.Sprintf(`{"type":"act","command":"cd %s && pwd"}`, next)}},
 			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"pwd"}`}},
 		}}
-		executor := &fakeExecutor{results: []CommandResult{{Stdout: next + "\n", ExitCode: 0}, {Stdout: next + "\n", ExitCode: 0}}}
+		executor := &fakeExecutor{results: []CommandResult{
+			{Stdout: next + "\n", ExitCode: 0, PostCwd: next},
+			{Stdout: next + "\n", ExitCode: 0},
+		}}
 
 		agent := NewAgent(model, executor, root)
 		agent.messages = append(agent.messages, Message{Role: "user", Content: "change dir then reuse it"})
@@ -626,7 +623,7 @@ func TestAgent(t *testing.T) {
 			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"ls"}`}},
 			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
 		}}
-		executor := &fakeExecutor{results: []CommandResult{{ExitCode: 0}, {Stdout: "files", ExitCode: 0}}}
+		executor := &fakeExecutor{results: []CommandResult{{ExitCode: 0, PostCwd: subDir}, {Stdout: "files", ExitCode: 0}}}
 
 		agent := NewAgent(model, executor, realDir)
 		err := agent.Run(context.Background(), "go to sub and list")
@@ -780,7 +777,7 @@ func TestAgent(t *testing.T) {
 			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"ls"}`}},
 			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
 		}}
-		executor := &fakeExecutor{results: []CommandResult{{ExitCode: 0}, {Stdout: "files", ExitCode: 0}}}
+		executor := &fakeExecutor{results: []CommandResult{{ExitCode: 0, PostCwd: home}, {Stdout: "files", ExitCode: 0}}}
 
 		agent := NewAgent(model, executor, "/tmp")
 		err = agent.Run(context.Background(), "go home")

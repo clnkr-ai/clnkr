@@ -119,4 +119,23 @@ func TestCommandExecutor(t *testing.T) {
 			t.Fatalf("got %q, want %q", out.Stdout, "/tmp/runtime")
 		}
 	})
+
+	t.Run("captures post-command shell state", func(t *testing.T) {
+		stateExec := &CommandExecutor{Timeout: 5 * time.Second}
+		cmd := `export CLNKR_TEST_VAR=ok && cd /tmp && printf done`
+		stateExec.SetShellAnalysis(analyzeShell(cmd))
+		out, err := stateExec.Execute(ctx, cmd, "/")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if out.Stdout != "done" {
+			t.Fatalf("got stdout %q, want %q", out.Stdout, "done")
+		}
+		if got := out.PostEnv["CLNKR_TEST_VAR"]; got != "ok" {
+			t.Fatalf("got env %q, want %q", got, "ok")
+		}
+		if out.PostCwd != "/tmp" && out.PostCwd != "/private/tmp" {
+			t.Fatalf("got cwd %q, want /tmp or /private/tmp", out.PostCwd)
+		}
+	})
 }

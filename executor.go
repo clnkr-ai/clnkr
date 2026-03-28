@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -16,11 +17,12 @@ type CommandExecutor struct {
 	Timeout      time.Duration
 	ProcessGroup bool
 	ExtraEnv     map[string]string
+	Analysis     shellAnalysis
 }
 
 func (e *CommandExecutor) SetEnv(env map[string]string) {
+	e.ExtraEnv = nil
 	if len(env) == 0 {
-		e.ExtraEnv = nil
 		return
 	}
 	e.ExtraEnv = make(map[string]string, len(env))
@@ -28,6 +30,8 @@ func (e *CommandExecutor) SetEnv(env map[string]string) {
 		e.ExtraEnv[k] = v
 	}
 }
+
+func (e *CommandExecutor) SetShellAnalysis(analysis shellAnalysis) { e.Analysis = analysis }
 
 // Execute runs a command in dir and returns separated stdout/stderr plus exit code.
 func (e *CommandExecutor) Execute(ctx context.Context, command string, dir string) (CommandResult, error) {
@@ -38,7 +42,13 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	wrapped, cleanup, err := e.wrapCommand(command)
+	if err != nil {
+		return CommandResult{}, fmt.Errorf("wrap command: %w", err)
+	}
+	defer cleanup()
+
+	cmd := exec.CommandContext(ctx, "bash", "-c", wrapped)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"PAGER=cat",
@@ -60,7 +70,7 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 	cmd.Stderr = &stderr
 
 	result := CommandResult{Command: command}
-	err := cmd.Run()
+	err = cmd.Run()
 	result.Stdout = stdout.String()
 	result.Stderr = stderr.String()
 
@@ -69,7 +79,7 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 	}
 
 	if err == nil {
-		return result, nil
+		return e.applyPostState(result)
 	}
 
 	var exitErr *exec.ExitError
@@ -77,5 +87,58 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 		result.ExitCode = exitErr.ExitCode()
 	}
 
+	result, stateErr := e.applyPostState(result)
+	if stateErr != nil {
+		return result, fmt.Errorf("run command: %w (shell state: %v)", err, stateErr)
+	}
 	return result, fmt.Errorf("run command: %w", err)
+}
+
+func (e *CommandExecutor) wrapCommand(command string) (string, func(), error) {
+	if !e.Analysis.CaptureState {
+		return command, func() {}, nil
+	}
+	stateFile, err := os.CreateTemp("", "clnkr-shell-state-")
+	if err != nil {
+		return "", nil, fmt.Errorf("create state file: %w", err)
+	}
+	if err := stateFile.Close(); err != nil {
+		_ = os.Remove(stateFile.Name())
+		return "", nil, fmt.Errorf("close state file: %w", err)
+	}
+	if e.ExtraEnv == nil {
+		e.ExtraEnv = make(map[string]string, 1)
+	}
+	e.ExtraEnv["CLNKR_STATE_FILE"] = stateFile.Name()
+	wrapped := "trap 'clnkr_status=$?; trap - EXIT; { printf \"%s\\0\" \"$PWD\"; env -0; } > \"$CLNKR_STATE_FILE\"; exit $clnkr_status' EXIT\n" + command
+	return wrapped, func() { _ = os.Remove(stateFile.Name()) }, nil
+}
+
+func (e *CommandExecutor) applyPostState(result CommandResult) (CommandResult, error) {
+	stateFile := e.ExtraEnv["CLNKR_STATE_FILE"]
+	delete(e.ExtraEnv, "CLNKR_STATE_FILE")
+	if !e.Analysis.CaptureState || stateFile == "" {
+		return result, nil
+	}
+	data, err := os.ReadFile(stateFile)
+	if err != nil {
+		return result, fmt.Errorf("read state file: %w", err)
+	}
+	parts := bytes.Split(data, []byte{0})
+	if len(parts[0]) > 0 {
+		result.PostCwd = string(parts[0])
+	}
+	env := make(map[string]string, len(parts)-1)
+	for _, part := range parts[1:] {
+		if len(part) == 0 {
+			continue
+		}
+		key, value, ok := strings.Cut(string(part), "=")
+		if !ok {
+			continue
+		}
+		env[key] = value
+	}
+	result.PostEnv = env
+	return result, nil
 }

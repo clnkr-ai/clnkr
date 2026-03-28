@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -76,6 +74,10 @@ type executorEnvSetter interface {
 	SetEnv(map[string]string)
 }
 
+type executorShellAnalysisSetter interface {
+	SetShellAnalysis(shellAnalysis)
+}
+
 // Step runs one query-parse-execute cycle. Policy lives in Run.
 func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	a.started = true
@@ -101,11 +103,22 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	if !isAct {
 		return StepResult{Response: resp, Turn: turn}, nil
 	}
-	a.syncExecutorEnv()
+	analysis := analyzeShell(act.Command)
+	if setter, ok := a.executor.(executorEnvSetter); ok {
+		setter.SetEnv(a.env)
+	}
+	if setter, ok := a.executor.(executorShellAnalysisSetter); ok {
+		setter.SetShellAnalysis(analysis)
+	}
 	a.notify(EventCommandStart{Command: act.Command, Dir: a.cwd})
 
 	execResult, execErr := a.executor.Execute(ctx, act.Command, a.cwd)
-	a.applyShellState(act.Command)
+	if execResult.PostCwd != "" {
+		a.cwd = execResult.PostCwd
+	}
+	if execResult.PostEnv != nil {
+		a.env = execResult.PostEnv
+	}
 	a.notify(EventDebug{Message: fmt.Sprintf("cwd: %s", a.cwd)})
 	payload := formatCommandOutput(execResult)
 	if execErr != nil {
@@ -167,146 +180,5 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 				return nil
 			}
 		}
-	}
-}
-
-func (a *Agent) syncExecutorEnv() {
-	if setter, ok := a.executor.(executorEnvSetter); ok {
-		setter.SetEnv(a.env)
-	}
-}
-
-func (a *Agent) applyShellState(command string) {
-	for _, segment := range leadingShellSegments(command) {
-		if !a.applyStateSegment(segment) {
-			return
-		}
-	}
-}
-
-func leadingShellSegments(command string) []string {
-	var segments []string
-	start := 0
-	inSingle, inDouble, escaped := false, false, false
-	for i := 0; i < len(command); i++ {
-		c := command[i]
-		if escaped {
-			escaped = false
-			continue
-		}
-		if inSingle {
-			if c == '\'' {
-				inSingle = false
-			}
-			continue
-		}
-		if inDouble {
-			if c == '\\' {
-				escaped = true
-				continue
-			}
-			if c == '"' {
-				inDouble = false
-			}
-			continue
-		}
-		switch c {
-		case '\'':
-			inSingle = true
-		case '"':
-			inDouble = true
-		case ';', '\n':
-			segments = append(segments, strings.TrimSpace(command[start:i]))
-			start = i + 1
-		case '&':
-			if i+1 < len(command) && command[i+1] == '&' {
-				segments = append(segments, strings.TrimSpace(command[start:i]))
-				start = i + 2
-				i++
-				continue
-			}
-			return segments
-		case '|':
-			return segments
-		}
-	}
-	segments = append(segments, strings.TrimSpace(command[start:]))
-	return segments
-}
-
-func (a *Agent) applyStateSegment(segment string) bool {
-	if segment == "" {
-		return true
-	}
-	if exports, ok := parseExportSegment(segment); ok {
-		if a.env == nil {
-			a.env = make(map[string]string, len(exports))
-		}
-		for k, v := range exports {
-			a.env[k] = v
-		}
-		return true
-	}
-	target, ok := parseCDSegment(segment)
-	if !ok {
-		return false
-	}
-	a.updateCwdTarget(target)
-	return true
-}
-
-func parseCDSegment(segment string) (string, bool) {
-	parts := strings.Fields(strings.TrimSpace(segment))
-	if len(parts) != 2 {
-		return "", false
-	}
-	if parts[0] != "cd" {
-		return "", false
-	}
-	return strings.Trim(parts[1], `'"`), true
-}
-
-func parseExportSegment(segment string) (map[string]string, bool) {
-	parts := strings.Fields(strings.TrimSpace(segment))
-	if len(parts) < 2 || parts[0] != "export" {
-		return nil, false
-	}
-	exports := make(map[string]string, len(parts)-1)
-	for _, part := range parts[1:] {
-		key, value, ok := strings.Cut(part, "=")
-		if !ok || key == "" {
-			return nil, false
-		}
-		exports[key] = strings.Trim(value, `'"`)
-	}
-	return exports, true
-}
-
-func (a *Agent) updateCwdTarget(target string) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = ""
-	}
-
-	var newCwd string
-	switch {
-	case target == "~":
-		if home == "" {
-			return
-		}
-		newCwd = home
-	case strings.HasPrefix(target, "~/"):
-		if home == "" {
-			return
-		}
-		newCwd = filepath.Join(home, target[2:])
-	case filepath.IsAbs(target):
-		newCwd = target
-	default:
-		newCwd = filepath.Join(a.cwd, target)
-	}
-
-	if info, err := os.Stat(newCwd); err == nil && info.IsDir() {
-		a.cwd = newCwd
 	}
 }

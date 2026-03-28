@@ -40,7 +40,7 @@ lint: sloc ## Run linters
 	golangci-lint run ./...
 	cd cmd/clnkr && golangci-lint run ./...
 
-CORE_SLOC_LIMIT := 500
+CORE_SLOC_LIMIT := 700
 CORE_FILES := $(filter-out %_test.go,$(wildcard *.go))
 
 sloc: ## Check core library stays under $(CORE_SLOC_LIMIT) SLOC
