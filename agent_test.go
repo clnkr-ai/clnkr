@@ -376,7 +376,7 @@ func TestMessages(t *testing.T) {
 	})
 }
 
-func TestAgentAppliesLeadingShellState(t *testing.T) {
+func TestAgentPersistsShellStateBetweenCommands(t *testing.T) {
 	t.Run("persists export to future commands", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"export NANOCHAT_BASE_DIR=/tmp/runtime && echo ok"}`}},

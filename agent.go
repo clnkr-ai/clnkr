@@ -70,11 +70,8 @@ func formatCommandOutput(result CommandResult) string {
 	return b.String()
 }
 
-type executorEnvSetter interface {
+type executorStateSetter interface {
 	SetEnv(map[string]string)
-}
-
-type executorShellAnalysisSetter interface {
 	SetShellAnalysis(shellAnalysis)
 }
 
@@ -104,10 +101,8 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 		return StepResult{Response: resp, Turn: turn}, nil
 	}
 	analysis := analyzeShell(act.Command)
-	if setter, ok := a.executor.(executorEnvSetter); ok {
+	if setter, ok := a.executor.(executorStateSetter); ok {
 		setter.SetEnv(a.env)
-	}
-	if setter, ok := a.executor.(executorShellAnalysisSetter); ok {
 		setter.SetShellAnalysis(analysis)
 	}
 	a.notify(EventCommandStart{Command: act.Command, Dir: a.cwd})

@@ -138,4 +138,26 @@ func TestCommandExecutor(t *testing.T) {
 			t.Fatalf("got cwd %q, want /tmp or /private/tmp", out.PostCwd)
 		}
 	})
+
+	t.Run("state file stays local to one execution", func(t *testing.T) {
+		stateExec := &CommandExecutor{Timeout: 5 * time.Second}
+		stateExec.SetEnv(map[string]string{"BASE": "ok"})
+		stateExec.SetShellAnalysis(analyzeShell(`export CLNKR_TEST_VAR=ok && printf done`))
+
+		if _, err := stateExec.Execute(ctx, `export CLNKR_TEST_VAR=ok && printf done`, "/tmp"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := stateExec.ExtraEnv["CLNKR_STATE_FILE"]; got != "" {
+			t.Fatalf("state file leaked into executor env: %q", got)
+		}
+
+		stateExec.SetShellAnalysis(shellAnalysis{})
+		out, err := stateExec.Execute(ctx, `printf %s "$CLNKR_STATE_FILE"`, "/tmp")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if out.Stdout != "" {
+			t.Fatalf("state file leaked into next command env: %q", out.Stdout)
+		}
+	})
 }

@@ -38,6 +38,10 @@ func TestParseTurn(t *testing.T) {
 			input: "{\"type\":\"act\",\"command\":\"printf \\`hi\\`\"}",
 		},
 		{
+			name:  "repairs malformed unicode escape in command",
+			input: `{"type":"act","command":"printf '\u12XZ'"}`,
+		},
+		{
 			name:    "invalid json",
 			input:   `not json at all`,
 			wantErr: ErrInvalidJSON,
@@ -231,14 +235,14 @@ func TestParseTurnReasoningPreserved(t *testing.T) {
 
 func TestProtocolCorrectionMessage(t *testing.T) {
 	t.Run("mentions invalid pipe escape", func(t *testing.T) {
-		msg := protocolCorrectionMessage(fmt.Errorf("%w: invalid character '|' in string escape code", ErrInvalidJSON))
+		msg := protocolCorrectionMessage(fmt.Errorf("%w: %w", ErrInvalidJSON, invalidStringEscapeError{char: '|', err: errors.New("invalid character '|' in string escape code")}))
 		if !strings.Contains(msg, `\|`) || !strings.Contains(msg, `\\|`) {
 			t.Fatalf("expected targeted pipe escape hint, got %q", msg)
 		}
 	})
 
 	t.Run("mentions invalid backtick escape", func(t *testing.T) {
-		msg := protocolCorrectionMessage(fmt.Errorf("%w: invalid character '`' in string escape code", ErrInvalidJSON))
+		msg := protocolCorrectionMessage(fmt.Errorf("%w: %w", ErrInvalidJSON, invalidStringEscapeError{char: '`', err: errors.New("invalid character '`' in string escape code")}))
 		if !strings.Contains(msg, "\\`") || !strings.Contains(msg, "\\\\") {
 			t.Fatalf("expected targeted backtick escape hint, got %q", msg)
 		}

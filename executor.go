@@ -31,7 +31,9 @@ func (e *CommandExecutor) SetEnv(env map[string]string) {
 	}
 }
 
-func (e *CommandExecutor) SetShellAnalysis(analysis shellAnalysis) { e.Analysis = analysis }
+func (e *CommandExecutor) SetShellAnalysis(analysis shellAnalysis) {
+	e.Analysis = analysis
+}
 
 // Execute runs a command in dir and returns separated stdout/stderr plus exit code.
 func (e *CommandExecutor) Execute(ctx context.Context, command string, dir string) (CommandResult, error) {
@@ -42,7 +44,7 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	wrapped, cleanup, err := e.wrapCommand(command)
+	wrapped, stateFile, cleanup, err := e.wrapCommand(command)
 	if err != nil {
 		return CommandResult{}, fmt.Errorf("wrap command: %w", err)
 	}
@@ -58,6 +60,9 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 	)
 	for k, v := range e.ExtraEnv {
 		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	if stateFile != "" {
+		cmd.Env = append(cmd.Env, "CLNKR_STATE_FILE="+stateFile)
 	}
 
 	if e.ProcessGroup {
@@ -79,7 +84,7 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 	}
 
 	if err == nil {
-		return e.applyPostState(result)
+		return e.applyPostState(result, stateFile)
 	}
 
 	var exitErr *exec.ExitError
@@ -87,36 +92,30 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 		result.ExitCode = exitErr.ExitCode()
 	}
 
-	result, stateErr := e.applyPostState(result)
+	result, stateErr := e.applyPostState(result, stateFile)
 	if stateErr != nil {
 		return result, fmt.Errorf("run command: %w (shell state: %v)", err, stateErr)
 	}
 	return result, fmt.Errorf("run command: %w", err)
 }
 
-func (e *CommandExecutor) wrapCommand(command string) (string, func(), error) {
+func (e *CommandExecutor) wrapCommand(command string) (string, string, func(), error) {
 	if !e.Analysis.CaptureState {
-		return command, func() {}, nil
+		return command, "", func() {}, nil
 	}
 	stateFile, err := os.CreateTemp("", "clnkr-shell-state-")
 	if err != nil {
-		return "", nil, fmt.Errorf("create state file: %w", err)
+		return "", "", nil, fmt.Errorf("create state file: %w", err)
 	}
 	if err := stateFile.Close(); err != nil {
 		_ = os.Remove(stateFile.Name())
-		return "", nil, fmt.Errorf("close state file: %w", err)
+		return "", "", nil, fmt.Errorf("close state file: %w", err)
 	}
-	if e.ExtraEnv == nil {
-		e.ExtraEnv = make(map[string]string, 1)
-	}
-	e.ExtraEnv["CLNKR_STATE_FILE"] = stateFile.Name()
 	wrapped := "trap 'clnkr_status=$?; trap - EXIT; { printf \"%s\\0\" \"$PWD\"; env -0; } > \"$CLNKR_STATE_FILE\"; exit $clnkr_status' EXIT\n" + command
-	return wrapped, func() { _ = os.Remove(stateFile.Name()) }, nil
+	return wrapped, stateFile.Name(), func() { _ = os.Remove(stateFile.Name()) }, nil
 }
 
-func (e *CommandExecutor) applyPostState(result CommandResult) (CommandResult, error) {
-	stateFile := e.ExtraEnv["CLNKR_STATE_FILE"]
-	delete(e.ExtraEnv, "CLNKR_STATE_FILE")
+func (e *CommandExecutor) applyPostState(result CommandResult, stateFile string) (CommandResult, error) {
 	if !e.Analysis.CaptureState || stateFile == "" {
 		return result, nil
 	}

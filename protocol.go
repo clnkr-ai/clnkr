@@ -38,6 +38,14 @@ type jsonEnvelope struct {
 	Reasoning string `json:"reasoning,omitempty"`
 }
 
+type invalidStringEscapeError struct {
+	char byte
+	err  error
+}
+
+func (e invalidStringEscapeError) Error() string { return e.err.Error() }
+func (e invalidStringEscapeError) Unwrap() error { return e.err }
+
 var (
 	ErrInvalidJSON     = errors.New("invalid JSON")
 	ErrMissingCommand  = errors.New("act turn requires command")
@@ -62,7 +70,7 @@ func sanitizeJSONEscapes(raw string) string {
 			continue
 		}
 		if escaped {
-			if !isJSONEscape(c) {
+			if !isValidJSONEscape(raw, i) {
 				b.WriteByte('\\')
 			}
 			b.WriteByte(c)
@@ -82,13 +90,28 @@ func sanitizeJSONEscapes(raw string) string {
 	return b.String()
 }
 
-func isJSONEscape(c byte) bool {
+func isValidJSONEscape(raw string, i int) bool {
+	c := raw[i]
 	switch c {
-	case '"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u':
+	case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
+		return true
+	case 'u':
+		if i+4 >= len(raw) {
+			return false
+		}
+		for j := i + 1; j < i+5; j++ {
+			if !isHexDigit(raw[j]) {
+				return false
+			}
+		}
 		return true
 	default:
 		return false
 	}
+}
+
+func isHexDigit(c byte) bool {
+	return '0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F'
 }
 
 // extractJSON finds the JSON object in model output. Tries code fences first,
@@ -146,6 +169,9 @@ func ParseTurn(raw string) (Turn, error) {
 	jsonStr = sanitizeJSONEscapes(jsonStr)
 	var env jsonEnvelope
 	if err := json.Unmarshal([]byte(jsonStr), &env); err != nil {
+		if invalid, ok := invalidEscape(err); ok {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidJSON, invalid)
+		}
 		return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
 	}
 
@@ -172,6 +198,16 @@ func ParseTurn(raw string) (Turn, error) {
 	}
 }
 
+var invalidEscapePattern = regexp.MustCompile(`invalid character '(.{1})' in string escape code`)
+
+func invalidEscape(err error) (invalidStringEscapeError, bool) {
+	match := invalidEscapePattern.FindStringSubmatch(err.Error())
+	if len(match) != 2 || len(match[1]) != 1 {
+		return invalidStringEscapeError{}, false
+	}
+	return invalidStringEscapeError{char: match[1][0], err: err}, true
+}
+
 func errorToReason(err error) string {
 	switch {
 	case errors.Is(err, ErrInvalidJSON):
@@ -192,10 +228,11 @@ func errorToReason(err error) string {
 // protocolCorrectionMessage returns a tagged-text correction message for the model.
 func protocolCorrectionMessage(err error) string {
 	hint := "Respond with a single JSON object: {\"type\":\"act\",\"command\":\"...\"} or {\"type\":\"clarify\",\"question\":\"...\"} or {\"type\":\"done\",\"summary\":\"...\"}."
+	var invalid invalidStringEscapeError
 	switch {
-	case strings.Contains(err.Error(), "invalid character '|' in string escape code"):
+	case errors.As(err, &invalid) && invalid.char == '|':
 		hint += ` Your command contains \| which is not a valid JSON escape. Use \\| for a literal backslash-pipe, or just | if you do not want a backslash.`
-	case strings.Contains(err.Error(), "invalid character '`' in string escape code"):
+	case errors.As(err, &invalid) && invalid.char == '`':
 		hint += " Your command contains \\` which is not a valid JSON escape. Use \\\\` for a literal backslash-backtick, or just ` if you do not want a backslash."
 	}
 	return fmt.Sprintf("[protocol_error]\nreason: %s\nhint: %s\ndetail: %s\n[/protocol_error]",
