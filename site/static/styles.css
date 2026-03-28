@@ -1,0 +1,279 @@
+:root {
+  --bg: #f5f1e8;
+  --bg-accent: #e4d5b7;
+  --ink: #171411;
+  --muted: #62564a;
+  --line: rgba(23, 20, 17, 0.18);
+  --panel: rgba(255, 250, 241, 0.82);
+  --warning: #fff0c2;
+  --warning-line: #d6a200;
+  --button: #171411;
+  --button-ink: #f8f4ed;
+  --link: #8d2f14;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(141, 47, 20, 0.14), transparent 32%),
+    radial-gradient(circle at top right, rgba(214, 162, 0, 0.18), transparent 28%),
+    linear-gradient(180deg, var(--bg-accent), var(--bg));
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1.6;
+}
+
+a {
+  color: var(--link);
+}
+
+code,
+pre {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+.page-shell {
+  width: min(1100px, calc(100vw - 2rem));
+  margin: 0 auto;
+  padding: 1rem 0 4rem;
+}
+
+.site-header,
+.site-footer,
+.hero,
+.warning-card,
+.panel,
+.doc-list,
+.doc-page {
+  backdrop-filter: blur(12px);
+}
+
+.site-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 0 1.5rem;
+}
+
+.wordmark {
+  color: var(--ink);
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.site-nav {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.site-nav a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.hero,
+.warning-card,
+.panel,
+.doc-list,
+.doc-page {
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--panel);
+  box-shadow: 0 20px 60px rgba(23, 20, 17, 0.08);
+}
+
+.hero {
+  padding: 3.5rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.hero h1,
+.page-header h1 {
+  margin: 0;
+  font-size: clamp(3rem, 9vw, 6rem);
+  line-height: 0.95;
+}
+
+.lede,
+.page-summary {
+  width: min(42rem, 100%);
+  font-size: 1.2rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 2rem;
+}
+
+.button {
+  display: inline-block;
+  padding: 0.85rem 1.25rem;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.button-primary {
+  background: var(--button);
+  color: var(--button-ink);
+}
+
+.warning-card {
+  margin-top: 1.5rem;
+  padding: 1.5rem;
+  border-color: var(--warning-line);
+  background: linear-gradient(180deg, var(--warning), rgba(255, 250, 241, 0.94));
+}
+
+.warning-card h2,
+.doc-list h2 {
+  margin-top: 0;
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.panel {
+  padding: 1.5rem;
+}
+
+.page {
+  padding-top: 1rem;
+}
+
+.page-header {
+  margin-bottom: 1.5rem;
+}
+
+.doc-list {
+  margin-top: 1.5rem;
+  padding: 1.5rem;
+}
+
+.doc-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.doc-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.doc-list li:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.doc-list span {
+  color: var(--muted);
+  text-align: right;
+}
+
+.doc-page {
+  padding: 2rem;
+}
+
+.doc-body h1 {
+  font-size: 2rem;
+  line-height: 1.1;
+}
+
+.doc-body h2 {
+  margin-top: 2.5rem;
+}
+
+.doc-body pre {
+  overflow-x: auto;
+  padding: 1rem;
+  border-radius: 16px;
+  background: rgba(23, 20, 17, 0.06);
+}
+
+.doc-body blockquote {
+  margin: 1.5rem 0;
+  padding: 0.25rem 1rem;
+  border-left: 4px solid var(--warning-line);
+  color: var(--muted);
+}
+
+.doc-body table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.doc-body th,
+.doc-body td {
+  padding: 0.6rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.site-footer {
+  padding: 1.25rem 0 0;
+  color: var(--muted);
+}
+
+@media (max-width: 800px) {
+  .page-shell {
+    width: min(100vw - 1rem, 1100px);
+  }
+
+  .site-header,
+  .doc-list li {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .hero,
+  .doc-page,
+  .doc-list,
+  .panel,
+  .warning-card {
+    border-radius: 18px;
+  }
+
+  .hero {
+    padding: 2rem 1.25rem;
+  }
+
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .doc-list span {
+    text-align: left;
+  }
+}
