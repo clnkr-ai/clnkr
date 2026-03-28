@@ -24,3 +24,8 @@ Thumbs.db
 # Claude Code
 .claude/
 !.claude/settings.json
+
+# Hugo
+/site/public/
+/site/resources/
+/site/.hugo_build.lock

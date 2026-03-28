@@ -1,0 +1,20 @@
+{{ define "main" }}
+  <main class="page">
+    <header class="page-header">
+      <p class="eyebrow">Section</p>
+      <h1>{{ .Title }}</h1>
+      {{ with .Content }}<div class="page-intro">{{ . }}</div>{{ end }}
+    </header>
+
+    <section class="doc-list">
+      <ul>
+        {{ range .Pages.ByWeight }}
+          <li>
+            <a href="{{ .RelPermalink }}">{{ .Title }}</a>
+            <span>{{ .Description }}</span>
+          </li>
+        {{ end }}
+      </ul>
+    </section>
+  </main>
+{{ end }}
