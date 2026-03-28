@@ -435,6 +435,7 @@ func TestAgentPersistsShellStateBetweenCommands(t *testing.T) {
 			t.Fatalf("got dir %q, want %q", executor.gotDirs[1], next)
 		}
 	})
+
 }
 
 func TestAddMessages(t *testing.T) {

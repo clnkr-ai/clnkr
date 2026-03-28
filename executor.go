@@ -58,12 +58,13 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 		"GIT_PAGER=cat",
 		"LESS=-R",
 	)
-	for k, v := range e.ExtraEnv {
-		cmd.Env = append(cmd.Env, k+"="+v)
+	for key, value := range e.ExtraEnv {
+		cmd.Env = append(cmd.Env, key+"="+value)
 	}
 	if stateFile != "" {
 		cmd.Env = append(cmd.Env, "CLNKR_STATE_FILE="+stateFile)
 	}
+	baseEnv := envListToMap(cmd.Env)
 
 	if e.ProcessGroup {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -84,7 +85,7 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 	}
 
 	if err == nil {
-		return e.applyPostState(result, stateFile)
+		return e.applyPostState(result, stateFile, baseEnv)
 	}
 
 	var exitErr *exec.ExitError
@@ -92,7 +93,7 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 		result.ExitCode = exitErr.ExitCode()
 	}
 
-	result, stateErr := e.applyPostState(result, stateFile)
+	result, stateErr := e.applyPostState(result, stateFile, baseEnv)
 	if stateErr != nil {
 		return result, fmt.Errorf("run command: %w (shell state: %v)", err, stateErr)
 	}
@@ -111,11 +112,12 @@ func (e *CommandExecutor) wrapCommand(command string) (string, string, func(), e
 		_ = os.Remove(stateFile.Name())
 		return "", "", nil, fmt.Errorf("close state file: %w", err)
 	}
+	// env -0 is widely available on Linux/macOS and gives robust null-delimited output.
 	wrapped := "trap 'clnkr_status=$?; trap - EXIT; { printf \"%s\\0\" \"$PWD\"; env -0; } > \"$CLNKR_STATE_FILE\"; exit $clnkr_status' EXIT\n" + command
 	return wrapped, stateFile.Name(), func() { _ = os.Remove(stateFile.Name()) }, nil
 }
 
-func (e *CommandExecutor) applyPostState(result CommandResult, stateFile string) (CommandResult, error) {
+func (e *CommandExecutor) applyPostState(result CommandResult, stateFile string, baseEnv map[string]string) (CommandResult, error) {
 	if !e.Analysis.CaptureState || stateFile == "" {
 		return result, nil
 	}
@@ -123,11 +125,14 @@ func (e *CommandExecutor) applyPostState(result CommandResult, stateFile string)
 	if err != nil {
 		return result, fmt.Errorf("read state file: %w", err)
 	}
+	if len(data) == 0 {
+		return result, nil
+	}
 	parts := bytes.Split(data, []byte{0})
 	if len(parts[0]) > 0 {
 		result.PostCwd = string(parts[0])
 	}
-	env := make(map[string]string, len(parts)-1)
+	captured := make(map[string]string, len(parts)-1)
 	for _, part := range parts[1:] {
 		if len(part) == 0 {
 			continue
@@ -136,8 +141,30 @@ func (e *CommandExecutor) applyPostState(result CommandResult, stateFile string)
 		if !ok {
 			continue
 		}
+		captured[key] = value
+	}
+	delete(captured, "CLNKR_STATE_FILE")
+
+	delta := make(map[string]string)
+	for key, value := range captured {
+		if base, ok := baseEnv[key]; !ok || base != value {
+			delta[key] = value
+		}
+	}
+	if len(delta) > 0 {
+		result.PostEnv = delta
+	}
+	return result, nil
+}
+
+func envListToMap(list []string) map[string]string {
+	env := make(map[string]string, len(list))
+	for _, item := range list {
+		key, value, ok := strings.Cut(item, "=")
+		if !ok {
+			continue
+		}
 		env[key] = value
 	}
-	result.PostEnv = env
-	return result, nil
+	return env
 }

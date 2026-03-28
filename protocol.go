@@ -38,14 +38,6 @@ type jsonEnvelope struct {
 	Reasoning string `json:"reasoning,omitempty"`
 }
 
-type invalidStringEscapeError struct {
-	char byte
-	err  error
-}
-
-func (e invalidStringEscapeError) Error() string { return e.err.Error() }
-func (e invalidStringEscapeError) Unwrap() error { return e.err }
-
 var (
 	ErrInvalidJSON     = errors.New("invalid JSON")
 	ErrMissingCommand  = errors.New("act turn requires command")
@@ -166,12 +158,11 @@ func ParseTurn(raw string) (Turn, error) {
 	if err != nil {
 		return nil, err
 	}
+	// We repair common model escape mistakes before unmarshal. The targeted
+	// invalid-escape hinting below is still useful as a fallback.
 	jsonStr = sanitizeJSONEscapes(jsonStr)
 	var env jsonEnvelope
 	if err := json.Unmarshal([]byte(jsonStr), &env); err != nil {
-		if invalid, ok := invalidEscape(err); ok {
-			return nil, fmt.Errorf("%w: %w", ErrInvalidJSON, invalid)
-		}
 		return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
 	}
 
@@ -198,14 +189,16 @@ func ParseTurn(raw string) (Turn, error) {
 	}
 }
 
+// invalidEscapePattern is coupled to encoding/json's current error text.
+// If that format changes, we gracefully fall back to generic protocol hints.
 var invalidEscapePattern = regexp.MustCompile(`invalid character '(.{1})' in string escape code`)
 
-func invalidEscape(err error) (invalidStringEscapeError, bool) {
+func invalidEscapeChar(err error) (byte, bool) {
 	match := invalidEscapePattern.FindStringSubmatch(err.Error())
 	if len(match) != 2 || len(match[1]) != 1 {
-		return invalidStringEscapeError{}, false
+		return 0, false
 	}
-	return invalidStringEscapeError{char: match[1][0], err: err}, true
+	return match[1][0], true
 }
 
 func errorToReason(err error) string {
@@ -228,11 +221,11 @@ func errorToReason(err error) string {
 // protocolCorrectionMessage returns a tagged-text correction message for the model.
 func protocolCorrectionMessage(err error) string {
 	hint := "Respond with a single JSON object: {\"type\":\"act\",\"command\":\"...\"} or {\"type\":\"clarify\",\"question\":\"...\"} or {\"type\":\"done\",\"summary\":\"...\"}."
-	var invalid invalidStringEscapeError
+	invalid, hasInvalid := invalidEscapeChar(err)
 	switch {
-	case errors.As(err, &invalid) && invalid.char == '|':
+	case hasInvalid && invalid == '|':
 		hint += ` Your command contains \| which is not a valid JSON escape. Use \\| for a literal backslash-pipe, or just | if you do not want a backslash.`
-	case errors.As(err, &invalid) && invalid.char == '`':
+	case hasInvalid && invalid == '`':
 		hint += " Your command contains \\` which is not a valid JSON escape. Use \\\\` for a literal backslash-backtick, or just ` if you do not want a backslash."
 	}
 	return fmt.Sprintf("[protocol_error]\nreason: %s\nhint: %s\ndetail: %s\n[/protocol_error]",

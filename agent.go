@@ -111,7 +111,7 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	if execResult.PostCwd != "" {
 		a.cwd = execResult.PostCwd
 	}
-	if execResult.PostEnv != nil {
+	if len(execResult.PostEnv) > 0 {
 		a.env = execResult.PostEnv
 	}
 	a.notify(EventDebug{Message: fmt.Sprintf("cwd: %s", a.cwd)})

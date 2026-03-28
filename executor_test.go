@@ -160,4 +160,30 @@ func TestCommandExecutor(t *testing.T) {
 			t.Fatalf("state file leaked into next command env: %q", out.Stdout)
 		}
 	})
+
+	t.Run("captures only env deltas and unsets", func(t *testing.T) {
+		stateExec := &CommandExecutor{Timeout: 5 * time.Second}
+		stateExec.SetEnv(map[string]string{"CLNKR_DELTA_BASE": "base", "CLNKR_DELTA_REMOVE": "gone"})
+		cmd := `export CLNKR_DELTA_BASE=changed CLNKR_DELTA_NEW=new && unset CLNKR_DELTA_REMOVE && printf done`
+		stateExec.SetShellAnalysis(analyzeShell(cmd))
+		out, err := stateExec.Execute(ctx, cmd, "/tmp")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if out.PostEnv["CLNKR_DELTA_BASE"] != "changed" {
+			t.Fatalf("missing changed delta var: %+v", out.PostEnv)
+		}
+		if out.PostEnv["CLNKR_DELTA_NEW"] != "new" {
+			t.Fatalf("missing new delta var: %+v", out.PostEnv)
+		}
+		if _, ok := out.PostEnv["HOME"]; ok {
+			t.Fatalf("unexpected full env capture in PostEnv: %+v", out.PostEnv)
+		}
+		if _, ok := out.PostEnv["CLNKR_STATE_FILE"]; ok {
+			t.Fatalf("state file leaked into PostEnv: %+v", out.PostEnv)
+		}
+		if _, ok := out.PostEnv["CLNKR_DELTA_REMOVE"]; ok {
+			t.Fatalf("unset variable should not appear in PostEnv: %+v", out.PostEnv)
+		}
+	})
 }

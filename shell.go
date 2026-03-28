@@ -8,7 +8,6 @@ import (
 
 type shellAnalysis struct {
 	CaptureState bool
-	WriteTargets []string
 }
 
 func analyzeShell(command string) shellAnalysis {
@@ -27,24 +26,8 @@ func analyzeShell(command string) shellAnalysis {
 			case ".", "cd", "export", "source", "unset":
 				analysis.CaptureState = true
 			}
-		case *syntax.Redirect:
-			switch x.Op.String() {
-			case ">", ">>", "&>", "&>>":
-				if lit := x.Word.Lit(); lit != "" {
-					analysis.WriteTargets = appendUnique(analysis.WriteTargets, lit)
-				}
-			}
 		}
 		return true
 	})
 	return analysis
-}
-
-func appendUnique(list []string, value string) []string {
-	for _, existing := range list {
-		if existing == value {
-			return list
-		}
-	}
-	return append(list, value)
 }
