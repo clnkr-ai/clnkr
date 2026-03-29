@@ -28,7 +28,7 @@ const exitClarificationNeeded = 2
 var errApprovalPending = errors.New("approval pending")
 
 type approvalPrompter interface {
-	Confirm(ctx context.Context, command string) (bool, error)
+	ActReply(ctx context.Context, command string) (string, error)
 	Clarify(ctx context.Context, question string) (string, error)
 }
 
@@ -75,25 +75,24 @@ func (r *lineReader) ReadLine(ctx context.Context) (string, error) {
 	}
 }
 
-func (p *stdinPrompter) Confirm(ctx context.Context, command string) (bool, error) {
+func (p *stdinPrompter) ActReply(ctx context.Context, command string) (string, error) {
 	fmt.Fprintln(os.Stderr, command) //nolint:errcheck
 	for {
-		fmt.Fprint(os.Stderr, "Approve command? [y/n]: ") //nolint:errcheck
+		fmt.Fprint(os.Stderr, "Send 'y' to approve, or type what the agent should do instead: ") //nolint:errcheck
 		line, err := p.reader.ReadLine(ctx)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				return false, errApprovalPending
+				return "", errApprovalPending
 			}
 			if errors.Is(err, context.Canceled) {
-				return false, err
+				return "", err
 			}
-			return false, fmt.Errorf("read approval input: %w", err)
+			return "", fmt.Errorf("read approval input: %w", err)
 		}
-		approved, ok := parseApprovalInput(line)
-		if ok {
-			return approved, nil
+		reply := strings.TrimSpace(line)
+		if reply != "" {
+			return reply, nil
 		}
-		fmt.Fprintln(os.Stderr, "Please answer yes or no.") //nolint:errcheck
 	}
 }
 
@@ -113,15 +112,8 @@ func (p *stdinPrompter) Clarify(ctx context.Context, question string) (string, e
 	return strings.TrimSpace(line), nil
 }
 
-func parseApprovalInput(s string) (bool, bool) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "y", "yes":
-		return true, true
-	case "n", "no":
-		return false, true
-	default:
-		return false, false
-	}
+func isApprovalReply(s string) bool {
+	return strings.TrimSpace(s) == "y"
 }
 
 func requireApprovalInput() error {
@@ -161,15 +153,11 @@ func runPlainApproval(ctx context.Context, agent *clnkr.Agent, task string, prom
 			}
 			agent.AppendUserMessage(reply)
 		case *clnkr.ActTurn:
-			approved, err := prompter.Confirm(ctx, turn.Command)
+			reply, err := waitForActReply(ctx, prompter, turn.Command)
 			if err != nil {
 				return err
 			}
-			if !approved {
-				reply, err := waitForClarification(ctx, prompter, "Command denied. What should the agent do instead?")
-				if err != nil {
-					return err
-				}
+			if !isApprovalReply(reply) {
 				agent.AppendUserMessage(reply)
 				continue
 			}
@@ -183,6 +171,19 @@ func runPlainApproval(ctx context.Context, agent *clnkr.Agent, task string, prom
 		default:
 			return fmt.Errorf("unexpected turn type %T", turn)
 		}
+	}
+}
+
+func waitForActReply(ctx context.Context, prompter approvalPrompter, command string) (string, error) {
+	for {
+		reply, err := prompter.ActReply(ctx, command)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(reply) == "" {
+			continue
+		}
+		return reply, nil
 	}
 }
 
@@ -453,7 +454,7 @@ func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, e
 			})
 			m.shared.agent = agent
 			m.shared.eventLog = eventLog
-			m.shared.cwd = cwd
+			m.shared.cwd = agent.Cwd()
 			m.chat.appendUserMessage(taskPrompt)
 			m.chat.updateViewport()
 			m.running = true
@@ -510,7 +511,7 @@ func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, e
 		})
 		m.shared.agent = agent
 		m.shared.eventLog = eventLog
-		m.shared.cwd = cwd
+		m.shared.cwd = agent.Cwd()
 		m.running = true
 		m.status.startRun()
 
@@ -561,7 +562,7 @@ func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, e
 	})
 	m.shared.agent = agent
 	m.shared.eventLog = eventLog
-	m.shared.cwd = cwd
+	m.shared.cwd = agent.Cwd()
 
 	p := tea.NewProgram(m)
 	m.shared.program = p

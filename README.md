@@ -105,6 +105,7 @@ clnku -p "write a fix based on the investigation" --load-messages /tmp/investiga
 `--event-log` streams one JSON object per line as events happen (O_APPEND, safe to tail).
 `--trajectory` writes the full message array as pretty-printed JSON when the task ends — even if it failed.
 `--load-messages` reads that same format and prepends the messages before starting, so one agent's output becomes another's context.
+The transcript may include host-generated JSON `[state]` messages. Today they persist the current working directory so `--load-messages` and `--continue` can restore it.
 With `--full-send`, a single-task run that stops to ask for clarification exits with status `2` after printing the question, so callers can distinguish "needs input" from "done". In the default approval mode, the harness asks for clarification inline instead.
 
 By default, both binaries require explicit approval before each `act` turn. Pass `--full-send` to restore the old "run every command immediately" behavior.
@@ -155,6 +156,10 @@ clnku --list-sessions
 
 Sessions are tied to their original working directory. You can only resume a
 session from the same project directory where it was created.
+
+Saved message history now restores the agent's current working directory on
+resume via transcript-level JSON `[state]` messages. Exported environment variables
+still persist only within the live process.
 
 ## How it works
 

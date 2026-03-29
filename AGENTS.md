@@ -80,7 +80,7 @@ clnkr/                  # core: types, interfaces, Agent, events (root go.mod, s
 - `Executor` — `Execute(ctx, command, dir) (CommandResult, error)` — implemented by `CommandExecutor`
 - `ExecutorStateSetter` (optional) — `SetEnv` — the agent type-asserts the executor to this before each command. Custom executors that skip it must populate `CommandResult.PostCwd`/`PostEnv` themselves
 
-**Command result protocol (host-to-model):** The core feeds command results back to the model as a flat tagged text envelope with `[command]`, `[exit_code]`, `[stdout]`, and `[stderr]` sections. Content inside sections is HTML-entity-escaped (`[` → `&#91;`, `<` → `&lt;`, `&` → `&amp;`) to prevent stdout from breaking section markers. This is a deliberate tradeoff:
+**Command result protocol (host-to-model):** The core feeds command results back to the model as a flat tagged text envelope with `[command]`, `[exit_code]`, `[stdout]`, and `[stderr]` sections. It also emits dedicated JSON `[state]` messages that currently carry the current working directory so transcripts can restore shell location on resume. Content inside command-result sections is HTML-entity-escaped (`[` → `&#91;`, `<` → `&lt;`, `&` → `&amp;`) to prevent stdout from breaking section markers. This is a deliberate tradeoff:
 - `stdout` and `stderr` stay separated in the core and in events.
 - The protocol is host-generated and deterministic; models only consume it.
 - We intentionally do not use nested XML here. The only downstream machine parsers are `clnku` and `clnkr`, so we prefer a simpler model-facing format with explicit flat delimiters.
@@ -118,6 +118,7 @@ Workflow:
 ## Design decisions
 
 - Shell state (cwd, exported env) persists across turns via EXIT trap + state file. Every command is wrapped unconditionally; the trap costs ~2ms and uses absolute paths (`/usr/bin/env -0`) so it works even if the command modified PATH. Shell locals, functions, and aliases do not persist.
+- Transcript-level JSON `[state]` messages persist cwd across `--load-messages` and `--continue`; exported env still does not survive process restart.
 - `Step()` is the proposal primitive; `Run()` adds full-send policy
 - `Messages()` returns a defensive copy; `AddMessages()` prepends seed messages (errors after first `Step()`)
 - Model-to-host direction uses structured JSON turns (`protocol.go`); host-to-model direction uses flat tagged text for command results

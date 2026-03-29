@@ -6,6 +6,7 @@ import (
 
 // inputHistorySize is the maximum number of previous submissions stored.
 const inputHistorySize = 100
+const defaultPlaceholder = "Type a task..."
 
 type inputModel struct {
 	textarea textarea.Model
@@ -16,7 +17,7 @@ type inputModel struct {
 
 func newInputModel(width int, s *inputStyles) inputModel {
 	ta := textarea.New()
-	ta.Placeholder = "Type a task..."
+	ta.Placeholder = defaultPlaceholder
 	ta.Prompt = iconPrompt + " "
 	ta.ShowLineNumbers = false
 	ta.SetWidth(width)
@@ -97,4 +98,12 @@ func (inp *inputModel) view() string {
 
 func (inp *inputModel) setWidth(w int) {
 	inp.textarea.SetWidth(w)
+}
+
+func (inp *inputModel) setPlaceholder(text string) {
+	inp.textarea.Placeholder = text
+}
+
+func (inp *inputModel) resetPlaceholder() {
+	inp.textarea.Placeholder = defaultPlaceholder
 }

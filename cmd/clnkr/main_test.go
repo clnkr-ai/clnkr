@@ -50,30 +50,25 @@ func (e *fakeExecutor) Execute(_ context.Context, command, _ string) (clnkr.Comm
 
 func (e *fakeExecutor) SetEnv(map[string]string) {}
 
-type approvalReply struct {
-	approved bool
-	err      error
-}
-
 type clarifyReply struct {
 	text string
 	err  error
 }
 
 type scriptPrompter struct {
-	approvals      []approvalReply
+	actReplies     []clarifyReply
 	clarifications []clarifyReply
-	approvalCalls  int
+	actReplyCalls  int
 	clarifyCalls   int
 }
 
-func (p *scriptPrompter) Confirm(context.Context, string) (bool, error) {
-	if p.approvalCalls >= len(p.approvals) {
-		return false, fmt.Errorf("no more approval replies")
+func (p *scriptPrompter) ActReply(context.Context, string) (string, error) {
+	if p.actReplyCalls >= len(p.actReplies) {
+		return "", fmt.Errorf("no more act replies")
 	}
-	reply := p.approvals[p.approvalCalls]
-	p.approvalCalls++
-	return reply.approved, reply.err
+	reply := p.actReplies[p.actReplyCalls]
+	p.actReplyCalls++
+	return reply.text, reply.err
 }
 
 func (p *scriptPrompter) Clarify(context.Context, string) (string, error) {
@@ -85,15 +80,38 @@ func (p *scriptPrompter) Clarify(context.Context, string) (string, error) {
 	return reply.text, reply.err
 }
 
-func TestRunPlainApprovalRejectsBeforeExecution(t *testing.T) {
+func TestRunPlainApprovalNonApprovalReplyBecomesGuidance(t *testing.T) {
+	model := &fakeModel{responses: []clnkr.Response{
+		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","command":"rm important.txt"}`}},
+		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"okay"}`}},
+	}}
+	executor := &fakeExecutor{}
+	agent := clnkr.NewAgent(model, executor, "/tmp")
+	prompter := &scriptPrompter{
+		actReplies: []clarifyReply{{text: "list files instead"}},
+	}
+
+	err := runPlainApproval(context.Background(), agent, "do it", prompter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if executor.calls != 0 {
+		t.Fatalf("non-approval reply should not execute")
+	}
+	msgs := agent.Messages()
+	if len(msgs) == 0 || msgs[len(msgs)-2].Content != "list files instead" {
+		t.Fatalf("guidance was not appended: %#v", msgs)
+	}
+}
+
+func TestRunPlainApprovalEmptyActReplyIsNoOp(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
 		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","command":"rm important.txt"}`}},
 	}}
 	executor := &fakeExecutor{}
 	agent := clnkr.NewAgent(model, executor, "/tmp")
 	prompter := &scriptPrompter{
-		approvals: []approvalReply{{approved: false}},
-		clarifications: []clarifyReply{
+		actReplies: []clarifyReply{
 			{text: ""},
 			{err: errApprovalPending},
 		},
@@ -104,37 +122,37 @@ func TestRunPlainApprovalRejectsBeforeExecution(t *testing.T) {
 		t.Fatalf("got %v, want errApprovalPending", err)
 	}
 	if executor.calls != 0 {
-		t.Fatalf("rejected command should not execute")
+		t.Fatalf("empty act reply should not execute")
 	}
 }
 
-func TestStdinPrompterConfirmWritesPromptToStderr(t *testing.T) {
+func TestStdinPrompterActReplyWritesPromptToStderr(t *testing.T) {
 	stderr := captureStderr(t, func() {
 		p := &stdinPrompter{reader: newLineReader(strings.NewReader("y\n"))}
-		approved, err := p.Confirm(context.Background(), "rm important.txt")
+		reply, err := p.ActReply(context.Background(), "rm important.txt")
 		if err != nil {
-			t.Fatalf("Confirm: %v", err)
+			t.Fatalf("ActReply: %v", err)
 		}
-		if !approved {
-			t.Fatal("expected approval")
+		if reply != "y" {
+			t.Fatalf("reply = %q, want y", reply)
 		}
 	})
 
 	if !strings.Contains(stderr, "rm important.txt") {
 		t.Fatalf("stderr should contain command, got %q", stderr)
 	}
-	if !strings.Contains(stderr, "Approve command? [y/n]: ") {
+	if !strings.Contains(stderr, "Send 'y' to approve, or type what the agent should do instead: ") {
 		t.Fatalf("stderr should contain approval prompt, got %q", stderr)
 	}
 }
 
-func TestStdinPrompterConfirmCanBeCanceled(t *testing.T) {
+func TestStdinPrompterActReplyCanBeCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	captureStderr(t, func() {
 		p := &stdinPrompter{reader: &lineReader{lines: make(chan lineResult)}}
-		_, err := p.Confirm(ctx, "rm important.txt")
+		_, err := p.ActReply(ctx, "rm important.txt")
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("got %v, want context.Canceled", err)
 		}
