@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -26,6 +27,7 @@ const ggTimeout = 500 * time.Millisecond
 
 // ctrlCInterval is the maximum gap between two Ctrl-C presses for a forced quit.
 const ctrlCInterval = 500 * time.Millisecond
+const approvalPromptText = "Send 'y' to approve, or type what the agent should do instead. Press Ctrl+Y to approve immediately."
 
 type agentDoneMsg struct{ err error }
 type stepDoneMsg struct {
@@ -219,6 +221,7 @@ func (m *model) finishRun(err error) {
 	m.awaitingApproval = false
 	m.awaitingClarification = false
 	m.clarificationPrompt = ""
+	m.input.resetPlaceholder()
 	m.executedSteps = 0
 	m.protocolErrors = 0
 	if m.chat.streaming {
@@ -284,6 +287,7 @@ func (m model) handleStepDone(msg stepDoneMsg) (tea.Model, tea.Cmd) {
 	case *clnkr.ClarifyTurn:
 		m.awaitingClarification = true
 		m.clarificationPrompt = turn.Question
+		m.input.setPlaceholder("Type clarification and press Enter.")
 		m.chat.appendHostNote(turn.Question)
 		m.chat.updateViewport()
 		m.focus = focusInput
@@ -292,9 +296,13 @@ func (m model) handleStepDone(msg stepDoneMsg) (tea.Model, tea.Cmd) {
 	case *clnkr.ActTurn:
 		m.pendingAct = turn
 		m.awaitingApproval = true
+		m.input.setPlaceholder(approvalPromptText)
 		m.chat.setProposedCommand(turn.Command)
+		m.chat.appendHostNote(approvalPromptText)
 		m.chat.updateViewport()
-		return m, nil
+		m.focus = focusInput
+		m.status.setFocus(focusInput)
+		return m, m.input.textarea.Focus()
 	default:
 		m.finishRun(fmt.Errorf("unexpected turn type %T", turn))
 		return m, nil
@@ -312,6 +320,7 @@ func (m model) handleExecuteDone(msg executeDoneMsg) (tea.Model, tea.Cmd) {
 
 	m.pendingAct = nil
 	m.awaitingApproval = false
+	m.input.resetPlaceholder()
 	m.executedSteps++
 	if m.shared.agent.MaxSteps > 0 && m.executedSteps >= m.shared.agent.MaxSteps {
 		return m, requestFinalSummaryCmd(m.shared.agent, m.runCtx)
@@ -365,11 +374,8 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case msg.Code == 'c' && msg.Mod == tea.ModCtrl:
 		return m.handleCtrlC()
 
-	case m.awaitingApproval && msg.Code == 'y':
+	case m.awaitingApproval && msg.Code == 'y' && msg.Mod == tea.ModCtrl:
 		return m.approvePendingCommand()
-
-	case m.awaitingApproval && msg.Code == 'n':
-		return m.rejectPendingCommand()
 
 	case msg.Code == tea.KeyEscape:
 		m.focus = focusViewport
@@ -425,6 +431,17 @@ func (m model) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Code == tea.KeyEnter && msg.Mod == 0:
 		// Submit on Enter (no modifiers)
+		if m.awaitingApproval {
+			text := strings.TrimSpace(m.input.textarea.Value())
+			if text == "" {
+				return m, nil
+			}
+			m.input.submit()
+			if isApprovalReply(text) {
+				return m.approvePendingCommand()
+			}
+			return m.submitPendingGuidance(text)
+		}
 		if m.awaitingClarification {
 			text := m.input.submit()
 			if text == "" {
@@ -533,20 +550,23 @@ func (m model) approvePendingCommand() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.awaitingApproval = false
+	m.input.resetPlaceholder()
 	return m, executeCmd(m.shared.agent, m.runCtx, m.pendingAct)
 }
 
-func (m model) rejectPendingCommand() (tea.Model, tea.Cmd) {
+func (m model) submitPendingGuidance(text string) (tea.Model, tea.Cmd) {
 	m.awaitingApproval = false
-	m.awaitingClarification = true
-	m.clarificationPrompt = "Command denied. What should the agent do instead?"
+	m.awaitingClarification = false
+	m.clarificationPrompt = ""
+	m.input.resetPlaceholder()
 	m.pendingAct = nil
 	m.chat.clearPendingCommand()
-	m.chat.appendHostNote(m.clarificationPrompt)
+	m.chat.appendUserMessage(text)
+	m.shared.agent.AppendUserMessage(text)
 	m.chat.updateViewport()
 	m.focus = focusInput
 	m.status.setFocus(focusInput)
-	return m, m.input.textarea.Focus()
+	return m, tea.Batch(m.input.textarea.Focus(), stepCmd(m.shared.agent, m.runCtx))
 }
 
 func (m model) handleDiffKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -605,7 +625,11 @@ func (m model) handleViewportKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if chatH < 1 {
 			chatH = 1
 		}
-		m.diff.toggle(m.files.files, m.shared.cwd, m.width, chatH)
+		cwd := m.shared.cwd
+		if m.shared.agent != nil {
+			cwd = m.shared.agent.Cwd()
+		}
+		m.diff.toggle(m.files.files, cwd, m.width, chatH)
 		return m, nil
 	}
 

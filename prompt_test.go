@@ -31,6 +31,12 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, "The host may require approval before running commands.") {
 			t.Error("prompt should mention host approval mode")
 		}
+		if !strings.Contains(prompt, "When the user refers to the current repo, current directory, or cwd, work in the current directory without adding cd.") {
+			t.Error("prompt should keep cwd tasks in the current directory")
+		}
+		if !strings.Contains(prompt, "You may also receive a [state] block containing JSON host execution state such as the current working directory.") {
+			t.Error("prompt should explain host state messages")
+		}
 	})
 
 	t.Run("appends AGENTS.md when present", func(t *testing.T) {

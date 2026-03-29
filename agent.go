@@ -2,6 +2,7 @@ package clnkr
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -44,6 +45,10 @@ func (a *Agent) Messages() []Message {
 	return cp
 }
 
+func (a *Agent) Cwd() string {
+	return a.cwd
+}
+
 // AddMessages prepends msgs before the first Step/Run call.
 func (a *Agent) AddMessages(msgs []Message) error {
 	if a.started {
@@ -56,6 +61,7 @@ func (a *Agent) AddMessages(msgs []Message) error {
 	copy(combined, msgs)
 	copy(combined[len(msgs):], a.messages)
 	a.messages = combined
+	a.restoreExecutionStateFromMessages()
 	return nil
 }
 
@@ -77,6 +83,65 @@ func formatCommandOutput(result CommandResult) string {
 	return b.String()
 }
 
+type transcriptState struct {
+	Source string `json:"source"`
+	Kind   string `json:"kind"`
+	Cwd    string `json:"cwd"`
+}
+
+func formatStateMessage(cwd string) string {
+	body, err := json.Marshal(transcriptState{
+		Source: "clnkr",
+		Kind:   "state",
+		Cwd:    cwd,
+	})
+	if err != nil {
+		panic(fmt.Sprintf("marshal state message: %v", err))
+	}
+	return fmt.Sprintf("[state]\n%s\n[/state]", body)
+}
+
+func extractLatestCwd(messages []Message) (string, bool) {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != "user" {
+			continue
+		}
+		if cwd, ok := extractStateCwd(messages[i].Content); ok {
+			return cwd, true
+		}
+	}
+	return "", false
+}
+
+func extractStateCwd(content string) (string, bool) {
+	content = strings.TrimSpace(content)
+	if !strings.HasPrefix(content, "[state]") || !strings.HasSuffix(content, "[/state]") {
+		return "", false
+	}
+	body := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(content, "[state]"), "[/state]"))
+	var state transcriptState
+	if err := json.Unmarshal([]byte(body), &state); err != nil {
+		return "", false
+	}
+	if state.Source != "clnkr" || state.Kind != "state" || state.Cwd == "" {
+		return "", false
+	}
+	return state.Cwd, true
+}
+
+func (a *Agent) restoreExecutionStateFromMessages() {
+	if cwd, ok := extractLatestCwd(a.messages); ok {
+		a.cwd = cwd
+	}
+}
+
+func (a *Agent) appendStateMessageIfNeeded() {
+	if cwd, ok := extractLatestCwd(a.messages); ok && cwd == a.cwd {
+		return
+	}
+	a.messages = append(a.messages, Message{Role: "user", Content: formatStateMessage(a.cwd)})
+}
+
 // ExecutorStateSetter is optional. Executors that skip it must populate
 // PostCwd/PostEnv themselves for cross-turn state.
 type ExecutorStateSetter interface {
@@ -86,6 +151,7 @@ type ExecutorStateSetter interface {
 // Step runs one query-parse cycle. Policy lives in Run.
 func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	a.started = true
+	a.appendStateMessageIfNeeded()
 	a.notify(EventDebug{Message: "querying model..."})
 	resp, err := a.model.Query(ctx, a.messages)
 	if err != nil {
@@ -129,6 +195,7 @@ func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, erro
 	a.notify(EventCommandDone{Command: act.Command, Stdout: execResult.Stdout, Stderr: execResult.Stderr, ExitCode: execResult.ExitCode, Err: execErr})
 
 	a.messages = append(a.messages, Message{Role: "user", Content: payload})
+	a.appendStateMessageIfNeeded()
 	return StepResult{Turn: act, Output: payload, ExecErr: execErr}, nil
 }
 

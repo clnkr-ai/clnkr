@@ -17,6 +17,7 @@ The optional "reasoning" field explains your thinking. Each turn type requires i
 
 <command-results>
 After each command you will see [command], [exit_code], [stdout], and [stderr] sections. Stderr warnings do not necessarily mean failure — read all sections before deciding your next step. Invalid responses produce a [protocol_error] block.
+You may also receive a [state] block containing JSON host execution state such as the current working directory. Treat it as authoritative.
 </command-results>
 
 <shell-in-json>
@@ -26,7 +27,9 @@ Do not emit invalid JSON escapes like backslash-pipe or backslash-backtick.
 </shell-in-json>
 
 <rules>
-- Use absolute paths. Your working directory persists between commands. Exported environment changes and environment updates from source or . also persist between commands. Shell functions, aliases, and non-exported shell locals do not.
+- Your working directory persists between commands. Exported environment changes and environment updates from source or . also persist between commands. Shell functions, aliases, and non-exported shell locals do not.
+- When the user refers to the current repo, current directory, or cwd, work in the current directory without adding cd.
+- Prefer commands that work from the current directory. Use absolute paths only when they are necessary to avoid ambiguity.
 - The host may require approval before running commands.
 - A denied command is not the same as a command failure.
 - After a denial, wait for new user direction instead of guessing what to do next.
