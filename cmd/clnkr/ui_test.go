@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -313,6 +316,34 @@ func TestModelDiffOverlayToggle(t *testing.T) {
 	}
 }
 
+func TestModelDiffOverlayUsesAgentCwd(t *testing.T) {
+	repo := t.TempDir()
+	cmd := exec.Command("git", "init", repo)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	file := filepath.Join(repo, "tracked.txt")
+	if err := os.WriteFile(file, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+
+	m := setupModel()
+	m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.shared.cwd = "/definitely/wrong"
+	m.shared.agent = clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, repo)
+	m.files.files = []string{"tracked.txt"}
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+
+	if !m.diff.visible {
+		t.Fatal("diff overlay should be visible after Ctrl+F")
+	}
+	if strings.Contains(m.diff.content, "git diff error") {
+		t.Fatalf("diff should use agent cwd, got %q", m.diff.content)
+	}
+}
+
 func TestModelDiffOverlayBlocksOtherKeys(t *testing.T) {
 	m := setupModel()
 	m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -340,25 +371,31 @@ func TestModelTracksFilesFromCommands(t *testing.T) {
 	}
 }
 
-func TestModelRejectProposalEntersClarificationMode(t *testing.T) {
+func TestModelApprovalReplyBecomesUserGuidance(t *testing.T) {
 	m := setupModel()
 	m.pendingAct = &clnkr.ActTurn{Command: "rm important.txt"}
 	m.chat.setProposedCommand("rm important.txt")
 	m.awaitingApproval = true
+	m.input.textarea.SetValue("list files instead")
 	m.running = true
+	m.shared.agent = clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	m.runCtx = context.Background()
 
-	m = updateModel(t, m, tea.KeyPressMsg{Code: 'n'})
-	if !m.awaitingClarification {
-		t.Fatal("reject should switch to clarification mode")
-	}
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.awaitingApproval {
-		t.Fatal("reject should clear awaitingApproval")
+		t.Fatal("guidance should clear awaitingApproval")
+	}
+	if m.awaitingClarification {
+		t.Fatal("guidance should not enter clarification mode")
 	}
 	if m.pendingAct != nil {
-		t.Fatal("reject should clear pendingAct")
+		t.Fatal("guidance should clear pendingAct")
 	}
 	if m.chat.pendingCmd != "" {
-		t.Fatal("reject should clear pending command banner")
+		t.Fatal("guidance should clear pending command banner")
+	}
+	if !strings.Contains(m.chat.content.String(), "list files instead") {
+		t.Fatal("guidance should be rendered into chat")
 	}
 }
 
@@ -384,11 +421,12 @@ func TestModelApproveProposalStartsExecution(t *testing.T) {
 	m := setupModel()
 	m.pendingAct = &clnkr.ActTurn{Command: "echo hi"}
 	m.awaitingApproval = true
+	m.input.textarea.SetValue("y")
 	m.running = true
 	m.shared.agent = clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
 	m.cancel = func() {}
 
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y'})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	um, ok := updated.(model)
 	if !ok {
 		t.Fatalf("expected model, got %T", updated)
@@ -401,15 +439,72 @@ func TestModelApproveProposalStartsExecution(t *testing.T) {
 	}
 }
 
-func TestModelEnterWhileRunningPreservesDraftInput(t *testing.T) {
+func TestModelEnterWhileRunningWithoutPendingPromptPreservesDraftInput(t *testing.T) {
 	m := setupModel()
 	m.running = true
-	m.awaitingApproval = true
 	m.input.textarea.SetValue("draft clarification")
 
 	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if got := m.input.textarea.Value(); got != "draft clarification" {
 		t.Fatalf("input should be preserved while running, got %q", got)
+	}
+}
+
+func TestModelApprovalHintAppearsWhenCommandIsProposed(t *testing.T) {
+	m := setupModel()
+
+	updated, cmd := m.Update(stepDoneMsg{result: clnkr.StepResult{Turn: &clnkr.ActTurn{Command: "echo hi"}}})
+	if cmd == nil {
+		t.Fatal("proposal should focus the input")
+	}
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if !um.awaitingApproval {
+		t.Fatal("proposal should enter approval mode")
+	}
+	if got := um.input.textarea.Placeholder; got != approvalPromptText {
+		t.Fatalf("placeholder = %q", got)
+	}
+	if !strings.Contains(um.chat.content.String(), approvalPromptText) {
+		t.Fatal("chat should explain how to approve")
+	}
+}
+
+func TestModelApprovalRequiresEnter(t *testing.T) {
+	m := setupModel()
+	m.pendingAct = &clnkr.ActTurn{Command: "echo hi"}
+	m.awaitingApproval = true
+	m.input.textarea.SetValue("y")
+	m.running = true
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'y'})
+	if !m.awaitingApproval {
+		t.Fatal("typing y should not approve before Enter")
+	}
+	if got := m.input.textarea.Value(); got != "y" {
+		t.Fatalf("input should remain pending, got %q", got)
+	}
+}
+
+func TestModelCtrlYApprovesPendingCommand(t *testing.T) {
+	m := setupModel()
+	m.pendingAct = &clnkr.ActTurn{Command: "echo hi"}
+	m.awaitingApproval = true
+	m.running = true
+	m.shared.agent = clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if cmd == nil {
+		t.Fatal("Ctrl+Y should start an execute command")
+	}
+	if um.awaitingApproval {
+		t.Fatal("Ctrl+Y should clear awaitingApproval")
 	}
 }
 

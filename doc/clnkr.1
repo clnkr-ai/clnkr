@@ -51,7 +51,7 @@ Execute every \fBact\fP turn immediately. Without this flag, clnkr asks for appr
 
 .TP
 \fB--load-messages\fP \fIfile\fP
-Read a JSON array of messages from \fIfile\fP and prepend them to the conversation before starting. The format matches \fB--trajectory\fP output, so one agent's trajectory can seed another agent's context.
+Read a JSON array of messages from \fIfile\fP and prepend them to the conversation before starting. The format matches \fB--trajectory\fP output, so one agent's trajectory can seed another agent's context. Host-generated JSON \fB[state]\fR messages in that transcript restore the current working directory.
 
 .TP
 \fB--event-log\fP \fIfile\fP
@@ -67,7 +67,7 @@ Show internal decisions (queries, parsing, working directory).
 
 .TP
 \fB--continue\fP
-Resume the most recent session for the current project directory.
+Resume the most recent session for the current project directory. Saved JSON \fB[state]\fR messages restore the last persisted working directory.
 
 .TP
 \fB--list-sessions\fP

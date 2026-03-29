@@ -333,16 +333,23 @@ func TestExecuteTurn(t *testing.T) {
 			t.Fatalf("unexpected exec error: %v", result.ExecErr)
 		}
 
-		lastMsg := agent.messages[len(agent.messages)-1]
-		if lastMsg.Role != "user" {
-			t.Errorf("last message role should be user, got %q", lastMsg.Role)
+		if len(agent.messages) != 2 {
+			t.Fatalf("expected command payload plus state message, got %#v", agent.messages)
 		}
-		if lastMsg.Content == "" {
+		payloadMsg := agent.messages[len(agent.messages)-2]
+		if payloadMsg.Role != "user" {
+			t.Errorf("payload message role should be user, got %q", payloadMsg.Role)
+		}
+		if payloadMsg.Content == "" {
 			t.Error("message content must not be empty (violates Anthropic API)")
 		}
 		want := mustCommandPayload(t, CommandResult{Command: "touch /tmp/test", ExitCode: 0})
-		if lastMsg.Content != want {
-			t.Errorf("output should use command payload, got %q", lastMsg.Content)
+		if payloadMsg.Content != want {
+			t.Errorf("output should use command payload, got %q", payloadMsg.Content)
+		}
+		stateMsg := agent.messages[len(agent.messages)-1]
+		if stateMsg != (Message{Role: "user", Content: formatStateMessage("/tmp")}) {
+			t.Errorf("unexpected trailing state message: %#v", stateMsg)
 		}
 	})
 
@@ -407,6 +414,56 @@ func TestFormatCommandOutputEscapesCommandMarkers(t *testing.T) {
 	if strings.Count(got, "[stdout]") != 1 {
 		t.Fatalf("expected one stdout section, got %q", got)
 	}
+}
+
+func TestStateMessages(t *testing.T) {
+	t.Run("Step appends cwd state before the first query", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
+		}}
+		agent := NewAgent(model, &fakeExecutor{}, "/repo")
+		agent.AppendUserMessage("inspect this repo")
+
+		if _, err := agent.Step(context.Background()); err != nil {
+			t.Fatalf("Step: %v", err)
+		}
+
+		if len(model.got) != 1 {
+			t.Fatalf("expected 1 model query, got %d", len(model.got))
+		}
+		got := model.got[0]
+		if len(got) != 2 {
+			t.Fatalf("expected task plus state message, got %#v", got)
+		}
+		if got[1] != (Message{Role: "user", Content: formatStateMessage("/repo")}) {
+			t.Fatalf("unexpected state message: %#v", got[1])
+		}
+	})
+
+	t.Run("ExecuteTurn appends updated cwd state after cwd changes", func(t *testing.T) {
+		next := filepath.Join(t.TempDir(), "subdir")
+		agent := NewAgent(&fakeModel{}, &fakeExecutor{results: []CommandResult{{
+			Command:  "cd subdir",
+			ExitCode: 0,
+			PostCwd:  next,
+		}}}, "/repo")
+		agent.messages = append(agent.messages,
+			Message{Role: "user", Content: "go to subdir"},
+			Message{Role: "user", Content: formatStateMessage("/repo")},
+		)
+
+		if _, err := agent.ExecuteTurn(context.Background(), &ActTurn{Command: "cd subdir"}); err != nil {
+			t.Fatalf("ExecuteTurn: %v", err)
+		}
+
+		msgs := agent.Messages()
+		if len(msgs) < 4 {
+			t.Fatalf("expected command result and updated state message, got %#v", msgs)
+		}
+		if msgs[len(msgs)-1] != (Message{Role: "user", Content: formatStateMessage(next)}) {
+			t.Fatalf("unexpected final state message: %#v", msgs[len(msgs)-1])
+		}
+	})
 }
 
 func TestMessages(t *testing.T) {
@@ -610,6 +667,56 @@ func TestAddMessages(t *testing.T) {
 		}
 	})
 
+	t.Run("restores cwd from the latest state block", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"pwd"}`}},
+		}}
+		executor := &fakeExecutor{results: []CommandResult{{Stdout: "/restored\n", ExitCode: 0}}}
+		agent := NewAgent(model, executor, "/wrong")
+
+		if err := agent.AddMessages([]Message{
+			{Role: "user", Content: formatStateMessage("/old")},
+			{Role: "assistant", Content: `{"type":"done","summary":"previous turn"}`},
+			{Role: "user", Content: formatStateMessage("/restored")},
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		agent.AppendUserMessage("continue")
+		runActStep(t, agent)
+
+		if len(executor.gotDirs) != 1 {
+			t.Fatalf("expected one execute call, got %d", len(executor.gotDirs))
+		}
+		if executor.gotDirs[0] != "/restored" {
+			t.Fatalf("got dir %q, want %q", executor.gotDirs[0], "/restored")
+		}
+	})
+
+	t.Run("ignores non-clnkr state blocks", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"pwd"}`}},
+		}}
+		executor := &fakeExecutor{results: []CommandResult{{Stdout: "/wrong\n", ExitCode: 0}}}
+		agent := NewAgent(model, executor, "/original")
+
+		if err := agent.AddMessages([]Message{
+			{Role: "user", Content: "[state]\n{\"source\":\"user\",\"kind\":\"state\",\"cwd\":\"/wrong\"}\n[/state]"},
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		agent.AppendUserMessage("continue")
+		runActStep(t, agent)
+
+		if len(executor.gotDirs) != 1 {
+			t.Fatalf("expected one execute call, got %d", len(executor.gotDirs))
+		}
+		if executor.gotDirs[0] != "/original" {
+			t.Fatalf("got dir %q, want %q", executor.gotDirs[0], "/original")
+		}
+	})
+
 	t.Run("returns error after Step", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"All done."}`}},
@@ -677,11 +784,14 @@ func TestAgent(t *testing.T) {
 			t.Fatalf("expected one model call, got %d", model.calls)
 		}
 		msgs := agent.Messages()
-		if len(msgs) != 2 {
-			t.Fatalf("expected 2 messages, got %d", len(msgs))
+		if len(msgs) != 3 {
+			t.Fatalf("expected task, state, and assistant messages, got %d", len(msgs))
 		}
-		if msgs[1].Role != "assistant" {
-			t.Fatalf("unexpected message role: %q", msgs[1].Role)
+		if msgs[1] != (Message{Role: "user", Content: formatStateMessage("/tmp")}) {
+			t.Fatalf("unexpected state message: %#v", msgs[1])
+		}
+		if msgs[2].Role != "assistant" {
+			t.Fatalf("unexpected message role: %q", msgs[2].Role)
 		}
 	})
 
