@@ -2,6 +2,8 @@ package clnkr
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -26,6 +28,18 @@ func TestParseTurn(t *testing.T) {
 		{
 			name:  "act with reasoning preserved",
 			input: `{"type":"act","command":"echo hi","reasoning":"testing output"}`,
+		},
+		{
+			name:  "repairs invalid pipe escape in command",
+			input: `{"type":"act","command":"grep 'A\|B' file.txt"}`,
+		},
+		{
+			name:  "repairs invalid backtick escape in command",
+			input: "{\"type\":\"act\",\"command\":\"printf \\`hi\\`\"}",
+		},
+		{
+			name:  "repairs malformed unicode escape in command",
+			input: `{"type":"act","command":"printf '\u12XZ'"}`,
 		},
 		{
 			name:    "invalid json",
@@ -215,6 +229,52 @@ func TestParseTurnReasoningPreserved(t *testing.T) {
 		act := turn.(*ActTurn)
 		if act.Reasoning != "" {
 			t.Errorf("expected empty reasoning, got %q", act.Reasoning)
+		}
+	})
+}
+
+func TestSanitizeJSONEscapes(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"valid: quote", `{"c":"say \"hi\""}`, `{"c":"say \"hi\""}`},
+		{"valid: backslash", `{"c":"a\\b"}`, `{"c":"a\\b"}`},
+		{"valid: slash", `{"c":"a\/b"}`, `{"c":"a\/b"}`},
+		{"valid: backspace", `{"c":"a\bb"}`, `{"c":"a\bb"}`},
+		{"valid: formfeed", `{"c":"a\fb"}`, `{"c":"a\fb"}`},
+		{"valid: newline", `{"c":"a\nb"}`, `{"c":"a\nb"}`},
+		{"valid: carriage return", `{"c":"a\rb"}`, `{"c":"a\rb"}`},
+		{"valid: tab", `{"c":"a\tb"}`, `{"c":"a\tb"}`},
+		{"valid: unicode", `{"c":"\u0041"}`, `{"c":"\u0041"}`},
+		{"invalid: pipe", `{"c":"grep 'A\|B'"}`, `{"c":"grep 'A\\|B'"}`},
+		{"invalid: backtick", "{\"c\":\"\\`hi\\`\"}", "{\"c\":\"\\\\`hi\\\\`\"}"},
+		{"invalid: malformed unicode", `{"c":"\u12XZ"}`, `{"c":"\\u12XZ"}`},
+		{"outside string unchanged", `{"type":"act"}`, `{"type":"act"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeJSONEscapes(tt.input)
+			if got != tt.want {
+				t.Fatalf("sanitizeJSONEscapes(%q)\n got %q\nwant %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProtocolCorrectionMessage(t *testing.T) {
+	t.Run("mentions invalid pipe escape", func(t *testing.T) {
+		msg := protocolCorrectionMessage(fmt.Errorf("%w: invalid character '|' in string escape code", ErrInvalidJSON))
+		if !strings.Contains(msg, `\|`) || !strings.Contains(msg, `\\|`) {
+			t.Fatalf("expected targeted pipe escape hint, got %q", msg)
+		}
+	})
+
+	t.Run("mentions invalid backtick escape", func(t *testing.T) {
+		msg := protocolCorrectionMessage(fmt.Errorf("%w: invalid character '`' in string escape code", ErrInvalidJSON))
+		if !strings.Contains(msg, "\\`") || !strings.Contains(msg, "\\\\") {
+			t.Fatalf("expected targeted backtick escape hint, got %q", msg)
 		}
 	})
 }
