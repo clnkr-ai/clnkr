@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0 (2026-03-29)
+
+- Add per-command approval mode
+- Update CHANGELOG.md for 0.9.0
+
 ## 0.9.0 (2026-03-29)
 
 - Update CHANGELOG.md for 0.9.0
