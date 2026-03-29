@@ -28,6 +28,9 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, "Exported environment changes and environment updates from source or . also persist between commands.") {
 			t.Error("prompt should explain shell env persistence")
 		}
+		if !strings.Contains(prompt, "The host may require approval before running commands.") {
+			t.Error("prompt should mention host approval mode")
+		}
 	})
 
 	t.Run("appends AGENTS.md when present", func(t *testing.T) {

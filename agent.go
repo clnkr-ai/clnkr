@@ -11,7 +11,7 @@ const DefaultMaxSteps = 100
 
 var ErrClarificationNeeded = errors.New("clarification needed")
 
-// Agent runs the query-parse-execute loop.
+// Agent coordinates model turns and command execution.
 type Agent struct {
 	model    Model
 	executor Executor
@@ -59,6 +59,13 @@ func (a *Agent) AddMessages(msgs []Message) error {
 	return nil
 }
 
+// AppendUserMessage appends a user message after the agent has started or for
+// frontends that drive the loop manually.
+func (a *Agent) AppendUserMessage(text string) {
+	a.started = true
+	a.messages = append(a.messages, Message{Role: "user", Content: text})
+}
+
 var sectionEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "[", "&#91;", "]", "&#93;")
 
 func formatCommandOutput(result CommandResult) string {
@@ -76,7 +83,7 @@ type ExecutorStateSetter interface {
 	SetEnv(map[string]string)
 }
 
-// Step runs one query-parse-execute cycle. Policy lives in Run.
+// Step runs one query-parse cycle. Policy lives in Run.
 func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	a.started = true
 	a.notify(EventDebug{Message: "querying model..."})
@@ -96,11 +103,11 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	}
 
 	a.notify(EventDebug{Message: fmt.Sprintf("parsed turn: %T", turn)})
+	return StepResult{Response: resp, Turn: turn}, nil
+}
 
-	act, isAct := turn.(*ActTurn)
-	if !isAct {
-		return StepResult{Response: resp, Turn: turn}, nil
-	}
+// ExecuteTurn runs an act turn and appends the command result payload.
+func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, error) {
 	if setter, ok := a.executor.(ExecutorStateSetter); ok {
 		setter.SetEnv(a.env)
 	}
@@ -122,12 +129,33 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	a.notify(EventCommandDone{Command: act.Command, Stdout: execResult.Stdout, Stderr: execResult.Stderr, ExitCode: execResult.ExitCode, Err: execErr})
 
 	a.messages = append(a.messages, Message{Role: "user", Content: payload})
-	return StepResult{Response: resp, Turn: turn, Output: payload, ExecErr: execErr}, nil
+	return StepResult{Turn: act, Output: payload, ExecErr: execErr}, nil
 }
 
-// Run loops Step until done, clarify, or step limit.
+// RequestStepLimitSummary asks the model for a final done summary after the
+// caller decides the step budget is exhausted.
+func (a *Agent) RequestStepLimitSummary(ctx context.Context) error {
+	a.notify(EventDebug{Message: "step limit reached, requesting summary"})
+	a.AppendUserMessage("Step limit reached. Respond with {\"type\":\"done\",\"summary\":\"...\"} summarizing your progress.")
+
+	resp, err := a.model.Query(ctx, a.messages)
+	if err != nil {
+		return fmt.Errorf("query model (final): %w", err)
+	}
+	a.messages = append(a.messages, resp.Message)
+	a.notify(EventResponse{Message: resp.Message, Usage: resp.Usage})
+	if turn, parseErr := ParseTurn(resp.Message.Content); parseErr != nil {
+		a.notify(EventDebug{Message: fmt.Sprintf("final response not a valid turn: %v", parseErr)})
+	} else {
+		a.notify(EventDebug{Message: fmt.Sprintf("final response turn: %T", turn)})
+	}
+	return nil
+}
+
+// Run loops Step until done, clarify, or step limit, executing act turns
+// immediately as the full-send policy path.
 func (a *Agent) Run(ctx context.Context, task string) error {
-	a.messages = append(a.messages, Message{Role: "user", Content: task})
+	a.AppendUserMessage(task)
 	steps := 0
 	protocolErrors := 0
 
@@ -153,26 +181,14 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 		case *ClarifyTurn:
 			return ErrClarificationNeeded
 		case *ActTurn:
+			act := result.Turn.(*ActTurn)
+			if _, err := a.ExecuteTurn(ctx, act); err != nil {
+				return err
+			}
 			steps++
 			a.notify(EventDebug{Message: fmt.Sprintf("step %d/%d", steps, a.MaxSteps)})
 			if a.MaxSteps > 0 && steps >= a.MaxSteps {
-				a.notify(EventDebug{Message: "step limit reached, requesting summary"})
-				a.messages = append(a.messages, Message{
-					Role:    "user",
-					Content: "Step limit reached. Respond with {\"type\":\"done\",\"summary\":\"...\"} summarizing your progress.",
-				})
-				resp, err := a.model.Query(ctx, a.messages)
-				if err != nil {
-					return fmt.Errorf("query model (final): %w", err)
-				}
-				a.messages = append(a.messages, resp.Message)
-				a.notify(EventResponse{Message: resp.Message, Usage: resp.Usage})
-				if turn, parseErr := ParseTurn(resp.Message.Content); parseErr != nil {
-					a.notify(EventDebug{Message: fmt.Sprintf("final response not a valid turn: %v", parseErr)})
-				} else {
-					a.notify(EventDebug{Message: fmt.Sprintf("final response turn: %T", turn)})
-				}
-				return nil
+				return a.RequestStepLimitSummary(ctx)
 			}
 		}
 	}

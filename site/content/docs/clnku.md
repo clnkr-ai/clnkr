@@ -13,7 +13,7 @@ clnku - a minimal coding agent (plain CLI)
 
 # SYNOPSIS
 
-**clnku** [**-p** *task*] [**--model** *name*] [**--base-url** *url*] [**--max-steps** *n*] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**--version**]
+**clnku** [**-p** *task*] [**--model** *name*] [**--base-url** *url*] [**--max-steps** *n*] [**--full-send**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**--version**]
 
 # DESCRIPTION
 
@@ -24,6 +24,8 @@ In default mode, **clnku** starts an interactive REPL. With **-p**, it runs a si
 **clnku** is the plain CLI variant of the clnkr project, with no external dependencies beyond the Go standard library. A TUI variant is available as **clnkr**(1).
 
 The agent communicates through JSON turns: **act** (execute a command), **clarify** (ask the user), and **done** (signal completion).
+
+By default, **clnku** asks for approval before each **act** turn. Pass **--full-send** to execute commands immediately without approval.
 
 Project-specific instructions are loaded from an **AGENTS.md** file in the current working directory, if present.
 
@@ -40,6 +42,9 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 
 **--max-steps** *n*
 : Maximum agent iterations. 0 uses the default of 100.
+
+**--full-send**
+: Execute every **act** turn immediately. Without this flag, clnku asks for approval before each command.
 
 **--load-messages** *file*
 : Read a JSON array of messages from *file* and prepend them to the conversation before starting. The format matches **--trajectory** output, so one agent's trajectory can seed another agent's context.

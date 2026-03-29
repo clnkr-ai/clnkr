@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -23,6 +25,180 @@ var version = "dev"
 
 const exitClarificationNeeded = 2
 
+var errApprovalPending = errors.New("approval pending")
+
+type approvalPrompter interface {
+	Confirm(ctx context.Context, command string) (bool, error)
+	Clarify(ctx context.Context, question string) (string, error)
+}
+
+type stdinPrompter struct {
+	reader *lineReader
+}
+
+type lineResult struct {
+	text string
+	err  error
+}
+
+type lineReader struct {
+	lines chan lineResult
+}
+
+func newLineReader(r io.Reader) *lineReader {
+	lr := &lineReader{lines: make(chan lineResult)}
+	go func() {
+		scanner := bufio.NewScanner(r)
+		for scanner.Scan() {
+			lr.lines <- lineResult{text: scanner.Text()}
+		}
+		if err := scanner.Err(); err != nil {
+			lr.lines <- lineResult{err: err}
+		}
+		close(lr.lines)
+	}()
+	return lr
+}
+
+func (r *lineReader) ReadLine(ctx context.Context) (string, error) {
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case line, ok := <-r.lines:
+		if !ok {
+			return "", io.EOF
+		}
+		if line.err != nil {
+			return "", line.err
+		}
+		return line.text, nil
+	}
+}
+
+func (p *stdinPrompter) Confirm(ctx context.Context, command string) (bool, error) {
+	fmt.Fprintln(os.Stderr, command) //nolint:errcheck
+	for {
+		fmt.Fprint(os.Stderr, "Approve command? [y/n]: ") //nolint:errcheck
+		line, err := p.reader.ReadLine(ctx)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return false, errApprovalPending
+			}
+			if errors.Is(err, context.Canceled) {
+				return false, err
+			}
+			return false, fmt.Errorf("read approval input: %w", err)
+		}
+		approved, ok := parseApprovalInput(line)
+		if ok {
+			return approved, nil
+		}
+		fmt.Fprintln(os.Stderr, "Please answer yes or no.") //nolint:errcheck
+	}
+}
+
+func (p *stdinPrompter) Clarify(ctx context.Context, question string) (string, error) {
+	fmt.Fprintln(os.Stderr, question)  //nolint:errcheck
+	fmt.Fprint(os.Stderr, "Clarify: ") //nolint:errcheck
+	line, err := p.reader.ReadLine(ctx)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return "", errApprovalPending
+		}
+		if errors.Is(err, context.Canceled) {
+			return "", err
+		}
+		return "", fmt.Errorf("read clarification input: %w", err)
+	}
+	return strings.TrimSpace(line), nil
+}
+
+func parseApprovalInput(s string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "y", "yes":
+		return true, true
+	case "n", "no":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func requireApprovalInput() error {
+	if !term.IsTerminal(os.Stdin.Fd()) {
+		return fmt.Errorf("approval mode requires interactive stdin; pass --full-send=true to bypass approval")
+	}
+	return nil
+}
+
+func runPlainApproval(ctx context.Context, agent *clnkr.Agent, task string, prompter approvalPrompter) error {
+	agent.AppendUserMessage(task)
+	steps := 0
+	protocolErrors := 0
+
+	for {
+		result, err := agent.Step(ctx)
+		if err != nil {
+			return err
+		}
+
+		if result.ParseErr != nil {
+			protocolErrors++
+			if protocolErrors >= 3 {
+				return fmt.Errorf("consecutive protocol failures, exiting")
+			}
+			continue
+		}
+		protocolErrors = 0
+
+		switch turn := result.Turn.(type) {
+		case *clnkr.DoneTurn:
+			return nil
+		case *clnkr.ClarifyTurn:
+			reply, err := waitForClarification(ctx, prompter, turn.Question)
+			if err != nil {
+				return err
+			}
+			agent.AppendUserMessage(reply)
+		case *clnkr.ActTurn:
+			approved, err := prompter.Confirm(ctx, turn.Command)
+			if err != nil {
+				return err
+			}
+			if !approved {
+				reply, err := waitForClarification(ctx, prompter, "Command denied. What should the agent do instead?")
+				if err != nil {
+					return err
+				}
+				agent.AppendUserMessage(reply)
+				continue
+			}
+			if _, err := agent.ExecuteTurn(ctx, turn); err != nil {
+				return err
+			}
+			steps++
+			if agent.MaxSteps > 0 && steps >= agent.MaxSteps {
+				return agent.RequestStepLimitSummary(ctx)
+			}
+		default:
+			return fmt.Errorf("unexpected turn type %T", turn)
+		}
+	}
+}
+
+func waitForClarification(ctx context.Context, prompter approvalPrompter, question string) (string, error) {
+	for {
+		reply, err := prompter.Clarify(ctx, question)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(reply) == "" {
+			continue
+		}
+		return reply, nil
+	}
+}
+
 func main() {
 	flags := flag.NewFlagSet("clnkr", flag.ContinueOnError)
 	flags.Usage = func() {
@@ -37,6 +213,7 @@ Core:
   -m, --model string        Model identifier (env: $CLNKR_MODEL, default: claude-sonnet-4-20250514)
   -u, --base-url string     LLM endpoint (env: $CLNKR_BASE_URL, default: https://api.anthropic.com)
       --max-steps int       Maximum agent steps (default: 100)
+      --full-send           Execute every Act turn without approval
   -v, --verbose             Show internal decisions
 
 Sessions:
@@ -69,6 +246,7 @@ Environment:
 	baseURL := flags.String("base-url", "", "")
 	baseURLShort := flags.String("u", "", "")
 	maxSteps := flags.Int("max-steps", 0, "")
+	fullSend := flags.Bool("full-send", false, "")
 	verbose := flags.Bool("verbose", false, "")
 	verboseShort := flags.Bool("v", false, "")
 	showVersion := flags.Bool("version", false, "")
@@ -253,17 +431,66 @@ Environment:
 
 	// TTY detection: if stdout is not a terminal, use plain-text rendering
 	if !term.IsTerminal(os.Stdout.Fd()) {
-		runPlain(agent, taskPrompt, *trajectory, eventLogFile, showDebug)
+		runPlain(agent, taskPrompt, *trajectory, eventLogFile, showDebug, *fullSend)
 		return
 	}
 
-	runTUI(agent, taskPrompt, *trajectory, *modelFlag, cwd, eventLogFile, showDebug)
+	runTUI(agent, taskPrompt, *trajectory, *modelFlag, cwd, eventLogFile, showDebug, *fullSend)
 }
 
-func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, eventLog *os.File, verbose bool) {
+func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, eventLog *os.File, verbose bool, fullSend bool) {
 	s := defaultStyles(true) // TODO: detect actual background
 
 	if taskPrompt != "" {
+		if !fullSend {
+			m := newModel(modelOpts{
+				styles:          s,
+				verbose:         verbose,
+				modelName:       modelName,
+				maxSteps:        agent.MaxSteps,
+				fullSend:        fullSend,
+				exitOnRunFinish: true,
+			})
+			m.shared.agent = agent
+			m.shared.eventLog = eventLog
+			m.shared.cwd = cwd
+			m.chat.appendUserMessage(taskPrompt)
+			m.chat.updateViewport()
+			m.running = true
+			m.status.startRun()
+			ctx, cancel := context.WithCancel(context.Background())
+			m.cancel = cancel
+			m.runCtx = ctx
+			eventCh := make(chan clnkr.Event, eventChSize)
+			m.eventCh = eventCh
+			m.closeEventChOnFinish = true
+			m.shared.agent.Notify = makeNotify(eventCh, eventLog)
+			m.shared.agent.AppendUserMessage(taskPrompt)
+			m.startupCmd = tea.Batch(stepCmd(agent, ctx), tickCmd())
+
+			p := tea.NewProgram(m)
+			m.shared.program = p
+
+			finalModel, err := p.Run()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+
+			fm, ok := finalModel.(model)
+			if !ok {
+				os.Exit(1)
+			}
+
+			if trajectory != "" {
+				writeTrajectory(agent, trajectory)
+			}
+			if fm.agentErr != nil {
+				os.Exit(1)
+			}
+			return
+		}
+
 		// Single-task mode: set up event channel and launch agent immediately
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -272,12 +499,14 @@ func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, e
 		agent.Notify = makeNotify(eventCh, eventLog)
 
 		m := newModel(modelOpts{
-			eventCh:   eventCh,
-			styles:    s,
-			verbose:   verbose,
-			cancel:    cancel,
-			modelName: modelName,
-			maxSteps:  agent.MaxSteps,
+			eventCh:         eventCh,
+			styles:          s,
+			verbose:         verbose,
+			cancel:          cancel,
+			modelName:       modelName,
+			maxSteps:        agent.MaxSteps,
+			fullSend:        fullSend,
+			exitOnRunFinish: true,
 		})
 		m.shared.agent = agent
 		m.shared.eventLog = eventLog
@@ -310,6 +539,9 @@ func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, e
 		}
 
 		if fm.agentErr != nil {
+			if errors.Is(fm.agentErr, context.Canceled) {
+				os.Exit(130)
+			}
 			if errors.Is(fm.agentErr, clnkr.ErrClarificationNeeded) {
 				fmt.Fprintln(os.Stderr, "Clarification needed.")
 				os.Exit(exitClarificationNeeded)
@@ -325,6 +557,7 @@ func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, e
 		verbose:   verbose,
 		modelName: modelName,
 		maxSteps:  agent.MaxSteps,
+		fullSend:  fullSend,
 	})
 	m.shared.agent = agent
 	m.shared.eventLog = eventLog
@@ -364,14 +597,11 @@ func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, e
 
 // runPlain provides plain-text output for non-TTY environments.
 // Matches core library behavior. ~30 lines of duplicated Notify logic.
-func runPlain(agent *clnkr.Agent, taskPrompt, trajectory string, eventLog *os.File, verbose bool) {
+func runPlain(agent *clnkr.Agent, taskPrompt, trajectory string, eventLog *os.File, verbose bool, fullSend bool) {
 	if taskPrompt == "" {
 		fmt.Fprintf(os.Stderr, "Error: non-interactive mode requires -p\n")
 		os.Exit(1)
 	}
-
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
 
 	agent.Notify = func(e clnkr.Event) {
 		if eventLog != nil {
@@ -402,13 +632,27 @@ func runPlain(agent *clnkr.Agent, taskPrompt, trajectory string, eventLog *os.Fi
 		}
 	}
 
-	runErr := agent.Run(ctx, taskPrompt)
+	var runErr error
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+	if fullSend {
+		runErr = agent.Run(ctx, taskPrompt)
+	} else {
+		if err := requireApprovalInput(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		runErr = runPlainApproval(ctx, agent, taskPrompt, &stdinPrompter{reader: newLineReader(os.Stdin)})
+	}
 
 	if trajectory != "" {
 		writeTrajectory(agent, trajectory)
 	}
 
 	if runErr != nil {
+		if errors.Is(runErr, context.Canceled) {
+			os.Exit(130)
+		}
 		if errors.Is(runErr, clnkr.ErrClarificationNeeded) {
 			fmt.Fprintln(os.Stderr, "Clarification needed.")
 			os.Exit(exitClarificationNeeded)
