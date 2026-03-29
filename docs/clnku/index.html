@@ -56,7 +56,7 @@
 <dt><strong>&ndash;full-send</strong></dt>
 <dd>Execute every <strong>act</strong> turn immediately. Without this flag, clnku asks for approval before each command.</dd>
 <dt><strong>&ndash;load-messages</strong> <em>file</em></dt>
-<dd>Read a JSON array of messages from <em>file</em> and prepend them to the conversation before starting. The format matches <strong>&ndash;trajectory</strong> output, so one agent&rsquo;s trajectory can seed another agent&rsquo;s context.</dd>
+<dd>Read a JSON array of messages from <em>file</em> and prepend them to the conversation before starting. The format matches <strong>&ndash;trajectory</strong> output, so one agent&rsquo;s trajectory can seed another agent&rsquo;s context. Host-generated JSON <code>[state]</code> messages in that transcript restore the current working directory.</dd>
 <dt><strong>&ndash;event-log</strong> <em>file</em></dt>
 <dd>Write every agent event as a JSONL line to <em>file</em>. Each line is a JSON object with &ldquo;type&rdquo; and &ldquo;payload&rdquo; fields. Uses O_APPEND for atomic writes, safe to tail from another process.</dd>
 <dt><strong>&ndash;trajectory</strong> <em>file</em></dt>
@@ -66,7 +66,7 @@
 <dt><strong>&ndash;version</strong></dt>
 <dd>Print version and exit.</dd>
 <dt><strong>&ndash;continue</strong></dt>
-<dd>Resume the most recent session for the current project directory.</dd>
+<dd>Resume the most recent session for the current project directory. Saved JSON <code>[state]</code> messages restore the last persisted working directory.</dd>
 <dt><strong>&ndash;list-sessions</strong></dt>
 <dd>List all saved sessions for the current project directory.</dd>
 </dl>
