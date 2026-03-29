@@ -130,6 +130,28 @@ func (c *chatModel) appendEvent(e clnkr.Event) {
 	}
 }
 
+func (c *chatModel) appendUserMessage(text string) {
+	c.content.WriteString(c.styles.Chat.UserMessage.Render(text))
+	c.content.WriteString("\n\n")
+}
+
+func (c *chatModel) appendHostNote(text string) {
+	c.content.WriteString(c.styles.Chat.Warning.Render(text))
+	c.content.WriteString("\n\n")
+}
+
+func (c *chatModel) setProposedCommand(command string) {
+	c.lastCmd = command
+	c.pendingCmd = c.styles.Chat.CommandPending.Render(
+		fmt.Sprintf("%s proposed: %s", iconPending, summarizeCommand(command)),
+	)
+}
+
+func (c *chatModel) clearPendingCommand() {
+	c.lastCmd = ""
+	c.pendingCmd = ""
+}
+
 func (c *chatModel) updateViewport() {
 	full := c.content.String() + c.pendingQuery + c.pendingCmd + c.streamBuf.String()
 	wasBottom := c.wasAtBottom

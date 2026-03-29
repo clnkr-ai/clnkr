@@ -41,6 +41,9 @@ clnkr
 
 # Single task
 clnkr -p "find all TODO comments in this project"
+
+# Skip per-command approval
+clnkr --full-send -p "fix the failing test"
 ```
 
 ### OpenAI-compatible providers
@@ -68,6 +71,7 @@ clnkr --base-url https://generativelanguage.googleapis.com/v1beta/openai --model
 --model string           Model identifier (default: claude-sonnet-4-20250514)
 --base-url string        LLM API endpoint (default: https://api.anthropic.com)
 --max-steps int          Maximum agent steps (default: 100)
+--full-send              Execute every Act turn without approval
 --load-messages string   Seed conversation from JSON file (e.g. from --trajectory)
 --event-log string       Write JSONL events to file (streams in real time)
 --trajectory string      Write message history as JSON on exit (single-task mode only)
@@ -101,7 +105,9 @@ clnku -p "write a fix based on the investigation" --load-messages /tmp/investiga
 `--event-log` streams one JSON object per line as events happen (O_APPEND, safe to tail).
 `--trajectory` writes the full message array as pretty-printed JSON when the task ends — even if it failed.
 `--load-messages` reads that same format and prepends the messages before starting, so one agent's output becomes another's context.
-If a single-task run stops to ask for clarification, the process exits with status `2` after printing the question, so callers can distinguish "needs input" from "done".
+With `--full-send`, a single-task run that stops to ask for clarification exits with status `2` after printing the question, so callers can distinguish "needs input" from "done". In the default approval mode, the harness asks for clarification inline instead.
+
+By default, both binaries require explicit approval before each `act` turn. Pass `--full-send` to restore the old "run every command immediately" behavior.
 
 ### Command result format
 
@@ -156,8 +162,8 @@ clnkr runs a loop using a structured JSON turn protocol:
 
 1. Send conversation history to the LLM
 2. Parse the model's JSON response into a typed turn (`clarify`, `act`, or `done`)
-3. If `clarify`: return control to the user for more input
-4. If `act`: execute the bash command and append structured output to the conversation
+3. If `clarify`: return control to the frontend for more input
+4. If `act`: either ask the user for approval or execute the bash command immediately, then append structured output to the conversation
 5. If `done`: exit with the model's summary
 6. Repeat until done or step limit
 

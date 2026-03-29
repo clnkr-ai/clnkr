@@ -66,6 +66,29 @@ func mustCommandPayload(t *testing.T, result CommandResult) string {
 	return formatCommandOutput(result)
 }
 
+func mustStepAct(t *testing.T, agent *Agent) *ActTurn {
+	t.Helper()
+	result, err := agent.Step(context.Background())
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	act, ok := result.Turn.(*ActTurn)
+	if !ok {
+		t.Fatalf("expected *ActTurn, got %T", result.Turn)
+	}
+	return act
+}
+
+func runActStep(t *testing.T, agent *Agent) StepResult {
+	t.Helper()
+	act := mustStepAct(t, agent)
+	result, err := agent.ExecuteTurn(context.Background(), act)
+	if err != nil {
+		t.Fatalf("ExecuteTurn: %v", err)
+	}
+	return result
+}
+
 // collectEvents returns a Notify function and a pointer to the collected events slice.
 func collectEvents() (func(Event), *[]Event) {
 	var events []Event
@@ -73,7 +96,7 @@ func collectEvents() (func(Event), *[]Event) {
 }
 
 func TestStep(t *testing.T) {
-	t.Run("returns command result", func(t *testing.T) {
+	t.Run("returns act turn without executing command", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"ls"}`}},
 		}}
@@ -93,12 +116,14 @@ func TestStep(t *testing.T) {
 		if act.Command != "ls" {
 			t.Errorf("got command %q, want %q", act.Command, "ls")
 		}
-		wantOutput := mustCommandPayload(t, CommandResult{Command: "ls", Stdout: "file1.go\n", ExitCode: 0})
-		if result.Output != wantOutput {
-			t.Errorf("got output %q, want %q", result.Output, wantOutput)
+		if executor.calls != 0 {
+			t.Fatalf("Step should not execute commands, got %d calls", executor.calls)
+		}
+		if result.Output != "" {
+			t.Errorf("expected empty output for Step act turn, got %q", result.Output)
 		}
 		if result.ExecErr != nil {
-			t.Errorf("unexpected exec error: %v", result.ExecErr)
+			t.Errorf("expected empty exec error for Step act turn, got %v", result.ExecErr)
 		}
 	})
 
@@ -195,14 +220,13 @@ func TestStep(t *testing.T) {
 		}
 	})
 
-	t.Run("emits events via Notify", func(t *testing.T) {
+	t.Run("emits response events via Notify without command events", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"echo hi"}`}, Usage: Usage{InputTokens: 10, OutputTokens: 5}},
 		}}
-		executor := &fakeExecutor{results: []CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
 		notify, events := collectEvents()
 
-		agent := NewAgent(model, executor, "/tmp")
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
 		agent.Notify = notify
 		agent.messages = append(agent.messages, Message{Role: "user", Content: "say hi"})
 
@@ -228,7 +252,7 @@ func TestStep(t *testing.T) {
 			}
 		}
 
-		// Must have response, cmd_start, cmd_done (debug events may vary)
+		// Must have response, but no command events yet.
 		hasResponse := false
 		hasCmdStart := false
 		hasCmdDone := false
@@ -245,11 +269,11 @@ func TestStep(t *testing.T) {
 		if !hasResponse {
 			t.Error("missing EventResponse")
 		}
-		if !hasCmdStart {
-			t.Error("missing EventCommandStart")
+		if hasCmdStart {
+			t.Error("Step should not emit EventCommandStart")
 		}
-		if !hasCmdDone {
-			t.Error("missing EventCommandDone")
+		if hasCmdDone {
+			t.Error("Step should not emit EventCommandDone")
 		}
 	})
 
@@ -271,40 +295,12 @@ func TestStep(t *testing.T) {
 		}
 	})
 
-	t.Run("command output appended as user message", func(t *testing.T) {
-		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"touch /tmp/test"}`}},
-		}}
-		executor := &fakeExecutor{results: []CommandResult{{ExitCode: 0}}}
-
-		agent := NewAgent(model, executor, "/tmp")
-		agent.messages = append(agent.messages, Message{Role: "user", Content: "create file"})
-
-		_, err := agent.Step(context.Background())
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		lastMsg := agent.messages[len(agent.messages)-1]
-		if lastMsg.Role != "user" {
-			t.Errorf("last message role should be user, got %q", lastMsg.Role)
-		}
-		if lastMsg.Content == "" {
-			t.Error("message content must not be empty (violates Anthropic API)")
-		}
-		want := mustCommandPayload(t, CommandResult{Command: "touch /tmp/test", ExitCode: 0})
-		if lastMsg.Content != want {
-			t.Errorf("output should use command payload, got %q", lastMsg.Content)
-		}
-	})
-
 	t.Run("act with reasoning preserved", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"ls","reasoning":"checking files"}`}},
 		}}
-		executor := &fakeExecutor{results: []CommandResult{{Stdout: "file.go\n", ExitCode: 0}}}
 
-		agent := NewAgent(model, executor, "/tmp")
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
 		agent.messages = append(agent.messages, Message{Role: "user", Content: "list"})
 
 		result, err := agent.Step(context.Background())
@@ -320,6 +316,62 @@ func TestStep(t *testing.T) {
 		}
 		if act.Reasoning != "checking files" {
 			t.Errorf("got reasoning %q, want %q", act.Reasoning, "checking files")
+		}
+	})
+}
+
+func TestExecuteTurn(t *testing.T) {
+	t.Run("appends command output as user message", func(t *testing.T) {
+		executor := &fakeExecutor{results: []CommandResult{{ExitCode: 0}}}
+		agent := NewAgent(&fakeModel{}, executor, "/tmp")
+
+		result, err := agent.ExecuteTurn(context.Background(), &ActTurn{Command: "touch /tmp/test"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.ExecErr != nil {
+			t.Fatalf("unexpected exec error: %v", result.ExecErr)
+		}
+
+		lastMsg := agent.messages[len(agent.messages)-1]
+		if lastMsg.Role != "user" {
+			t.Errorf("last message role should be user, got %q", lastMsg.Role)
+		}
+		if lastMsg.Content == "" {
+			t.Error("message content must not be empty (violates Anthropic API)")
+		}
+		want := mustCommandPayload(t, CommandResult{Command: "touch /tmp/test", ExitCode: 0})
+		if lastMsg.Content != want {
+			t.Errorf("output should use command payload, got %q", lastMsg.Content)
+		}
+	})
+
+	t.Run("emits command events via Notify", func(t *testing.T) {
+		executor := &fakeExecutor{results: []CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
+		notify, events := collectEvents()
+
+		agent := NewAgent(&fakeModel{}, executor, "/tmp")
+		agent.Notify = notify
+
+		_, err := agent.ExecuteTurn(context.Background(), &ActTurn{Command: "echo hi"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		var hasCmdStart, hasCmdDone bool
+		for _, e := range *events {
+			switch e.(type) {
+			case EventCommandStart:
+				hasCmdStart = true
+			case EventCommandDone:
+				hasCmdDone = true
+			}
+		}
+		if !hasCmdStart {
+			t.Error("missing EventCommandStart")
+		}
+		if !hasCmdDone {
+			t.Error("missing EventCommandDone")
 		}
 	})
 }
@@ -401,14 +453,10 @@ func TestAgentPersistsShellStateBetweenCommands(t *testing.T) {
 		}}
 
 		agent := NewAgent(model, executor, "/tmp")
-		agent.messages = append(agent.messages, Message{Role: "user", Content: "set env then use it"})
+		agent.AppendUserMessage("set env then use it")
 
-		if _, err := agent.Step(context.Background()); err != nil {
-			t.Fatalf("step 1: %v", err)
-		}
-		if _, err := agent.Step(context.Background()); err != nil {
-			t.Fatalf("step 2: %v", err)
-		}
+		runActStep(t, agent)
+		runActStep(t, agent)
 		if len(executor.gotEnv) < 2 {
 			t.Fatalf("expected env snapshots for both commands, got %d", len(executor.gotEnv))
 		}
@@ -432,12 +480,10 @@ func TestAgentPersistsShellStateBetweenCommands(t *testing.T) {
 		}}
 
 		agent := NewAgent(model, executor, "/tmp")
-		agent.messages = append(agent.messages, Message{Role: "user", Content: "persist env across commands"})
+		agent.AppendUserMessage("persist env across commands")
 
 		for i := 0; i < 4; i++ {
-			if _, err := agent.Step(context.Background()); err != nil {
-				t.Fatalf("step %d: %v", i+1, err)
-			}
+			runActStep(t, agent)
 		}
 
 		if len(executor.gotEnv) < 4 {
@@ -473,14 +519,10 @@ func TestAgentPersistsShellStateBetweenCommands(t *testing.T) {
 		}}
 
 		agent := NewAgent(model, executor, root)
-		agent.messages = append(agent.messages, Message{Role: "user", Content: "change dir then reuse it"})
+		agent.AppendUserMessage("change dir then reuse it")
 
-		if _, err := agent.Step(context.Background()); err != nil {
-			t.Fatalf("step 1: %v", err)
-		}
-		if _, err := agent.Step(context.Background()); err != nil {
-			t.Fatalf("step 2: %v", err)
-		}
+		runActStep(t, agent)
+		runActStep(t, agent)
 		if len(executor.gotDirs) < 2 {
 			t.Fatalf("expected two execute calls, got %d", len(executor.gotDirs))
 		}
@@ -573,7 +615,7 @@ func TestAddMessages(t *testing.T) {
 			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"All done."}`}},
 		}}
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
-		agent.messages = append(agent.messages, Message{Role: "user", Content: "hi"})
+		agent.AppendUserMessage("hi")
 
 		if _, err := agent.Step(context.Background()); err != nil {
 			t.Fatalf("unexpected Step error: %v", err)
@@ -584,6 +626,20 @@ func TestAddMessages(t *testing.T) {
 			t.Fatal("expected error calling AddMessages after Step")
 		}
 	})
+}
+
+func TestAppendUserMessage(t *testing.T) {
+	agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+
+	agent.AppendUserMessage("hello")
+
+	msgs := agent.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if msgs[0] != (Message{Role: "user", Content: "hello"}) {
+		t.Fatalf("got %#v", msgs[0])
+	}
 }
 
 func TestAgent(t *testing.T) {

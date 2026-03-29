@@ -39,7 +39,7 @@ func (EventCommandDone) event()     {}
 func (EventProtocolFailure) event() {}
 func (EventDebug) event()           {}
 
-// StepResult is the outcome of one Step call.
+// StepResult is the outcome of one agent operation.
 type StepResult struct {
 	Response Response
 	Turn     Turn

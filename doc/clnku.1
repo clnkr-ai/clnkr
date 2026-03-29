@@ -6,7 +6,7 @@ clnku \- a minimal coding agent (plain CLI)
 
 
 .SH SYNOPSIS
-\fBclnku\fP [\fB-p\fP \fItask\fP] [\fB--model\fP \fIname\fP] [\fB--base-url\fP \fIurl\fP] [\fB--max-steps\fP \fIn\fP] [\fB--load-messages\fP \fIfile\fP] [\fB--event-log\fP \fIfile\fP] [\fB--trajectory\fP \fIfile\fP] [\fB-v\fP|\fB--verbose\fP] [\fB--version\fP]
+\fBclnku\fP [\fB-p\fP \fItask\fP] [\fB--model\fP \fIname\fP] [\fB--base-url\fP \fIurl\fP] [\fB--max-steps\fP \fIn\fP] [\fB--full-send\fP] [\fB--load-messages\fP \fIfile\fP] [\fB--event-log\fP \fIfile\fP] [\fB--trajectory\fP \fIfile\fP] [\fB-v\fP|\fB--verbose\fP] [\fB--version\fP]
 
 
 .SH DESCRIPTION
@@ -20,6 +20,9 @@ In default mode, \fBclnku\fP starts an interactive REPL. With \fB-p\fP, it runs 
 
 .PP
 The agent communicates through JSON turns: \fBact\fP (execute a command), \fBclarify\fP (ask the user), and \fBdone\fP (signal completion).
+
+.PP
+By default, \fBclnku\fP asks for approval before each \fBact\fP turn. Pass \fB--full-send\fP to execute commands immediately without approval.
 
 .PP
 Project-specific instructions are loaded from an \fBAGENTS.md\fP file in the current working directory, if present.
@@ -41,6 +44,10 @@ LLM API endpoint (default: https://api.anthropic.com). If the URL contains "anth
 .TP
 \fB--max-steps\fP \fIn\fP
 Maximum agent iterations. 0 uses the default of 100.
+
+.TP
+\fB--full-send\fP
+Execute every \fBact\fP turn immediately. Without this flag, clnku asks for approval before each command.
 
 .TP
 \fB--load-messages\fP \fIfile\fP
