@@ -133,10 +133,6 @@ Workflow:
 - `--continue` loads the most recent session for the current project directory (conversational mode only)
 - `--list-sessions` displays all saved sessions for the current project
 - Sessions auto-save on exit in conversational mode (no `-p` flag); stored in `$XDG_STATE_HOME/clnkr/projects/`
-## Worktrees
-
-Worktree directory: `~/.config/superpowers/worktrees/clnkr/`
-
 ## CI
 
 GitHub Actions runs on push to `main` and PRs targeting `main`. Single job: lint, test (with `-race`), build.
