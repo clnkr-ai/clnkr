@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 (2026-03-29)
+
+- Persist cwd in transcript state and refine approval UX
+- Remove worktree guidance for local clnkr dev
+- Update CHANGELOG.md for 1.0.0
+
 ## 1.0.0 (2026-03-29)
 
 - Add per-command approval mode
