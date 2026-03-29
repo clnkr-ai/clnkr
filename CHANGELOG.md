@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.0 (2026-03-28)
+
+- Add Hugo site and gh-pages deployment
+- Update CHANGELOG.md for 0.8.0
+
 ## 0.8.0 (2026-03-26)
 
 - Add clnk symlink to install target
