@@ -10,6 +10,20 @@ import (
 	"time"
 )
 
+// envListToMap converts a KEY=VALUE environ slice to a map.
+// Only used in tests; production code uses envMapToList for the reverse direction.
+func envListToMap(list []string) map[string]string {
+	env := make(map[string]string, len(list))
+	for _, item := range list {
+		key, value, ok := strings.Cut(item, "=")
+		if !ok {
+			continue
+		}
+		env[key] = value
+	}
+	return env
+}
+
 func TestCommandExecutor(t *testing.T) {
 	exec := &CommandExecutor{Timeout: 5 * time.Second}
 	ctx := context.Background()
@@ -105,6 +119,105 @@ func TestCommandExecutor(t *testing.T) {
 		}
 		if strings.TrimSpace(out.Stderr) != "nope" {
 			t.Errorf("expected stderr %q, got %q", "nope", out.Stderr)
+		}
+	})
+
+	t.Run("injects persisted env", func(t *testing.T) {
+		envExec := &CommandExecutor{Timeout: 5 * time.Second}
+		base := envListToMap(os.Environ())
+		base["NANOCHAT_BASE_DIR"] = "/tmp/runtime"
+		envExec.SetEnv(base)
+		out, err := envExec.Execute(ctx, `printf %s "$NANOCHAT_BASE_DIR"`, "/tmp")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if out.Stdout != "/tmp/runtime" {
+			t.Fatalf("got %q, want %q", out.Stdout, "/tmp/runtime")
+		}
+	})
+
+	t.Run("captures post-command shell state", func(t *testing.T) {
+		stateExec := &CommandExecutor{Timeout: 5 * time.Second}
+		cmd := `export CLNKR_TEST_VAR=ok && cd /tmp && printf done`
+		out, err := stateExec.Execute(ctx, cmd, "/")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if out.Stdout != "done" {
+			t.Fatalf("got stdout %q, want %q", out.Stdout, "done")
+		}
+		if got := out.PostEnv["CLNKR_TEST_VAR"]; got != "ok" {
+			t.Fatalf("got env %q, want %q", got, "ok")
+		}
+		if out.PostCwd != "/tmp" && out.PostCwd != "/private/tmp" {
+			t.Fatalf("got cwd %q, want /tmp or /private/tmp", out.PostCwd)
+		}
+	})
+
+	t.Run("state file does not leak into PostEnv", func(t *testing.T) {
+		stateExec := &CommandExecutor{Timeout: 5 * time.Second}
+		base := envListToMap(os.Environ())
+		base["BASE"] = "ok"
+		stateExec.SetEnv(base)
+
+		out, err := stateExec.Execute(ctx, `export CLNKR_TEST_VAR=ok && printf done`, "/tmp")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, ok := out.PostEnv["CLNKR_STATE_FILE"]; ok {
+			t.Fatalf("CLNKR_STATE_FILE leaked into PostEnv: %+v", out.PostEnv)
+		}
+		if got := stateExec.ExtraEnv["CLNKR_STATE_FILE"]; got != "" {
+			t.Fatalf("CLNKR_STATE_FILE leaked into ExtraEnv: %q", got)
+		}
+	})
+
+	t.Run("captures full env snapshots across stateful commands", func(t *testing.T) {
+		stateExec := &CommandExecutor{Timeout: 5 * time.Second}
+
+		cmd1 := `export CLNKR_CHAIN_ONE=one && cd /tmp && printf done`
+		out1, err := stateExec.Execute(ctx, cmd1, "/tmp")
+		if err != nil {
+			t.Fatalf("step 1: %v", err)
+		}
+		if out1.PostEnv["CLNKR_CHAIN_ONE"] != "one" {
+			t.Fatalf("missing chain var in snapshot: %+v", out1.PostEnv)
+		}
+
+		stateExec.SetEnv(out1.PostEnv)
+		cmd2 := `export CLNKR_CHAIN_TWO=two && cd /tmp && printf done`
+		out2, err := stateExec.Execute(ctx, cmd2, "/tmp")
+		if err != nil {
+			t.Fatalf("step 2: %v", err)
+		}
+		if out2.PostEnv["CLNKR_CHAIN_ONE"] != "one" || out2.PostEnv["CLNKR_CHAIN_TWO"] != "two" {
+			t.Fatalf("snapshot should include earlier exports: %+v", out2.PostEnv)
+		}
+
+		stateExec.SetEnv(out2.PostEnv)
+		cmd3 := `unset CLNKR_CHAIN_ONE && cd /tmp && printf done`
+		out3, err := stateExec.Execute(ctx, cmd3, "/tmp")
+		if err != nil {
+			t.Fatalf("step 3: %v", err)
+		}
+		if _, ok := out3.PostEnv["CLNKR_CHAIN_ONE"]; ok {
+			t.Fatalf("unset variable should be removed from snapshot: %+v", out3.PostEnv)
+		}
+		if out3.PostEnv["CLNKR_CHAIN_TWO"] != "two" {
+			t.Fatalf("expected other vars to persist: %+v", out3.PostEnv)
+		}
+
+		stateExec.SetEnv(out3.PostEnv)
+		cmd4 := `printf "%s,%s" "$CLNKR_CHAIN_ONE" "$CLNKR_CHAIN_TWO"`
+		out4, err := stateExec.Execute(ctx, cmd4, "/tmp")
+		if err != nil {
+			t.Fatalf("step 4: %v", err)
+		}
+		if out4.Stdout != ",two" {
+			t.Fatalf("expected unset var to stay cleared, got %q", out4.Stdout)
+		}
+		if _, ok := out3.PostEnv["CLNKR_STATE_FILE"]; ok {
+			t.Fatalf("state file leaked into PostEnv: %+v", out3.PostEnv)
 		}
 	})
 }

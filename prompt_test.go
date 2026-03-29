@@ -22,6 +22,12 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if strings.Contains(prompt, "<done/>") {
 			t.Error("prompt should not reference done signal")
 		}
+		if !strings.Contains(prompt, `grep 'A\\\\|B' file.txt`) {
+			t.Error("prompt should teach shell escaping inside JSON")
+		}
+		if !strings.Contains(prompt, "Exported environment changes and environment updates from source or . also persist between commands.") {
+			t.Error("prompt should explain shell env persistence")
+		}
 	})
 
 	t.Run("appends AGENTS.md when present", func(t *testing.T) {
