@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -19,6 +17,7 @@ type Agent struct {
 	executor Executor
 	messages []Message
 	cwd      string
+	env      map[string]string
 	started  bool
 	Notify   func(Event)
 	MaxSteps int
@@ -71,6 +70,12 @@ func formatCommandOutput(result CommandResult) string {
 	return b.String()
 }
 
+// ExecutorStateSetter is optional. Executors that skip it must populate
+// PostCwd/PostEnv themselves for cross-turn state.
+type ExecutorStateSetter interface {
+	SetEnv(map[string]string)
+}
+
 // Step runs one query-parse-execute cycle. Policy lives in Run.
 func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	a.started = true
@@ -96,11 +101,20 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	if !isAct {
 		return StepResult{Response: resp, Turn: turn}, nil
 	}
-	a.updateCwd(act.Command)
-	a.notify(EventDebug{Message: fmt.Sprintf("cwd: %s", a.cwd)})
+	if setter, ok := a.executor.(ExecutorStateSetter); ok {
+		setter.SetEnv(a.env)
+	}
 	a.notify(EventCommandStart{Command: act.Command, Dir: a.cwd})
 
 	execResult, execErr := a.executor.Execute(ctx, act.Command, a.cwd)
+	if execResult.PostCwd != "" {
+		a.cwd = execResult.PostCwd
+	}
+	// PostEnv is a full next-turn snapshot; nil means no new snapshot captured.
+	if execResult.PostEnv != nil {
+		a.env = execResult.PostEnv
+	}
+	a.notify(EventDebug{Message: fmt.Sprintf("cwd: %s", a.cwd)})
 	payload := formatCommandOutput(execResult)
 	if execErr != nil {
 		a.notify(EventDebug{Message: fmt.Sprintf("command error: %v", execErr)})
@@ -161,47 +175,5 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 				return nil
 			}
 		}
-	}
-}
-
-func (a *Agent) updateCwd(command string) {
-	trimmed := strings.TrimSpace(command)
-	if !strings.HasPrefix(trimmed, "cd ") {
-		return
-	}
-	if strings.ContainsAny(trimmed, "&|;\n") {
-		return
-	}
-	parts := strings.Fields(trimmed)
-	if len(parts) != 2 {
-		return
-	}
-	target := parts[1]
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = ""
-	}
-
-	var newCwd string
-	switch {
-	case target == "~":
-		if home == "" {
-			return
-		}
-		newCwd = home
-	case strings.HasPrefix(target, "~/"):
-		if home == "" {
-			return
-		}
-		newCwd = filepath.Join(home, target[2:])
-	case filepath.IsAbs(target):
-		newCwd = target
-	default:
-		newCwd = filepath.Join(a.cwd, target)
-	}
-
-	if info, err := os.Stat(newCwd); err == nil && info.IsDir() {
-		a.cwd = newCwd
 	}
 }

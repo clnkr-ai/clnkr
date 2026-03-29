@@ -20,12 +20,15 @@ type Response struct {
 	Usage   Usage
 }
 
-// CommandResult captures the outcome of one shell command execution.
+// CommandResult captures one shell command execution.
+// Zero PostCwd = no change; nil PostEnv = no snapshot.
 type CommandResult struct {
 	Command  string
 	Stdout   string
 	Stderr   string
 	ExitCode int
+	PostCwd  string
+	PostEnv  map[string]string
 }
 
 // Model sends messages to an LLM and returns a response.
