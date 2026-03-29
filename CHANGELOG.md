@@ -1,7 +1,9 @@
 # Changelog
 
-## 0.9.0 (2026-03-28)
+## 0.9.0 (2026-03-29)
 
+- Update CHANGELOG.md for 0.9.0
+- Harden bash turn parsing and shell state (#2)
 - Add Hugo site and gh-pages deployment
 - Update CHANGELOG.md for 0.8.0
 
