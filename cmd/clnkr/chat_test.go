@@ -89,6 +89,19 @@ func TestChatPendingCommandBuffer(t *testing.T) {
 	}
 }
 
+func TestChatSetProposedCommand(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.setProposedCommand("rm important.txt")
+	if c.pendingCmd == "" {
+		t.Fatal("pendingCmd should be set after proposing a command")
+	}
+	if strings.Contains(c.content.String(), "rm important.txt") {
+		t.Fatal("proposed command should not be committed before execution")
+	}
+}
+
 func TestChatBufferInvariant(t *testing.T) {
 	s := defaultStyles(true)
 	c := newChatModel(80, 24, s, false)

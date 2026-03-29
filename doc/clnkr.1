@@ -6,7 +6,7 @@ clnkr \- a minimal coding agent (TUI)
 
 
 .SH SYNOPSIS
-\fBclnkr\fP [\fB-p\fP \fItask\fP] [\fB--model\fP \fIname\fP] [\fB--base-url\fP \fIurl\fP] [\fB--max-steps\fP \fIn\fP] [\fB--load-messages\fP \fIfile\fP] [\fB--event-log\fP \fIfile\fP] [\fB--trajectory\fP \fIfile\fP] [\fB-v\fP|\fB--verbose\fP] [\fB--version\fP]
+\fBclnkr\fP [\fB-p\fP \fItask\fP] [\fB--model\fP \fIname\fP] [\fB--base-url\fP \fIurl\fP] [\fB--max-steps\fP \fIn\fP] [\fB--full-send\fP] [\fB--load-messages\fP \fIfile\fP] [\fB--event-log\fP \fIfile\fP] [\fB--trajectory\fP \fIfile\fP] [\fB-v\fP|\fB--verbose\fP] [\fB--version\fP]
 
 
 .SH DESCRIPTION
@@ -17,6 +17,9 @@ In default mode, \fBclnkr\fP starts the TUI. With \fB-p\fP, it runs a single tas
 
 .PP
 The agent communicates through JSON turns: \fBact\fP (execute a command), \fBclarify\fP (ask the user), and \fBdone\fP (signal completion).
+
+.PP
+By default, \fBclnkr\fP asks for approval before each \fBact\fP turn. Pass \fB--full-send\fP to execute commands immediately without approval.
 
 .PP
 A plain CLI variant is available as \fBclnku\fP(1).
@@ -41,6 +44,10 @@ LLM API endpoint (default: https://api.anthropic.com). If the URL contains "anth
 .TP
 \fB--max-steps\fP \fIn\fP
 Maximum agent iterations. 0 uses the default of 100.
+
+.TP
+\fB--full-send\fP
+Execute every \fBact\fP turn immediately. Without this flag, clnkr asks for approval before each command.
 
 .TP
 \fB--load-messages\fP \fIfile\fP

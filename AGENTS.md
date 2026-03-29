@@ -67,8 +67,9 @@ clnkr/                  # core: types, interfaces, Agent, events (root go.mod, s
 **Multi-module:** `cmd/clnkr/` has its own `go.mod`. Root `go test ./...` does not descend into it. Use `make test` to test both modules. `go install github.com/clnkr-ai/clnkr/cmd/clnkr@latest` does NOT work due to replace directive — use `make build-clnkr` or install from releases.
 
 **Two-tier agent API:**
-- `Step(ctx) (StepResult, error)` — one query-parse-execute cycle, no policy. `StepResult` carries the response, parsed protocol `Turn`, formatted command output payload, and execution error.
-- `Run(ctx, task) error` — policy loop over `Step()`. Counts protocol failures (exits on 3 consecutive) and enforces step limits.
+- `Step(ctx) (StepResult, error)` — one query-parse cycle, no policy. It appends the model response, parses the protocol turn, and returns a typed `Turn` or `ParseErr` without executing commands.
+- `ExecuteTurn(ctx, act) (StepResult, error)` — runs an `act` turn, updates cwd/env state, emits command events, and appends the structured command-result payload as a user message.
+- `Run(ctx, task) error` — full-send policy loop over `Step()` + `ExecuteTurn()`. Counts protocol failures (exits on 3 consecutive) and enforces step limits.
 
 **Structured turn protocol** (`protocol.go`): Models respond with one JSON object per turn. Three turn types: `act` (execute a command), `clarify` (ask for user input), `done` (task complete). `ParseTurn` extracts JSON from model output (handling prose wrapping and code fences), repairs common invalid JSON escapes (`\|`, `` \` ``, malformed `\uXXXX`) via `sanitizeJSONEscapes`, validates required fields, and returns a typed `Turn`. Each `act` turn carries a single command.
 
@@ -117,7 +118,7 @@ Workflow:
 ## Design decisions
 
 - Shell state (cwd, exported env) persists across turns via EXIT trap + state file. Every command is wrapped unconditionally; the trap costs ~2ms and uses absolute paths (`/usr/bin/env -0`) so it works even if the command modified PATH. Shell locals, functions, and aliases do not persist.
-- `Step()` is the loop primitive; `Run()` adds policy
+- `Step()` is the proposal primitive; `Run()` adds full-send policy
 - `Messages()` returns a defensive copy; `AddMessages()` prepends seed messages (errors after first `Step()`)
 - Model-to-host direction uses structured JSON turns (`protocol.go`); host-to-model direction uses flat tagged text for command results
 - Command execution returns structured `stdout`, `stderr`, and `exit_code`; frontends render from events, but the model sees a flat tagged transcript optimized for readability rather than a formal XML schema

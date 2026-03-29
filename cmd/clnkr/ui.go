@@ -28,6 +28,11 @@ const ggTimeout = 500 * time.Millisecond
 const ctrlCInterval = 500 * time.Millisecond
 
 type agentDoneMsg struct{ err error }
+type stepDoneMsg struct {
+	result clnkr.StepResult
+	err    error
+}
+type executeDoneMsg struct{ err error }
 
 // tickMsg is sent by the elapsed-time ticker while the agent is running.
 type tickMsg time.Time
@@ -44,48 +49,64 @@ type shared struct {
 }
 
 type model struct {
-	chat      chatModel
-	input     inputModel
-	status    statusModel
-	diff      diffModel
-	files     fileTracker
-	styles    *styles
-	shared    *shared
-	eventCh   <-chan clnkr.Event
-	cancel    context.CancelFunc
-	width     int
-	height    int
-	focus     focusTarget
-	running   bool
-	quitting  bool
-	agentErr  error
-	pendingG  bool
-	gTimer    time.Time
-	verbose   bool
-	lastCtrlC time.Time
+	chat                  chatModel
+	input                 inputModel
+	status                statusModel
+	diff                  diffModel
+	files                 fileTracker
+	styles                *styles
+	shared                *shared
+	eventCh               chan clnkr.Event
+	cancel                context.CancelFunc
+	runCtx                context.Context
+	width                 int
+	height                int
+	focus                 focusTarget
+	running               bool
+	quitting              bool
+	agentErr              error
+	pendingG              bool
+	gTimer                time.Time
+	verbose               bool
+	lastCtrlC             time.Time
+	fullSend              bool
+	pendingAct            *clnkr.ActTurn
+	awaitingApproval      bool
+	awaitingClarification bool
+	clarificationPrompt   string
+	executedSteps         int
+	protocolErrors        int
+	closeEventChOnFinish  bool
+	startupCmd            tea.Cmd
+	exitOnRunFinish       bool
+	bridgeDrained         bool
 }
 
 type modelOpts struct {
-	eventCh   <-chan clnkr.Event
-	styles    *styles
-	verbose   bool
-	cancel    context.CancelFunc
-	modelName string
-	maxSteps  int
+	eventCh         chan clnkr.Event
+	styles          *styles
+	verbose         bool
+	cancel          context.CancelFunc
+	modelName       string
+	maxSteps        int
+	fullSend        bool
+	exitOnRunFinish bool
 }
 
 func newModel(opts modelOpts) model {
 	return model{
-		chat:    newChatModel(0, 0, opts.styles, opts.verbose),
-		input:   newInputModel(0, &opts.styles.Input),
-		status:  newStatusModel(opts.modelName, opts.maxSteps, &opts.styles.Status),
-		diff:    newDiffModel(opts.styles),
-		styles:  opts.styles,
-		shared:  &shared{},
-		eventCh: opts.eventCh,
-		cancel:  opts.cancel,
-		focus:   focusInput,
-		verbose: opts.verbose,
+		chat:            newChatModel(0, 0, opts.styles, opts.verbose),
+		input:           newInputModel(0, &opts.styles.Input),
+		status:          newStatusModel(opts.modelName, opts.maxSteps, &opts.styles.Status),
+		diff:            newDiffModel(opts.styles),
+		styles:          opts.styles,
+		shared:          &shared{},
+		eventCh:         opts.eventCh,
+		cancel:          opts.cancel,
+		focus:           focusInput,
+		verbose:         opts.verbose,
+		fullSend:        opts.fullSend,
+		exitOnRunFinish: opts.exitOnRunFinish,
 	}
 }
 
@@ -103,11 +124,23 @@ func (m model) Init() tea.Cmd {
 	if m.eventCh != nil {
 		cmds = append(cmds, eventBridge(m.eventCh))
 	}
+	if m.startupCmd != nil {
+		cmds = append(cmds, m.startupCmd)
+	}
 	return tea.Batch(cmds...)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case nil:
+		if m.exitOnRunFinish {
+			m.bridgeDrained = true
+			if !m.running {
+				return m, tea.Quit
+			}
+		}
+		return m, nil
+
 	case tea.QuitMsg:
 		m.quitting = true
 		return m, tea.Quit
@@ -124,25 +157,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case agentDoneMsg:
-		m.running = false
-		m.agentErr = msg.err
-		m.status.stopRun()
-		if m.chat.streaming {
-			m.chat.commitPartialStream()
+		m.finishRun(msg.err)
+		if m.exitOnRunFinish && m.bridgeDrained {
+			return m, tea.Quit
 		}
-		if msg.err != nil && !errors.Is(msg.err, clnkr.ErrClarificationNeeded) {
-			m.chat.content.WriteString(
-				m.styles.Chat.Warning.Render(fmt.Sprintf("\n%s Agent error: %s", iconError, msg.err)),
-			)
-			m.chat.content.WriteString("\n\n")
-		}
-		m.chat.updateViewport()
 		return m, nil
+
+	case stepDoneMsg:
+		return m.handleStepDone(msg)
+
+	case executeDoneMsg:
+		return m.handleExecuteDone(msg)
 
 	case eventMsg:
 		m.routeEvent(msg.event)
 		m.chat.updateViewport()
-		return m, eventBridge(m.eventCh)
+		if m.eventCh != nil {
+			return m, eventBridge(m.eventCh)
+		}
+		return m, nil
 
 	case tickMsg:
 		if m.running {
@@ -176,6 +209,114 @@ func (m *model) recalcLayout() {
 	m.chat.resize(m.width, chatHeight)
 	m.chat.updateViewport()
 	m.input.setWidth(m.width)
+}
+
+func (m *model) finishRun(err error) {
+	m.running = false
+	m.agentErr = err
+	m.status.stopRun()
+	m.pendingAct = nil
+	m.awaitingApproval = false
+	m.awaitingClarification = false
+	m.clarificationPrompt = ""
+	m.executedSteps = 0
+	m.protocolErrors = 0
+	if m.chat.streaming {
+		m.chat.commitPartialStream()
+	}
+	if err != nil && !errors.Is(err, clnkr.ErrClarificationNeeded) && !errors.Is(err, context.Canceled) {
+		m.chat.content.WriteString(
+			m.styles.Chat.Warning.Render(fmt.Sprintf("\n%s Agent error: %s", iconError, err)),
+		)
+		m.chat.content.WriteString("\n\n")
+	}
+	m.chat.updateViewport()
+	if m.closeEventChOnFinish && m.eventCh != nil {
+		close(m.eventCh)
+		m.eventCh = nil
+	}
+	m.closeEventChOnFinish = false
+}
+
+func stepCmd(agent *clnkr.Agent, ctx context.Context) tea.Cmd {
+	return func() tea.Msg {
+		result, err := agent.Step(ctx)
+		return stepDoneMsg{result: result, err: err}
+	}
+}
+
+func executeCmd(agent *clnkr.Agent, ctx context.Context, act *clnkr.ActTurn) tea.Cmd {
+	return func() tea.Msg {
+		_, err := agent.ExecuteTurn(ctx, act)
+		return executeDoneMsg{err: err}
+	}
+}
+
+func requestFinalSummaryCmd(agent *clnkr.Agent, ctx context.Context) tea.Cmd {
+	return func() tea.Msg {
+		return agentDoneMsg{err: agent.RequestStepLimitSummary(ctx)}
+	}
+}
+
+func (m model) handleStepDone(msg stepDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.finishRun(msg.err)
+		if m.exitOnRunFinish && m.bridgeDrained {
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+
+	if msg.result.ParseErr != nil {
+		m.protocolErrors++
+		if m.protocolErrors >= 3 {
+			m.finishRun(fmt.Errorf("consecutive protocol failures, exiting"))
+			return m, nil
+		}
+		return m, stepCmd(m.shared.agent, m.runCtx)
+	}
+	m.protocolErrors = 0
+
+	switch turn := msg.result.Turn.(type) {
+	case *clnkr.DoneTurn:
+		m.finishRun(nil)
+		return m, nil
+	case *clnkr.ClarifyTurn:
+		m.awaitingClarification = true
+		m.clarificationPrompt = turn.Question
+		m.chat.appendHostNote(turn.Question)
+		m.chat.updateViewport()
+		m.focus = focusInput
+		m.status.setFocus(focusInput)
+		return m, m.input.textarea.Focus()
+	case *clnkr.ActTurn:
+		m.pendingAct = turn
+		m.awaitingApproval = true
+		m.chat.setProposedCommand(turn.Command)
+		m.chat.updateViewport()
+		return m, nil
+	default:
+		m.finishRun(fmt.Errorf("unexpected turn type %T", turn))
+		return m, nil
+	}
+}
+
+func (m model) handleExecuteDone(msg executeDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.finishRun(msg.err)
+		if m.exitOnRunFinish && m.bridgeDrained {
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+
+	m.pendingAct = nil
+	m.awaitingApproval = false
+	m.executedSteps++
+	if m.shared.agent.MaxSteps > 0 && m.executedSteps >= m.shared.agent.MaxSteps {
+		return m, requestFinalSummaryCmd(m.shared.agent, m.runCtx)
+	}
+	return m, stepCmd(m.shared.agent, m.runCtx)
 }
 
 // routeEvent dispatches a core library event to the appropriate sub-models.
@@ -224,6 +365,12 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case msg.Code == 'c' && msg.Mod == tea.ModCtrl:
 		return m.handleCtrlC()
 
+	case m.awaitingApproval && msg.Code == 'y':
+		return m.approvePendingCommand()
+
+	case m.awaitingApproval && msg.Code == 'n':
+		return m.rejectPendingCommand()
+
 	case msg.Code == tea.KeyEscape:
 		m.focus = focusViewport
 		m.status.setFocus(focusViewport)
@@ -264,6 +411,10 @@ func (m model) handleCtrlC() (tea.Model, tea.Cmd) {
 	}
 
 	// Running: cancel the agent but don't quit
+	if m.awaitingApproval || m.awaitingClarification {
+		m.finishRun(context.Canceled)
+		return m, nil
+	}
 	if m.cancel != nil {
 		m.cancel()
 	}
@@ -274,8 +425,20 @@ func (m model) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Code == tea.KeyEnter && msg.Mod == 0:
 		// Submit on Enter (no modifiers)
+		if m.awaitingClarification {
+			text := m.input.submit()
+			if text == "" {
+				return m, nil
+			}
+			m.awaitingClarification = false
+			m.clarificationPrompt = ""
+			m.chat.appendUserMessage(text)
+			m.shared.agent.AppendUserMessage(text)
+			m.chat.updateViewport()
+			return m, stepCmd(m.shared.agent, m.runCtx)
+		}
 		if m.running {
-			return m, nil // reject while running
+			return m, nil // reject while task is active
 		}
 		text := m.input.submit()
 		if text == "" {
@@ -327,16 +490,22 @@ func (m model) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m model) startTask(task string) (tea.Model, tea.Cmd) {
 	// Show user's task in chat
-	m.chat.content.WriteString(m.styles.Chat.UserMessage.Render(task))
-	m.chat.content.WriteString("\n\n")
+	m.chat.appendUserMessage(task)
 	m.chat.updateViewport()
 
 	m.running = true
 	m.status.startRun()
+	m.executedSteps = 0
+	m.protocolErrors = 0
+	m.pendingAct = nil
+	m.awaitingApproval = false
+	m.awaitingClarification = false
+	m.clarificationPrompt = ""
 
 	// Create new context for this task
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
+	m.runCtx = ctx
 
 	// Set up event channel for this run
 	eventCh := make(chan clnkr.Event, eventChSize)
@@ -345,13 +514,39 @@ func (m model) startTask(task string) (tea.Model, tea.Cmd) {
 
 	agent := m.shared.agent
 
-	cmd := func() tea.Msg {
-		runErr := agent.Run(ctx, task)
-		close(eventCh)
-		return agentDoneMsg{err: runErr}
+	if m.fullSend {
+		cmd := func() tea.Msg {
+			runErr := agent.Run(ctx, task)
+			close(eventCh)
+			return agentDoneMsg{err: runErr}
+		}
+		return m, tea.Batch(cmd, eventBridge(eventCh), tickCmd())
 	}
 
-	return m, tea.Batch(cmd, eventBridge(eventCh), tickCmd())
+	m.closeEventChOnFinish = true
+	m.shared.agent.AppendUserMessage(task)
+	return m, tea.Batch(stepCmd(agent, ctx), eventBridge(eventCh), tickCmd())
+}
+
+func (m model) approvePendingCommand() (tea.Model, tea.Cmd) {
+	if m.pendingAct == nil {
+		return m, nil
+	}
+	m.awaitingApproval = false
+	return m, executeCmd(m.shared.agent, m.runCtx, m.pendingAct)
+}
+
+func (m model) rejectPendingCommand() (tea.Model, tea.Cmd) {
+	m.awaitingApproval = false
+	m.awaitingClarification = true
+	m.clarificationPrompt = "Command denied. What should the agent do instead?"
+	m.pendingAct = nil
+	m.chat.clearPendingCommand()
+	m.chat.appendHostNote(m.clarificationPrompt)
+	m.chat.updateViewport()
+	m.focus = focusInput
+	m.status.setFocus(focusInput)
+	return m, m.input.textarea.Focus()
 }
 
 func (m model) handleDiffKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {

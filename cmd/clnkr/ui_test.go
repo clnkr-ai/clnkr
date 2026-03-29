@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -336,5 +337,121 @@ func TestModelTracksFilesFromCommands(t *testing.T) {
 	}
 	if m.files.files[0] != "newfile.go" {
 		t.Errorf("expected newfile.go, got %s", m.files.files[0])
+	}
+}
+
+func TestModelRejectProposalEntersClarificationMode(t *testing.T) {
+	m := setupModel()
+	m.pendingAct = &clnkr.ActTurn{Command: "rm important.txt"}
+	m.chat.setProposedCommand("rm important.txt")
+	m.awaitingApproval = true
+	m.running = true
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'n'})
+	if !m.awaitingClarification {
+		t.Fatal("reject should switch to clarification mode")
+	}
+	if m.awaitingApproval {
+		t.Fatal("reject should clear awaitingApproval")
+	}
+	if m.pendingAct != nil {
+		t.Fatal("reject should clear pendingAct")
+	}
+	if m.chat.pendingCmd != "" {
+		t.Fatal("reject should clear pending command banner")
+	}
+}
+
+func TestModelClarificationSubmitAppendsUserMessage(t *testing.T) {
+	m := setupModel()
+	m.awaitingClarification = true
+	m.clarificationPrompt = "What should the agent do instead?"
+	m.input.textarea.SetValue("list files instead")
+	m.running = true
+	m.shared.agent = clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	m.runCtx = context.Background()
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.awaitingClarification {
+		t.Fatal("submit should clear awaitingClarification")
+	}
+	if !strings.Contains(m.chat.content.String(), "list files instead") {
+		t.Fatal("clarification should be rendered into chat")
+	}
+}
+
+func TestModelApproveProposalStartsExecution(t *testing.T) {
+	m := setupModel()
+	m.pendingAct = &clnkr.ActTurn{Command: "echo hi"}
+	m.awaitingApproval = true
+	m.running = true
+	m.shared.agent = clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	m.cancel = func() {}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y'})
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if cmd == nil {
+		t.Fatal("approve should start an execute command")
+	}
+	if um.awaitingApproval {
+		t.Fatal("approve should clear awaitingApproval")
+	}
+}
+
+func TestModelEnterWhileRunningPreservesDraftInput(t *testing.T) {
+	m := setupModel()
+	m.running = true
+	m.awaitingApproval = true
+	m.input.textarea.SetValue("draft clarification")
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := m.input.textarea.Value(); got != "draft clarification" {
+		t.Fatalf("input should be preserved while running, got %q", got)
+	}
+}
+
+func TestModelSingleTaskDoneQuitsAfterBridgeDrains(t *testing.T) {
+	m := setupModel()
+	m.exitOnRunFinish = true
+
+	updated, cmd := m.Update(stepDoneMsg{result: clnkr.StepResult{Turn: &clnkr.DoneTurn{Summary: "done"}}})
+	if cmd != nil {
+		t.Fatal("step completion should wait for the bridge to drain before quitting")
+	}
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if um.running {
+		t.Fatal("single-task done should stop the run")
+	}
+	_, quitCmd := um.Update(nil)
+	if quitCmd == nil {
+		t.Fatal("bridge drain should quit the TUI for single-task runs")
+	}
+}
+
+func TestModelSingleTaskAgentDoneQuitsIfBridgeDrainedFirst(t *testing.T) {
+	m := setupModel()
+	m.exitOnRunFinish = true
+
+	updated, cmd := m.Update(nil)
+	if cmd != nil {
+		t.Fatal("bridge drain before completion should not quit immediately")
+	}
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if !um.bridgeDrained {
+		t.Fatal("nil bridge message should mark bridgeDrained")
+	}
+
+	_, quitCmd := um.Update(agentDoneMsg{err: nil})
+	if quitCmd == nil {
+		t.Fatal("agentDone should quit if the bridge already drained")
 	}
 }
