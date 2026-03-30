@@ -3,7 +3,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hugo)
 
 .DEFAULT_GOAL := build-all
-.PHONY: build-clnku build-clnkr build-all install clean test vet fmt lint sloc check run help setup man check-man site-sync site-build site-serve
+.PHONY: build-clnku build-clnkr build-all install clean test eval vet fmt lint sloc check run help setup man check-man site-sync site-build site-serve
 
 build-clnku: ## Build plain CLI binary (clnku)
 	go build -trimpath -ldflags '$(LDFLAGS)' -o clnku ./cmd/clnku/
@@ -27,6 +27,9 @@ clean: ## Remove build artifacts
 test: ## Run all tests
 	go test ./... -v
 	cd cmd/clnkr && go test ./... -v
+
+eval: ## Run eval harness tests
+	go test ./eval -v
 
 vet: ## Run go vet
 	go vet ./...
