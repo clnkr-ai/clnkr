@@ -26,6 +26,7 @@ type expectConfig struct {
 	ExitCode  int      `json:"exit_code"`
 	Commands  []string `json:"commands"`
 	ExitCodes []int    `json:"exit_codes"`
+	MaxCmds   int      `json:"max_commands"`
 }
 
 type manifest struct {
@@ -310,13 +311,36 @@ func TestCompareSemanticTrace(t *testing.T) {
 		}
 	})
 
-	t.Run("live mode still checks command count", func(t *testing.T) {
+	t.Run("live mode allows extra commands by default", func(t *testing.T) {
 		err := compareSemanticTrace(evalModeLive, semanticTrace{
-			Commands:  nil,
-			ExitCodes: []int{0},
+			Commands:  []string{"pwd", "printf 'hello\\n' > ./note.txt"},
+			ExitCodes: []int{0, 0},
 		}, expect)
-		if err == nil || !strings.Contains(err.Error(), "command count") {
-			t.Fatalf("error = %v, want command count mismatch", err)
+		if err != nil {
+			t.Fatalf("compareSemanticTrace: %v", err)
+		}
+	})
+
+	t.Run("live mode enforces max command count when configured", func(t *testing.T) {
+		err := compareSemanticTrace(evalModeLive, semanticTrace{
+			Commands:  []string{"pwd", "printf 'hello\\n' > ./note.txt"},
+			ExitCodes: []int{0, 0},
+		}, expectConfig{
+			ExitCodes: []int{0},
+			MaxCmds:   1,
+		})
+		if err == nil || !strings.Contains(err.Error(), "max command count") {
+			t.Fatalf("error = %v, want max command count mismatch", err)
+		}
+	})
+
+	t.Run("live mode treats expected exit codes as an allowed set", func(t *testing.T) {
+		err := compareSemanticTrace(evalModeLive, semanticTrace{
+			Commands:  []string{"pwd", "printf 'hello\\n' > ./note.txt"},
+			ExitCodes: []int{0, 1},
+		}, expect)
+		if err == nil || !strings.Contains(err.Error(), "unexpected exit code") {
+			t.Fatalf("error = %v, want unexpected exit code mismatch", err)
 		}
 	})
 }
@@ -507,22 +531,38 @@ func firstNonEmpty(values ...string) string {
 }
 
 func compareSemanticTrace(mode evalMode, got semanticTrace, want expectConfig) error {
-	if len(got.Commands) != len(want.Commands) {
-		return fmt.Errorf("command count = %d, want %d", len(got.Commands), len(want.Commands))
-	}
 	if mode == evalModeFixture {
+		if len(got.Commands) != len(want.Commands) {
+			return fmt.Errorf("command count = %d, want %d", len(got.Commands), len(want.Commands))
+		}
 		for i, command := range want.Commands {
 			if got.Commands[i] != command {
 				return fmt.Errorf("command[%d] = %q, want %q", i, got.Commands[i], command)
 			}
 		}
+		if len(got.ExitCodes) != len(want.ExitCodes) {
+			return fmt.Errorf("exit code count = %d, want %d", len(got.ExitCodes), len(want.ExitCodes))
+		}
+		for i, exitCode := range want.ExitCodes {
+			if got.ExitCodes[i] != exitCode {
+				return fmt.Errorf("trace exit code[%d] = %d, want %d", i, got.ExitCodes[i], exitCode)
+			}
+		}
+		return nil
 	}
-	if len(got.ExitCodes) != len(want.ExitCodes) {
-		return fmt.Errorf("exit code count = %d, want %d", len(got.ExitCodes), len(want.ExitCodes))
+	if want.MaxCmds > 0 && len(got.Commands) > want.MaxCmds {
+		return fmt.Errorf("max command count = %d, got %d", want.MaxCmds, len(got.Commands))
 	}
-	for i, exitCode := range want.ExitCodes {
-		if got.ExitCodes[i] != exitCode {
-			return fmt.Errorf("trace exit code[%d] = %d, want %d", i, got.ExitCodes[i], exitCode)
+	if len(want.ExitCodes) == 0 {
+		return nil
+	}
+	allowedExitCodes := make(map[int]struct{}, len(want.ExitCodes))
+	for _, exitCode := range want.ExitCodes {
+		allowedExitCodes[exitCode] = struct{}{}
+	}
+	for i, exitCode := range got.ExitCodes {
+		if _, ok := allowedExitCodes[exitCode]; !ok {
+			return fmt.Errorf("unexpected exit code[%d] = %d", i, exitCode)
 		}
 	}
 	return nil
