@@ -1,0 +1,45 @@
+name: Live Evals
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  eval-live:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check live eval configuration
+        id: config
+        run: |
+          if [ -z "${OPENAI_API_KEY}" ]; then
+            echo "Live eval skipped: OPENAI_API_KEY secret is not set."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - uses: actions/checkout@v4
+        if: steps.config.outputs.configured == 'true'
+
+      - uses: actions/setup-go@v5
+        if: steps.config.outputs.configured == 'true'
+        with:
+          go-version-file: go.mod
+
+      - name: Run live evals
+        if: steps.config.outputs.configured == 'true'
+        run: |
+          : "${CLNKR_EVAL_BASE_URL:=https://api.openai.com/v1}"
+          : "${CLNKR_EVAL_MODEL:=gpt-5.4-nano}"
+          export CLNKR_EVAL_MODE=live
+          export CLNKR_EVAL_API_KEY="${OPENAI_API_KEY}"
+          export CLNKR_EVAL_BASE_URL
+          export CLNKR_EVAL_MODEL
+          go test ./eval -v
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLNKR_EVAL_BASE_URL: ${{ vars.CLNKR_EVAL_BASE_URL }}
+          CLNKR_EVAL_MODEL: ${{ vars.CLNKR_EVAL_MODEL }}

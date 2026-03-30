@@ -1,0 +1,21 @@
+{
+  "name": "basic-edit",
+  "task_file": "input/task.txt",
+  "model_turns_file": "input/model-turns.json",
+  "cwd": "workspace",
+  "full_send": true,
+  "max_steps": 10,
+  "compare": {
+    "workspace": true,
+    "semantic_trace": true
+  },
+  "expect": {
+    "exit_code": 0,
+    "commands": [
+      "printf 'hello\\n' > note.txt"
+    ],
+    "exit_codes": [
+      0
+    ]
+  }
+}
