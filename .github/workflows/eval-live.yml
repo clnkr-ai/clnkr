@@ -43,3 +43,23 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           CLNKR_EVAL_BASE_URL: ${{ vars.CLNKR_EVAL_BASE_URL }}
           CLNKR_EVAL_MODEL: ${{ vars.CLNKR_EVAL_MODEL }}
+
+      - name: Show live eval traces on failure
+        if: failure() && steps.config.outputs.configured == 'true'
+        run: |
+          find eval/artifacts -maxdepth 3 -type f | sort || true
+          echo
+          echo "== event log =="
+          sed -n '1,200p' eval/artifacts/001-basic-edit/event-log.jsonl || true
+          echo
+          echo "== trajectory =="
+          sed -n '1,200p' eval/artifacts/001-basic-edit/trajectory.json || true
+
+      - name: Upload live eval artifacts
+        if: always() && steps.config.outputs.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-eval-artifacts-${{ github.run_id }}
+          path: eval/artifacts/
+          if-no-files-found: warn
+          retention-days: 14
