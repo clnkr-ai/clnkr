@@ -1,0 +1,4 @@
+[
+  "{\"type\":\"act\",\"command\":\"printf 'hello\\\\n' > note.txt\"}",
+  "{\"type\":\"done\",\"summary\":\"created note.txt\"}"
+]

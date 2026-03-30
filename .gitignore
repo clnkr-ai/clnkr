@@ -29,3 +29,7 @@ Thumbs.db
 /site/public/
 /site/resources/
 /site/.hugo_build.lock
+
+# Eval harness
+/eval/artifacts/*
+!/eval/artifacts/.gitkeep

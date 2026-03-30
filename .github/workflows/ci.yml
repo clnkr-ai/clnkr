@@ -28,7 +28,7 @@ jobs:
           working-directory: cmd/clnkr
 
       - name: Test core
-        run: go test -race ./... -v
+        run: go test -race $(go list ./... | grep -v '/eval$$') -v
 
       - name: Test TUI
         run: cd cmd/clnkr && go test -race ./... -v
@@ -41,3 +41,15 @@ jobs:
 
       - name: Build site
         run: make site-build
+
+  eval-fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run fixture evals
+        run: make eval
