@@ -39,8 +39,12 @@ type statusStyles struct {
 }
 
 type inputStyles struct {
-	Prompt  lipgloss.Style
-	Running lipgloss.Style
+	Prompt      lipgloss.Style
+	Text        lipgloss.Style
+	Placeholder lipgloss.Style
+	CursorLine  lipgloss.Style
+	Cursor      color.Color
+	Running     lipgloss.Style
 }
 
 type styles struct {
@@ -50,42 +54,45 @@ type styles struct {
 }
 
 func defaultStyles(hasDark bool) *styles {
-	ld := lipgloss.LightDark(hasDark)
+	_ = hasDark
 
-	muted := ld(c("#666666"), c("#999999"))
-	dim := ld(c("#888888"), c("#666666"))
-	warn := ld(c("#CC6600"), c("#FFAA00"))
-	errColor := ld(c("#CC0000"), c("#FF4444"))
-	success := ld(c("#006600"), c("#44FF44"))
-	pending := ld(c("#666600"), c("#FFFF44"))
-	info := ld(c("#0066CC"), c("#44AAFF"))
-	barBg := ld(c("#EEEEEE"), c("#333333"))
+	bg := c("#050301")
+	bgSoft := c("#0A0602")
+	ink := c("#FF9E2C")
+	inkSoft := c("#F08A22")
+	inkDim := c("#C66A1A")
+	line := c("#B85D14")
+	errColor := c("#D65A31")
 
 	return &styles{
 		Chat: chatStyles{
-			UserMessage:    lipgloss.NewStyle().Bold(true),
-			AssistantReply: lipgloss.NewStyle(),
-			StreamingText:  lipgloss.NewStyle(),
-			CommandPending: lipgloss.NewStyle().Foreground(pending),
-			CommandSuccess: lipgloss.NewStyle().Foreground(success),
-			CommandError:   lipgloss.NewStyle().Foreground(errColor),
-			CommandOutput:  lipgloss.NewStyle().Foreground(muted),
-			Debug:          lipgloss.NewStyle().Foreground(dim),
-			Warning:        lipgloss.NewStyle().Foreground(warn),
-			NewContent:     lipgloss.NewStyle().Foreground(info).Bold(true),
+			UserMessage:    lipgloss.NewStyle().Foreground(ink).Bold(true),
+			AssistantReply: lipgloss.NewStyle().Foreground(ink),
+			StreamingText:  lipgloss.NewStyle().Foreground(ink),
+			CommandPending: lipgloss.NewStyle().Foreground(inkSoft),
+			CommandSuccess: lipgloss.NewStyle().Foreground(ink).Bold(true),
+			CommandError:   lipgloss.NewStyle().Foreground(errColor).Bold(true),
+			CommandOutput:  lipgloss.NewStyle().Foreground(inkDim),
+			Debug:          lipgloss.NewStyle().Foreground(line),
+			Warning:        lipgloss.NewStyle().Foreground(inkSoft).Bold(true),
+			NewContent:     lipgloss.NewStyle().Foreground(bg).Background(ink).Bold(true),
 		},
 		Status: statusStyles{
-			Bar:            lipgloss.NewStyle().Background(barBg),
-			ModelName:      lipgloss.NewStyle().Bold(true),
-			Tokens:         lipgloss.NewStyle().Foreground(muted),
-			StepCount:      lipgloss.NewStyle().Foreground(muted),
-			Elapsed:        lipgloss.NewStyle().Foreground(muted),
-			FocusIndicator: lipgloss.NewStyle().Bold(true),
-			Separator:      lipgloss.NewStyle().Foreground(dim),
+			Bar:            lipgloss.NewStyle().Foreground(bg).Background(ink),
+			ModelName:      lipgloss.NewStyle().Foreground(bg).Background(ink).Bold(true),
+			Tokens:         lipgloss.NewStyle().Foreground(bg).Background(ink),
+			StepCount:      lipgloss.NewStyle().Foreground(bg).Background(ink),
+			Elapsed:        lipgloss.NewStyle().Foreground(bg).Background(ink),
+			FocusIndicator: lipgloss.NewStyle().Foreground(bg).Background(ink).Bold(true),
+			Separator:      lipgloss.NewStyle().Foreground(bg).Background(ink),
 		},
 		Input: inputStyles{
-			Prompt:  lipgloss.NewStyle().Foreground(info).Bold(true),
-			Running: lipgloss.NewStyle().Foreground(dim).Italic(true),
+			Prompt:      lipgloss.NewStyle().Foreground(ink).Bold(true),
+			Text:        lipgloss.NewStyle().Foreground(ink),
+			Placeholder: lipgloss.NewStyle().Foreground(inkDim),
+			CursorLine:  lipgloss.NewStyle().Foreground(ink).Background(bgSoft),
+			Cursor:      ink,
+			Running:     lipgloss.NewStyle().Foreground(inkDim),
 		},
 	}
 }
