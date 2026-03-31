@@ -1,5 +1,7 @@
 {{ define "main" }}
   {{ $docs := (where .Site.RegularPages "Section" "docs").ByWeight }}
+  {{ $install := .Site.Params.install }}
+  {{ $latestTag := os.Getenv "HUGO_CLNKR_LATEST_TAG" }}
   <div class="retro-home">
     <section class="pane pane-large">
       <div class="pane-bar">
@@ -12,10 +14,21 @@
         <p class="one-liner">A minimal, stubborn coding agent with a rough metal finish.</p>
 
         <p class="line-label">SYNOPSIS</p>
-        <pre><code>go install github.com/clnkr-ai/clnkr/cmd/clnku@latest
-git clone {{ .Site.Params.repo }}
-cd clnkr
-make build</code></pre>
+        <ul class="key-value install-list">
+          <li>
+            <span>{{ $install.homebrew_label }} / {{ $install.homebrew_platform }}</span>
+            <a href="{{ $install.homebrew_url }}">{{ $install.homebrew_command }}</a>
+          </li>
+          <li>
+            <span>{{ $install.apt_label }} / {{ $install.apt_platform }}</span>
+            {{ if $latestTag }}
+              {{ $debVersion := replaceRE "^v" "" $latestTag }}
+              <a href="{{ printf "%s/releases/download/%s/clnkr_%s-1_%s.deb" .Site.Params.repo $latestTag $debVersion $install.apt_arch }}">sudo apt install ./clnkr_{{ $debVersion }}-1_{{ $install.apt_arch }}.deb</a>
+            {{ else }}
+              <a href="{{ printf "%s/releases/latest" .Site.Params.repo }}">latest release (.deb)</a>
+            {{ end }}
+          </li>
+        </ul>
 
         <p class="line-label">DESCRIPTION</p>
         <p>clnkr works with a human in the loop, or hand it the wheel with --full-send. Permissions are simple, sharp, and not here to save you from yourself.</p>

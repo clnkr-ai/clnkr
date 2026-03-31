@@ -22,3 +22,17 @@ disableKinds = ["taxonomy", "term", "RSS", "sitemap"]
 [params]
   description = "A minimal coding agent. Query an LLM, execute bash commands, repeat."
   repo = "https://github.com/clnkr-ai/clnkr"
+
+  [params.shortcuts]
+    help = "/"
+    docs = "/docs/"
+    github = "https://github.com/clnkr-ai/clnkr"
+
+  [params.install]
+    homebrew_label = "Homebrew"
+    homebrew_platform = "macOS"
+    homebrew_url = "https://github.com/clnkr-ai/homebrew-tap"
+    homebrew_command = "brew install clnkr-ai/tap/clnkr"
+    apt_label = "apt"
+    apt_platform = "Debian/Ubuntu"
+    apt_arch = "amd64"
