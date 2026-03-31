@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	clnkr "github.com/clnkr-ai/clnkr"
@@ -15,9 +16,12 @@ import (
 type fakeModel struct {
 	responses []clnkr.Response
 	calls     int
+	mu        sync.Mutex
 }
 
 func (m *fakeModel) Query(_ context.Context, _ []clnkr.Message) (clnkr.Response, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.calls >= len(m.responses) {
 		return clnkr.Response{}, fmt.Errorf("no more responses")
 	}
@@ -26,13 +30,22 @@ func (m *fakeModel) Query(_ context.Context, _ []clnkr.Message) (clnkr.Response,
 	return resp, nil
 }
 
+func (m *fakeModel) callCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calls
+}
+
 type fakeExecutor struct {
 	results []clnkr.CommandResult
 	errs    []error
 	calls   int
+	mu      sync.Mutex
 }
 
 func (e *fakeExecutor) Execute(_ context.Context, command, _ string) (clnkr.CommandResult, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.calls >= len(e.results) {
 		return clnkr.CommandResult{}, fmt.Errorf("no more results")
 	}
@@ -49,6 +62,12 @@ func (e *fakeExecutor) Execute(_ context.Context, command, _ string) (clnkr.Comm
 }
 
 func (e *fakeExecutor) SetEnv(map[string]string) {}
+
+func (e *fakeExecutor) callCount() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.calls
+}
 
 type clarifyReply struct {
 	text string

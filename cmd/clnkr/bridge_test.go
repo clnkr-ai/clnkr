@@ -29,15 +29,15 @@ func TestEventBridgeDeliversEvents(t *testing.T) {
 	}
 }
 
-func TestEventBridgeReturnsNilOnClose(t *testing.T) {
+func TestEventBridgeReturnsDrainMsgOnClose(t *testing.T) {
 	ch := make(chan clnkr.Event, eventChSize)
 	close(ch)
 
 	cmd := eventBridge(ch)
 	msg := cmd()
 
-	if msg != nil {
-		t.Fatalf("expected nil, got %T", msg)
+	if _, ok := msg.(bridgeDrainedMsg); !ok {
+		t.Fatalf("expected bridgeDrainedMsg, got %T", msg)
 	}
 }
 
