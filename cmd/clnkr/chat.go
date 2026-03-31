@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"html"
 	"strings"
 
 	"charm.land/bubbles/v2/viewport"
@@ -152,6 +153,44 @@ func (c *chatModel) clearPendingCommand() {
 	c.pendingCmd = ""
 }
 
+func (c *chatModel) hydrateHistory(messages []clnkr.Message) {
+	for _, msg := range messages {
+		switch msg.Role {
+		case "assistant":
+			c.writeRendered(msg.Content)
+		case "user":
+			if isStateTranscript(msg.Content) {
+				continue
+			}
+			if transcript, ok := parseCommandTranscript(msg.Content); ok {
+				style := c.styles.Chat.CommandSuccess
+				icon := iconSuccess
+				if transcript.exitCode != 0 {
+					style = c.styles.Chat.CommandError
+					icon = iconError
+				}
+				c.content.WriteString(style.Render(fmt.Sprintf("%s ran: %s", icon, summarizeCommand(transcript.command))))
+				c.content.WriteString("\n")
+
+				output := transcript.stdout
+				if transcript.stderr != "" {
+					if output != "" {
+						output += "\n"
+					}
+					output += transcript.stderr
+				}
+				if output != "" {
+					c.content.WriteString(c.styles.Chat.CommandOutput.Render(truncateOutput(output, 20)))
+					c.content.WriteString("\n")
+				}
+				c.content.WriteString("\n")
+				continue
+			}
+			c.appendUserMessage(msg.Content)
+		}
+	}
+}
+
 func (c *chatModel) updateViewport() {
 	full := c.content.String() + c.pendingQuery + c.pendingCmd + c.streamBuf.String()
 	wasBottom := c.wasAtBottom
@@ -200,4 +239,62 @@ func truncateOutput(output string, maxLines int) string {
 	}
 	truncated := strings.Join(lines[:maxLines], "\n")
 	return truncated + fmt.Sprintf("\n... (%d more lines)", len(lines)-maxLines)
+}
+
+type transcriptCommand struct {
+	command  string
+	stdout   string
+	stderr   string
+	exitCode int
+}
+
+func parseCommandTranscript(content string) (transcriptCommand, bool) {
+	command, ok := extractTaggedSection(content, "command")
+	if !ok {
+		return transcriptCommand{}, false
+	}
+	stdout, ok := extractTaggedSection(content, "stdout")
+	if !ok {
+		return transcriptCommand{}, false
+	}
+	stderr, ok := extractTaggedSection(content, "stderr")
+	if !ok {
+		return transcriptCommand{}, false
+	}
+	exitCodeText, ok := extractTaggedSection(content, "exit_code")
+	if !ok {
+		return transcriptCommand{}, false
+	}
+
+	var exitCode int
+	if _, err := fmt.Sscanf(strings.TrimSpace(exitCodeText), "%d", &exitCode); err != nil {
+		return transcriptCommand{}, false
+	}
+
+	return transcriptCommand{
+		command:  html.UnescapeString(command),
+		stdout:   html.UnescapeString(stdout),
+		stderr:   html.UnescapeString(stderr),
+		exitCode: exitCode,
+	}, true
+}
+
+func extractTaggedSection(content, tag string) (string, bool) {
+	startTag := "[" + tag + "]"
+	endTag := "[/" + tag + "]"
+	start := strings.Index(content, startTag)
+	if start < 0 {
+		return "", false
+	}
+	start += len(startTag)
+	end := strings.Index(content[start:], endTag)
+	if end < 0 {
+		return "", false
+	}
+	return strings.Trim(strings.TrimSpace(content[start:start+end]), "\n"), true
+}
+
+func isStateTranscript(content string) bool {
+	content = strings.TrimSpace(content)
+	return strings.HasPrefix(content, "[state]") && strings.HasSuffix(content, "[/state]")
 }

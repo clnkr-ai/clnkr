@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -74,6 +75,37 @@ func TestProgramGuidanceReplyBecomesNextUserTurn(t *testing.T) {
 	msgs := agent.Messages()
 	if got, want := lastUserMessage(msgs), "list files instead"; got != want {
 		t.Fatalf("last user message = %q, want %q", got, want)
+	}
+}
+
+func TestSeedModelHistoryRendersResumedHistory(t *testing.T) {
+	model := &fakeModel{}
+	executor := &fakeExecutor{}
+	agent := clnkr.NewAgent(model, executor, t.TempDir())
+	if err := agent.AddMessages([]clnkr.Message{
+		{Role: "user", Content: "inspect this repo"},
+		{Role: "assistant", Content: "I will inspect the repo first."},
+		{Role: "user", Content: "[command]\nls\n[/command]\n[exit_code]\n0\n[/exit_code]\n[stdout]\nREADME.md\n[/stdout]\n[stderr]\n\n[/stderr]"},
+		{Role: "user", Content: "[state]\n{\"source\":\"clnkr\",\"kind\":\"state\",\"cwd\":\"/tmp/project\"}\n[/state]"},
+		{Role: "assistant", Content: "The repo has a README."},
+	}); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+
+	m := setupModel()
+	seedModelHistory(&m, agent)
+	view := m.View()
+	if !strings.Contains(view.Content, "inspect this repo") {
+		t.Fatalf("view should contain resumed user message, got: %q", view.Content)
+	}
+	if !strings.Contains(view.Content, "I will inspect the repo first.") {
+		t.Fatalf("view should contain resumed assistant message, got: %q", view.Content)
+	}
+	if !strings.Contains(view.Content, "README.md") {
+		t.Fatalf("view should contain resumed command output, got: %q", view.Content)
+	}
+	if !strings.Contains(view.Content, "The repo has a README.") {
+		t.Fatalf("view should contain final assistant message, got: %q", view.Content)
 	}
 }
 
