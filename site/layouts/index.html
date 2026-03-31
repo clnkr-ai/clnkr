@@ -16,16 +16,14 @@
         <p class="line-label">SYNOPSIS</p>
         <ul class="key-value install-list">
           <li>
-            <span>{{ $install.homebrew_label }} / {{ $install.homebrew_platform }}</span>
-            <a href="{{ $install.homebrew_url }}">{{ $install.homebrew_command }}</a>
+            <span>{{ $install.homebrew_label }}: <a href="{{ $install.homebrew_url }}">{{ $install.homebrew_command }}</a></span>
           </li>
           <li>
-            <span>{{ $install.apt_label }} / {{ $install.apt_platform }}</span>
             {{ if $latestTag }}
               {{ $debVersion := replaceRE "^v" "" $latestTag }}
-              <a href="{{ printf "%s/releases/download/%s/clnkr_%s-1_%s.deb" .Site.Params.repo $latestTag $debVersion $install.apt_arch }}">sudo apt install ./clnkr_{{ $debVersion }}-1_{{ $install.apt_arch }}.deb</a>
+              <span>{{ $install.apt_platform }}: <a href="{{ printf "%s/releases/download/%s/clnkr_%s-1_%s.deb" .Site.Params.repo $latestTag $debVersion $install.apt_arch }}">sudo apt install ./clnkr_{{ $debVersion }}-1_{{ $install.apt_arch }}.deb</a></span>
             {{ else }}
-              <a href="{{ printf "%s/releases/latest" .Site.Params.repo }}">latest release (.deb)</a>
+              <span>{{ $install.apt_platform }}: <a href="{{ printf "%s/releases/latest" .Site.Params.repo }}">latest release (.deb)</a></span>
             {{ end }}
           </li>
         </ul>
