@@ -34,13 +34,13 @@ jobs:
         run: cd cmd/clnkr && go test -race ./... -v
 
       - name: Build
-        run: make build-all
+        run: make build
 
       - name: Install Hugo
         run: go install github.com/gohugoio/hugo@v0.159.1
 
       - name: Build site
-        run: make site-build
+        run: make docs
 
   eval-fixture:
     runs-on: ubuntu-latest
