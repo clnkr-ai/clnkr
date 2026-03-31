@@ -1,4 +1,5 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LATEST_TAG ?= $(shell git tag -l 'v[0-9]*' --sort=-v:refname | head -1)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hugo)
 
@@ -97,7 +98,7 @@ man: ## Generate man pages from markdown
 docs: _site-build ## Build documentation site
 
 docs-serve: _site-sync ## Run documentation site locally
-	$(HUGO) server --source site
+	HUGO_CLNKR_LATEST_TAG='$(LATEST_TAG)' $(HUGO) server --source site
 
 _check-man:
 	@cp doc/clnkr.1 doc/clnkr.1.bak
@@ -114,4 +115,4 @@ _site-sync:
 	./scripts/sync-site-docs.sh
 
 _site-build: _site-sync
-	$(HUGO) --source site
+	HUGO_CLNKR_LATEST_TAG='$(LATEST_TAG)' $(HUGO) --source site
