@@ -13,13 +13,15 @@
     <div class="viewport">
       <div class="screen">
         <header class="status-bar">
-          <span>F1 Help</span>
-          <span>F2 Docs</span>
-          <span>F3 GitHub</span>
+          <a class="status-link" href="/">F1 Help</a>
+          <a class="status-link" href="/docs/">F2 Docs</a>
+          <a class="status-link" href="https://github.com/clnkr-ai/clnkr">F3 GitHub</a>
         </header>
 
         <main id="main-content" class="screen-main">
           
+  
+  
   
   <div class="retro-home">
     <section class="pane pane-large">
@@ -33,10 +35,19 @@
         <p class="one-liner">A minimal, stubborn coding agent with a rough metal finish.</p>
 
         <p class="line-label">SYNOPSIS</p>
-        <pre><code>go install github.com/clnkr-ai/clnkr/cmd/clnku@latest
-git clone https://github.com/clnkr-ai/clnkr
-cd clnkr
-make build</code></pre>
+        <ul class="key-value install-list">
+          <li>
+            <span>Homebrew / macOS</span>
+            <a href="https://github.com/clnkr-ai/homebrew-tap">brew install clnkr-ai/tap/clnkr</a>
+          </li>
+          <li>
+            <span>apt / Debian/Ubuntu</span>
+            
+              
+              <a href="https://github.com/clnkr-ai/clnkr/releases/download/v1.2.0/clnkr_1.2.0-1_amd64.deb">sudo apt install ./clnkr_1.2.0-1_amd64.deb</a>
+            
+          </li>
+        </ul>
 
         <p class="line-label">DESCRIPTION</p>
         <p>clnkr works with a human in the loop, or hand it the wheel with --full-send. Permissions are simple, sharp, and not here to save you from yourself.</p>

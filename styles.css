@@ -119,6 +119,18 @@ kbd {
   text-decoration: none;
 }
 
+.status-link,
+.install-list a {
+  text-decoration: none;
+}
+
+.status-link:hover,
+.status-link:focus-visible,
+.install-list a:hover,
+.install-list a:focus-visible {
+  text-decoration: underline;
+}
+
 .screen-main {
   flex: 1;
   padding: 0;
@@ -287,6 +299,10 @@ pre {
 
 .docs-nav {
   margin-top: 1rem;
+}
+
+.install-list {
+  margin-bottom: 1rem;
 }
 
 .docs-nav a,
