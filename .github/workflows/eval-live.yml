@@ -21,13 +21,14 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         if: steps.config.outputs.configured == 'true'
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         if: steps.config.outputs.configured == 'true'
         with:
           go-version-file: go.mod
+          cache-dependency-path: cmd/clnkr/go.sum
 
       - name: Run live evals
         if: steps.config.outputs.configured == 'true'
