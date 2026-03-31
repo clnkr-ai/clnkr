@@ -33,3 +33,6 @@ Thumbs.db
 # Eval harness
 /eval/artifacts/*
 !/eval/artifacts/.gitkeep
+
+# Local worktrees
+/.worktrees/
