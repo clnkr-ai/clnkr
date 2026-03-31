@@ -114,6 +114,21 @@ func TestModelAgentDoneCommitsStreamBuffer(t *testing.T) {
 	}
 }
 
+func TestModelAgentDoneClarificationRendersQuestion(t *testing.T) {
+	m := setupModel()
+	m.shared.agent = clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := m.shared.agent.AddMessages([]clnkr.Message{
+		{Role: "assistant", Content: `{"type":"clarify","question":"Which interface should I use?"}`},
+	}); err != nil {
+		t.Fatalf("seed messages: %v", err)
+	}
+
+	um := updateModel(t, m, agentDoneMsg{err: clnkr.ErrClarificationNeeded})
+	if !strings.Contains(um.chat.content.String(), "Which interface should I use?") {
+		t.Fatalf("expected clarify question in chat, got: %q", um.chat.content.String())
+	}
+}
+
 func TestModelWindowResize(t *testing.T) {
 	m := setupModel()
 	um := updateModel(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -259,6 +274,22 @@ func TestModelEventResponseUpdatesStatus(t *testing.T) {
 	}
 	if m.status.outputTokens != 200 {
 		t.Errorf("outputTokens = %d, want 200", m.status.outputTokens)
+	}
+}
+
+func TestLatestClarifyQuestion(t *testing.T) {
+	msgs := []clnkr.Message{
+		{Role: "assistant", Content: `{"type":"act","command":"ls"}`},
+		{Role: "assistant", Content: `{"type":"clarify","question":"Bind to 0.0.0.0?"}`},
+		{Role: "user", Content: "yes"},
+	}
+
+	question, ok := latestClarifyQuestion(msgs)
+	if !ok {
+		t.Fatal("expected to find clarify question")
+	}
+	if question != "Bind to 0.0.0.0?" {
+		t.Fatalf("question = %q, want %q", question, "Bind to 0.0.0.0?")
 	}
 }
 

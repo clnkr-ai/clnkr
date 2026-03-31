@@ -49,7 +49,9 @@ func (c *chatModel) appendToken(text string) {
 }
 
 func (c *chatModel) commitStream(authoritative string) {
-	c.writeRendered(authoritative)
+	if authoritative != "" {
+		c.writeRendered(authoritative)
+	}
 	c.streamBuf.Reset()
 	c.streaming = false
 }
@@ -73,9 +75,12 @@ func (c *chatModel) appendEvent(e clnkr.Event) {
 	case clnkr.EventResponse:
 		c.pendingQuery = ""
 		if c.streaming {
-			c.commitStream(ev.Message.Content)
+			c.commitStream(c.renderAssistantMessage(ev.Message.Content, false))
 		} else {
-			c.writeRendered(ev.Message.Content)
+			rendered := c.renderAssistantMessage(ev.Message.Content, false)
+			if rendered != "" {
+				c.writeRendered(rendered)
+			}
 		}
 	case clnkr.EventCommandStart:
 		c.lastCmd = ev.Command
@@ -157,7 +162,10 @@ func (c *chatModel) hydrateHistory(messages []clnkr.Message) {
 	for _, msg := range messages {
 		switch msg.Role {
 		case "assistant":
-			c.writeRendered(msg.Content)
+			rendered := c.renderAssistantMessage(msg.Content, true)
+			if rendered != "" {
+				c.writeRendered(rendered)
+			}
 		case "user":
 			if isStateTranscript(msg.Content) {
 				continue
@@ -188,6 +196,30 @@ func (c *chatModel) hydrateHistory(messages []clnkr.Message) {
 			}
 			c.appendUserMessage(msg.Content)
 		}
+	}
+}
+
+// renderAssistantMessage converts structured protocol JSON turns into user-facing
+// text for TUI rendering. Returning "" suppresses message rendering.
+func (c *chatModel) renderAssistantMessage(content string, includeClarify bool) string {
+	turn, err := clnkr.ParseTurn(content)
+	if err != nil {
+		return content
+	}
+
+	switch t := turn.(type) {
+	case *clnkr.ActTurn:
+		// Act turns are rendered by command proposal/execution UI.
+		return ""
+	case *clnkr.ClarifyTurn:
+		if includeClarify {
+			return t.Question
+		}
+		return ""
+	case *clnkr.DoneTurn:
+		return t.Summary
+	default:
+		return content
 	}
 }
 
