@@ -2,27 +2,42 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hugo)
 
-.DEFAULT_GOAL := build-all
-.PHONY: build-clnku build-clnkr build-all install clean test eval vet fmt lint sloc check run help setup man check-man site-sync site-build site-serve
-
-build-clnku: ## Build plain CLI binary (clnku)
-	go build -trimpath -ldflags '$(LDFLAGS)' -o clnku ./cmd/clnku/
-
-build-clnkr: ## Build TUI binary (clnkr)
-	cd cmd/clnkr && go build -trimpath -ldflags '$(LDFLAGS)' -o ../../clnkr .
-
-build-all: build-clnku build-clnkr ## Build both binaries
+.DEFAULT_GOAL := build
+.PHONY: \
+	build clean install run \
+	check test eval \
+	help man docs docs-serve \
+	_build-clnku _build-clnkr \
+	_fmt _fmt-check _vet _lint _sloc _eval-live \
+	_hooks _check-man _site-sync _site-build
 
 PREFIX ?= /usr/local
+CORE_SLOC_LIMIT := 700
+CORE_FILES := $(filter-out %_test.go,$(wildcard *.go))
 
-install: build-all ## Install both binaries and clnk symlink
+##@ Build
+build: _build-clnku _build-clnkr ## Build both binaries
+
+clean: ## Remove build artifacts
+	rm -f clnku clnkr
+
+install: build ## Install both binaries and clnk symlink
 	install -d $(DESTDIR)$(PREFIX)/bin
 	install -m 755 clnkr $(DESTDIR)$(PREFIX)/bin/clnkr
 	install -m 755 clnku $(DESTDIR)$(PREFIX)/bin/clnku
 	ln -sf clnkr $(DESTDIR)$(PREFIX)/bin/clnk
 
-clean: ## Remove build artifacts
-	rm -f clnku clnkr
+run: _build-clnkr ## Build and start TUI
+	./clnkr
+
+_build-clnku:
+	go build -trimpath -ldflags '$(LDFLAGS)' -o clnku ./cmd/clnku/
+
+_build-clnkr:
+	cd cmd/clnkr && go build -trimpath -ldflags '$(LDFLAGS)' -o ../../clnkr .
+
+##@ Quality
+check: _fmt-check _vet _lint _sloc _check-man test ## Run formatting, vet, lint, SLOC, manpage, and test checks
 
 test: ## Run all tests
 	go test ./... -v
@@ -31,38 +46,57 @@ test: ## Run all tests
 eval: ## Run eval harness tests
 	go test ./eval -v
 
-vet: ## Run go vet
-	go vet ./...
-	cd cmd/clnkr && go vet ./...
+_eval-live:
+	CLNKR_EVAL_MODE=live $(MAKE) eval
 
-fmt: ## Format source code
+_fmt:
 	go fmt ./...
 	cd cmd/clnkr && go fmt ./...
 
-lint: sloc ## Run linters
+_fmt-check:
+	@files=$$(find . -type f -name '*.go' -not -path './.git/*'); \
+	unformatted=$$(gofmt -l $$files); \
+	if [ -n "$$unformatted" ]; then \
+		echo "gofmt: these files are not formatted:"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
+
+_vet:
+	go vet ./...
+	cd cmd/clnkr && go vet ./...
+
+_lint:
 	golangci-lint run ./...
 	cd cmd/clnkr && golangci-lint run ./...
 
-CORE_SLOC_LIMIT := 700
-CORE_FILES := $(filter-out %_test.go,$(wildcard *.go))
-
-sloc: ## Check core library stays under $(CORE_SLOC_LIMIT) SLOC
+_sloc:
 	@sloc=$$(cloc --quiet --csv $(CORE_FILES) | tail -1 | cut -d, -f5); \
 	echo "core library: $$sloc / $(CORE_SLOC_LIMIT) SLOC"; \
 	if [ "$$sloc" -gt $(CORE_SLOC_LIMIT) ]; then \
 		echo "error: core exceeds $(CORE_SLOC_LIMIT) SLOC limit" >&2; exit 1; \
 	fi
 
-check: lint sloc test ## Run lint, SLOC check, and tests
+##@ Contributing
+help: ## Show available targets
+	@awk 'BEGIN {FS = ":.*## "; printf "Available targets:\n"} \
+	/^##@/ {printf "\n%s\n", substr($$0, 5)} \
+	/^[a-zA-Z0-9][a-zA-Z0-9_-]*:.*## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-run: build-clnkr ## Build and start TUI
-	./clnkr
+_hooks:
+	git config core.hooksPath .githooks
 
+##@ Docs
 man: ## Generate man pages from markdown
 	go-md2man -in doc/clnkr.1.md -out doc/clnkr.1
 	go-md2man -in doc/clnku.1.md -out doc/clnku.1
 
-check-man: ## Verify committed man pages are up-to-date
+docs: _site-build ## Build documentation site
+
+docs-serve: _site-sync ## Run documentation site locally
+	$(HUGO) server --source site
+
+_check-man:
 	@cp doc/clnkr.1 doc/clnkr.1.bak
 	@go-md2man -in doc/clnkr.1.md -out doc/clnkr.1
 	@diff -q doc/clnkr.1 doc/clnkr.1.bak >/dev/null 2>&1 || (echo "error: doc/clnkr.1 is out of date; run 'make man'" && mv doc/clnkr.1.bak doc/clnkr.1 && exit 1)
@@ -73,17 +107,8 @@ check-man: ## Verify committed man pages are up-to-date
 	@mv doc/clnku.1.bak doc/clnku.1
 	@echo "man pages are up-to-date"
 
-site-sync: ## Sync doc/*.md into Hugo content
+_site-sync:
 	./scripts/sync-site-docs.sh
 
-site-build: site-sync ## Build the Hugo site into site/public
+_site-build: _site-sync
 	$(HUGO) --source site
-
-site-serve: site-sync ## Run the Hugo development server
-	$(HUGO) server --source site
-
-help: ## Show available targets
-	@grep -E '^[a-z][-a-z]+:.*##' $(MAKEFILE_LIST) | sort | awk -F ':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
-
-setup: ## Install git hooks
-	ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
