@@ -36,7 +36,9 @@ jobs:
           working-directory: cmd/clnkr
 
       - name: Test core
-        run: go test -race $(go list ./... | grep -v '/eval$$') -v
+        run: |
+          mapfile -t packages < <(go list ./... | grep -v '/eval$$')
+          go test -race "${packages[@]}" -v
 
       - name: Test TUI
         run: cd cmd/clnkr && go test -race ./... -v
