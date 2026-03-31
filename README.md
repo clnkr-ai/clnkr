@@ -4,6 +4,8 @@
 
 Warning: `clnkr` executes bash directly and currently has no permissions or sandboxing system; use it only in environments you are willing to trust and break.
 
+Platform note: today `clnkr` is Unix-only. The executor assumes `bash`, process groups, and tools like `/usr/bin/env`, so Linux and macOS are supported targets. Windows is not supported.
+
 A minimal coding agent. Query an LLM, execute bash commands, repeat. Supports the Anthropic Messages API and any OpenAI-compatible endpoint (vLLM, Ollama, LiteLLM, etc.).
 
 Ships two binaries: **clnkr** (TUI) and **clnku** (plain CLI). A **clnk** symlink points to clnkr for convenience.
