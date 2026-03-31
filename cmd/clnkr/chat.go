@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	clnkr "github.com/clnkr-ai/clnkr"
+	"github.com/clnkr-ai/clnkr/transcript"
 )
 
 type chatModel struct {
@@ -159,7 +160,7 @@ func (c *chatModel) hydrateHistory(messages []clnkr.Message) {
 		case "assistant":
 			c.writeRendered(msg.Content)
 		case "user":
-			if isStateTranscript(msg.Content) {
+			if isStateTranscript(msg.Content) || isCompactTranscript(msg.Content) {
 				continue
 			}
 			if transcript, ok := parseCommandTranscript(msg.Content); ok {
@@ -297,4 +298,8 @@ func extractTaggedSection(content, tag string) (string, bool) {
 func isStateTranscript(content string) bool {
 	content = strings.TrimSpace(content)
 	return strings.HasPrefix(content, "[state]") && strings.HasSuffix(content, "[/state]")
+}
+
+func isCompactTranscript(content string) bool {
+	return transcript.IsCompactMessage(transcript.Message{Role: "user", Content: content})
 }

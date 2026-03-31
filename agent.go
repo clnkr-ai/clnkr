@@ -2,10 +2,11 @@ package clnkr
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/clnkr-ai/clnkr/transcript"
 )
 
 const DefaultMaxSteps = 100
@@ -25,12 +26,7 @@ type Agent struct {
 }
 
 func NewAgent(model Model, executor Executor, cwd string) *Agent {
-	return &Agent{
-		model:    model,
-		executor: executor,
-		cwd:      cwd,
-		MaxSteps: DefaultMaxSteps,
-	}
+	return &Agent{model: model, executor: executor, cwd: cwd, MaxSteps: DefaultMaxSteps}
 }
 
 func (a *Agent) notify(e Event) {
@@ -45,9 +41,7 @@ func (a *Agent) Messages() []Message {
 	return cp
 }
 
-func (a *Agent) Cwd() string {
-	return a.cwd
-}
+func (a *Agent) Cwd() string { return a.cwd }
 
 // AddMessages prepends msgs before the first Step/Run call.
 func (a *Agent) AddMessages(msgs []Message) error {
@@ -72,74 +66,59 @@ func (a *Agent) AppendUserMessage(text string) {
 	a.messages = append(a.messages, Message{Role: "user", Content: text})
 }
 
-var sectionEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "[", "&#91;", "]", "&#93;")
-
-func formatCommandOutput(result CommandResult) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "[command]\n%s\n[/command]\n", sectionEscaper.Replace(result.Command))
-	fmt.Fprintf(&b, "[exit_code]\n%d\n[/exit_code]\n", result.ExitCode)
-	fmt.Fprintf(&b, "[stdout]\n%s\n[/stdout]\n", sectionEscaper.Replace(result.Stdout))
-	fmt.Fprintf(&b, "[stderr]\n%s\n[/stderr]", sectionEscaper.Replace(result.Stderr))
-	return b.String()
-}
-
-type transcriptState struct {
-	Source string `json:"source"`
-	Kind   string `json:"kind"`
-	Cwd    string `json:"cwd"`
-}
-
-func formatStateMessage(cwd string) string {
-	body, err := json.Marshal(transcriptState{
-		Source: "clnkr",
-		Kind:   "state",
-		Cwd:    cwd,
-	})
-	if err != nil {
-		panic(fmt.Sprintf("marshal state message: %v", err))
-	}
-	return fmt.Sprintf("[state]\n%s\n[/state]", body)
-}
-
-func extractLatestCwd(messages []Message) (string, bool) {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role != "user" {
-			continue
-		}
-		if cwd, ok := extractStateCwd(messages[i].Content); ok {
-			return cwd, true
-		}
-	}
-	return "", false
-}
-
-func extractStateCwd(content string) (string, bool) {
-	content = strings.TrimSpace(content)
-	if !strings.HasPrefix(content, "[state]") || !strings.HasSuffix(content, "[/state]") {
-		return "", false
-	}
-	body := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(content, "[state]"), "[/state]"))
-	var state transcriptState
-	if err := json.Unmarshal([]byte(body), &state); err != nil {
-		return "", false
-	}
-	if state.Source != "clnkr" || state.Kind != "state" || state.Cwd == "" {
-		return "", false
-	}
-	return state.Cwd, true
-}
-
 func (a *Agent) restoreExecutionStateFromMessages() {
-	if cwd, ok := extractLatestCwd(a.messages); ok {
+	if cwd, ok := transcript.ExtractLatestCwd(toTranscriptMessages(a.messages)); ok {
 		a.cwd = cwd
 	}
 }
 
 func (a *Agent) appendStateMessageIfNeeded() {
-	if cwd, ok := extractLatestCwd(a.messages); ok && cwd == a.cwd {
+	messages := toTranscriptMessages(a.messages)
+	if cwd, ok := transcript.ExtractLatestCwd(messages); ok && cwd == a.cwd {
 		return
 	}
-	a.messages = append(a.messages, Message{Role: "user", Content: formatStateMessage(a.cwd)})
+	a.messages = append(a.messages, Message{Role: "user", Content: transcript.FormatStateMessage(a.cwd)})
+}
+
+// Compact rewrites the transcript by summarizing an older prefix and keeping a
+// recent tail of user-authored turns intact.
+func (a *Agent) Compact(ctx context.Context, compactor Compactor, opts CompactOptions) (CompactStats, error) {
+	if compactor == nil {
+		return CompactStats{}, fmt.Errorf("compact transcript: no compactor configured")
+	}
+
+	keepRecentTurns := opts.KeepRecentTurns
+	if keepRecentTurns < 0 {
+		return CompactStats{}, fmt.Errorf("compact transcript: invalid keep recent turns: %d", keepRecentTurns)
+	}
+	if keepRecentTurns == 0 {
+		keepRecentTurns = 2
+	}
+
+	transcriptMessages := toTranscriptMessages(a.messages)
+	boundary, ok := transcript.FindCompactBoundary(transcriptMessages, keepRecentTurns)
+	if !ok {
+		return CompactStats{}, fmt.Errorf("compact transcript: not enough history to compact")
+	}
+
+	prefix := append([]Message{}, a.messages[:boundary]...)
+	summary, err := compactor.Summarize(ctx, prefix)
+	if err != nil {
+		return CompactStats{}, fmt.Errorf("compact transcript: summarize prefix: %w", err)
+	}
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return CompactStats{}, fmt.Errorf("compact transcript: empty summary")
+	}
+
+	rewritten, stats, err := transcript.RewriteForCompaction(transcriptMessages, summary, opts.Instructions, keepRecentTurns)
+	if err != nil {
+		return CompactStats{}, fmt.Errorf("compact transcript: %w", err)
+	}
+
+	a.messages = fromTranscriptMessages(rewritten)
+	a.restoreExecutionStateFromMessages()
+	return CompactStats(stats), nil
 }
 
 // ExecutorStateSetter is optional. Executors that skip it must populate
@@ -188,7 +167,7 @@ func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, erro
 		a.env = execResult.PostEnv
 	}
 	a.notify(EventDebug{Message: fmt.Sprintf("cwd: %s", a.cwd)})
-	payload := formatCommandOutput(execResult)
+	payload := transcript.FormatCommandResult(toTranscriptCommandResult(execResult))
 	if execErr != nil {
 		a.notify(EventDebug{Message: fmt.Sprintf("command error: %v", execErr)})
 	}

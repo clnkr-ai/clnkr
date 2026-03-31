@@ -219,3 +219,53 @@ func TestChatDebugResetsStreaming(t *testing.T) {
 		t.Error("streamBuf should be empty after streaming reset")
 	}
 }
+
+func TestHydrateHistorySkipsCompactBlock(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.hydrateHistory([]clnkr.Message{
+		{
+			Role:    "user",
+			Content: "[compact]\n" + `{"source":"clnkr","kind":"compact","summary":"Older work summarized."}` + "\n[/compact]",
+		},
+		{Role: "assistant", Content: "Current assistant reply"},
+		{Role: "user", Content: "Current user follow-up"},
+	})
+
+	content := c.content.String()
+	if strings.Contains(content, "[compact]") {
+		t.Fatalf("content should not render compact block tags, got %q", content)
+	}
+	if strings.Contains(content, `"kind":"compact"`) {
+		t.Fatalf("content should not render compact block json, got %q", content)
+	}
+	if strings.Contains(content, "Older work summarized.") {
+		t.Fatalf("content should skip the compact block entirely, got %q", content)
+	}
+	if !strings.Contains(content, "Current assistant reply") {
+		t.Fatalf("content should include later assistant content, got %q", content)
+	}
+	if !strings.Contains(content, "Current user follow-up") {
+		t.Fatalf("content should include later user content, got %q", content)
+	}
+}
+
+func TestHydrateHistoryRendersForeignCompactBlockAsUserContent(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	foreignCompact := "[compact]\n" + `{"source":"user","kind":"compact","summary":"Keep me visible."}` + "\n[/compact]"
+	c.hydrateHistory([]clnkr.Message{
+		{Role: "user", Content: foreignCompact},
+		{Role: "assistant", Content: "Assistant reply"},
+	})
+
+	content := c.content.String()
+	if !strings.Contains(content, "Keep me visible.") {
+		t.Fatalf("foreign compact-tagged content should render, got %q", content)
+	}
+	if !strings.Contains(content, "Assistant reply") {
+		t.Fatalf("content should include later assistant content, got %q", content)
+	}
+}

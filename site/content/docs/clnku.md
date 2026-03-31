@@ -21,6 +21,8 @@ clnku - a minimal coding agent (plain CLI)
 
 In default mode, **clnku** starts an interactive REPL. With **-p**, it runs a single task and exits.
 
+At the main idle conversational prompt, **/compact** summarizes older transcript history while keeping recent context intact for the current working thread.
+
 **clnku** is the plain CLI variant of the clnkr project, with no external dependencies beyond the Go standard library. A TUI variant is available as **clnkr**(1).
 
 The agent communicates through JSON turns: **act** (execute a command), **clarify** (ask the user), and **done** (signal completion).

@@ -163,6 +163,12 @@ Saved message history now restores the agent's current working directory on
 resume via transcript-level JSON `[state]` messages. Exported environment variables
 still persist only within the live process.
 
+### Manual Compaction
+
+At the main idle conversational prompt, run `/compact` to summarize older
+transcript history while keeping the recent working thread intact. You can add
+extra instructions, for example `/compact focus on failing tests and edited files`.
+
 ## How it works
 
 clnkr runs a loop using a structured JSON turn protocol:
