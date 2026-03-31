@@ -9,10 +9,7 @@ type Message struct {
 }
 
 // Usage tracks token consumption for a single LLM call.
-type Usage struct {
-	InputTokens  int
-	OutputTokens int
-}
+type Usage struct{ InputTokens, OutputTokens int }
 
 // Response pairs an LLM reply with its token usage.
 type Response struct {

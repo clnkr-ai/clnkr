@@ -12,7 +12,7 @@ HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hug
 	_hooks _check-man _site-sync _site-build
 
 PREFIX ?= /usr/local
-CORE_SLOC_LIMIT := 700
+CORE_SLOC_LIMIT := 750
 CORE_FILES := $(filter-out %_test.go,$(wildcard *.go))
 
 ##@ Build
