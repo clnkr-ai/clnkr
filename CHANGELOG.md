@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.2 (2026-03-31)
+
+- Match TUI styling to retro site
+- Redesign site with retro terminal shell
+- Update GitHub Actions versions
+- Fix actionlint workflow warnings
+- Lint workflow make targets
+- Fix CI make targets
+- Clean up make help targets
+- Document Unix-only support
+- Fix TUI shutdown race and add PTY tests
+- Relax live eval command matching
+- Upload live eval artifacts on failure
+- Clean up old --full-send implementation docs
+- Add eval harness with live mode
+- Update CHANGELOG.md for 1.0.1
+
 ## 1.0.1 (2026-03-29)
 
 - Persist cwd in transcript state and refine approval UX
