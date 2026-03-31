@@ -22,6 +22,57 @@ func TestChatAppendEventResponse(t *testing.T) {
 	}
 }
 
+func TestChatSuppressesStructuredActResponse(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.appendEvent(clnkr.EventResponse{
+		Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","command":"ls -la"}`},
+	})
+
+	content := c.content.String()
+	if strings.Contains(content, `"type":"act"`) {
+		t.Fatalf("content should not contain raw act JSON, got: %q", content)
+	}
+	if strings.Contains(content, "ls -la") {
+		t.Fatalf("content should not render act command from EventResponse, got: %q", content)
+	}
+}
+
+func TestChatSuppressesStructuredClarifyResponseInLiveStream(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.appendEvent(clnkr.EventResponse{
+		Message: clnkr.Message{Role: "assistant", Content: `{"type":"clarify","question":"Which interface?"}`},
+	})
+
+	content := c.content.String()
+	if strings.Contains(content, `"type":"clarify"`) {
+		t.Fatalf("content should not contain raw clarify JSON, got: %q", content)
+	}
+	if strings.Contains(content, "Which interface?") {
+		t.Fatalf("live EventResponse should not render clarify text directly, got: %q", content)
+	}
+}
+
+func TestChatRendersDoneSummaryFromStructuredResponse(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.appendEvent(clnkr.EventResponse{
+		Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"All set."}`},
+	})
+
+	content := c.content.String()
+	if strings.Contains(content, `"type":"done"`) {
+		t.Fatalf("content should not contain raw done JSON, got: %q", content)
+	}
+	if !strings.Contains(content, "All set.") {
+		t.Fatalf("content should render done summary, got: %q", content)
+	}
+}
+
 func TestChatStreamingBuffer(t *testing.T) {
 	s := defaultStyles(true)
 	c := newChatModel(80, 24, s, false)
@@ -86,6 +137,23 @@ func TestChatPendingCommandBuffer(t *testing.T) {
 	}
 	if !strings.Contains(c.content.String(), "ls -la") {
 		t.Error("committed content should contain the command after EventCommandDone")
+	}
+}
+
+func TestChatHydrateHistoryRendersClarifyQuestion(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.hydrateHistory([]clnkr.Message{
+		{Role: "assistant", Content: `{"type":"clarify","question":"Use 0.0.0.0?"}`},
+	})
+
+	content := c.content.String()
+	if strings.Contains(content, `"type":"clarify"`) {
+		t.Fatalf("hydrated content should not contain raw clarify JSON, got: %q", content)
+	}
+	if !strings.Contains(content, "Use 0.0.0.0?") {
+		t.Fatalf("hydrated content should contain clarify question, got: %q", content)
 	}
 }
 
