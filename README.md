@@ -20,7 +20,7 @@ Ships two binaries: **clnkr** (TUI) and **clnku** (plain CLI). A **clnk** symlin
 go install github.com/clnkr-ai/clnkr/cmd/clnku@latest
 
 # TUI requires building from source (due to replace directive)
-make build-clnkr
+make build
 ```
 
 Or build from source:
@@ -28,7 +28,7 @@ Or build from source:
 ```bash
 git clone https://github.com/clnkr-ai/clnkr.git
 cd clnkr
-make build-all
+make build
 ```
 
 ## Usage
@@ -180,7 +180,8 @@ The LLM is the agent. clnkr is the scaffold.
 
 ```bash
 make help       # Show all targets
-make check      # Lint + tests
+make build      # Build both binaries
+make check      # Full quality suite
 make test       # Tests only
-make fmt        # Format source
+make docs       # Build documentation site
 ```
