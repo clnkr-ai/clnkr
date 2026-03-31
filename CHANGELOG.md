@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.3 (2026-03-31)
+
+- Render resumed history in TUI
+
 ## 1.0.2 (2026-03-31)
 
 - Match TUI styling to retro site
