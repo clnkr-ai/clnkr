@@ -57,6 +57,7 @@
 <h1 id="description">DESCRIPTION</h1>
 <p><strong>clnkr</strong> is a minimal coding agent with a terminal user interface (TUI), built with bubbletea. It queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.</p>
 <p>In default mode, <strong>clnkr</strong> starts the TUI. With <strong>-p</strong>, it runs a single task and exits. When stdout is not a TTY, <strong>clnkr</strong> falls back to plain-text rendering.</p>
+<p>At the main idle conversational prompt, <strong>/compact</strong> summarizes older transcript history while keeping recent context intact for the current working thread.</p>
 <p>The agent communicates through JSON turns: <strong>act</strong> (execute a command), <strong>clarify</strong> (ask the user), and <strong>done</strong> (signal completion).</p>
 <p>By default, <strong>clnkr</strong> asks for approval before each <strong>act</strong> turn. Pass <strong>&ndash;full-send</strong> to execute commands immediately without approval.</p>
 <p>A plain CLI variant is available as <strong>clnku</strong>(1).</p>
