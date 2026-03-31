@@ -1,14 +1,32 @@
 {{ define "main" }}
-  <main class="page">
-    <article class="doc-page">
-      <header class="page-header">
-        <p class="eyebrow">{{ .Section }}</p>
+  {{ $docs := (where .Site.RegularPages "Section" "docs").ByWeight }}
+  <div class="docs-grid docs-grid-single">
+    <aside class="pane">
+      <div class="pane-bar">
+        <span>docs.nav</span>
+        <span>{{ .Section }}</span>
+      </div>
+      <div class="pane-body">
+        <p class="line-label">PAGE</p>
         <h1>{{ .Title }}</h1>
         {{ with .Description }}<p class="page-summary">{{ . }}</p>{{ end }}
-      </header>
-      <div class="doc-body">
+        <nav class="docs-nav" aria-label="Documentation">
+          <a href="/docs/">Overview</a>
+          {{ range $docs }}
+            <a class="{{ if eq $.RelPermalink .RelPermalink }}is-active{{ end }}" href="{{ .RelPermalink }}">{{ .Title }}</a>
+          {{ end }}
+        </nav>
+      </div>
+    </aside>
+
+    <article class="pane pane-wide">
+      <div class="pane-bar">
+        <span>{{ .Title }}</span>
+        <span>manual</span>
+      </div>
+      <div class="pane-body doc-body">
         {{ .Content }}
       </div>
     </article>
-  </main>
+  </div>
 {{ end }}
