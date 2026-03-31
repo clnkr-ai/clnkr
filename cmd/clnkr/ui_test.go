@@ -523,7 +523,7 @@ func TestModelSingleTaskDoneQuitsAfterBridgeDrains(t *testing.T) {
 	if um.running {
 		t.Fatal("single-task done should stop the run")
 	}
-	_, quitCmd := um.Update(nil)
+	_, quitCmd := um.Update(bridgeDrainedMsg{})
 	if quitCmd == nil {
 		t.Fatal("bridge drain should quit the TUI for single-task runs")
 	}
@@ -533,7 +533,7 @@ func TestModelSingleTaskAgentDoneQuitsIfBridgeDrainedFirst(t *testing.T) {
 	m := setupModel()
 	m.exitOnRunFinish = true
 
-	updated, cmd := m.Update(nil)
+	updated, cmd := m.Update(bridgeDrainedMsg{})
 	if cmd != nil {
 		t.Fatal("bridge drain before completion should not quit immediately")
 	}
@@ -542,11 +542,48 @@ func TestModelSingleTaskAgentDoneQuitsIfBridgeDrainedFirst(t *testing.T) {
 		t.Fatalf("expected model, got %T", updated)
 	}
 	if !um.bridgeDrained {
-		t.Fatal("nil bridge message should mark bridgeDrained")
+		t.Fatal("bridge drain message should mark bridgeDrained")
 	}
 
 	_, quitCmd := um.Update(agentDoneMsg{err: nil})
 	if quitCmd == nil {
 		t.Fatal("agentDone should quit if the bridge already drained")
+	}
+}
+
+func TestModelSingleTaskDoneKeepsBridgeAliveForBufferedResponse(t *testing.T) {
+	m := setupModel()
+	m.exitOnRunFinish = true
+	m.eventCh = make(chan clnkr.Event)
+	m.closeEventChOnFinish = true
+
+	updated, cmd := m.Update(stepDoneMsg{result: clnkr.StepResult{Turn: &clnkr.DoneTurn{Summary: "done"}}})
+	if cmd != nil {
+		t.Fatal("step completion should not quit before buffered events render")
+	}
+
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if um.eventCh == nil {
+		t.Fatal("finishRun should keep the closed event channel available until the bridge drains")
+	}
+
+	updated, cmd = um.Update(eventMsg{event: clnkr.EventResponse{
+		Message: clnkr.Message{Role: "assistant", Content: "done"},
+	}})
+	if cmd == nil {
+		t.Fatal("buffered response should resubscribe to the bridge")
+	}
+
+	um, ok = updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+
+	_, quitCmd := um.Update(bridgeDrainedMsg{})
+	if quitCmd == nil {
+		t.Fatal("bridge drain should quit after the buffered response is rendered")
 	}
 }

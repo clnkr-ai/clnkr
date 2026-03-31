@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -48,6 +49,22 @@ type shared struct {
 	program  *tea.Program
 	eventLog *os.File
 	cwd      string
+	stateMu  sync.RWMutex
+	// awaitingApproval is mirrored here so tests can observe the live program
+	// state across Bubble Tea model copies without poking at internal channels.
+	awaitingApproval bool
+}
+
+func (s *shared) setAwaitingApproval(v bool) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.awaitingApproval = v
+}
+
+func (s *shared) getAwaitingApproval() bool {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return s.awaitingApproval
 }
 
 type model struct {
@@ -134,6 +151,16 @@ func (m model) Init() tea.Cmd {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case bridgeDrainedMsg:
+		if m.exitOnRunFinish {
+			m.bridgeDrained = true
+			m.eventCh = nil
+			if !m.running {
+				return m, tea.Quit
+			}
+		}
+		return m, nil
+
 	case nil:
 		if m.exitOnRunFinish {
 			m.bridgeDrained = true
@@ -219,6 +246,7 @@ func (m *model) finishRun(err error) {
 	m.status.stopRun()
 	m.pendingAct = nil
 	m.awaitingApproval = false
+	m.shared.setAwaitingApproval(false)
 	m.awaitingClarification = false
 	m.clarificationPrompt = ""
 	m.input.resetPlaceholder()
@@ -236,7 +264,6 @@ func (m *model) finishRun(err error) {
 	m.chat.updateViewport()
 	if m.closeEventChOnFinish && m.eventCh != nil {
 		close(m.eventCh)
-		m.eventCh = nil
 	}
 	m.closeEventChOnFinish = false
 }
@@ -296,6 +323,7 @@ func (m model) handleStepDone(msg stepDoneMsg) (tea.Model, tea.Cmd) {
 	case *clnkr.ActTurn:
 		m.pendingAct = turn
 		m.awaitingApproval = true
+		m.shared.setAwaitingApproval(true)
 		m.input.setPlaceholder(approvalPromptText)
 		m.chat.setProposedCommand(turn.Command)
 		m.chat.appendHostNote(approvalPromptText)
@@ -320,6 +348,7 @@ func (m model) handleExecuteDone(msg executeDoneMsg) (tea.Model, tea.Cmd) {
 
 	m.pendingAct = nil
 	m.awaitingApproval = false
+	m.shared.setAwaitingApproval(false)
 	m.input.resetPlaceholder()
 	m.executedSteps++
 	if m.shared.agent.MaxSteps > 0 && m.executedSteps >= m.shared.agent.MaxSteps {
@@ -550,12 +579,14 @@ func (m model) approvePendingCommand() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.awaitingApproval = false
+	m.shared.setAwaitingApproval(false)
 	m.input.resetPlaceholder()
 	return m, executeCmd(m.shared.agent, m.runCtx, m.pendingAct)
 }
 
 func (m model) submitPendingGuidance(text string) (tea.Model, tea.Cmd) {
 	m.awaitingApproval = false
+	m.shared.setAwaitingApproval(false)
 	m.awaitingClarification = false
 	m.clarificationPrompt = ""
 	m.input.resetPlaceholder()

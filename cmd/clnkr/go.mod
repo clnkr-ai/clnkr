@@ -11,6 +11,7 @@ require (
 	github.com/charmbracelet/glamour v0.10.0
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/clnkr-ai/clnkr v0.1.3
+	github.com/creack/pty v1.1.24
 )
 
 require (
