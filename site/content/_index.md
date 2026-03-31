@@ -28,7 +28,7 @@ go install github.com/clnkr-ai/clnkr/cmd/clnku@latest
 # TUI
 git clone https://github.com/clnkr-ai/clnkr.git
 cd clnkr
-make build-clnkr
+make build
 ```
 
 ## Docs
