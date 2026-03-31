@@ -16,6 +16,14 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+      - name: Lint workflows
+        run: |
+          "$(go env GOPATH)/bin/actionlint"
+          python3 ./scripts/check-workflow-make-targets.py
+
       - name: Lint core
         uses: golangci/golangci-lint-action@v7
         with:

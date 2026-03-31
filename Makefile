@@ -8,7 +8,7 @@ HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hug
 	check test eval \
 	help man docs docs-serve \
 	_build-clnku _build-clnkr \
-	_fmt _fmt-check _vet _lint _sloc _eval-live \
+	_fmt _fmt-check _vet _lint _sloc _eval-live _workflow-make-targets \
 	_hooks _check-man _site-sync _site-build
 
 PREFIX ?= /usr/local
@@ -37,7 +37,7 @@ _build-clnkr:
 	cd cmd/clnkr && go build -trimpath -ldflags '$(LDFLAGS)' -o ../../clnkr .
 
 ##@ Quality
-check: _fmt-check _vet _lint _sloc _check-man test ## Run formatting, vet, lint, SLOC, manpage, and test checks
+check: _fmt-check _vet _lint _sloc _workflow-make-targets _check-man test ## Run formatting, vet, lint, SLOC, workflow, manpage, and test checks
 
 test: ## Run all tests
 	go test ./... -v
@@ -76,6 +76,9 @@ _sloc:
 	if [ "$$sloc" -gt $(CORE_SLOC_LIMIT) ]; then \
 		echo "error: core exceeds $(CORE_SLOC_LIMIT) SLOC limit" >&2; exit 1; \
 	fi
+
+_workflow-make-targets:
+	python3 ./scripts/check-workflow-make-targets.py
 
 ##@ Contributing
 help: ## Show available targets
