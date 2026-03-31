@@ -159,8 +159,14 @@ kbd {
   line-height: 1;
 }
 
-.window-bar-bottom span {
+.window-bar-bottom a {
+  text-decoration: none;
   white-space: nowrap;
+}
+
+.window-bar-bottom a:hover,
+.window-bar-bottom a:focus-visible {
+  text-decoration: underline;
 }
 
 .retro-home,
