@@ -33,6 +33,7 @@ make build-all VERSION=0.2.0
 - Before committing, run `make fmt` then `make check`. Do not commit if either fails.
 - A PostToolUse hook runs gofmt on Go files after Edit/Write automatically. You do not need to format manually, but `make fmt` and `make check` are still required before commits.
 - Do not add external dependencies to root go.mod. Core library is stdlib only. Charm deps live only in `cmd/clnkr/go.mod`.
+- Windows is unsupported. Assume a Unix-like environment (`bash`, process groups, `/usr/bin/env`) unless the task explicitly asks for portability work.
 - Do not move packages to `internal/`. The core is a public library.
 - Do not add `io.Writer` parameters for output. Output goes through typed events.
 - Do not put policy logic in `Step()`. Keep it in `Run()`. New shared logic goes in `Step()`.
