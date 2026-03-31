@@ -17,12 +17,13 @@ import (
 const eventChSize = 256
 
 type eventMsg struct{ event clnkr.Event }
+type bridgeDrainedMsg struct{}
 
 func eventBridge(ch <-chan clnkr.Event) tea.Cmd {
 	return func() tea.Msg {
 		e, ok := <-ch
 		if !ok {
-			return nil
+			return bridgeDrainedMsg{}
 		}
 		return eventMsg{event: e}
 	}
