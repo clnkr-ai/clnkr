@@ -305,6 +305,10 @@ pre {
   margin-bottom: 1rem;
 }
 
+.install-list li {
+  justify-content: flex-start;
+}
+
 .docs-nav a,
 .toc-block a {
   display: block;
