@@ -261,11 +261,39 @@ func (m *model) finishRun(err error) {
 		)
 		m.chat.content.WriteString("\n\n")
 	}
+	if errors.Is(err, clnkr.ErrClarificationNeeded) && m.shared.agent != nil {
+		if question, ok := latestClarifyQuestion(m.shared.agent.Messages()); ok {
+			m.chat.appendHostNote(question)
+		}
+	}
 	m.chat.updateViewport()
 	if m.closeEventChOnFinish && m.eventCh != nil {
 		close(m.eventCh)
 	}
 	m.closeEventChOnFinish = false
+}
+
+func latestClarifyQuestion(messages []clnkr.Message) (string, bool) {
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != "assistant" {
+			continue
+		}
+		turn, err := clnkr.ParseTurn(msg.Content)
+		if err != nil {
+			continue
+		}
+		clarify, ok := turn.(*clnkr.ClarifyTurn)
+		if !ok {
+			continue
+		}
+		question := strings.TrimSpace(clarify.Question)
+		if question == "" {
+			continue
+		}
+		return question, true
+	}
+	return "", false
 }
 
 func stepCmd(agent *clnkr.Agent, ctx context.Context) tea.Cmd {
