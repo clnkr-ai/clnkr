@@ -7,22 +7,26 @@
     <meta name="description" content="{{ with .Description }}{{ . }}{{ else }}{{ .Site.Params.description }}{{ end }}">
     <link rel="stylesheet" href="/styles.css">
   </head>
-  <body>
-    <div class="page-shell">
-      <header class="site-header">
-        <a class="wordmark" href="/">{{ .Site.Title }}</a>
-        <nav class="site-nav" aria-label="Main">
-          {{ range .Site.Menus.main }}
-            <a href="{{ .URL }}">{{ .Name }}</a>
-          {{ end }}
-        </nav>
-      </header>
+  <body class="{{ if .IsHome }}page-home{{ else if eq .Section "docs" }}page-docs{{ else }}page-default{{ end }}">
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <div class="viewport">
+      <div class="screen">
+        <header class="status-bar">
+          <span>F1 Help</span>
+          <span>F2 Docs</span>
+          <span>F3 GitHub</span>
+        </header>
 
-      {{ block "main" . }}{{ end }}
+        <main id="main-content" class="screen-main">
+          {{ block "main" . }}{{ end }}
+        </main>
 
-      <footer class="site-footer">
-        <p>Minimal harness. Real shell. No permission system yet.</p>
-      </footer>
+        <footer class="window-bar window-bar-bottom">
+          <span>man clnkr</span>
+          <span>/docs/</span>
+          <span>github.com/clnkr-ai/clnkr</span>
+        </footer>
+      </div>
     </div>
   </body>
 </html>
