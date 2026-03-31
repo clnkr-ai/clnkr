@@ -427,7 +427,6 @@ Environment:
 			fmt.Fprintf(os.Stderr, "Error: cannot resume session: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Fprintf(os.Stderr, "[Resumed session with %d messages]\n", len(msgs))
 	}
 
 	// TTY detection: if stdout is not a terminal, use plain-text rendering
@@ -455,6 +454,7 @@ func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, e
 			m.shared.agent = agent
 			m.shared.eventLog = eventLog
 			m.shared.cwd = agent.Cwd()
+			seedModelHistory(&m, agent)
 			m.chat.appendUserMessage(taskPrompt)
 			m.chat.updateViewport()
 			m.running = true
@@ -512,6 +512,7 @@ func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, e
 		m.shared.agent = agent
 		m.shared.eventLog = eventLog
 		m.shared.cwd = agent.Cwd()
+		seedModelHistory(&m, agent)
 		m.running = true
 		m.status.startRun()
 
@@ -563,6 +564,7 @@ func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, e
 	m.shared.agent = agent
 	m.shared.eventLog = eventLog
 	m.shared.cwd = agent.Cwd()
+	seedModelHistory(&m, agent)
 
 	p := tea.NewProgram(m)
 	m.shared.program = p
@@ -594,6 +596,15 @@ func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, e
 		}
 		os.Exit(1)
 	}
+}
+
+func seedModelHistory(m *model, agent *clnkr.Agent) {
+	history := agent.Messages()
+	if len(history) == 0 {
+		return
+	}
+	m.chat.hydrateHistory(history)
+	m.chat.updateViewport()
 }
 
 // runPlain provides plain-text output for non-TTY environments.
