@@ -26,6 +26,24 @@ func newInputModel(width int, s *inputStyles) inputModel {
 	ta.CharLimit = 0 // no limit
 	ta.Focus()       // Set focused state before bubbletea copies the model
 
+	taStyles := textarea.DefaultDarkStyles()
+	taStyles.Focused.Text = s.Text
+	taStyles.Blurred.Text = s.Text
+	taStyles.Focused.Prompt = s.Prompt
+	taStyles.Blurred.Prompt = s.Prompt
+	taStyles.Focused.Placeholder = s.Placeholder
+	taStyles.Blurred.Placeholder = s.Placeholder
+	taStyles.Focused.CursorLine = s.CursorLine
+	taStyles.Blurred.CursorLine = s.CursorLine
+	taStyles.Focused.LineNumber = s.Placeholder
+	taStyles.Blurred.LineNumber = s.Placeholder
+	taStyles.Focused.CursorLineNumber = s.Placeholder
+	taStyles.Blurred.CursorLineNumber = s.Placeholder
+	taStyles.Focused.EndOfBuffer = s.Placeholder
+	taStyles.Blurred.EndOfBuffer = s.Placeholder
+	taStyles.Cursor.Color = s.Cursor
+	ta.SetStyles(taStyles)
+
 	return inputModel{
 		textarea: ta,
 		histIdx:  -1,
