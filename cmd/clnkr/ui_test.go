@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	clnkr "github.com/clnkr-ai/clnkr"
@@ -617,4 +619,420 @@ func TestModelSingleTaskDoneKeepsBridgeAliveForBufferedResponse(t *testing.T) {
 	if quitCmd == nil {
 		t.Fatal("bridge drain should quit after the buffered response is rendered")
 	}
+}
+
+type recordingCompactor struct {
+	summary string
+	err     error
+
+	started chan struct{}
+	release chan struct{}
+
+	mu       sync.Mutex
+	calls    int
+	messages []clnkr.Message
+}
+
+func (c *recordingCompactor) Summarize(_ context.Context, messages []clnkr.Message) (string, error) {
+	c.mu.Lock()
+	c.calls++
+	c.messages = append([]clnkr.Message(nil), messages...)
+	started := c.started
+	release := c.release
+	summary := c.summary
+	err := c.err
+	c.mu.Unlock()
+
+	if started != nil {
+		close(started)
+	}
+	if release != nil {
+		<-release
+	}
+	return summary, err
+}
+
+func (c *recordingCompactor) callCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
+func runReturnedCmdAsync(t *testing.T, cmd tea.Cmd) <-chan tea.Msg {
+	t.Helper()
+	msgCh := make(chan tea.Msg, 8)
+	go func() {
+		defer close(msgCh)
+		dispatchCmdResult(msgCh, cmd())
+	}()
+	return msgCh
+}
+
+func dispatchCmdResult(msgCh chan<- tea.Msg, msg tea.Msg) {
+	switch msg := msg.(type) {
+	case nil:
+		return
+	case tea.BatchMsg:
+		var wg sync.WaitGroup
+		for _, sub := range msg {
+			if sub == nil {
+				continue
+			}
+			wg.Add(1)
+			go func(sub tea.Cmd) {
+				defer wg.Done()
+				dispatchCmdResult(msgCh, sub())
+			}(sub)
+		}
+		wg.Wait()
+	default:
+		msgCh <- msg
+	}
+}
+
+func waitForCompactDone(t *testing.T, msgCh <-chan tea.Msg) compactDoneMsg {
+	t.Helper()
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case msg, ok := <-msgCh:
+			if !ok {
+				t.Fatal("command channel closed before compactDoneMsg")
+			}
+			done, ok := msg.(compactDoneMsg)
+			if ok {
+				return done
+			}
+		case <-timeout:
+			t.Fatal("timed out waiting for compactDoneMsg")
+		}
+	}
+}
+
+func TestCompactCommandInterceptsIdleInput(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("seed messages: %v", err)
+	}
+	m.shared.agent = agent
+
+	compactor := &recordingCompactor{summary: "Older work summarized."}
+	var instructions []string
+	m.shared.compactorFactory = func(input string) clnkr.Compactor {
+		instructions = append(instructions, input)
+		return compactor
+	}
+	m.input.textarea.SetValue("/compact focus on failing tests")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("compact command should start async work")
+	}
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if !um.running {
+		t.Fatal("compact command should mark the model as running")
+	}
+	if !um.status.running {
+		t.Fatal("compact command should start the status timer")
+	}
+	if len(instructions) != 1 || instructions[0] != "focus on failing tests" {
+		t.Fatalf("factory instructions = %#v", instructions)
+	}
+	if hasUserMessage(agent.Messages(), "/compact focus on failing tests") {
+		t.Fatalf("literal compact command leaked into transcript: %#v", agent.Messages())
+	}
+	if strings.Contains(um.chat.content.String(), "Session compacted:") {
+		t.Fatal("host feedback should not be appended before completion")
+	}
+
+	um.input.textarea.SetValue("/compact again")
+	updated, secondCmd := um.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if secondCmd != nil {
+		t.Fatal("second submission should be rejected while compaction is busy")
+	}
+	um, ok = updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if got := um.input.textarea.Value(); got != "/compact again" {
+		t.Fatalf("busy submission should preserve draft, got %q", got)
+	}
+	if len(instructions) != 1 {
+		t.Fatalf("factory called %d times, want 1", len(instructions))
+	}
+
+	done := waitForCompactDone(t, runReturnedCmdAsync(t, cmd))
+	if done.err != nil {
+		t.Fatalf("compactDoneMsg.err = %v", done.err)
+	}
+}
+
+func TestCompactCommandAppendsHostFeedback(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("seed messages: %v", err)
+	}
+	m.shared.agent = agent
+	compactor := &recordingCompactor{summary: "Older work summarized."}
+	m.shared.compactorFactory = func(string) clnkr.Compactor { return compactor }
+	m.input.textarea.SetValue("/compact focus on failing tests")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("compact command should start async work")
+	}
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+
+	doneMsg := waitForCompactDone(t, runReturnedCmdAsync(t, cmd))
+	updated, followCmd := um.Update(doneMsg)
+	if followCmd != nil {
+		t.Fatal("compact completion should not schedule another command")
+	}
+	um, ok = updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if um.running {
+		t.Fatal("compact completion should clear running state")
+	}
+	if um.status.running {
+		t.Fatal("compact completion should stop the status timer")
+	}
+	if !strings.Contains(um.chat.content.String(), "Session compacted: summarized 2 messages, kept 4.") {
+		t.Fatalf("chat = %q, want host feedback", um.chat.content.String())
+	}
+	msgs := agent.Messages()
+	if len(msgs) == 0 || !strings.HasPrefix(msgs[0].Content, "[compact]\n") {
+		t.Fatalf("expected compact block at start, got %#v", msgs)
+	}
+	if hasUserMessage(msgs, "/compact focus on failing tests") {
+		t.Fatalf("literal compact command leaked into transcript: %#v", msgs)
+	}
+}
+
+func TestCompactCommandRunsThroughAsyncCmd(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("seed messages: %v", err)
+	}
+	m.shared.agent = agent
+
+	compactor := &recordingCompactor{
+		summary: "Older work summarized.",
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	m.shared.compactorFactory = func(string) clnkr.Compactor { return compactor }
+	m.input.textarea.SetValue("/compact")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("compact command should start async work")
+	}
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if !um.running {
+		t.Fatal("compact command should leave model busy until completion")
+	}
+
+	msgCh := runReturnedCmdAsync(t, cmd)
+
+	<-compactor.started
+	if compactor.callCount() != 1 {
+		t.Fatalf("compactor calls = %d, want 1", compactor.callCount())
+	}
+	if msgs := agent.Messages(); len(msgs) > 0 && strings.HasPrefix(msgs[0].Content, "[compact]\n") {
+		t.Fatalf("transcript should not rewrite before async completion, got %#v", msgs)
+	}
+
+	um.input.textarea.SetValue("follow-up task")
+	updated, blockedCmd := um.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if blockedCmd != nil {
+		t.Fatal("busy model should reject another submission while compaction is running")
+	}
+	um, ok = updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if got := um.input.textarea.Value(); got != "follow-up task" {
+		t.Fatalf("busy submission should preserve draft, got %q", got)
+	}
+
+	close(compactor.release)
+	doneMsg := waitForCompactDone(t, msgCh)
+	if doneMsg.err != nil {
+		t.Fatalf("compactDoneMsg.err = %v", doneMsg.err)
+	}
+}
+
+func TestCompactCommandRepeatedCompactionStaysStable(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(alreadyCompactedMessages()); err != nil {
+		t.Fatalf("seed messages: %v", err)
+	}
+	m.shared.agent = agent
+	compactor := &recordingCompactor{summary: "Newer summary."}
+	m.shared.compactorFactory = func(string) clnkr.Compactor { return compactor }
+	m.input.textarea.SetValue("/compact")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("compact command should start async work")
+	}
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+
+	doneMsg := waitForCompactDone(t, runReturnedCmdAsync(t, cmd))
+	updated, followCmd := um.Update(doneMsg)
+	if followCmd != nil {
+		t.Fatal("compact completion should not schedule another command")
+	}
+	um, ok = updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+
+	msgs := agent.Messages()
+	if countCompactMessages(msgs) != 1 {
+		t.Fatalf("compact block count = %d, want 1; msgs=%#v", countCompactMessages(msgs), msgs)
+	}
+	if !strings.Contains(um.chat.content.String(), "Session compacted: summarized 3 messages, kept 4.") {
+		t.Fatalf("chat = %q, want compact completion feedback", um.chat.content.String())
+	}
+}
+
+func TestCompactCommandNotInterceptedDuringApproval(t *testing.T) {
+	m := setupModel()
+	m.running = true
+	m.awaitingApproval = true
+	m.pendingAct = &clnkr.ActTurn{Command: "echo hi"}
+	m.chat.setProposedCommand("echo hi")
+	m.runCtx = context.Background()
+
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	m.shared.agent = agent
+
+	factoryCalls := 0
+	m.shared.compactorFactory = func(string) clnkr.Compactor {
+		factoryCalls++
+		return &recordingCompactor{summary: "should not run"}
+	}
+	m.input.textarea.SetValue("/compact focus on tests")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("approval guidance should continue through the normal async path")
+	}
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if um.awaitingApproval {
+		t.Fatal("approval submission should clear awaitingApproval")
+	}
+	if factoryCalls != 0 {
+		t.Fatalf("compactor factory called %d times during approval", factoryCalls)
+	}
+	if !hasUserMessage(agent.Messages(), "/compact focus on tests") {
+		t.Fatalf("approval should append the literal reply, got %#v", agent.Messages())
+	}
+}
+
+func TestCompactCommandNotInterceptedDuringClarification(t *testing.T) {
+	m := setupModel()
+	m.running = true
+	m.awaitingClarification = true
+	m.clarificationPrompt = "Need more detail"
+	m.runCtx = context.Background()
+
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	m.shared.agent = agent
+
+	factoryCalls := 0
+	m.shared.compactorFactory = func(string) clnkr.Compactor {
+		factoryCalls++
+		return &recordingCompactor{summary: "should not run"}
+	}
+	m.input.textarea.SetValue("/compact focus on tests")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("clarification reply should continue through the normal async path")
+	}
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if um.awaitingClarification {
+		t.Fatal("clarification submission should clear awaitingClarification")
+	}
+	if factoryCalls != 0 {
+		t.Fatalf("compactor factory called %d times during clarification", factoryCalls)
+	}
+	if !hasUserMessage(agent.Messages(), "/compact focus on tests") {
+		t.Fatalf("clarification should append the literal reply, got %#v", agent.Messages())
+	}
+}
+
+func compactableMessages() []clnkr.Message {
+	return []clnkr.Message{
+		{Role: "user", Content: "first task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done"}`},
+		{Role: "user", Content: "second task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done again"}`},
+		{Role: "user", Content: "third task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+	}
+}
+
+func alreadyCompactedMessages() []clnkr.Message {
+	return []clnkr.Message{
+		{
+			Role:    "user",
+			Content: `[compact]` + "\n" + `{"source":"clnkr","kind":"compact","summary":"Older work summarized."}` + "\n" + `[/compact]`,
+		},
+		{Role: "user", Content: "third task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+		{Role: "user", Content: "fourth task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done fourth"}`},
+		{Role: "user", Content: "fifth task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done fifth"}`},
+	}
+}
+
+func hasUserMessage(msgs []clnkr.Message, want string) bool {
+	for _, msg := range msgs {
+		if msg.Role == "user" && msg.Content == want {
+			return true
+		}
+	}
+	return false
+}
+
+func countCompactMessages(msgs []clnkr.Message) int {
+	count := 0
+	for _, msg := range msgs {
+		if msg.Role == "user" && strings.HasPrefix(msg.Content, "[compact]\n") {
+			count++
+		}
+	}
+	return count
 }

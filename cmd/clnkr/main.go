@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	clnkr "github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/anthropic"
+	"github.com/clnkr-ai/clnkr/compaction"
 	"github.com/clnkr-ai/clnkr/openai"
 	"github.com/clnkr-ai/clnkr/session"
 )
@@ -198,6 +199,16 @@ func waitForClarification(ctx context.Context, prompter approvalPrompter, questi
 		}
 		return reply, nil
 	}
+}
+
+func makeCompactorFactory(baseURL, apiKey, modelName string) compaction.Factory {
+	return compaction.NewFactory(func(instructions string) clnkr.Model {
+		systemPrompt := compaction.LoadCompactionPrompt(instructions)
+		if strings.Contains(baseURL, "anthropic.com") {
+			return anthropic.NewModel(baseURL, apiKey, modelName, systemPrompt)
+		}
+		return openai.NewModel(baseURL, apiKey, modelName, systemPrompt)
+	})
 }
 
 func main() {
@@ -435,21 +446,32 @@ Environment:
 		return
 	}
 
-	runTUI(agent, taskPrompt, *trajectory, *modelFlag, cwd, eventLogFile, showDebug, *fullSend)
+	runTUI(
+		agent,
+		taskPrompt,
+		*trajectory,
+		*modelFlag,
+		cwd,
+		eventLogFile,
+		showDebug,
+		*fullSend,
+		makeCompactorFactory(*baseURL, apiKey, *modelFlag),
+	)
 }
 
-func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, eventLog *os.File, verbose bool, fullSend bool) {
+func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, eventLog *os.File, verbose bool, fullSend bool, compactorFactory compaction.Factory) {
 	s := defaultStyles(true) // TODO: detect actual background
 
 	if taskPrompt != "" {
 		if !fullSend {
 			m := newModel(modelOpts{
-				styles:          s,
-				verbose:         verbose,
-				modelName:       modelName,
-				maxSteps:        agent.MaxSteps,
-				fullSend:        fullSend,
-				exitOnRunFinish: true,
+				styles:           s,
+				verbose:          verbose,
+				modelName:        modelName,
+				maxSteps:         agent.MaxSteps,
+				fullSend:         fullSend,
+				exitOnRunFinish:  true,
+				compactorFactory: compactorFactory,
 			})
 			m.shared.agent = agent
 			m.shared.eventLog = eventLog
@@ -500,14 +522,15 @@ func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, e
 		agent.Notify = makeNotify(eventCh, eventLog)
 
 		m := newModel(modelOpts{
-			eventCh:         eventCh,
-			styles:          s,
-			verbose:         verbose,
-			cancel:          cancel,
-			modelName:       modelName,
-			maxSteps:        agent.MaxSteps,
-			fullSend:        fullSend,
-			exitOnRunFinish: true,
+			eventCh:          eventCh,
+			styles:           s,
+			verbose:          verbose,
+			cancel:           cancel,
+			modelName:        modelName,
+			maxSteps:         agent.MaxSteps,
+			fullSend:         fullSend,
+			exitOnRunFinish:  true,
+			compactorFactory: compactorFactory,
 		})
 		m.shared.agent = agent
 		m.shared.eventLog = eventLog
@@ -555,11 +578,12 @@ func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, e
 
 	// Conversational REPL mode: start with empty input, user types tasks
 	m := newModel(modelOpts{
-		styles:    s,
-		verbose:   verbose,
-		modelName: modelName,
-		maxSteps:  agent.MaxSteps,
-		fullSend:  fullSend,
+		styles:           s,
+		verbose:          verbose,
+		modelName:        modelName,
+		maxSteps:         agent.MaxSteps,
+		fullSend:         fullSend,
+		compactorFactory: compactorFactory,
 	})
 	m.shared.agent = agent
 	m.shared.eventLog = eventLog

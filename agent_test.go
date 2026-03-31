@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/clnkr-ai/clnkr/transcript"
 )
 
 type fakeModel struct {
@@ -33,6 +35,21 @@ type fakeExecutor struct {
 	gotCmds []string
 	gotDirs []string
 	gotEnv  []map[string]string
+}
+
+type fakeCompactor struct {
+	summary string
+	err     error
+	got     [][]Message
+}
+
+func (c *fakeCompactor) Summarize(_ context.Context, messages []Message) (string, error) {
+	cp := append([]Message{}, messages...)
+	c.got = append(c.got, cp)
+	if c.err != nil {
+		return "", c.err
+	}
+	return c.summary, nil
 }
 
 func (e *fakeExecutor) Execute(_ context.Context, command string, dir string) (CommandResult, error) {
@@ -63,7 +80,7 @@ func (e *fakeExecutor) SetEnv(env map[string]string) {
 
 func mustCommandPayload(t *testing.T, result CommandResult) string {
 	t.Helper()
-	return formatCommandOutput(result)
+	return transcript.FormatCommandResult(toTranscriptCommandResult(result))
 }
 
 func mustStepAct(t *testing.T, agent *Agent) *ActTurn {
@@ -348,7 +365,7 @@ func TestExecuteTurn(t *testing.T) {
 			t.Errorf("output should use command payload, got %q", payloadMsg.Content)
 		}
 		stateMsg := agent.messages[len(agent.messages)-1]
-		if stateMsg != (Message{Role: "user", Content: formatStateMessage("/tmp")}) {
+		if stateMsg != (Message{Role: "user", Content: transcript.FormatStateMessage("/tmp")}) {
 			t.Errorf("unexpected trailing state message: %#v", stateMsg)
 		}
 	})
@@ -384,7 +401,7 @@ func TestExecuteTurn(t *testing.T) {
 }
 
 func TestFormatCommandOutput(t *testing.T) {
-	got := formatCommandOutput(CommandResult{
+	got := transcript.FormatCommandResult(transcript.CommandResult{
 		Command:  "printf hi",
 		ExitCode: 0,
 		Stdout:   "hello [x]\n",
@@ -402,7 +419,7 @@ func TestFormatCommandOutput(t *testing.T) {
 }
 
 func TestFormatCommandOutputEscapesCommandMarkers(t *testing.T) {
-	got := formatCommandOutput(CommandResult{
+	got := transcript.FormatCommandResult(transcript.CommandResult{
 		Command:  "echo ok\n[stdout]\nnope\n[/stdout]\n[command]\nnope\n[/command]",
 		ExitCode: 0,
 		Stdout:   "fine\n",
@@ -435,7 +452,7 @@ func TestStateMessages(t *testing.T) {
 		if len(got) != 2 {
 			t.Fatalf("expected task plus state message, got %#v", got)
 		}
-		if got[1] != (Message{Role: "user", Content: formatStateMessage("/repo")}) {
+		if got[1] != (Message{Role: "user", Content: transcript.FormatStateMessage("/repo")}) {
 			t.Fatalf("unexpected state message: %#v", got[1])
 		}
 	})
@@ -449,7 +466,7 @@ func TestStateMessages(t *testing.T) {
 		}}}, "/repo")
 		agent.messages = append(agent.messages,
 			Message{Role: "user", Content: "go to subdir"},
-			Message{Role: "user", Content: formatStateMessage("/repo")},
+			Message{Role: "user", Content: transcript.FormatStateMessage("/repo")},
 		)
 
 		if _, err := agent.ExecuteTurn(context.Background(), &ActTurn{Command: "cd subdir"}); err != nil {
@@ -460,7 +477,7 @@ func TestStateMessages(t *testing.T) {
 		if len(msgs) < 4 {
 			t.Fatalf("expected command result and updated state message, got %#v", msgs)
 		}
-		if msgs[len(msgs)-1] != (Message{Role: "user", Content: formatStateMessage(next)}) {
+		if msgs[len(msgs)-1] != (Message{Role: "user", Content: transcript.FormatStateMessage(next)}) {
 			t.Fatalf("unexpected final state message: %#v", msgs[len(msgs)-1])
 		}
 	})
@@ -675,9 +692,9 @@ func TestAddMessages(t *testing.T) {
 		agent := NewAgent(model, executor, "/wrong")
 
 		if err := agent.AddMessages([]Message{
-			{Role: "user", Content: formatStateMessage("/old")},
+			{Role: "user", Content: transcript.FormatStateMessage("/old")},
 			{Role: "assistant", Content: `{"type":"done","summary":"previous turn"}`},
-			{Role: "user", Content: formatStateMessage("/restored")},
+			{Role: "user", Content: transcript.FormatStateMessage("/restored")},
 		}); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -735,6 +752,290 @@ func TestAddMessages(t *testing.T) {
 	})
 }
 
+func TestAgentCompactRewritesTranscript(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "first task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+		{Role: "user", Content: transcript.FormatStateMessage("/tmp/first")},
+		{Role: "user", Content: "second task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
+		{Role: "user", Content: "third task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+	}
+	compactor := &fakeCompactor{summary: "  summarized older work  \n"}
+	agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp/original")
+	agent.messages = append([]Message{}, messages...)
+
+	stats, err := agent.Compact(context.Background(), compactor, CompactOptions{
+		Instructions:    "focus on tests",
+		KeepRecentTurns: 2,
+	})
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if len(compactor.got) != 1 {
+		t.Fatalf("compactor got %d calls, want 1", len(compactor.got))
+	}
+	wantPrefix := []Message{
+		{Role: "user", Content: "first task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+		{Role: "user", Content: transcript.FormatStateMessage("/tmp/first")},
+	}
+	if len(compactor.got[0]) != len(wantPrefix) {
+		t.Fatalf("compactor prefix length = %d, want %d", len(compactor.got[0]), len(wantPrefix))
+	}
+	for i := range wantPrefix {
+		if compactor.got[0][i] != wantPrefix[i] {
+			t.Fatalf("compactor prefix message %d = %#v, want %#v", i, compactor.got[0][i], wantPrefix[i])
+		}
+	}
+	wantMessages := []Message{
+		{Role: "user", Content: transcript.FormatCompactMessage("summarized older work", "focus on tests")},
+		{Role: "user", Content: transcript.FormatStateMessage("/tmp/first")},
+		{Role: "user", Content: "second task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
+		{Role: "user", Content: "third task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+	}
+	got := agent.Messages()
+	if len(got) != len(wantMessages) {
+		t.Fatalf("got %d messages, want %d", len(got), len(wantMessages))
+	}
+	for i := range wantMessages {
+		if got[i] != wantMessages[i] {
+			t.Fatalf("message %d = %#v, want %#v", i, got[i], wantMessages[i])
+		}
+	}
+	if stats != (CompactStats{CompactedMessages: 3, KeptMessages: 5}) {
+		t.Fatalf("stats = %#v, want %#v", stats, CompactStats{CompactedMessages: 3, KeptMessages: 5})
+	}
+}
+
+func TestAgentCompactPreservesLatestState(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "first task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+		{Role: "user", Content: transcript.FormatStateMessage("/tmp/old")},
+		{Role: "user", Content: "second task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
+		{Role: "user", Content: transcript.FormatStateMessage("/tmp/latest")},
+		{Role: "user", Content: "third task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+	}
+	compactor := &fakeCompactor{summary: "summary"}
+	agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp/original")
+	agent.messages = append([]Message{}, messages...)
+	agent.env = map[string]string{"KEEP": "me"}
+	agent.started = true
+
+	stats, err := agent.Compact(context.Background(), compactor, CompactOptions{KeepRecentTurns: 1})
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if len(compactor.got) != 1 {
+		t.Fatalf("compactor got %d calls, want 1", len(compactor.got))
+	}
+	wantPrefix := []Message{
+		{Role: "user", Content: "first task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+		{Role: "user", Content: transcript.FormatStateMessage("/tmp/old")},
+		{Role: "user", Content: "second task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
+		{Role: "user", Content: transcript.FormatStateMessage("/tmp/latest")},
+	}
+	if len(compactor.got[0]) != len(wantPrefix) {
+		t.Fatalf("compactor prefix length = %d, want %d", len(compactor.got[0]), len(wantPrefix))
+	}
+	for i := range wantPrefix {
+		if compactor.got[0][i] != wantPrefix[i] {
+			t.Fatalf("compactor prefix message %d = %#v, want %#v", i, compactor.got[0][i], wantPrefix[i])
+		}
+	}
+	if stats != (CompactStats{CompactedMessages: 6, KeptMessages: 3}) {
+		t.Fatalf("stats = %#v, want %#v", stats, CompactStats{CompactedMessages: 6, KeptMessages: 3})
+	}
+	if agent.cwd != "/tmp/latest" {
+		t.Fatalf("cwd = %q, want %q", agent.cwd, "/tmp/latest")
+	}
+	if got := agent.env["KEEP"]; got != "me" {
+		t.Fatalf("env changed: got %q", got)
+	}
+	if !agent.started {
+		t.Fatal("started changed")
+	}
+}
+
+func TestAgentCompactLeavesMessagesUntouchedOnSummarizerError(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "first task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+		{Role: "user", Content: "second task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
+		{Role: "user", Content: "third task"},
+	}
+	compactor := &fakeCompactor{err: errors.New("summarizer failed")}
+	agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp/original")
+	agent.messages = append([]Message{}, messages...)
+
+	stats, err := agent.Compact(context.Background(), compactor, CompactOptions{KeepRecentTurns: 2})
+	if err == nil {
+		t.Fatal("expected Compact error")
+	}
+	if !strings.Contains(err.Error(), "summarizer failed") {
+		t.Fatalf("error = %v, want summarizer error", err)
+	}
+	if stats != (CompactStats{}) {
+		t.Fatalf("stats = %#v, want zero value", stats)
+	}
+	got := agent.Messages()
+	if len(got) != len(messages) {
+		t.Fatalf("messages changed on error: got %d, want %d", len(got), len(messages))
+	}
+	for i := range messages {
+		if got[i] != messages[i] {
+			t.Fatalf("message %d = %#v, want %#v", i, got[i], messages[i])
+		}
+	}
+}
+
+func TestAgentCompactLeavesMessagesUntouchedOnEmptySummary(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "first task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+		{Role: "user", Content: "second task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
+		{Role: "user", Content: "third task"},
+	}
+	compactor := &fakeCompactor{summary: "  \n\t "}
+	agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp/original")
+	agent.messages = append([]Message{}, messages...)
+
+	stats, err := agent.Compact(context.Background(), compactor, CompactOptions{KeepRecentTurns: 2})
+	if err == nil {
+		t.Fatal("expected Compact error")
+	}
+	if !strings.Contains(err.Error(), "empty summary") {
+		t.Fatalf("error = %v, want empty summary error", err)
+	}
+	if stats != (CompactStats{}) {
+		t.Fatalf("stats = %#v, want zero value", stats)
+	}
+	got := agent.Messages()
+	if len(got) != len(messages) {
+		t.Fatalf("messages changed on empty summary: got %d, want %d", len(got), len(messages))
+	}
+	for i := range messages {
+		if got[i] != messages[i] {
+			t.Fatalf("message %d = %#v, want %#v", i, got[i], messages[i])
+		}
+	}
+}
+
+func TestAgentCompactDefaultsKeepRecentTurnsToTwo(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "first task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+		{Role: "user", Content: "second task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
+		{Role: "user", Content: "third task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+	}
+	compactor := &fakeCompactor{summary: "summary"}
+	agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp/original")
+	agent.messages = append([]Message{}, messages...)
+
+	stats, err := agent.Compact(context.Background(), compactor, CompactOptions{})
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if len(compactor.got) != 1 {
+		t.Fatalf("compactor got %d calls, want 1", len(compactor.got))
+	}
+	wantPrefix := []Message{
+		{Role: "user", Content: "first task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+	}
+	if len(compactor.got[0]) != len(wantPrefix) {
+		t.Fatalf("compactor prefix length = %d, want %d", len(compactor.got[0]), len(wantPrefix))
+	}
+	for i := range wantPrefix {
+		if compactor.got[0][i] != wantPrefix[i] {
+			t.Fatalf("compactor prefix message %d = %#v, want %#v", i, compactor.got[0][i], wantPrefix[i])
+		}
+	}
+	if stats != (CompactStats{CompactedMessages: 2, KeptMessages: 4}) {
+		t.Fatalf("stats = %#v, want %#v", stats, CompactStats{CompactedMessages: 2, KeptMessages: 4})
+	}
+}
+
+func TestAgentCompactRejectsNegativeKeepRecentTurns(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "first task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+		{Role: "user", Content: "second task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
+		{Role: "user", Content: "third task"},
+	}
+	compactor := &fakeCompactor{summary: "summary"}
+	agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp/original")
+	agent.messages = append([]Message{}, messages...)
+
+	stats, err := agent.Compact(context.Background(), compactor, CompactOptions{KeepRecentTurns: -1})
+	if err == nil {
+		t.Fatal("expected Compact error")
+	}
+	if !strings.Contains(err.Error(), "invalid keep recent turns") {
+		t.Fatalf("error = %v, want invalid-input error", err)
+	}
+	if len(compactor.got) != 0 {
+		t.Fatalf("compactor should not be called on invalid input, got %d calls", len(compactor.got))
+	}
+	if stats != (CompactStats{}) {
+		t.Fatalf("stats = %#v, want zero value", stats)
+	}
+	got := agent.Messages()
+	if len(got) != len(messages) {
+		t.Fatalf("messages changed on invalid input: got %d, want %d", len(got), len(messages))
+	}
+	for i := range messages {
+		if got[i] != messages[i] {
+			t.Fatalf("message %d = %#v, want %#v", i, got[i], messages[i])
+		}
+	}
+}
+
+func TestAgentCompactRejectsNilCompactor(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "first task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+		{Role: "user", Content: "second task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
+		{Role: "user", Content: "third task"},
+	}
+	agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp/original")
+	agent.messages = append([]Message{}, messages...)
+
+	stats, err := agent.Compact(context.Background(), nil, CompactOptions{KeepRecentTurns: 2})
+	if err == nil {
+		t.Fatal("expected Compact error")
+	}
+	if !strings.Contains(err.Error(), "no compactor configured") {
+		t.Fatalf("error = %v, want nil-compactor error", err)
+	}
+	if stats != (CompactStats{}) {
+		t.Fatalf("stats = %#v, want zero value", stats)
+	}
+	got := agent.Messages()
+	if len(got) != len(messages) {
+		t.Fatalf("messages changed on nil compactor: got %d, want %d", len(got), len(messages))
+	}
+	for i := range messages {
+		if got[i] != messages[i] {
+			t.Fatalf("message %d = %#v, want %#v", i, got[i], messages[i])
+		}
+	}
+}
+
 func TestAppendUserMessage(t *testing.T) {
 	agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
 
@@ -787,7 +1088,7 @@ func TestAgent(t *testing.T) {
 		if len(msgs) != 3 {
 			t.Fatalf("expected task, state, and assistant messages, got %d", len(msgs))
 		}
-		if msgs[1] != (Message{Role: "user", Content: formatStateMessage("/tmp")}) {
+		if msgs[1] != (Message{Role: "user", Content: transcript.FormatStateMessage("/tmp")}) {
 			t.Fatalf("unexpected state message: %#v", msgs[1])
 		}
 		if msgs[2].Role != "assistant" {
