@@ -15,6 +15,8 @@ clnkr - a minimal coding agent (TUI)
 
 In default mode, **clnkr** starts the TUI. With **-p**, it runs a single task and exits. When stdout is not a TTY, **clnkr** falls back to plain-text rendering.
 
+At the main idle conversational prompt, **/compact** summarizes older transcript history while keeping recent context intact for the current working thread.
+
 The agent communicates through JSON turns: **act** (execute a command), **clarify** (ask the user), and **done** (signal completion).
 
 By default, **clnkr** asks for approval before each **act** turn. Pass **--full-send** to execute commands immediately without approval.

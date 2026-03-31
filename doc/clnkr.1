@@ -16,6 +16,9 @@ clnkr \- a minimal coding agent (TUI)
 In default mode, \fBclnkr\fP starts the TUI. With \fB-p\fP, it runs a single task and exits. When stdout is not a TTY, \fBclnkr\fP falls back to plain-text rendering.
 
 .PP
+At the main idle conversational prompt, \fB/compact\fP summarizes older transcript history while keeping recent context intact for the current working thread.
+
+.PP
 The agent communicates through JSON turns: \fBact\fP (execute a command), \fBclarify\fP (ask the user), and \fBdone\fP (signal completion).
 
 .PP

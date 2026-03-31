@@ -11,9 +11,11 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"unicode"
 
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/anthropic"
+	"github.com/clnkr-ai/clnkr/compaction"
 	"github.com/clnkr-ai/clnkr/openai"
 	"github.com/clnkr-ai/clnkr/session"
 )
@@ -24,6 +26,7 @@ var version = "dev"
 const exitClarificationNeeded = 2
 
 var errApprovalPending = errors.New("approval pending")
+var errCompactCommandOutsideConversation = errors.New("/compact is only available at the conversational prompt")
 
 type approvalPrompter interface {
 	ActReply(ctx context.Context, command string) (string, error)
@@ -136,6 +139,83 @@ func runTask(ctx context.Context, agent *clnkr.Agent, task string, fullSend bool
 	return runApprovalTask(ctx, agent, task, prompter)
 }
 
+func runSingleTask(ctx context.Context, agent *clnkr.Agent, task string, fullSend bool, prompter approvalPrompter) error {
+	if err := rejectCompactCommand(task); err != nil {
+		return err
+	}
+	return runTask(ctx, agent, task, fullSend, prompter)
+}
+
+func prepareSingleTask(task string, fullSend bool, requireApproval func() error) error {
+	if err := rejectCompactCommand(task); err != nil {
+		return err
+	}
+	if fullSend {
+		return nil
+	}
+	return requireApproval()
+}
+
+func parseCompactCommand(input string) (instructions string, ok bool) {
+	input = strings.TrimSpace(input)
+	const command = "/compact"
+	if input == command {
+		return "", true
+	}
+	if !strings.HasPrefix(input, command) {
+		return "", false
+	}
+	if len(input) == len(command) {
+		return "", true
+	}
+	if !unicode.IsSpace(rune(input[len(command)])) {
+		return "", false
+	}
+	return strings.TrimSpace(input[len(command):]), true
+}
+
+func makeCompactorFactory(baseURL, apiKey, modelName string) compaction.Factory {
+	return compaction.NewFactory(func(instructions string) clnkr.Model {
+		systemPrompt := compaction.LoadCompactionPrompt(instructions)
+		if strings.Contains(baseURL, "anthropic.com") {
+			return anthropic.NewModel(baseURL, apiKey, modelName, systemPrompt)
+		}
+		return openai.NewModel(baseURL, apiKey, modelName, systemPrompt)
+	})
+}
+
+func handleConversationalInput(ctx context.Context, stderr io.Writer, agent *clnkr.Agent, input string, fullSend bool, prompter approvalPrompter, compactorFactory compaction.Factory) error {
+	if stderr == nil {
+		stderr = io.Discard
+	}
+	if instructions, ok := parseCompactCommand(input); ok {
+		if compactorFactory == nil {
+			return fmt.Errorf("compact command: no compactor factory configured")
+		}
+		compactor := compactorFactory(instructions)
+		if compactor == nil {
+			return fmt.Errorf("compact command: no compactor configured")
+		}
+		stats, err := agent.Compact(ctx, compactor, clnkr.CompactOptions{
+			Instructions:    instructions,
+			KeepRecentTurns: 2,
+		})
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(stderr, "[Session compacted: %d messages summarized, %d kept]\n", stats.CompactedMessages, stats.KeptMessages)
+		return nil
+	}
+	return runTask(ctx, agent, input, fullSend, prompter)
+}
+
+func rejectCompactCommand(input string) error {
+	if _, ok := parseCompactCommand(input); ok {
+		return errCompactCommandOutsideConversation
+	}
+	return nil
+}
+
 func runApprovalTask(ctx context.Context, agent *clnkr.Agent, task string, prompter approvalPrompter) error {
 	agent.AppendUserMessage(task)
 	return runApprovalLoop(ctx, agent, prompter)
@@ -200,6 +280,10 @@ func waitForActReply(ctx context.Context, prompter approvalPrompter, command str
 		if strings.TrimSpace(reply) == "" {
 			continue
 		}
+		if err := rejectCompactCommand(reply); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err) //nolint:errcheck
+			continue
+		}
 		return reply, nil
 	}
 }
@@ -211,6 +295,10 @@ func waitForClarification(ctx context.Context, prompter approvalPrompter, questi
 			return "", err
 		}
 		if strings.TrimSpace(reply) == "" {
+			continue
+		}
+		if err := rejectCompactCommand(reply); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err) //nolint:errcheck
 			continue
 		}
 		return reply, nil
@@ -401,6 +489,7 @@ Environment:
 	} else {
 		model = openai.NewModel(*baseURL, apiKey, *modelFlag, systemPrompt)
 	}
+	compactorFactory := makeCompactorFactory(*baseURL, apiKey, *modelFlag)
 
 	executor := &clnkr.CommandExecutor{}
 
@@ -486,15 +575,11 @@ Environment:
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
 		var runErr error
-		if *fullSend {
-			runErr = agent.Run(ctx, taskPrompt)
-		} else {
-			if err := requireApprovalInput(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				os.Exit(1)
-			}
-			runErr = runApprovalTask(ctx, agent, taskPrompt, &stdinPrompter{reader: newLineReader(os.Stdin)})
+		if err := prepareSingleTask(taskPrompt, *fullSend, requireApprovalInput); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
 		}
+		runErr = runSingleTask(ctx, agent, taskPrompt, *fullSend, &stdinPrompter{reader: newLineReader(os.Stdin)})
 		if *trajectory != "" {
 			msgs := agent.Messages()
 			data, err := json.MarshalIndent(msgs, "", "  ")
@@ -552,7 +637,7 @@ Environment:
 			continue
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-		if err := runTask(ctx, agent, input, *fullSend, prompter); err != nil {
+		if err := handleConversationalInput(ctx, os.Stderr, agent, input, *fullSend, prompter, compactorFactory); err != nil {
 			if errors.Is(err, clnkr.ErrClarificationNeeded) || errors.Is(err, errApprovalPending) || errors.Is(err, context.Canceled) {
 				stop()
 				continue

@@ -8,9 +8,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	clnkr "github.com/clnkr-ai/clnkr"
+	"github.com/clnkr-ai/clnkr/compaction"
 )
 
 // Compile-time assertion that model implements tea.Model.
@@ -36,6 +38,10 @@ type stepDoneMsg struct {
 	err    error
 }
 type executeDoneMsg struct{ err error }
+type compactDoneMsg struct {
+	stats clnkr.CompactStats
+	err   error
+}
 
 // tickMsg is sent by the elapsed-time ticker while the agent is running.
 type tickMsg time.Time
@@ -45,11 +51,12 @@ type tickMsg time.Time
 // model fields are stale after that copy. This struct is allocated once and
 // shared via pointer.
 type shared struct {
-	agent    *clnkr.Agent
-	program  *tea.Program
-	eventLog *os.File
-	cwd      string
-	stateMu  sync.RWMutex
+	agent            *clnkr.Agent
+	program          *tea.Program
+	eventLog         *os.File
+	compactorFactory compaction.Factory
+	cwd              string
+	stateMu          sync.RWMutex
 	// awaitingApproval is mirrored here so tests can observe the live program
 	// state across Bubble Tea model copies without poking at internal channels.
 	awaitingApproval bool
@@ -102,14 +109,15 @@ type model struct {
 }
 
 type modelOpts struct {
-	eventCh         chan clnkr.Event
-	styles          *styles
-	verbose         bool
-	cancel          context.CancelFunc
-	modelName       string
-	maxSteps        int
-	fullSend        bool
-	exitOnRunFinish bool
+	eventCh          chan clnkr.Event
+	styles           *styles
+	verbose          bool
+	cancel           context.CancelFunc
+	modelName        string
+	maxSteps         int
+	fullSend         bool
+	exitOnRunFinish  bool
+	compactorFactory compaction.Factory
 }
 
 func newModel(opts modelOpts) model {
@@ -119,7 +127,7 @@ func newModel(opts modelOpts) model {
 		status:          newStatusModel(opts.modelName, opts.maxSteps, &opts.styles.Status),
 		diff:            newDiffModel(opts.styles),
 		styles:          opts.styles,
-		shared:          &shared{},
+		shared:          &shared{compactorFactory: opts.compactorFactory},
 		eventCh:         opts.eventCh,
 		cancel:          opts.cancel,
 		focus:           focusInput,
@@ -197,6 +205,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case executeDoneMsg:
 		return m.handleExecuteDone(msg)
+
+	case compactDoneMsg:
+		return m.handleCompactDone(msg)
 
 	case eventMsg:
 		m.routeEvent(msg.event)
@@ -310,6 +321,16 @@ func executeCmd(agent *clnkr.Agent, ctx context.Context, act *clnkr.ActTurn) tea
 	}
 }
 
+func compactCmd(agent *clnkr.Agent, compactor clnkr.Compactor, ctx context.Context, opts clnkr.CompactOptions) tea.Cmd {
+	return func() tea.Msg {
+		if compactor == nil {
+			return compactDoneMsg{err: fmt.Errorf("compact command: no compactor configured")}
+		}
+		stats, err := agent.Compact(ctx, compactor, opts)
+		return compactDoneMsg{stats: stats, err: err}
+	}
+}
+
 func requestFinalSummaryCmd(agent *clnkr.Agent, ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
 		return agentDoneMsg{err: agent.RequestStepLimitSummary(ctx)}
@@ -383,6 +404,34 @@ func (m model) handleExecuteDone(msg executeDoneMsg) (tea.Model, tea.Cmd) {
 		return m, requestFinalSummaryCmd(m.shared.agent, m.runCtx)
 	}
 	return m, stepCmd(m.shared.agent, m.runCtx)
+}
+
+func (m model) handleCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
+	m.running = false
+	m.status.stopRun()
+	m.pendingAct = nil
+	m.awaitingApproval = false
+	m.shared.setAwaitingApproval(false)
+	m.awaitingClarification = false
+	m.clarificationPrompt = ""
+	m.input.resetPlaceholder()
+	m.executedSteps = 0
+	m.protocolErrors = 0
+
+	switch {
+	case msg.err == nil:
+		m.chat.appendHostNote(fmt.Sprintf(
+			"Session compacted: summarized %d messages, kept %d.",
+			msg.stats.CompactedMessages,
+			msg.stats.KeptMessages,
+		))
+	case errors.Is(msg.err, context.Canceled):
+		m.chat.appendHostNote("Session compaction canceled.")
+	default:
+		m.chat.appendHostNote(fmt.Sprintf("Session compaction failed: %s", msg.err))
+	}
+	m.chat.updateViewport()
+	return m, nil
 }
 
 // routeEvent dispatches a core library event to the appropriate sub-models.
@@ -518,6 +567,9 @@ func (m model) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if text == "" {
 			return m, nil
 		}
+		if instructions, ok := parseCompactCommand(text); ok {
+			return m.startCompact(instructions)
+		}
 		return m.startTask(text)
 
 	case msg.Code == 'j' && msg.Mod == tea.ModCtrl:
@@ -560,6 +612,55 @@ func (m model) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.input.textarea = newTA
 	m.recalcLayout()
 	return m, cmd
+}
+
+func parseCompactCommand(input string) (instructions string, ok bool) {
+	input = strings.TrimSpace(input)
+	const command = "/compact"
+	if input == command {
+		return "", true
+	}
+	if !strings.HasPrefix(input, command) {
+		return "", false
+	}
+	if len(input) == len(command) {
+		return "", true
+	}
+	if !unicode.IsSpace(rune(input[len(command)])) {
+		return "", false
+	}
+	return strings.TrimSpace(input[len(command):]), true
+}
+
+func (m model) startCompact(instructions string) (tea.Model, tea.Cmd) {
+	if m.shared.compactorFactory == nil {
+		m.chat.appendHostNote("Session compaction unavailable: no compactor factory configured.")
+		m.chat.updateViewport()
+		return m, nil
+	}
+
+	compactor := m.shared.compactorFactory(instructions)
+	m.running = true
+	m.status.startRun()
+	m.executedSteps = 0
+	m.protocolErrors = 0
+	m.pendingAct = nil
+	m.awaitingApproval = false
+	m.shared.setAwaitingApproval(false)
+	m.awaitingClarification = false
+	m.clarificationPrompt = ""
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+	m.runCtx = ctx
+
+	return m, tea.Batch(
+		compactCmd(m.shared.agent, compactor, ctx, clnkr.CompactOptions{
+			Instructions:    instructions,
+			KeepRecentTurns: 2,
+		}),
+		tickCmd(),
+	)
 }
 
 func (m model) startTask(task string) (tea.Model, tea.Cmd) {

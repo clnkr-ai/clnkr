@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -49,6 +51,22 @@ func (e *fakeExecutor) Execute(_ context.Context, command, _ string) (clnkr.Comm
 }
 
 func (e *fakeExecutor) SetEnv(map[string]string) {}
+
+type fakeCompactor struct {
+	summary  string
+	err      error
+	calls    int
+	messages []clnkr.Message
+}
+
+func (c *fakeCompactor) Summarize(_ context.Context, messages []clnkr.Message) (string, error) {
+	c.calls++
+	c.messages = append([]clnkr.Message{}, messages...)
+	if c.err != nil {
+		return "", c.err
+	}
+	return c.summary, nil
+}
 
 type clarifyReply struct {
 	text string
@@ -96,6 +114,231 @@ func TestIsApprovalReply(t *testing.T) {
 		if got := isApprovalReply(tt.in); got != tt.want {
 			t.Fatalf("isApprovalReply(%q) = %v, want %v", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestParseCompactCommand(t *testing.T) {
+	tests := []struct {
+		name             string
+		input            string
+		wantInstructions string
+		wantOK           bool
+	}{
+		{name: "bare command", input: "/compact", wantOK: true},
+		{name: "trimmed command", input: "  /compact  ", wantOK: true},
+		{name: "with instructions", input: "/compact focus on tests", wantInstructions: "focus on tests", wantOK: true},
+		{name: "with tab separator", input: "/compact\tfocus on tests", wantInstructions: "focus on tests", wantOK: true},
+		{name: "not compact", input: "compact", wantOK: false},
+		{name: "prefixed word", input: "/compaction", wantOK: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotInstructions, gotOK := parseCompactCommand(tt.input)
+			if gotInstructions != tt.wantInstructions || gotOK != tt.wantOK {
+				t.Fatalf("parseCompactCommand(%q) = (%q, %v), want (%q, %v)", tt.input, gotInstructions, gotOK, tt.wantInstructions, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestCompactCommandDoesNotAppendLiteralUserMessage(t *testing.T) {
+	model := &fakeModel{}
+	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+
+	compactor := &fakeCompactor{summary: "Older work summarized."}
+	var gotInstructions string
+	factory := func(instructions string) clnkr.Compactor {
+		gotInstructions = instructions
+		return compactor
+	}
+
+	var stderr bytes.Buffer
+	if err := handleConversationalInput(context.Background(), &stderr, agent, "/compact focus on failing tests", true, nil, factory); err != nil {
+		t.Fatalf("handleConversationalInput: %v", err)
+	}
+
+	if compactor.calls != 1 {
+		t.Fatalf("expected compactor to be called once, got %d", compactor.calls)
+	}
+	if gotInstructions != "focus on failing tests" {
+		t.Fatalf("factory instructions = %q, want %q", gotInstructions, "focus on failing tests")
+	}
+	if len(compactor.messages) != 2 {
+		t.Fatalf("compactor saw %d messages, want 2", len(compactor.messages))
+	}
+
+	msgs := agent.Messages()
+	for _, msg := range msgs {
+		if msg.Role == "user" && msg.Content == "/compact focus on failing tests" {
+			t.Fatalf("literal compact command was appended: %#v", msgs)
+		}
+	}
+	if len(msgs) == 0 || !strings.HasPrefix(msgs[0].Content, "[compact]\n") {
+		t.Fatalf("expected compact block at start, got %#v", msgs)
+	}
+	if !strings.Contains(msgs[0].Content, `"instructions":"focus on failing tests"`) {
+		t.Fatalf("compact block missing instructions: %q", msgs[0].Content)
+	}
+	if got := stderr.String(); !strings.Contains(got, "[Session compacted: 2 messages summarized, 4 kept]") {
+		t.Fatalf("stderr = %q, want compact summary", got)
+	}
+}
+
+func TestCompactCommandFailureLeavesMessagesUnchanged(t *testing.T) {
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+	before := agent.Messages()
+
+	compactor := &fakeCompactor{err: errors.New("boom")}
+	factory := func(string) clnkr.Compactor { return compactor }
+
+	var stderr bytes.Buffer
+	err := handleConversationalInput(context.Background(), &stderr, agent, "/compact", true, nil, factory)
+	if err == nil || !strings.Contains(err.Error(), "compact transcript: summarize prefix: boom") {
+		t.Fatalf("got %v, want summarize prefix error", err)
+	}
+	if !reflect.DeepEqual(agent.Messages(), before) {
+		t.Fatalf("messages changed on compaction failure: got %#v want %#v", agent.Messages(), before)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty on failure", stderr.String())
+	}
+}
+
+func TestCompactCommandKeepsSessionUsable(t *testing.T) {
+	model := &fakeModel{responses: []clnkr.Response{
+		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
+	}}
+	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+
+	compactor := &fakeCompactor{summary: "Older work summarized."}
+	factory := func(string) clnkr.Compactor { return compactor }
+
+	var stderr bytes.Buffer
+	if err := handleConversationalInput(context.Background(), &stderr, agent, "/compact", true, nil, factory); err != nil {
+		t.Fatalf("compact command: %v", err)
+	}
+	if err := handleConversationalInput(context.Background(), &stderr, agent, "next task", true, nil, factory); err != nil {
+		t.Fatalf("follow-up task: %v", err)
+	}
+
+	msgs := agent.Messages()
+	if len(msgs) < 3 {
+		t.Fatalf("expected compacted transcript plus follow-up, got %#v", msgs)
+	}
+	if !strings.HasPrefix(msgs[0].Content, "[compact]\n") {
+		t.Fatalf("expected compact block to remain at start, got %#v", msgs)
+	}
+	if msgs[len(msgs)-1].Content != `{"type":"done","summary":"done"}` {
+		t.Fatalf("expected follow-up completion at end, got %#v", msgs)
+	}
+	if !hasUserMessage(msgs, "next task") {
+		t.Fatalf("follow-up task not appended after compaction: %#v", msgs)
+	}
+	if model.calls != 1 {
+		t.Fatalf("model calls = %d, want 1", model.calls)
+	}
+}
+
+func TestRunSingleTaskRejectsCompactCommand(t *testing.T) {
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+
+	err := runSingleTask(context.Background(), agent, "/compact focus on tests", true, nil)
+	if err == nil || !strings.Contains(err.Error(), "/compact is only available at the conversational prompt") {
+		t.Fatalf("got %v, want conversational prompt error", err)
+	}
+	if msgs := agent.Messages(); len(msgs) != 0 {
+		t.Fatalf("single-task compact should not touch transcript: %#v", msgs)
+	}
+}
+
+func TestRunSingleTaskRejectsCompactCommandBeforeApprovalCheck(t *testing.T) {
+	called := false
+	err := prepareSingleTask("/compact focus on tests", false, func() error {
+		called = true
+		return errors.New("approval mode requires interactive stdin")
+	})
+	if err == nil || !strings.Contains(err.Error(), "/compact is only available at the conversational prompt") {
+		t.Fatalf("got %v, want conversational prompt error", err)
+	}
+	if called {
+		t.Fatal("approval preflight should not run for /compact")
+	}
+}
+
+func TestRunApprovalTaskRejectsCompactApprovalReply(t *testing.T) {
+	model := &fakeModel{responses: []clnkr.Response{
+		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","command":"echo hi"}`}},
+		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
+	}}
+	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
+	agent := clnkr.NewAgent(model, executor, "/tmp")
+	prompter := &scriptPrompter{
+		actReplies: []clarifyReply{
+			{text: "/compact focus on tests"},
+			{text: "y"},
+		},
+	}
+
+	stderr := captureStderr(t, func() {
+		err := runApprovalTask(context.Background(), agent, "say hi", prompter)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	if executor.calls != 1 {
+		t.Fatalf("expected command execution after valid retry, got %d", executor.calls)
+	}
+	if hasUserMessage(agent.Messages(), "/compact focus on tests") {
+		t.Fatalf("compact reply leaked into transcript: %#v", agent.Messages())
+	}
+	if prompter.actReplyCalls != 2 {
+		t.Fatalf("expected reprompt after rejected compact reply, got %d prompts", prompter.actReplyCalls)
+	}
+	if !strings.Contains(stderr, "/compact is only available at the conversational prompt") {
+		t.Fatalf("stderr = %q, want compact rejection", stderr)
+	}
+}
+
+func TestRunApprovalTaskRejectsCompactClarificationReply(t *testing.T) {
+	model := &fakeModel{responses: []clnkr.Response{
+		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"clarify","question":"Which repo?"}`}},
+		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
+	}}
+	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
+	prompter := &scriptPrompter{
+		clarifications: []clarifyReply{
+			{text: "/compact"},
+			{text: "/tmp/repo"},
+		},
+	}
+
+	stderr := captureStderr(t, func() {
+		err := runApprovalTask(context.Background(), agent, "inspect", prompter)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	if hasUserMessage(agent.Messages(), "/compact") {
+		t.Fatalf("compact clarification leaked into transcript: %#v", agent.Messages())
+	}
+	if !hasUserMessage(agent.Messages(), "/tmp/repo") {
+		t.Fatalf("expected valid clarification reply in transcript: %#v", agent.Messages())
+	}
+	if prompter.clarifyCalls != 2 {
+		t.Fatalf("expected reprompt after rejected compact clarification, got %d prompts", prompter.clarifyCalls)
+	}
+	if !strings.Contains(stderr, "/compact is only available at the conversational prompt") {
+		t.Fatalf("stderr = %q, want compact rejection", stderr)
 	}
 }
 
@@ -271,4 +514,24 @@ func captureStderr(t *testing.T, fn func()) string {
 		t.Fatalf("close read pipe: %v", err)
 	}
 	return string(data)
+}
+
+func compactableMessages() []clnkr.Message {
+	return []clnkr.Message{
+		{Role: "user", Content: "first task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done"}`},
+		{Role: "user", Content: "second task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done again"}`},
+		{Role: "user", Content: "third task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+	}
+}
+
+func hasUserMessage(msgs []clnkr.Message, want string) bool {
+	for _, msg := range msgs {
+		if msg.Role == "user" && msg.Content == want {
+			return true
+		}
+	}
+	return false
 }
