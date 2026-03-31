@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.0 (2026-03-31)
+
+- Add manual transcript compaction
+- Update CHANGELOG.md for 1.1.0
+
 ## 1.1.0 (2026-03-31)
 
 - Render protocol turns in TUI instead of raw JSON
