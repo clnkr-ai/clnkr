@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 (2026-03-31)
+
+- Render protocol turns in TUI instead of raw JSON
+- Ignore local worktrees directory
+- Update CHANGELOG.md for 1.0.3
+- Render resumed history in TUI
+- Update CHANGELOG.md for 1.0.2
+
 ## 1.0.3 (2026-03-31)
 
 - Render resumed history in TUI
