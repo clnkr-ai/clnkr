@@ -18,13 +18,14 @@ jobs:
   debian-amd64:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache-dependency-path: cmd/clnkr/go.sum
 
       - name: Install Debian tooling
         env:
@@ -88,13 +89,14 @@ jobs:
   debian-arm64:
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache-dependency-path: cmd/clnkr/go.sum
 
       - name: Install Debian tooling
         env:
@@ -150,11 +152,12 @@ jobs:
   binaries:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache-dependency-path: cmd/clnkr/go.sum
 
       - name: Test core
         run: go test -race ./...
@@ -188,7 +191,7 @@ jobs:
     needs: [debian-amd64, debian-arm64, binaries]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
