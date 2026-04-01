@@ -822,5 +822,7 @@ func (m model) View() tea.View {
 	statusView := m.status.view(m.width)
 	inputView := m.input.view()
 
-	return tea.NewView(topPane + "\n" + statusView + "\n" + inputView)
+	view := tea.NewView(topPane + "\n" + statusView + "\n" + inputView)
+	view.ReportFocus = true
+	return view
 }
