@@ -180,6 +180,12 @@ func (s *ptySession) snapshot() string {
 	return normalizePTYOutput(raw)
 }
 
+func (s *ptySession) rawSnapshot() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.raw.String()
+}
+
 func (s *ptySession) exitStatus() (error, bool) {
 	select {
 	case <-s.done:
@@ -194,6 +200,22 @@ func (s *ptySession) exitStatus() (error, bool) {
 func (s *ptySession) failWithSnapshot(format string, args ...any) {
 	s.t.Helper()
 	s.t.Fatalf(format+"\n\nscreen snapshot:\n%s", append(args, s.snapshot())...)
+}
+
+func (s *ptySession) WaitForRaw(substr string) {
+	s.t.Helper()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(s.rawSnapshot(), substr) {
+			return
+		}
+		if err, exited := s.exitStatus(); exited {
+			s.failWithSnapshot("process exited before raw output %q: %v", substr, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	s.failWithSnapshot("timed out waiting for raw output %q", substr)
 }
 
 var (
