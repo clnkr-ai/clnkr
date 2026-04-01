@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.1 (2026-04-01)
+
+- Bound compaction summarize prompt size
+- gitignore update
+- Document local clnkr skills workflow
+- Remove CommandExecutor timeouts
+- Update CHANGELOG.md for 1.3.0
+
 ## 1.3.0 (2026-04-01)
 
 - Add /delegate workflow to clnkr TUI
