@@ -21,8 +21,15 @@ type modelCompactor struct {
 	model clnkr.Model
 }
 
+const summarizeRequest = "Summarize the transcript prefix above according to the system instructions."
+
 func (m modelCompactor) Summarize(ctx context.Context, messages []clnkr.Message) (string, error) {
-	resp, err := m.model.Query(ctx, messages)
+	queryMessages := append(append([]clnkr.Message{}, messages...), clnkr.Message{
+		Role:    "user",
+		Content: summarizeRequest,
+	})
+
+	resp, err := m.model.Query(ctx, queryMessages)
 	if err != nil {
 		return "", err
 	}

@@ -79,8 +79,54 @@ func TestModelCompactorTrimsSummaryText(t *testing.T) {
 	if len(model.got) != 1 {
 		t.Fatalf("model got %d calls, want 1", len(model.got))
 	}
-	if len(model.got[0]) != len(messages) || model.got[0][0] != messages[0] {
-		t.Fatalf("model got messages %#v, want %#v", model.got[0], messages)
+	if len(model.got[0]) != len(messages)+1 {
+		t.Fatalf("model got %d messages, want %d", len(model.got[0]), len(messages)+1)
+	}
+	for i := range messages {
+		if model.got[0][i] != messages[i] {
+			t.Fatalf("model got message %d = %#v, want %#v", i, model.got[0][i], messages[i])
+		}
+	}
+	last := model.got[0][len(model.got[0])-1]
+	if last.Role != "user" {
+		t.Fatalf("last query role = %q, want user", last.Role)
+	}
+	if last.Content == "" {
+		t.Fatal("last query content should contain a summarize request")
+	}
+}
+
+func TestModelCompactorAppendsSummarizeRequestAfterAssistantTail(t *testing.T) {
+	model := &stubModel{response: clnkr.Response{
+		Message: clnkr.Message{Role: "assistant", Content: "summary"},
+	}}
+	compactor := modelCompactor{model: model}
+	messages := []clnkr.Message{
+		{Role: "user", Content: "first task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+	}
+
+	if _, err := compactor.Summarize(context.Background(), messages); err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if len(model.got) != 1 {
+		t.Fatalf("model got %d calls, want 1", len(model.got))
+	}
+	got := model.got[0]
+	if len(got) != len(messages)+1 {
+		t.Fatalf("model got %d messages, want %d", len(got), len(messages)+1)
+	}
+	for i := range messages {
+		if got[i] != messages[i] {
+			t.Fatalf("model got message %d = %#v, want %#v", i, got[i], messages[i])
+		}
+	}
+	last := got[len(got)-1]
+	if last.Role != "user" {
+		t.Fatalf("last query role = %q, want user", last.Role)
+	}
+	if last.Content == "" {
+		t.Fatal("last query content should contain a summarize request")
 	}
 }
 
