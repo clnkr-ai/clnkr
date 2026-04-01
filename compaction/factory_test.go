@@ -3,6 +3,7 @@ package compaction
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	clnkr "github.com/clnkr-ai/clnkr"
@@ -127,6 +128,41 @@ func TestModelCompactorAppendsSummarizeRequestAfterAssistantTail(t *testing.T) {
 	}
 	if last.Content == "" {
 		t.Fatal("last query content should contain a summarize request")
+	}
+}
+
+func TestModelCompactorTruncatesOversizedPrefixBeforeQuery(t *testing.T) {
+	model := &stubModel{response: clnkr.Response{
+		Message: clnkr.Message{Role: "assistant", Content: "summary"},
+	}}
+	compactor := modelCompactor{model: model}
+	oversized := strings.Repeat("x", summarizeInputCharBudget+1)
+	messages := []clnkr.Message{
+		{Role: "user", Content: "small opener"},
+		{Role: "assistant", Content: oversized},
+	}
+
+	if _, err := compactor.Summarize(context.Background(), messages); err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if len(model.got) != 1 {
+		t.Fatalf("model got %d calls, want 1", len(model.got))
+	}
+	got := model.got[0]
+	if len(got) != 2 {
+		t.Fatalf("model got %d messages, want 2", len(got))
+	}
+	if got[0].Role != "user" {
+		t.Fatalf("first query role = %q, want user", got[0].Role)
+	}
+	if !strings.HasPrefix(got[0].Content, "[compact_context_truncated]\n") {
+		t.Fatalf("first query content = %q, want truncation block prefix", got[0].Content)
+	}
+	if len(got[0].Content) > summarizeInputCharBudget {
+		t.Fatalf("truncation block length = %d, want <= %d", len(got[0].Content), summarizeInputCharBudget)
+	}
+	if got[1].Role != "user" || got[1].Content != summarizeRequest {
+		t.Fatalf("last query = %#v, want trailing summarize request", got[1])
 	}
 }
 
