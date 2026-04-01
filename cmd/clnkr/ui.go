@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	clnkr "github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/compaction"
+	"github.com/clnkr-ai/clnkr/delegate"
 )
 
 // Compile-time assertion that model implements tea.Model.
@@ -42,6 +43,11 @@ type compactDoneMsg struct {
 	stats clnkr.CompactStats
 	err   error
 }
+type delegateDoneMsg struct {
+	task   string
+	result delegate.Result
+	err    error
+}
 
 // tickMsg is sent by the elapsed-time ticker while the agent is running.
 type tickMsg time.Time
@@ -50,11 +56,16 @@ type tickMsg time.Time
 // Bubbletea copies the model on NewProgram, so pointers stored directly in
 // model fields are stale after that copy. This struct is allocated once and
 // shared via pointer.
+type delegateRunner interface {
+	Run(context.Context, delegate.Request) (delegate.Result, error)
+}
+
 type shared struct {
 	agent            *clnkr.Agent
 	program          *tea.Program
 	eventLog         *os.File
 	compactorFactory compaction.Factory
+	delegateRunner   delegateRunner
 	cwd              string
 	stateMu          sync.RWMutex
 	// awaitingApproval is mirrored here so tests can observe the live program
@@ -118,6 +129,7 @@ type modelOpts struct {
 	fullSend         bool
 	exitOnRunFinish  bool
 	compactorFactory compaction.Factory
+	delegateRunner   delegateRunner
 }
 
 func newModel(opts modelOpts) model {
@@ -127,7 +139,7 @@ func newModel(opts modelOpts) model {
 		status:          newStatusModel(opts.modelName, opts.maxSteps, &opts.styles.Status),
 		diff:            newDiffModel(opts.styles),
 		styles:          opts.styles,
-		shared:          &shared{compactorFactory: opts.compactorFactory},
+		shared:          &shared{compactorFactory: opts.compactorFactory, delegateRunner: opts.delegateRunner},
 		eventCh:         opts.eventCh,
 		cancel:          opts.cancel,
 		focus:           focusInput,
@@ -208,6 +220,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case compactDoneMsg:
 		return m.handleCompactDone(msg)
+
+	case delegateDoneMsg:
+		return m.handleDelegateDone(msg)
 
 	case eventMsg:
 		m.routeEvent(msg.event)
@@ -331,6 +346,13 @@ func compactCmd(agent *clnkr.Agent, compactor clnkr.Compactor, ctx context.Conte
 	}
 }
 
+func delegateCmd(runner delegateRunner, ctx context.Context, req delegate.Request) tea.Cmd {
+	return func() tea.Msg {
+		result, err := runner.Run(ctx, req)
+		return delegateDoneMsg{task: req.Task, result: result, err: err}
+	}
+}
+
 func requestFinalSummaryCmd(agent *clnkr.Agent, ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
 		return agentDoneMsg{err: agent.RequestStepLimitSummary(ctx)}
@@ -429,6 +451,31 @@ func (m model) handleCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 		m.chat.appendHostNote("Session compaction canceled.")
 	default:
 		m.chat.appendHostNote(fmt.Sprintf("Session compaction failed: %s", msg.err))
+	}
+	m.chat.updateViewport()
+	return m, nil
+}
+
+func (m model) handleDelegateDone(msg delegateDoneMsg) (tea.Model, tea.Cmd) {
+	m.running = false
+	m.status.stopRun()
+	m.pendingAct = nil
+	m.awaitingApproval = false
+	m.shared.setAwaitingApproval(false)
+	m.awaitingClarification = false
+	m.clarificationPrompt = ""
+	m.input.resetPlaceholder()
+	m.executedSteps = 0
+	m.protocolErrors = 0
+
+	switch {
+	case msg.err == nil:
+		m.shared.agent.AppendUserMessage(delegate.FormatArtifact(msg.task, msg.result.Summary))
+		m.chat.appendHostNote(fmt.Sprintf("Delegation complete: %s", msg.result.Summary))
+	case errors.Is(msg.err, context.Canceled):
+		m.chat.appendHostNote("Delegation canceled.")
+	default:
+		m.chat.appendHostNote(fmt.Sprintf("Delegation failed: %s", msg.err))
 	}
 	m.chat.updateViewport()
 	return m, nil
@@ -570,6 +617,9 @@ func (m model) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if instructions, ok := parseCompactCommand(text); ok {
 			return m.startCompact(instructions)
 		}
+		if task, ok := parseDelegateCommand(text); ok {
+			return m.startDelegate(task)
+		}
 		return m.startTask(text)
 
 	case msg.Code == 'j' && msg.Mod == tea.ModCtrl:
@@ -632,6 +682,21 @@ func parseCompactCommand(input string) (instructions string, ok bool) {
 	return strings.TrimSpace(input[len(command):]), true
 }
 
+func parseDelegateCommand(input string) (task string, ok bool) {
+	input = strings.TrimSpace(input)
+	const command = "/delegate"
+	if !strings.HasPrefix(input, command) {
+		return "", false
+	}
+	if len(input) == len(command) {
+		return "", true
+	}
+	if !unicode.IsSpace(rune(input[len(command)])) {
+		return "", false
+	}
+	return strings.TrimSpace(input[len(command):]), true
+}
+
 func (m model) startCompact(instructions string) (tea.Model, tea.Cmd) {
 	if m.shared.compactorFactory == nil {
 		m.chat.appendHostNote("Session compaction unavailable: no compactor factory configured.")
@@ -658,6 +723,38 @@ func (m model) startCompact(instructions string) (tea.Model, tea.Cmd) {
 		compactCmd(m.shared.agent, compactor, ctx, clnkr.CompactOptions{
 			Instructions:    instructions,
 			KeepRecentTurns: 2,
+		}),
+		tickCmd(),
+	)
+}
+
+func (m model) startDelegate(task string) (tea.Model, tea.Cmd) {
+	if strings.TrimSpace(task) == "" {
+		m.chat.appendHostNote("Delegation unavailable: empty task.")
+		m.chat.updateViewport()
+		return m, nil
+	}
+
+	m.running = true
+	m.status.startRun()
+	m.executedSteps = 0
+	m.protocolErrors = 0
+	m.pendingAct = nil
+	m.awaitingApproval = false
+	m.shared.setAwaitingApproval(false)
+	m.awaitingClarification = false
+	m.clarificationPrompt = ""
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+	m.runCtx = ctx
+
+	return m, tea.Batch(
+		delegateCmd(m.shared.delegateRunner, ctx, delegate.Request{
+			Task:       task,
+			WorkingDir: m.shared.cwd,
+			Parent:     m.shared.agent.Messages(),
+			MaxSteps:   m.shared.agent.MaxSteps,
 		}),
 		tickCmd(),
 	)

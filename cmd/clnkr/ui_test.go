@@ -13,6 +13,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	clnkr "github.com/clnkr-ai/clnkr"
+	"github.com/clnkr-ai/clnkr/delegate"
 )
 
 func setupModel() model {
@@ -1069,4 +1070,237 @@ func countCompactMessages(msgs []clnkr.Message) int {
 		}
 	}
 	return count
+}
+
+type stubDelegateRunner struct {
+	result  delegate.Result
+	err     error
+	got     []delegate.Request
+	start   chan struct{}
+	release chan struct{}
+}
+
+func (r *stubDelegateRunner) Run(_ context.Context, req delegate.Request) (delegate.Result, error) {
+	r.got = append(r.got, req)
+	if r.start != nil {
+		close(r.start)
+	}
+	if r.release != nil {
+		<-r.release
+	}
+	if r.err != nil {
+		return delegate.Result{}, r.err
+	}
+	return r.result, nil
+}
+
+func waitForDelegateDone(t *testing.T, msgCh <-chan tea.Msg) delegateDoneMsg {
+	t.Helper()
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case msg, ok := <-msgCh:
+			if !ok {
+				t.Fatal("command channel closed before delegateDoneMsg")
+			}
+			done, ok := msg.(delegateDoneMsg)
+			if ok {
+				return done
+			}
+		case <-timeout:
+			t.Fatal("timed out waiting for delegateDoneMsg")
+		}
+	}
+}
+
+func TestDelegateCommandInterceptsIdleInput(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("seed messages: %v", err)
+	}
+	m.shared.agent = agent
+
+	runner := &stubDelegateRunner{result: delegate.Result{Summary: "Found test patterns."}}
+	m.shared.delegateRunner = runner
+	m.input.textarea.SetValue("/delegate inspect compaction tests")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("delegate command should start async work")
+	}
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if !um.running {
+		t.Fatal("delegate command should mark model as running")
+	}
+	if hasUserMessage(agent.Messages(), "/delegate inspect compaction tests") {
+		t.Fatalf("literal delegate command leaked into transcript: %#v", agent.Messages())
+	}
+
+	done := waitForDelegateDone(t, runReturnedCmdAsync(t, cmd))
+	if done.err != nil {
+		t.Fatalf("delegateDoneMsg.err = %v", done.err)
+	}
+	if len(runner.got) != 1 || runner.got[0].Task != "inspect compaction tests" {
+		t.Fatalf("runner requests = %#v", runner.got)
+	}
+}
+
+func TestDelegateCommandAppendsHostFeedbackAndArtifact(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("seed messages: %v", err)
+	}
+	m.shared.agent = agent
+	m.shared.delegateRunner = &stubDelegateRunner{result: delegate.Result{Summary: "Found test patterns."}}
+	m.input.textarea.SetValue("/delegate inspect compaction tests")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("delegate command should start async work")
+	}
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+
+	doneMsg := waitForDelegateDone(t, runReturnedCmdAsync(t, cmd))
+	updated, followCmd := um.Update(doneMsg)
+	if followCmd != nil {
+		t.Fatal("delegate completion should not schedule another command")
+	}
+	um, ok = updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if um.running {
+		t.Fatal("delegate completion should clear running state")
+	}
+	if !strings.Contains(um.chat.content.String(), "Delegation complete: Found test patterns.") {
+		t.Fatalf("chat = %q, want delegate host feedback", um.chat.content.String())
+	}
+	msgs := agent.Messages()
+	if len(msgs) == 0 || !strings.HasPrefix(msgs[len(msgs)-1].Content, "[delegate]\n") {
+		t.Fatalf("expected delegate artifact at end, got %#v", msgs)
+	}
+	if hasUserMessage(msgs, "/delegate inspect compaction tests") {
+		t.Fatalf("literal delegate command leaked into transcript: %#v", msgs)
+	}
+}
+
+func TestDelegateCommandRunsThroughAsyncCmd(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("seed messages: %v", err)
+	}
+	m.shared.agent = agent
+	runner := &stubDelegateRunner{
+		result:  delegate.Result{Summary: "Found test patterns."},
+		start:   make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	m.shared.delegateRunner = runner
+	m.input.textarea.SetValue("/delegate inspect compaction tests")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("delegate command should start async work")
+	}
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if !um.running {
+		t.Fatal("delegate command should leave model busy until completion")
+	}
+
+	msgCh := runReturnedCmdAsync(t, cmd)
+	<-runner.start
+	if len(runner.got) != 1 {
+		t.Fatalf("runner calls = %d, want 1", len(runner.got))
+	}
+
+	um.input.textarea.SetValue("follow-up task")
+	updated, blockedCmd := um.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if blockedCmd != nil {
+		t.Fatal("busy model should reject another submission while delegation is running")
+	}
+	um, ok = updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if got := um.input.textarea.Value(); got != "follow-up task" {
+		t.Fatalf("busy submission should preserve draft, got %q", got)
+	}
+
+	close(runner.release)
+	doneMsg := waitForDelegateDone(t, msgCh)
+	if doneMsg.err != nil {
+		t.Fatalf("delegateDoneMsg.err = %v", doneMsg.err)
+	}
+}
+
+func TestDelegateCommandNotInterceptedDuringApproval(t *testing.T) {
+	m := setupModel()
+	m.running = true
+	m.awaitingApproval = true
+	m.pendingAct = &clnkr.ActTurn{Command: "echo hi"}
+	m.chat.setProposedCommand("echo hi")
+	m.runCtx = context.Background()
+
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	m.shared.agent = agent
+	m.shared.delegateRunner = &stubDelegateRunner{result: delegate.Result{Summary: "should not run"}}
+	m.input.textarea.SetValue("/delegate inspect compaction tests")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("approval guidance should continue through the normal async path")
+	}
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if um.awaitingApproval {
+		t.Fatal("approval submission should clear awaitingApproval")
+	}
+	if !hasUserMessage(agent.Messages(), "/delegate inspect compaction tests") {
+		t.Fatalf("approval should append the literal reply, got %#v", agent.Messages())
+	}
+}
+
+func TestDelegateCommandNotInterceptedDuringClarification(t *testing.T) {
+	m := setupModel()
+	m.running = true
+	m.awaitingClarification = true
+	m.clarificationPrompt = "Need more detail"
+	m.runCtx = context.Background()
+
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	m.shared.agent = agent
+	m.shared.delegateRunner = &stubDelegateRunner{result: delegate.Result{Summary: "should not run"}}
+	m.input.textarea.SetValue("/delegate inspect compaction tests")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("clarification reply should continue through the normal async path")
+	}
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if um.awaitingClarification {
+		t.Fatal("clarification submission should clear awaitingClarification")
+	}
+	if !hasUserMessage(agent.Messages(), "/delegate inspect compaction tests") {
+		t.Fatalf("clarification should append the literal reply, got %#v", agent.Messages())
+	}
 }

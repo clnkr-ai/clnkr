@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
 	"strings"
@@ -171,6 +172,10 @@ func (c *chatModel) hydrateHistory(messages []clnkr.Message) {
 			if isStateTranscript(msg.Content) || isCompactTranscript(msg.Content) {
 				continue
 			}
+			if summary, ok := parseDelegateTranscript(msg.Content); ok {
+				c.appendHostNote(fmt.Sprintf("Delegation complete: %s", summary))
+				continue
+			}
 			if transcript, ok := parseCommandTranscript(msg.Content); ok {
 				style := c.styles.Chat.CommandSuccess
 				icon := iconSuccess
@@ -334,4 +339,23 @@ func isStateTranscript(content string) bool {
 
 func isCompactTranscript(content string) bool {
 	return transcript.IsCompactMessage(transcript.Message{Role: "user", Content: content})
+}
+
+func parseDelegateTranscript(content string) (string, bool) {
+	body, ok := extractTaggedSection(content, "delegate")
+	if !ok {
+		return "", false
+	}
+	var payload struct {
+		Source  string `json:"source"`
+		Kind    string `json:"kind"`
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		return "", false
+	}
+	if payload.Source != "clnkr" || payload.Kind != "delegate" || strings.TrimSpace(payload.Summary) == "" {
+		return "", false
+	}
+	return strings.TrimSpace(payload.Summary), true
 }
