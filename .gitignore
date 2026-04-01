@@ -33,6 +33,7 @@ Thumbs.db
 # Evaluations
 /evaluations/trials/*
 /evaluations/reports/*
+eval/artifacts*
 
 # Local worktrees
 /.worktrees/
