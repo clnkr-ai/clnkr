@@ -189,5 +189,9 @@ make help       # Show all targets
 make build      # Build both binaries
 make check      # Full quality suite
 make test       # Tests only
+make evaluations      # Run the mock-provider evaluation suite
+make evaluations-live # Run the live-provider evaluation suite
 make docs       # Build documentation site
 ```
+
+Evaluation suite layout, bundle contents, and maintenance workflows are documented in `evaluations/README.md`.

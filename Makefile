@@ -6,10 +6,10 @@ HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hug
 .DEFAULT_GOAL := build
 .PHONY: \
 	build clean install run \
-	check test eval \
+	check test evaluations evaluations-live \
 	help man docs docs-serve \
 	_build-clnku _build-clnkr \
-	_fmt _fmt-check _vet _lint _sloc _eval-live _workflow-make-targets \
+	_fmt _fmt-check _vet _lint _sloc _workflow-make-targets \
 	_hooks _check-man _site-sync _site-build
 
 PREFIX ?= /usr/local
@@ -44,11 +44,11 @@ test: ## Run all tests
 	go test ./... -v
 	cd cmd/clnkr && go test ./... -v
 
-eval: ## Run eval harness tests
-	go test ./eval -v
+evaluations: ## Run the mock-provider evaluation suite
+	go run ./cmd/clnkeval run --suite default
 
-_eval-live:
-	CLNKR_EVAL_MODE=live $(MAKE) eval
+evaluations-live: ## Run the live-provider evaluation suite
+	CLNKR_EVALUATION_MODE=live-provider go run ./cmd/clnkeval run --suite default
 
 _fmt:
 	go fmt ./...
