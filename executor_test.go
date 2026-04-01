@@ -3,6 +3,7 @@ package clnkr
 import (
 	"context"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -25,7 +26,7 @@ func envListToMap(list []string) map[string]string {
 }
 
 func TestCommandExecutor(t *testing.T) {
-	exec := &CommandExecutor{Timeout: 5 * time.Second}
+	exec := &CommandExecutor{}
 	ctx := context.Background()
 
 	t.Run("simple command", func(t *testing.T) {
@@ -68,11 +69,22 @@ func TestCommandExecutor(t *testing.T) {
 		}
 	})
 
-	t.Run("returns error on timeout", func(t *testing.T) {
-		shortExec := &CommandExecutor{Timeout: 100 * time.Millisecond}
-		_, err := shortExec.Execute(ctx, "sleep 10", "/tmp")
+	t.Run("does not expose timeout field", func(t *testing.T) {
+		if _, ok := reflect.TypeOf(CommandExecutor{}).FieldByName("Timeout"); ok {
+			t.Fatal("CommandExecutor should not expose a Timeout field")
+		}
+	})
+
+	t.Run("respects context deadline", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		_, err := exec.Execute(ctx, "sleep 1", "/tmp")
 		if err == nil {
-			t.Error("expected timeout error, got nil")
+			t.Fatal("expected error from expired context, got nil")
+		}
+		if ctx.Err() != context.DeadlineExceeded {
+			t.Fatalf("expected caller context deadline exceeded, got %v (err=%v)", ctx.Err(), err)
 		}
 	})
 
@@ -86,7 +98,7 @@ func TestCommandExecutor(t *testing.T) {
 	})
 
 	t.Run("process group assigns new pgid", func(t *testing.T) {
-		pgExec := &CommandExecutor{Timeout: 5 * time.Second, ProcessGroup: true}
+		pgExec := &CommandExecutor{ProcessGroup: true}
 
 		parentPgid, err := syscall.Getpgid(os.Getpid())
 		if err != nil {
@@ -123,7 +135,7 @@ func TestCommandExecutor(t *testing.T) {
 	})
 
 	t.Run("injects persisted env", func(t *testing.T) {
-		envExec := &CommandExecutor{Timeout: 5 * time.Second}
+		envExec := &CommandExecutor{}
 		base := envListToMap(os.Environ())
 		base["NANOCHAT_BASE_DIR"] = "/tmp/runtime"
 		envExec.SetEnv(base)
@@ -137,7 +149,7 @@ func TestCommandExecutor(t *testing.T) {
 	})
 
 	t.Run("captures post-command shell state", func(t *testing.T) {
-		stateExec := &CommandExecutor{Timeout: 5 * time.Second}
+		stateExec := &CommandExecutor{}
 		cmd := `export CLNKR_TEST_VAR=ok && cd /tmp && printf done`
 		out, err := stateExec.Execute(ctx, cmd, "/")
 		if err != nil {
@@ -155,7 +167,7 @@ func TestCommandExecutor(t *testing.T) {
 	})
 
 	t.Run("state file does not leak into PostEnv", func(t *testing.T) {
-		stateExec := &CommandExecutor{Timeout: 5 * time.Second}
+		stateExec := &CommandExecutor{}
 		base := envListToMap(os.Environ())
 		base["BASE"] = "ok"
 		stateExec.SetEnv(base)
@@ -173,7 +185,7 @@ func TestCommandExecutor(t *testing.T) {
 	})
 
 	t.Run("captures full env snapshots across stateful commands", func(t *testing.T) {
-		stateExec := &CommandExecutor{Timeout: 5 * time.Second}
+		stateExec := &CommandExecutor{}
 
 		cmd1 := `export CLNKR_CHAIN_ONE=one && cd /tmp && printf done`
 		out1, err := stateExec.Execute(ctx, cmd1, "/tmp")

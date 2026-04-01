@@ -42,11 +42,11 @@ func (r Runner) Run(ctx context.Context, req Request) (Result, error) {
 		return Result{}, fmt.Errorf("delegate run: create seed file: %w", err)
 	}
 	seedPath := seedFile.Name()
-	defer os.Remove(seedPath)
+	defer func() { _ = os.Remove(seedPath) }()
 
 	enc := json.NewEncoder(seedFile)
 	if err := enc.Encode(req.Parent); err != nil {
-		seedFile.Close()
+		_ = seedFile.Close()
 		return Result{}, fmt.Errorf("delegate run: write seed file: %w", err)
 	}
 	if err := seedFile.Close(); err != nil {
