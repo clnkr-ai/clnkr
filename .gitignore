@@ -31,6 +31,7 @@ Thumbs.db
 /site/.hugo_build.lock
 
 # Evaluations
+/eval/artifacts/
 /evaluations/trials/*
 /evaluations/reports/*
 eval/artifacts*
