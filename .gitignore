@@ -30,9 +30,9 @@ Thumbs.db
 /site/resources/
 /site/.hugo_build.lock
 
-# Eval harness
-/eval/artifacts/*
-!/eval/artifacts/.gitkeep
+# Evaluations
+/evaluations/trials/*
+/evaluations/reports/*
 
 # Local worktrees
 /.worktrees/
