@@ -87,6 +87,14 @@ clnkr/                  # core: types, interfaces, Agent, events (root go.mod, s
 
 **System prompt** (`prompt.go`): Hardcoded base prompt teaching the JSON turn protocol + optional `AGENTS.md` content from the working directory.
 
+## Evals
+
+The primary purpose of evals is to improve the real agent. Treat live evals as the main signal when discussing prompt, protocol, or agent-loop changes.
+
+Fixture evals exist to keep the harness deterministic in CI and to catch harness regressions. They support the optimization loop, but they are not the main reason the eval system exists.
+
+When choosing tasks, metrics, or follow-on eval work, optimize first for live runs that measure actual agent behavior. Do not judge the value of the eval system mainly by regression protection.
+
 ## Website
 
 The project website is a Hugo static site under `site/`.
