@@ -49,6 +49,25 @@ func TestPTYSingleTaskShowsApprovalPrompt(t *testing.T) {
 	app.WaitFor("Send 'y' to approve")
 }
 
+func TestPTYRequestsTerminalFocusReports(t *testing.T) {
+	bin := buildCLNKRBinary(t)
+	app := startPTYSession(t, ptyStartOptions{
+		binary: bin,
+		args: []string{
+			"--model", "test-model",
+			"-S",
+		},
+		env: map[string]string{
+			"CLNKR_API_KEY": "test-key",
+		},
+		size: terminalSize{cols: 80, rows: 24},
+	})
+	defer app.Close()
+
+	app.WaitFor("Type a task...")
+	app.WaitForRaw("\x1b[?1004h")
+}
+
 var (
 	buildOnce   sync.Once
 	buildBinary string

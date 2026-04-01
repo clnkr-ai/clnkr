@@ -264,6 +264,40 @@ func TestModelViewContainsStatusBar(t *testing.T) {
 	}
 }
 
+func TestModelViewRequestsTerminalFocusReports(t *testing.T) {
+	m := setupModel()
+	view := m.View()
+	if !view.ReportFocus {
+		t.Fatal("view should request terminal focus reports")
+	}
+}
+
+func TestModelTerminalBlurDoesNotChangeAppFocusMode(t *testing.T) {
+	m := setupModel()
+
+	m = updateModel(t, m, tea.BlurMsg{})
+	if m.focus != focusInput {
+		t.Fatalf("terminal blur should preserve app focus mode, got %v", m.focus)
+	}
+	if m.status.focus != focusInput {
+		t.Fatalf("terminal blur should preserve status focus, got %v", m.status.focus)
+	}
+	if !m.input.textarea.Focused() {
+		t.Fatal("terminal blur should not switch the textarea out of input mode")
+	}
+
+	m = updateModel(t, m, tea.FocusMsg{})
+	if m.focus != focusInput {
+		t.Fatalf("terminal focus should preserve app focus mode, got %v", m.focus)
+	}
+	if m.status.focus != focusInput {
+		t.Fatalf("terminal focus should preserve status focus, got %v", m.status.focus)
+	}
+	if !m.input.textarea.Focused() {
+		t.Fatal("terminal focus should keep the textarea in input mode")
+	}
+}
+
 func TestModelEventResponseUpdatesStatus(t *testing.T) {
 	m := setupModel()
 	m = updateModel(t, m, eventMsg{event: clnkr.EventResponse{
