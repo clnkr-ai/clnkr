@@ -66,19 +66,24 @@ clnkr --base-url http://proxy:4000/v1 --model gpt-4o
 clnkr --base-url https://generativelanguage.googleapis.com/v1beta/openai --model gemini-2.0-flash
 ```
 
-### Flags
+### Common flags
 
 ```
--p, --prompt string      Task to run (exits after completion)
---model string           Model identifier (default: claude-sonnet-4-20250514)
---base-url string        LLM API endpoint (default: https://api.anthropic.com)
---max-steps int          Maximum agent steps (default: 100)
---full-send              Execute every Act turn without approval
---load-messages string   Seed conversation from JSON file (e.g. from --trajectory)
---event-log string       Write JSONL events to file (streams in real time)
---trajectory string      Write message history as JSON on exit (single-task mode only)
--v, --verbose            Show internal decisions on stderr
---version                Print version and exit
+-p, --prompt string            Task to run (exits after completion)
+-m, --model string             Model identifier (default: claude-sonnet-4-20250514)
+-u, --base-url string          LLM API endpoint (default: https://api.anthropic.com)
+--max-steps int                Maximum agent steps (default: 100)
+--full-send                    Execute every Act turn without approval
+-c, --continue                 Resume the most recent session for this project
+-l, --list-sessions            List saved sessions for this project
+-S, --no-system-prompt         Omit the built-in system prompt
+--system-prompt-append string  Append text to the composed system prompt
+--dump-system-prompt           Print the composed system prompt and exit
+--load-messages string         Seed conversation from JSON file (e.g. from --trajectory)
+--event-log string             Write JSONL events to file (streams in real time)
+--trajectory string            Write message history as JSON on exit (single-task mode only)
+-v, --verbose                  Show internal decisions on stderr
+-V, --version                  Print version and exit
 ```
 
 ### Environment variables
@@ -133,9 +138,22 @@ clnkr executes commands with structured results in the core: command text, exit 
 
 This is intentional. The only downstream machine consumers are clnkr and clnku, so the protocol is optimized for model readability rather than external XML tooling. In practice, weaker models follow explicit flat delimiters more reliably than nested structure, while the frontends still receive fully structured events.
 
-### Project-specific instructions
+### Prompt customization
 
 Place an `AGENTS.md` file in your working directory. Its contents are appended to the system prompt, giving the LLM project-specific context.
+
+You can also customize the composed prompt directly:
+
+```bash
+# Show the final prompt that will be sent
+clnkr --dump-system-prompt
+
+# Append extra one-off instructions
+clnkr --system-prompt-append "Prefer targeted tests first"
+
+# Disable the built-in prompt entirely
+clnkr --no-system-prompt
+```
 
 ## Session Persistence
 
@@ -163,11 +181,11 @@ Saved message history now restores the agent's current working directory on
 resume via transcript-level JSON `[state]` messages. Exported environment variables
 still persist only within the live process.
 
-### Manual Compaction
+### Conversational commands
 
-At the main idle conversational prompt, run `/compact` to summarize older
-transcript history while keeping the recent working thread intact. You can add
-extra instructions, for example `/compact focus on failing tests and edited files`.
+At the main idle conversational prompt, run `/compact` to summarize older transcript history while keeping the recent working thread intact. You can add extra instructions, for example `/compact focus on failing tests and edited files`.
+
+In the TUI, `/delegate TASK` runs a child `clnku` session seeded with the current transcript and appends a delegation summary back into the conversation when the child run completes.
 
 ## How it works
 

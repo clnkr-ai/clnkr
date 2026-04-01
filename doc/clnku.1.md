@@ -7,7 +7,7 @@ clnku - a minimal coding agent (plain CLI)
 
 # SYNOPSIS
 
-**clnku** [**-p** *task*] [**--model** *name*] [**--base-url** *url*] [**--max-steps** *n*] [**--full-send**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**--version**]
+**clnku** [**-p**|**--prompt** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
 
 # DESCRIPTION
 
@@ -30,11 +30,11 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 **-p**, **--prompt** *task*
 : Run the given task and exit. Without this flag, clnku starts in conversational REPL mode.
 
-**--model** *name*
-: LLM model identifier (default: claude-sonnet-4-20250514).
+**-m**, **--model** *name*
+: LLM model identifier (default: claude-sonnet-4-20250514). If omitted, **CLNKR_MODEL** is used when set.
 
-**--base-url** *url*
-: LLM API endpoint (default: https://api.anthropic.com). If the URL contains "anthropic.com", the Anthropic adapter is used; otherwise, the OpenAI-compatible adapter is used.
+**-u**, **--base-url** *url*
+: LLM API endpoint (default: https://api.anthropic.com). If omitted, **CLNKR_BASE_URL** is used when set. If the URL contains "anthropic.com", the Anthropic adapter is used; otherwise, the OpenAI-compatible adapter is used.
 
 **--max-steps** *n*
 : Maximum agent iterations. 0 uses the default of 100.
@@ -42,26 +42,42 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 **--full-send**
 : Execute every **act** turn immediately. Without this flag, clnku asks for approval before each command.
 
+**-c**, **--continue**
+: Resume the most recent session for the current project directory. Saved JSON **[state]** messages restore the last persisted working directory. Mutually exclusive with **--trajectory**.
+
+**-l**, **--list-sessions**
+: List all saved sessions for the current project directory and exit.
+
+**-S**, **--no-system-prompt**
+: Omit the built-in system prompt entirely.
+
+**--system-prompt-append** *text*
+: Append *text* to the built-in system prompt after any loaded **AGENTS.md** content.
+
+**--dump-system-prompt**
+: Print the composed system prompt and exit.
+
 **--load-messages** *file*
-: Read a JSON array of messages from *file* and prepend them to the conversation before starting. The format matches **--trajectory** output, so one agent's trajectory can seed another agent's context. Host-generated JSON `[state]` messages in that transcript restore the current working directory.
+: Read a JSON array of messages from *file* and prepend them to the conversation before starting. The format matches **--trajectory** output, so one agent's trajectory can seed another agent's context. Host-generated JSON **[state]** messages in that transcript restore the current working directory.
 
 **--event-log** *file*
 : Write every agent event as a JSONL line to *file*. Each line is a JSON object with "type" and "payload" fields. Uses O_APPEND for atomic writes, safe to tail from another process.
 
 **--trajectory** *file*
-: After the task finishes, write the full message history as pretty-printed JSON to *file*. Written before exit, even on error. Only applies to single-task mode (**-p**), not the REPL.
+: After the task finishes, write the full message history as pretty-printed JSON to *file*. Written before exit, even on error. Only applies to single-task mode (**-p**), not the REPL. Mutually exclusive with **--continue**.
 
 **-v**, **--verbose**
 : Show internal decisions (queries, parsing, working directory).
 
-**--version**
+**-V**, **--version**
 : Print version and exit.
 
-**--continue**
-: Resume the most recent session for the current project directory. Saved JSON `[state]` messages restore the last persisted working directory.
+# INTERACTIVE COMMANDS
 
-**--list-sessions**
-: List all saved sessions for the current project directory.
+**/compact** [*instructions*]
+: At the idle conversational prompt, summarize older transcript history while keeping the recent working thread intact. Optional trailing text is passed to the compaction summarizer as extra instructions.
+
+This command is only available at the top-level conversational prompt. In single-task mode, approval replies, and clarification replies, the literal text is treated as normal input or rejected with an error rather than triggering compaction.
 
 # ENVIRONMENT
 
@@ -70,6 +86,12 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 
 **ANTHROPIC_API_KEY**
 : Fallback API key when using the Anthropic endpoint.
+
+**CLNKR_MODEL**
+: Default model identifier when **--model** is not provided.
+
+**CLNKR_BASE_URL**
+: Default LLM endpoint when **--base-url** is not provided.
 
 # FILES
 
@@ -82,7 +104,10 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : Success.
 
 **1**
-: Error (no API key, step limit reached, etc.).
+: Error (no API key, step limit reached, invalid flags, session load failure, etc.).
+
+**2**
+: In single-task mode with **--full-send**, the run stopped because the agent asked for clarification.
 
 # SEE ALSO
 

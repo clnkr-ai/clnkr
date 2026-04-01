@@ -6,7 +6,7 @@ clnkr \- a minimal coding agent (TUI)
 
 
 .SH SYNOPSIS
-\fBclnkr\fP [\fB-p\fP \fItask\fP] [\fB--model\fP \fIname\fP] [\fB--base-url\fP \fIurl\fP] [\fB--max-steps\fP \fIn\fP] [\fB--full-send\fP] [\fB--load-messages\fP \fIfile\fP] [\fB--event-log\fP \fIfile\fP] [\fB--trajectory\fP \fIfile\fP] [\fB-v\fP|\fB--verbose\fP] [\fB--version\fP]
+\fBclnkr\fP [\fB-p\fP|\fB--prompt\fP \fItask\fP] [\fB-m\fP|\fB--model\fP \fIname\fP] [\fB-u\fP|\fB--base-url\fP \fIurl\fP] [\fB--max-steps\fP \fIn\fP] [\fB--full-send\fP] [\fB-c\fP|\fB--continue\fP] [\fB-l\fP|\fB--list-sessions\fP] [\fB-S\fP|\fB--no-system-prompt\fP] [\fB--system-prompt-append\fP \fItext\fP] [\fB--dump-system-prompt\fP] [\fB--load-messages\fP \fIfile\fP] [\fB--event-log\fP \fIfile\fP] [\fB--trajectory\fP \fIfile\fP] [\fB-v\fP|\fB--verbose\fP] [\fB-V\fP|\fB--version\fP]
 
 
 .SH DESCRIPTION
@@ -17,6 +17,9 @@ In default mode, \fBclnkr\fP starts the TUI. With \fB-p\fP, it runs a single tas
 
 .PP
 At the main idle conversational prompt, \fB/compact\fP summarizes older transcript history while keeping recent context intact for the current working thread.
+
+.PP
+At the main idle conversational prompt, \fB/delegate\fP runs a child \fBclnku\fP task seeded with the current transcript and appends a host-generated delegation summary artifact when the child run completes.
 
 .PP
 The agent communicates through JSON turns: \fBact\fP (execute a command), \fBclarify\fP (ask the user), and \fBdone\fP (signal completion).
@@ -37,12 +40,12 @@ Project-specific instructions are loaded from an \fBAGENTS.md\fP file in the cur
 Run the given task and exit. Without this flag, clnkr starts the TUI.
 
 .TP
-\fB--model\fP \fIname\fP
-LLM model identifier (default: claude-sonnet-4-20250514).
+\fB-m\fP, \fB--model\fP \fIname\fP
+LLM model identifier (default: claude-sonnet-4-20250514). If omitted, \fBCLNKR_MODEL\fP is used when set.
 
 .TP
-\fB--base-url\fP \fIurl\fP
-LLM API endpoint (default: https://api.anthropic.com). If the URL contains "anthropic.com", the Anthropic adapter is used; otherwise, the OpenAI-compatible adapter is used.
+\fB-u\fP, \fB--base-url\fP \fIurl\fP
+LLM API endpoint (default: https://api.anthropic.com). If omitted, \fBCLNKR_BASE_URL\fP is used when set. If the URL contains "anthropic.com", the Anthropic adapter is used; otherwise, the OpenAI-compatible adapter is used.
 
 .TP
 \fB--max-steps\fP \fIn\fP
@@ -53,8 +56,28 @@ Maximum agent iterations. 0 uses the default of 100.
 Execute every \fBact\fP turn immediately. Without this flag, clnkr asks for approval before each command.
 
 .TP
+\fB-c\fP, \fB--continue\fP
+Resume the most recent session for the current project directory. Saved JSON \fB[state]\fP messages restore the last persisted working directory. Mutually exclusive with \fB--trajectory\fP\&.
+
+.TP
+\fB-l\fP, \fB--list-sessions\fP
+List all saved sessions for the current project directory and exit.
+
+.TP
+\fB-S\fP, \fB--no-system-prompt\fP
+Omit the built-in system prompt entirely.
+
+.TP
+\fB--system-prompt-append\fP \fItext\fP
+Append \fItext\fP to the built-in system prompt after any loaded \fBAGENTS.md\fP content.
+
+.TP
+\fB--dump-system-prompt\fP
+Print the composed system prompt and exit.
+
+.TP
 \fB--load-messages\fP \fIfile\fP
-Read a JSON array of messages from \fIfile\fP and prepend them to the conversation before starting. The format matches \fB--trajectory\fP output, so one agent's trajectory can seed another agent's context. Host-generated JSON \fB[state]\fR messages in that transcript restore the current working directory.
+Read a JSON array of messages from \fIfile\fP and prepend them to the conversation before starting. The format matches \fB--trajectory\fP output, so one agent's trajectory can seed another agent's context. Host-generated JSON \fB[state]\fP messages in that transcript restore the current working directory.
 
 .TP
 \fB--event-log\fP \fIfile\fP
@@ -62,23 +85,25 @@ Write every agent event as a JSONL line to \fIfile\fP\&. Each line is a JSON obj
 
 .TP
 \fB--trajectory\fP \fIfile\fP
-After the task finishes, write the full message history as pretty-printed JSON to \fIfile\fP\&. Written before exit, even on error. Only applies to single-task mode (\fB-p\fP), not the REPL.
+After the task finishes, write the full message history as pretty-printed JSON to \fIfile\fP\&. Written before exit, even on error. Only applies to single-task mode (\fB-p\fP), not the conversational TUI. Mutually exclusive with \fB--continue\fP\&.
 
 .TP
 \fB-v\fP, \fB--verbose\fP
 Show internal decisions (queries, parsing, working directory).
 
 .TP
-\fB--continue\fP
-Resume the most recent session for the current project directory. Saved JSON \fB[state]\fR messages restore the last persisted working directory.
-
-.TP
-\fB--list-sessions\fP
-List all saved sessions for the current project directory.
-
-.TP
-\fB--version\fP
+\fB-V\fP, \fB--version\fP
 Print version and exit.
+
+
+.SH INTERACTIVE COMMANDS
+.TP
+\fB/compact\fP [\fIinstructions\fP]
+At the idle conversational prompt, summarize older transcript history while keeping the recent working thread intact. Optional trailing text is passed to the compaction summarizer as extra instructions.
+
+.TP
+\fB/delegate\fP \fItask\fP
+At the idle conversational prompt, run \fItask\fP in a child \fBclnku\fP process seeded with the current transcript. When the child run completes, clnkr appends a host-generated \fB[delegate]\fP artifact containing the delegated task and summary. Empty delegated tasks are rejected.
 
 
 .SH ENVIRONMENT
@@ -89,6 +114,14 @@ API key for the LLM provider (required).
 .TP
 \fBANTHROPIC_API_KEY\fP
 Fallback API key when using the Anthropic endpoint.
+
+.TP
+\fBCLNKR_MODEL\fP
+Default model identifier when \fB--model\fP is not provided.
+
+.TP
+\fBCLNKR_BASE_URL\fP
+Default LLM endpoint when \fB--base-url\fP is not provided.
 
 
 .SH FILES
@@ -104,7 +137,11 @@ Success.
 
 .TP
 \fB1\fP
-Error (no API key, step limit reached, etc.).
+Error (no API key, step limit reached, invalid flags, session load failure, etc.).
+
+.TP
+\fB2\fP
+In single-task mode with \fB--full-send\fP, the run stopped because the agent asked for clarification.
 
 
 .SH AUTHOR
