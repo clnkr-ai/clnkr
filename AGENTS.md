@@ -60,6 +60,7 @@ clnkr/                  # core: types, interfaces, Agent, events (root go.mod, s
 **Two binaries:**
 - `cmd/clnku/` — plain CLI (under root go.mod, stdlib only).
 - `cmd/clnkr/` — bubbletea TUI (own go.mod with charm v2 deps). Detects non-TTY stdout and falls back to plain-text rendering.
+- Do not assume `clnkr` and `clnku` need feature parity. Rich workflow/UI features may belong only in `cmd/clnkr`; keep `cmd/clnku` minimal unless the task explicitly calls for both. Treat frontend-specific slash/workflow commands as TUI policy first, not shared core behavior.
 
 **Multi-module:** `cmd/clnkr/` has its own `go.mod`. Root `go test ./...` does not descend into it. Use `make test` to test both modules. `go install github.com/clnkr-ai/clnkr/cmd/clnkr@latest` does NOT work due to replace directive — use `make build` or install from releases.
 
@@ -108,6 +109,7 @@ Workflow:
 
 - Provider adapters use `httptest.NewServer` in external test packages (`package anthropic_test`) — black-box, no real API calls
 - Agent loop uses `fakeModel` and `fakeExecutor` (in `agent_test.go`) — deterministic inputs for state machine testing
+- In `cmd/clnkr`, store injectable helpers in model/shared state behind the narrowest local interface needed by the TUI, not a concrete helper struct. Good: `type delegateRunner interface { Run(context.Context, delegate.Request) (delegate.Result, error) }`. Bad: storing `delegate.Runner` directly when tests need stub injection.
 - Executor tests shell out to bash (real integration tests)
 - macOS `/private/tmp` symlink is handled in executor tests
 
