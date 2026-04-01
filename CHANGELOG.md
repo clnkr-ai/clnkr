@@ -3,6 +3,7 @@
 ## 1.4.0 (2026-04-01)
 
 - Retry OpenAI rate limit responses
+- Update CHANGELOG.md for 1.3.2
 
 ## 1.3.2 (2026-04-01)
 
