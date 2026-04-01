@@ -36,3 +36,6 @@ Thumbs.db
 
 # Local worktrees
 /.worktrees/
+
+# Local agent skills
+/.agents/
