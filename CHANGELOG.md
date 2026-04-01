@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.2 (2026-04-01)
+
+- Refresh man pages and README for current features
+- Update CHANGELOG.md for 1.3.1
+
 ## 1.3.1 (2026-04-01)
 
 - Bound compaction summarize prompt size
