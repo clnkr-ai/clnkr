@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.1 (2026-04-01)
+
+- Request terminal focus reports in the TUI
+- Link the site footer
+- Tighten homepage install copy
+- Update CHANGELOG.md for 1.2.0
+- Use package manager links on the homepage
+
 ## 1.2.0 (2026-03-31)
 
 - Add manual transcript compaction
