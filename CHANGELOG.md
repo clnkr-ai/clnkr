@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.2 (2026-04-01)
+
+- End compaction summarize requests with a user message
+- Add evaluations/ to .gitignore
+- Update CHANGELOG.md for 1.2.1
+
 ## 1.2.1 (2026-04-01)
 
 - Request terminal focus reports in the TUI
