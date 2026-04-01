@@ -17,6 +17,7 @@ import (
 	clnkr "github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/anthropic"
 	"github.com/clnkr-ai/clnkr/compaction"
+	"github.com/clnkr-ai/clnkr/delegate"
 	"github.com/clnkr-ai/clnkr/openai"
 	"github.com/clnkr-ai/clnkr/session"
 )
@@ -456,10 +457,11 @@ Environment:
 		showDebug,
 		*fullSend,
 		makeCompactorFactory(*baseURL, apiKey, *modelFlag),
+		delegate.Runner{},
 	)
 }
 
-func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, eventLog *os.File, verbose bool, fullSend bool, compactorFactory compaction.Factory) {
+func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, eventLog *os.File, verbose bool, fullSend bool, compactorFactory compaction.Factory, delegateRunner delegate.Runner) {
 	s := defaultStyles(true) // TODO: detect actual background
 
 	if taskPrompt != "" {
@@ -472,6 +474,7 @@ func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, e
 				fullSend:         fullSend,
 				exitOnRunFinish:  true,
 				compactorFactory: compactorFactory,
+				delegateRunner:   delegateRunner,
 			})
 			m.shared.agent = agent
 			m.shared.eventLog = eventLog
@@ -531,6 +534,7 @@ func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, e
 			fullSend:         fullSend,
 			exitOnRunFinish:  true,
 			compactorFactory: compactorFactory,
+			delegateRunner:   delegateRunner,
 		})
 		m.shared.agent = agent
 		m.shared.eventLog = eventLog
@@ -584,6 +588,7 @@ func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, e
 		maxSteps:         agent.MaxSteps,
 		fullSend:         fullSend,
 		compactorFactory: compactorFactory,
+		delegateRunner:   delegateRunner,
 	})
 	m.shared.agent = agent
 	m.shared.eventLog = eventLog
