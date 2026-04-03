@@ -8,7 +8,7 @@ Platform note: today `clnkr` is Unix-only. The executor assumes `bash`, process 
 
 A minimal coding agent. Query an LLM, execute bash commands, repeat. Supports the Anthropic Messages API and any OpenAI-compatible endpoint (vLLM, Ollama, LiteLLM, etc.).
 
-Ships two binaries: **clnkr** (TUI) and **clnku** (plain CLI). A **clnk** symlink points to clnkr for convenience.
+Ships three binaries: **clnkr** (TUI), **clnku** (plain CLI), and **clnkeval** (evaluation runner). A **clnk** symlink points to clnkr for convenience.
 
 <img width="512" height="512" alt="Isildur cut the Ring (the ring here is bash -jokeexplainer)from his hand with the hilt-shard of his father's sword, and took it for his own." src="https://github.com/user-attachments/assets/7c9d648c-f5b9-4610-a311-04f5af37b364" />
 
@@ -204,7 +204,7 @@ The LLM is the agent. clnkr is the scaffold.
 
 ```bash
 make help       # Show all targets
-make build      # Build both binaries
+make build      # Build all binaries
 make check      # Full quality suite
 make test       # Tests only
 make evaluations      # Run the mock-provider evaluation suite

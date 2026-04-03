@@ -8,7 +8,7 @@ HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hug
 	build clean install run \
 	check test evaluations evaluations-live \
 	help man docs docs-serve \
-	_build-clnku _build-clnkr \
+	_build-clnku _build-clnkr _build-clnkeval \
 	_fmt _fmt-check _vet _lint _sloc _workflow-make-targets \
 	_hooks _check-man _site-sync _site-build
 
@@ -17,15 +17,16 @@ CORE_SLOC_LIMIT := 750
 CORE_FILES := $(filter-out %_test.go,$(wildcard *.go))
 
 ##@ Build
-build: _build-clnku _build-clnkr ## Build both binaries
+build: _build-clnku _build-clnkr _build-clnkeval ## Build all binaries
 
 clean: ## Remove build artifacts
-	rm -f clnku clnkr
+	rm -f clnku clnkr clnkeval
 
-install: build ## Install both binaries and clnk symlink
+install: build ## Install all binaries and clnk symlink
 	install -d $(DESTDIR)$(PREFIX)/bin
 	install -m 755 clnkr $(DESTDIR)$(PREFIX)/bin/clnkr
 	install -m 755 clnku $(DESTDIR)$(PREFIX)/bin/clnku
+	install -m 755 clnkeval $(DESTDIR)$(PREFIX)/bin/clnkeval
 	ln -sf clnkr $(DESTDIR)$(PREFIX)/bin/clnk
 
 run: _build-clnkr ## Build and start TUI
@@ -36,6 +37,9 @@ _build-clnku:
 
 _build-clnkr:
 	cd cmd/clnkr && go build -trimpath -ldflags '$(LDFLAGS)' -o ../../clnkr .
+
+_build-clnkeval:
+	go build -trimpath -ldflags '$(LDFLAGS)' -o clnkeval ./cmd/clnkeval/
 
 ##@ Quality
 check: _fmt-check _vet _lint _sloc _workflow-make-targets _check-man test ## Run formatting, vet, lint, SLOC, workflow, manpage, and test checks
