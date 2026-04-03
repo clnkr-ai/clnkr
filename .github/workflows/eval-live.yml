@@ -1,4 +1,4 @@
-name: Live Evals
+name: Live Evaluations
 
 on:
   workflow_dispatch:
@@ -6,20 +6,20 @@ on:
     branches: [main]
 
 jobs:
-  eval-live:
+  evaluations-live:
     runs-on: ubuntu-latest
     steps:
-      - name: Check live eval configuration
+      - name: Check live evaluation configuration
         id: config
         run: |
-          if [ -z "${OPENAI_API_KEY}" ]; then
-            echo "Live eval skipped: OPENAI_API_KEY secret is not set."
+          if [ -z "${CLNKR_EVALUATION_API_KEY}" ]; then
+            echo "Live evaluation skipped: CLNKR_EVALUATION_API_KEY secret is not set."
             echo "configured=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "configured=true" >> "$GITHUB_OUTPUT"
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLNKR_EVALUATION_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
       - uses: actions/checkout@v5
         if: steps.config.outputs.configured == 'true'
@@ -30,37 +30,46 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: cmd/clnkr/go.sum
 
-      - name: Run live evals
+      - name: Run live evaluations
         if: steps.config.outputs.configured == 'true'
         run: |
-          : "${CLNKR_EVAL_BASE_URL:=https://api.openai.com/v1}"
-          : "${CLNKR_EVAL_MODEL:=gpt-5.4-nano}"
-          export CLNKR_EVAL_MODE=live
-          export CLNKR_EVAL_API_KEY="${OPENAI_API_KEY}"
-          export CLNKR_EVAL_BASE_URL
-          export CLNKR_EVAL_MODEL
-          go test ./eval -v
+          : "${CLNKR_EVALUATION_BASE_URL:=https://api.openai.com/v1}"
+          : "${CLNKR_EVALUATION_MODEL:=gpt-5.4-nano}"
+          export CLNKR_EVALUATION_MODE=live-provider
+          export CLNKR_EVALUATION_API_KEY
+          export CLNKR_EVALUATION_BASE_URL
+          export CLNKR_EVALUATION_MODEL
+          make evaluations-live
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          CLNKR_EVAL_BASE_URL: ${{ vars.CLNKR_EVAL_BASE_URL }}
-          CLNKR_EVAL_MODEL: ${{ vars.CLNKR_EVAL_MODEL }}
+          CLNKR_EVALUATION_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLNKR_EVALUATION_BASE_URL: ${{ vars.CLNKR_EVALUATION_BASE_URL }}
+          CLNKR_EVALUATION_MODEL: ${{ vars.CLNKR_EVALUATION_MODEL }}
 
-      - name: Show live eval traces on failure
+      - name: Show live evaluation bundles on failure
         if: failure() && steps.config.outputs.configured == 'true'
         run: |
-          find eval/artifacts -maxdepth 3 -type f | sort || true
+          find evaluations/trials -maxdepth 3 -type f | sort || true
           echo
-          echo "== event log =="
-          sed -n '1,200p' eval/artifacts/001-basic-edit/event-log.jsonl || true
-          echo
-          echo "== trajectory =="
-          sed -n '1,200p' eval/artifacts/001-basic-edit/trajectory.json || true
+          find evaluations/reports -maxdepth 1 -type f | sort || true
+          for trial_dir in $(find evaluations/trials -mindepth 1 -maxdepth 1 -type d | sort); do
+            echo
+            echo "== $(basename "$trial_dir") bundle =="
+            sed -n '1,200p' "$trial_dir/bundle.json" || true
+            echo
+            echo "== $(basename "$trial_dir") normalized graders =="
+            sed -n '1,200p' "$trial_dir/normalized/graders.jsonl" || true
+            echo
+            echo "== $(basename "$trial_dir") raw events =="
+            sed -n '1,200p' "$trial_dir/raw/events.jsonl" || true
+          done
 
-      - name: Upload live eval artifacts
+      - name: Upload live evaluation artifacts
         if: always() && steps.config.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: live-eval-artifacts-${{ github.run_id }}
-          path: eval/artifacts/
+          name: live-evaluations-${{ github.run_id }}
+          path: |
+            evaluations/trials/
+            evaluations/reports/
           if-no-files-found: warn
           retention-days: 14
