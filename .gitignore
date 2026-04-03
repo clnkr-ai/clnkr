@@ -1,8 +1,10 @@
 # Binaries
 /clnku
 /clnkr
+/clnkeval
 /cmd/clnku/clnku
 /cmd/clnkr/clnkr
+/cmd/clnkeval/clnkeval
 
 # Test binary
 *.test

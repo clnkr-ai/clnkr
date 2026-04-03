@@ -2,12 +2,12 @@
 
 ## Overview
 
-clnkr is a coding agent CLI that queries LLMs and executes bash commands in a loop. Core library is stdlib only. Talks to the Anthropic Messages API and any OpenAI-compatible endpoint. Ships two binaries: `clnku` (plain CLI) and `clnkr` (TUI frontend).
+clnkr is a coding agent CLI that queries LLMs and executes bash commands in a loop. Core library is stdlib only. Talks to the Anthropic Messages API and any OpenAI-compatible endpoint. Ships three binaries: `clnku` (plain CLI), `clnkr` (TUI frontend), and `clnkeval` (evaluation runner).
 
 ## Commands
 
 ```bash
-make build          # Build both binaries (default target)
+make build          # Build all binaries (default target)
 make test           # Run all tests (both modules)
 make check          # Run the full quality suite
 make man            # Generate man page from doc/clnkr.1.md
@@ -45,7 +45,7 @@ make build VERSION=0.2.0
 
 ## Architecture
 
-The core is an importable library at module root (`github.com/clnkr-ai/clnkr`). Two CLI consumers ship in the same repo.
+The core is an importable library at module root (`github.com/clnkr-ai/clnkr`). Three CLI consumers ship in the same repo.
 
 **Package structure:**
 ```
@@ -53,12 +53,15 @@ clnkr/                  # core: types, interfaces, Agent, events (root go.mod, s
 ├── anthropic/          # Anthropic Messages API adapter
 ├── openai/             # OpenAI-compatible adapter
 ├── session/            # Session persistence (XDG state, save/load/list)
+├── evaluations/        # Evaluation framework
 ├── cmd/clnku/          # Plain CLI (under root go.mod, no external deps)
+├── cmd/clnkeval/       # Evaluation runner (under root go.mod)
 └── cmd/clnkr/          # TUI frontend (own go.mod with charm deps)
 ```
 
-**Two binaries:**
+**Three binaries:**
 - `cmd/clnku/` — plain CLI (under root go.mod, stdlib only).
+- `cmd/clnkeval/` — evaluation runner (under root go.mod).
 - `cmd/clnkr/` — bubbletea TUI (own go.mod with charm v2 deps). Detects non-TTY stdout and falls back to plain-text rendering.
 - Do not assume `clnkr` and `clnku` need feature parity. Rich workflow/UI features may belong only in `cmd/clnkr`; keep `cmd/clnku` minimal unless the task explicitly calls for both. Treat frontend-specific slash/workflow commands as TUI policy first, not shared core behavior.
 
