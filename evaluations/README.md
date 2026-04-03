@@ -1,0 +1,107 @@
+# Evaluations
+
+This directory holds the contributor-facing evaluation runtime for `clnku`.
+
+The runtime shells out to the real `clnku` binary, records each trial as a canonical bundle under `evaluations/trials/`, and derives run-level reports under `evaluations/reports/`.
+
+## Layout
+
+```text
+evaluations/
+  suites/
+    <suite-id>/
+      suite.json
+      tasks/
+        <task-id>/
+          task.json
+          input/
+          expected/
+  trials/
+    <trial-id>/
+      bundle.json
+      raw/
+      normalized/
+      outcome/
+  reports/
+    open-test-report.xml
+    junit.xml
+```
+
+Task inputs live under `evaluations/suites/<suite-id>/tasks/<task-id>/input/`.
+
+Expected task outputs live under `evaluations/suites/<suite-id>/tasks/<task-id>/expected/`.
+
+Generated trial bundles live under `evaluations/trials/<trial-id>/`.
+
+Generated run-level reports live under `evaluations/reports/`.
+
+## Bundle Layout
+
+Each trial bundle preserves both `raw/` and `normalized/` records.
+
+- `raw/` keeps exact captured runtime data for debugging and replay-oriented inspection.
+- `normalized/` keeps stable comparison/export data for grading, diffing, and report generation.
+
+Current bundle structure:
+
+```text
+evaluations/trials/<trial-id>/
+  bundle.json
+  raw/
+    transcript.json
+    events.jsonl
+    provider-requests.jsonl
+    provider-responses.jsonl
+  normalized/
+    transcript.jsonl
+    outcome.json
+    graders.jsonl
+  outcome/
+    workspace/
+```
+
+## Artifact Meanings
+
+- `transcript`: the structured conversation and command lifecycle for a trial.
+- `outcome`: the final end-state, including the materialized workspace snapshot.
+- `grader`: one normalized grading record describing pass/fail status, message, and structured evidence.
+
+Useful maintenance files:
+
+- `normalized/transcript.jsonl`: canonicalized transcript records.
+- `normalized/outcome.json`: normalized final outcome summary.
+- `normalized/graders.jsonl`: one normalized record per enabled grader.
+- `raw/events.jsonl`: exact command lifecycle events from the run.
+
+## Run
+
+Mock-provider regression suite:
+
+```bash
+make evaluations
+```
+
+Live-provider evaluation suite:
+
+```bash
+make evaluations-live
+```
+
+`make evaluations-live` reads the first-wave runtime configuration from:
+
+- `CLNKR_EVALUATION_MODE`
+- `CLNKR_EVALUATION_API_KEY`
+- `CLNKR_EVALUATION_BASE_URL`
+- `CLNKR_EVALUATION_MODEL`
+
+## Inspect
+
+After a run:
+
+1. Read `evaluations/trials/<trial-id>/bundle.json` to identify the trial and its artifact paths.
+2. Inspect `evaluations/trials/<trial-id>/normalized/transcript.jsonl` for canonical transcript flow.
+3. Inspect `evaluations/trials/<trial-id>/normalized/outcome.json` for the normalized end-state.
+4. Inspect `evaluations/trials/<trial-id>/normalized/graders.jsonl` for required/advisory grading results.
+5. Inspect `evaluations/trials/<trial-id>/raw/events.jsonl` for exact command start/done events.
+
+The `evaluations/trials/` and `evaluations/reports/` directories are regenerated per run.

@@ -1,0 +1,25 @@
+{
+  "id": "001-basic-edit",
+  "instruction_file": "input/instruction.txt",
+  "scripted_turns_file": "input/model-turns.json",
+  "working_directory": "workspace",
+  "full_send": true,
+  "step_limit": 10,
+  "graders": {
+    "outcome_workspace_snapshot": {
+      "enabled": true,
+      "required": true
+    },
+    "transcript_command_trace": {
+      "enabled": true,
+      "required": false,
+      "expected_commands": [
+        "printf 'hello\\n' > note.txt"
+      ],
+      "expected_exit_codes": [
+        0
+      ],
+      "max_command_count": 5
+    }
+  }
+}

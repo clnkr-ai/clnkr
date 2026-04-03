@@ -37,9 +37,7 @@ jobs:
           working-directory: cmd/clnkr
 
       - name: Test core
-        run: |
-          mapfile -t packages < <(go list ./... | grep -v '/eval$$')
-          go test -race "${packages[@]}" -v
+        run: go test -race ./... -v
 
       - name: Test TUI
         run: cd cmd/clnkr && go test -race ./... -v
@@ -53,7 +51,7 @@ jobs:
       - name: Build site
         run: make docs
 
-  eval-fixture:
+  evaluations:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -63,5 +61,5 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: cmd/clnkr/go.sum
 
-      - name: Run fixture evals
-        run: make eval
+      - name: Run mock-provider evaluations
+        run: make evaluations
