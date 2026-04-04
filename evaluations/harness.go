@@ -14,13 +14,39 @@ import (
 	"time"
 )
 
-// Harness builds clnku once and runs evaluation trials against it.
+// Harness builds clnku once (or locates a pre-installed binary) and runs
+// evaluation trials against it.
 type Harness struct {
 	tempRoot   string
 	trialsDir  string
 	repoRoot   string
+	evalsDir   string
 	buildDir   string
 	binaryPath string
+}
+
+// HarnessOption configures optional Harness behavior.
+type HarnessOption func(*harnessOptions)
+
+type harnessOptions struct {
+	binaryPath string
+	evalsDir   string
+}
+
+// WithBinary skips building clnku from source and uses the supplied binary
+// path instead. If path is empty, the harness resolves "clnku" via PATH.
+func WithBinary(path string) HarnessOption {
+	return func(o *harnessOptions) {
+		o.binaryPath = path
+	}
+}
+
+// WithEvalsDir sets a custom evaluations directory instead of
+// repoRoot/evaluations.
+func WithEvalsDir(path string) HarnessOption {
+	return func(o *harnessOptions) {
+		o.evalsDir = path
+	}
 }
 
 // RunArtifacts captures the raw outputs from one trial run.
@@ -51,36 +77,60 @@ type RunArtifacts struct {
 	TrialPassed           bool
 	GraderResults         []GraderResult
 	FailedRequiredGraders []GraderResult
+	GitDiff               string
 }
 
 // NewHarness builds clnku once for reuse across trials.
-func NewHarness(ctx context.Context, repoRoot string) (*Harness, error) {
+// Pass WithBinary to skip building from source and use a pre-installed binary.
+func NewHarness(ctx context.Context, repoRoot string, opts ...HarnessOption) (*Harness, error) {
+	var o harnessOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	tempRoot, err := os.MkdirTemp("", "clnkr-eval-harness-*")
 	if err != nil {
 		return nil, fmt.Errorf("create harness temp root: %w", err)
 	}
-	buildDir := filepath.Join(tempRoot, "build")
 	trialsDir := filepath.Join(tempRoot, "trials")
-	if err := os.MkdirAll(buildDir, 0o755); err != nil {
-		_ = os.RemoveAll(tempRoot)
-		return nil, fmt.Errorf("create harness build dir: %w", err)
-	}
 	if err := os.MkdirAll(trialsDir, 0o755); err != nil {
 		_ = os.RemoveAll(tempRoot)
 		return nil, fmt.Errorf("create harness trials dir: %w", err)
 	}
 
 	h := &Harness{
-		tempRoot:   tempRoot,
-		trialsDir:  trialsDir,
-		repoRoot:   repoRoot,
-		buildDir:   buildDir,
-		binaryPath: filepath.Join(buildDir, "clnku"),
+		tempRoot:  tempRoot,
+		trialsDir: trialsDir,
+		repoRoot:  repoRoot,
+		evalsDir:  o.evalsDir,
 	}
-	if err := h.buildBinary(ctx); err != nil {
-		_ = os.RemoveAll(tempRoot)
-		return nil, err
+
+	if o.binaryPath != "" {
+		// Explicit binary path provided.
+		h.binaryPath = o.binaryPath
+	} else if repoRoot == "" {
+		// No repo root — resolve from PATH.
+		resolved, err := exec.LookPath("clnku")
+		if err != nil {
+			_ = os.RemoveAll(tempRoot)
+			return nil, fmt.Errorf("resolve clnku binary: %w", err)
+		}
+		h.binaryPath = resolved
+	} else {
+		// Build from source.
+		buildDir := filepath.Join(tempRoot, "build")
+		if err := os.MkdirAll(buildDir, 0o755); err != nil {
+			_ = os.RemoveAll(tempRoot)
+			return nil, fmt.Errorf("create harness build dir: %w", err)
+		}
+		h.buildDir = buildDir
+		h.binaryPath = filepath.Join(buildDir, "clnku")
+		if err := h.buildBinary(ctx); err != nil {
+			_ = os.RemoveAll(tempRoot)
+			return nil, err
+		}
 	}
+
 	return h, nil
 }
 
@@ -111,7 +161,7 @@ func (h *Harness) RunTrial(ctx context.Context, suite Suite, task Task, cfg RunC
 	}()
 
 	startedAt := time.Now().UTC()
-	taskRoot := filepath.Join(h.repoRoot, "evaluations", "suites", suite.ID, "tasks", task.ID)
+	taskRoot := resolveTaskRoot(h.repoRoot, h.evalsDir, suite.ID, task.ID)
 	artifacts := RunArtifacts{
 		SuiteID:        suite.ID,
 		TaskID:         task.ID,
@@ -128,7 +178,15 @@ func (h *Harness) RunTrial(ctx context.Context, suite Suite, task Task, cfg RunC
 		return RunArtifacts{}, err
 	}
 	artifacts.Mode = mode
-	workspaceDir := filepath.Join(trialRoot, task.WorkingDirectory)
+
+	inPlace := task.WorkingDirectory == "."
+	var workspaceDir string
+	if inPlace {
+		workspaceDir = h.repoRoot
+	} else {
+		workspaceDir = filepath.Join(trialRoot, task.WorkingDirectory)
+	}
+
 	homeDir := filepath.Join(trialRoot, "home")
 	configDir := filepath.Join(trialRoot, "config")
 	stateDir := filepath.Join(trialRoot, "state")
@@ -136,8 +194,13 @@ func (h *Harness) RunTrial(ctx context.Context, suite Suite, task Task, cfg RunC
 		return RunArtifacts{}, fmt.Errorf("create state dir: %w", err)
 	}
 
-	if err := copyTreeOptional(filepath.Join(taskRoot, "input", "workspace"), workspaceDir); err != nil {
-		return RunArtifacts{}, fmt.Errorf("copy workspace input: %w", err)
+	if !inPlace {
+		if err := copyTreeOptional(filepath.Join(taskRoot, "input", "workspace"), workspaceDir); err != nil {
+			return RunArtifacts{}, fmt.Errorf("copy workspace input: %w", err)
+		}
+		if err := copyProjectAgents(filepath.Join(taskRoot, "input", "project"), workspaceDir); err != nil {
+			return RunArtifacts{}, fmt.Errorf("copy project AGENTS: %w", err)
+		}
 	}
 	if err := copyTreeOptional(filepath.Join(taskRoot, "input", "home"), homeDir); err != nil {
 		return RunArtifacts{}, fmt.Errorf("copy home input: %w", err)
@@ -145,8 +208,15 @@ func (h *Harness) RunTrial(ctx context.Context, suite Suite, task Task, cfg RunC
 	if err := copyTreeOptional(filepath.Join(taskRoot, "input", "config"), configDir); err != nil {
 		return RunArtifacts{}, fmt.Errorf("copy config input: %w", err)
 	}
-	if err := copyProjectAgents(filepath.Join(taskRoot, "input", "project"), workspaceDir); err != nil {
-		return RunArtifacts{}, fmt.Errorf("copy project AGENTS: %w", err)
+
+	// Record git HEAD before the trial for in-place diff capture.
+	var baseRef string
+	if inPlace {
+		headOut, _, headExit, headErr := runCommand(ctx, workspaceDir, nil, "git", "rev-parse", "HEAD")
+		if headErr != nil || headExit != 0 {
+			return RunArtifacts{}, fmt.Errorf("record git HEAD before trial: exit=%d err=%v", headExit, headErr)
+		}
+		baseRef = strings.TrimSpace(headOut)
 	}
 
 	var mockProvider *MockProvider
@@ -175,12 +245,12 @@ func (h *Harness) RunTrial(ctx context.Context, suite Suite, task Task, cfg RunC
 		"PATH=" + os.Getenv("PATH"),
 	}
 
-	systemPrompt, stderr, exitCode, err := runCommand(ctx, workspaceDir, env, h.binaryPath, "--dump-system-prompt")
+	systemPrompt, stderrOut, exitCode, err := runCommand(ctx, workspaceDir, env, h.binaryPath, "--dump-system-prompt")
 	if err != nil {
 		return RunArtifacts{}, fmt.Errorf("dump system prompt: %w", err)
 	}
 	if exitCode != 0 {
-		return RunArtifacts{}, fmt.Errorf("dump system prompt exit code %d: %s", exitCode, strings.TrimSpace(stderr))
+		return RunArtifacts{}, fmt.Errorf("dump system prompt exit code %d: %s", exitCode, strings.TrimSpace(stderrOut))
 	}
 	artifacts.SystemPrompt = systemPrompt
 
@@ -229,14 +299,36 @@ func (h *Harness) RunTrial(ctx context.Context, suite Suite, task Task, cfg RunC
 	if err != nil {
 		return RunArtifacts{}, fmt.Errorf("read event log: %w", err)
 	}
-	workspace, err := snapshotWorkspace(workspaceDir)
-	if err != nil {
-		return RunArtifacts{}, fmt.Errorf("snapshot workspace: %w", err)
+
+	if inPlace {
+		// Capture git diff against the recorded base ref.
+		diffOut, _, diffExit, diffErr := runCommand(ctx, workspaceDir, nil, "git", "diff", baseRef)
+		if diffErr != nil {
+			return RunArtifacts{}, fmt.Errorf("capture git diff: %w", diffErr)
+		}
+		if diffExit != 0 {
+			return RunArtifacts{}, fmt.Errorf("capture git diff exit code %d", diffExit)
+		}
+		artifacts.GitDiff = diffOut
+		artifacts.Workspace = nil
+
+		// Reset the workspace for the next trial.
+		if _, _, rc, err := runCommand(ctx, workspaceDir, nil, "git", "reset", "--hard", baseRef); err != nil || rc != 0 {
+			return RunArtifacts{}, fmt.Errorf("reset workspace to %s: exit=%d err=%v", baseRef, rc, err)
+		}
+		if _, _, rc, err := runCommand(ctx, workspaceDir, nil, "git", "clean", "-fd"); err != nil || rc != 0 {
+			return RunArtifacts{}, fmt.Errorf("clean workspace: exit=%d err=%v", rc, err)
+		}
+	} else {
+		workspace, err := snapshotWorkspace(workspaceDir)
+		if err != nil {
+			return RunArtifacts{}, fmt.Errorf("snapshot workspace: %w", err)
+		}
+		artifacts.Workspace = workspace
 	}
 
 	artifacts.Trajectory = string(trajectory)
 	artifacts.EventLog = string(eventLog)
-	artifacts.Workspace = workspace
 	artifacts.WorkspaceRoot = workspaceDir
 	artifacts.HomeDir = homeDir
 	artifacts.ConfigDir = configDir
@@ -255,6 +347,13 @@ func (h *Harness) RunTrial(ctx context.Context, suite Suite, task Task, cfg RunC
 	artifacts.FailedRequiredGraders = append([]GraderResult(nil), policyResult.FailedRequiredGraders...)
 	artifacts.FinishedAt = time.Now().UTC()
 	return artifacts, nil
+}
+
+func resolveTaskRoot(repoRoot, evalsDir, suiteID, taskID string) string {
+	if evalsDir != "" {
+		return filepath.Join(evalsDir, "suites", suiteID, "tasks", taskID)
+	}
+	return filepath.Join(repoRoot, "evaluations", "suites", suiteID, "tasks", taskID)
 }
 
 func (h *Harness) buildBinary(ctx context.Context) error {

@@ -52,6 +52,7 @@ type BundleArtifacts struct {
 	NormalizedOutcome    string `json:"normalized_outcome"`
 	NormalizedGraders    string `json:"normalized_graders"`
 	OutcomeWorkspace     string `json:"outcome_workspace"`
+	OutcomeDiff          string `json:"outcome_diff,omitempty"`
 }
 
 // GraderResult is one normalized grader record.
@@ -91,6 +92,9 @@ func WriteTrialBundle(root string, artifacts RunArtifacts, graderResults []Grade
 		NormalizedOutcome:    "normalized/outcome.json",
 		NormalizedGraders:    "normalized/graders.jsonl",
 		OutcomeWorkspace:     "outcome/workspace",
+	}
+	if artifacts.GitDiff != "" {
+		artifactPaths.OutcomeDiff = "outcome/diff.patch"
 	}
 
 	writtenChecksums := map[string]string{}
@@ -132,8 +136,25 @@ func WriteTrialBundle(root string, artifacts RunArtifacts, graderResults []Grade
 	if err := writeJSONL(root, artifactPaths.NormalizedGraders, graderResults, nil, false); err != nil {
 		return Bundle{}, fmt.Errorf("write normalized graders: %w", err)
 	}
-	if err := materializeWorkspace(root, artifactPaths.OutcomeWorkspace, artifacts.Workspace); err != nil {
-		return Bundle{}, fmt.Errorf("materialize workspace: %w", err)
+	if artifacts.Workspace != nil {
+		if err := materializeWorkspace(root, artifactPaths.OutcomeWorkspace, artifacts.Workspace); err != nil {
+			return Bundle{}, fmt.Errorf("materialize workspace: %w", err)
+		}
+	} else {
+		// Ensure the outcome workspace directory exists even when empty
+		// (in-place mode uses git diff instead of workspace snapshot).
+		wsPath, err := bundleArtifactPath(root, artifactPaths.OutcomeWorkspace)
+		if err != nil {
+			return Bundle{}, fmt.Errorf("resolve workspace path: %w", err)
+		}
+		if err := os.MkdirAll(wsPath, 0o755); err != nil {
+			return Bundle{}, fmt.Errorf("create empty workspace dir: %w", err)
+		}
+	}
+	if artifactPaths.OutcomeDiff != "" {
+		if err := writeFile(root, artifactPaths.OutcomeDiff, []byte(artifacts.GitDiff), writtenChecksums, true); err != nil {
+			return Bundle{}, fmt.Errorf("write outcome diff: %w", err)
+		}
 	}
 
 	bundle := Bundle{
@@ -171,7 +192,7 @@ func LoadBundle(root string) (Bundle, error) {
 	}
 	bundle.Root = root
 
-	for _, rel := range []string{
+	requiredPaths := []string{
 		bundle.Artifacts.RawTranscript,
 		bundle.Artifacts.RawEvents,
 		bundle.Artifacts.RawProviderRequests,
@@ -180,7 +201,13 @@ func LoadBundle(root string) (Bundle, error) {
 		bundle.Artifacts.NormalizedOutcome,
 		bundle.Artifacts.NormalizedGraders,
 		bundle.Artifacts.OutcomeWorkspace,
-	} {
+	}
+	for _, rel := range []string{bundle.Artifacts.OutcomeDiff} {
+		if rel != "" {
+			requiredPaths = append(requiredPaths, rel)
+		}
+	}
+	for _, rel := range requiredPaths {
 		if err := validateBundleRelativePath(root, rel); err != nil {
 			return Bundle{}, fmt.Errorf("load bundle validate artifact path %q: %w", rel, err)
 		}

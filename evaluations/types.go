@@ -49,6 +49,13 @@ type TrialPolicyResult struct {
 type GraderConfig struct {
 	TranscriptCommandTrace   TranscriptCommandTraceConfig
 	OutcomeWorkspaceSnapshot OutcomeWorkspaceSnapshotConfig
+	OutcomeDiff              OutcomeDiffConfig
+}
+
+// OutcomeDiffConfig validates that the agent produced a non-empty git diff.
+type OutcomeDiffConfig struct {
+	Enabled  bool
+	Required bool
 }
 
 // TranscriptCommandTraceConfig validates the command trace for a mock-provider trial.
