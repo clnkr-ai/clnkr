@@ -55,16 +55,16 @@ func TestRun(t *testing.T) {
 		}
 	})
 
-	t.Run("unsupported first-wave subcommand fails explicitly", func(t *testing.T) {
-		for _, subcommand := range []string{"list-suites", "list-tasks", "validate"} {
+	t.Run("unknown subcommand fails with usage", func(t *testing.T) {
+		for _, subcommand := range []string{"list-suites", "list-tasks", "validate", "bogus"} {
 			stdout := &bytes.Buffer{}
 			stderr := &bytes.Buffer{}
 			exitCode := run([]string{subcommand}, repoRoot, stdout, stderr, func(string) string { return "" })
 			if exitCode == 0 {
 				t.Fatalf("%s exit code = 0, want non-zero", subcommand)
 			}
-			if !strings.Contains(stderr.String(), "not available in the first wave") {
-				t.Fatalf("%s stderr = %q, want explicit unsupported-subcommand error", subcommand, stderr.String())
+			if !strings.Contains(stderr.String(), "unknown command") {
+				t.Fatalf("%s stderr = %q, want unknown command error", subcommand, stderr.String())
 			}
 		}
 	})

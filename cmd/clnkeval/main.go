@@ -12,6 +12,24 @@ import (
 	"github.com/clnkr-ai/clnkr/evaluations"
 )
 
+var version = "dev"
+
+const topLevelUsage = `clnkeval - evaluation runner for clnkr
+
+Usage:
+  clnkeval <command> [flags]
+
+Commands:
+  run     Run an evaluation suite
+  init    Scaffold an evaluations/ directory
+
+Flags:
+  --help      Show this help
+  --version   Print version
+
+Run 'clnkeval <command> --help' for details on a specific command.
+`
+
 func main() {
 	os.Exit(run(os.Args[1:], mustGetwd(), os.Stdout, os.Stderr, os.Getenv))
 }
@@ -31,20 +49,24 @@ func run(args []string, cwd string, stdout, stderr io.Writer, getenv func(string
 	}
 
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "Error: missing subcommand. Supported subcommands: run, init")
+		_, _ = fmt.Fprint(stderr, topLevelUsage)
 		return 1
 	}
 
 	switch args[0] {
+	case "--help", "-h", "help":
+		_, _ = fmt.Fprint(stdout, topLevelUsage)
+		return 0
+	case "--version", "-V", "version":
+		_, _ = fmt.Fprintln(stdout, "clnkeval "+version)
+		return 0
 	case "run":
 		return runSuite(args[1:], cwd, stdout, stderr, getenv)
 	case "init":
 		return runInit(args[1:], cwd, stdout, stderr)
-	case "list-suites", "list-tasks", "validate":
-		_, _ = fmt.Fprintf(stderr, "Error: subcommand %q is not available in the first wave; use 'run'\n", args[0])
-		return 1
 	default:
-		_, _ = fmt.Fprintf(stderr, "Error: unsupported subcommand %q. Supported subcommands: run, init\n", args[0])
+		_, _ = fmt.Fprintf(stderr, "Error: unknown command %q\n\n", args[0])
+		_, _ = fmt.Fprint(stderr, topLevelUsage)
 		return 1
 	}
 }
@@ -52,6 +74,15 @@ func run(args []string, cwd string, stdout, stderr io.Writer, getenv func(string
 func runSuite(args []string, cwd string, stdout, stderr io.Writer, getenv func(string) string) int {
 	flags := flag.NewFlagSet("clnkeval run", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	flags.Usage = func() {
+		fmt.Fprint(stderr, `Usage: clnkeval run [flags]
+
+Run an evaluation suite against the current directory.
+
+Flags:
+`)
+		flags.PrintDefaults()
+	}
 	suiteID := flags.String("suite", "default", "suite id to run")
 	binaryPath := flags.String("binary", "", "path to clnku binary (default: build from source, or resolve from PATH)")
 	evalsDir := flags.String("evals-dir", "", "evaluations directory (default: <cwd>/evaluations)")
@@ -119,6 +150,13 @@ func runSuite(args []string, cwd string, stdout, stderr io.Writer, getenv func(s
 func runInit(args []string, cwd string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("clnkeval init", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	flags.Usage = func() {
+		fmt.Fprint(stderr, `Usage: clnkeval init
+
+Scaffold an evaluations/ directory with a default suite and example task.
+The directory must not already exist.
+`)
+	}
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return 0
