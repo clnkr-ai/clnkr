@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.4 (2026-04-04)
+
+- Improve clnkeval CLI UX: add --help, --version, and usage text
+
 ## 1.4.3 (2026-04-04)
 
 - Add outcome_command_output grader for language-agnostic workspace verification
