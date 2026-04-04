@@ -50,6 +50,7 @@ type GraderConfig struct {
 	TranscriptCommandTrace   TranscriptCommandTraceConfig
 	OutcomeWorkspaceSnapshot OutcomeWorkspaceSnapshotConfig
 	OutcomeDiff              OutcomeDiffConfig
+	OutcomeCommandOutput     OutcomeCommandOutputConfig
 }
 
 // OutcomeDiffConfig validates that the agent produced a non-empty git diff.
@@ -71,4 +72,15 @@ type TranscriptCommandTraceConfig struct {
 type OutcomeWorkspaceSnapshotConfig struct {
 	Enabled  bool
 	Required bool
+}
+
+// OutcomeCommandOutputConfig runs a command against the outcome workspace and checks its output.
+type OutcomeCommandOutputConfig struct {
+	Enabled              bool
+	Required             bool
+	Command              []string // e.g. ["go", "vet", "./..."] -- exec'd directly, no shell
+	ExpectedExitCode     int      // default 0
+	StdoutContains       []string // all must appear in stdout (order-independent)
+	StderrMustNotContain []string // none may appear in stderr
+	TimeoutSeconds       int      // 0 means use default (30s)
 }

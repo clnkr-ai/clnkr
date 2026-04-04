@@ -181,6 +181,90 @@ func TestLoadTask(t *testing.T) {
 			t.Fatalf("transcript_command_trace = %#v, want enabled and not required", got.Graders.TranscriptCommandTrace)
 		}
 	})
+
+	t.Run("loads task with outcome_command_output grader", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTestFile(t, filepath.Join(dir, "task.json"), `{
+			"id": "cmd-test",
+			"instruction_file": "input/instruction.txt",
+			"working_directory": "workspace",
+			"step_limit": 5,
+			"full_send": true,
+			"graders": {
+				"outcome_workspace_snapshot": {"enabled": false, "required": false},
+				"transcript_command_trace": {"enabled": false, "required": false},
+				"outcome_command_output": {
+					"enabled": true,
+					"required": true,
+					"command": ["go", "vet", "./..."],
+					"expected_exit_code": 0,
+					"stdout_contains": ["ok"],
+					"stderr_must_not_contain": ["error"],
+					"timeout_seconds": 60
+				}
+			}
+		}`)
+		task, err := LoadTask(filepath.Join(dir, "task.json"))
+		if err != nil {
+			t.Fatalf("LoadTask(): %v", err)
+		}
+		cfg := task.Graders.OutcomeCommandOutput
+		if !cfg.Enabled || !cfg.Required {
+			t.Fatalf("enabled=%v required=%v, want both true", cfg.Enabled, cfg.Required)
+		}
+		if len(cfg.Command) != 3 || cfg.Command[0] != "go" {
+			t.Fatalf("command = %v, want [go vet ./...]", cfg.Command)
+		}
+		if cfg.TimeoutSeconds != 60 {
+			t.Fatalf("timeout = %d, want 60", cfg.TimeoutSeconds)
+		}
+	})
+
+	t.Run("loads task without outcome_command_output grader (backward compat)", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTestFile(t, filepath.Join(dir, "task.json"), `{
+			"id": "no-cmd",
+			"instruction_file": "input/instruction.txt",
+			"working_directory": "workspace",
+			"step_limit": 5,
+			"full_send": true,
+			"graders": {
+				"outcome_workspace_snapshot": {"enabled": true, "required": true},
+				"transcript_command_trace": {"enabled": false, "required": false}
+			}
+		}`)
+		task, err := LoadTask(filepath.Join(dir, "task.json"))
+		if err != nil {
+			t.Fatalf("LoadTask(): %v", err)
+		}
+		if task.Graders.OutcomeCommandOutput.Enabled {
+			t.Fatal("command output grader should be disabled when absent from JSON")
+		}
+	})
+
+	t.Run("rejects enabled command output grader with empty command", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTestFile(t, filepath.Join(dir, "task.json"), `{
+			"id": "bad-cmd",
+			"instruction_file": "input/instruction.txt",
+			"working_directory": "workspace",
+			"step_limit": 5,
+			"full_send": true,
+			"graders": {
+				"outcome_workspace_snapshot": {"enabled": false, "required": false},
+				"transcript_command_trace": {"enabled": false, "required": false},
+				"outcome_command_output": {
+					"enabled": true,
+					"required": true,
+					"command": []
+				}
+			}
+		}`)
+		_, err := LoadTask(filepath.Join(dir, "task.json"))
+		if err == nil {
+			t.Fatal("LoadTask() error = nil, want command validation failure")
+		}
+	})
 }
 
 func TestLoadSuiteTasks(t *testing.T) {
