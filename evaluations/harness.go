@@ -338,7 +338,7 @@ func (h *Harness) RunTrial(ctx context.Context, suite Suite, task Task, cfg RunC
 		artifacts.ProviderRequests = mockProvider.Requests()
 		artifacts.ProviderResponses = collectProviderResponses(artifacts.ProviderRequests)
 	}
-	graderResults, policyResult, err := runTrialGraders(task, artifacts)
+	graderResults, policyResult, err := runTrialGraders(ctx, task, artifacts)
 	if err != nil {
 		return RunArtifacts{}, fmt.Errorf("run graders: %w", err)
 	}

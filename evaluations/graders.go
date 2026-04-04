@@ -1,18 +1,24 @@
 package evaluations
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
 	outcomeWorkspaceSnapshotGraderID = "outcome_workspace_snapshot"
 	outcomeDiffGraderID              = "outcome_diff"
 	transcriptCommandTraceGraderID   = "transcript_command_trace"
+	outcomeCommandOutputGraderID     = "outcome_command_output"
 
 	graderTargetOutcome    = "outcome"
 	graderTargetTranscript = "transcript"
@@ -180,6 +186,118 @@ func GradeTranscriptCommandTrace(task Task, artifacts RunArtifacts) (GraderResul
 	return result, nil
 }
 
+// CommandOutputEvidence captures the command execution result for the outcome command grader.
+type CommandOutputEvidence struct {
+	Command          []string `json:"command"`
+	ExpandedCommand  []string `json:"expanded_command"`
+	ExitCode         int      `json:"exit_code"`
+	ExpectedExitCode int      `json:"expected_exit_code"`
+	Stdout           string   `json:"stdout"`
+	Stderr           string   `json:"stderr"`
+	TimedOut         bool     `json:"timed_out,omitempty"`
+}
+
+// GradeOutcomeCommandOutput runs a command against the workspace and checks its output.
+func GradeOutcomeCommandOutput(ctx context.Context, task Task, artifacts RunArtifacts) (GraderResult, error) {
+	cfg := task.Graders.OutcomeCommandOutput
+	if len(cfg.Command) == 0 {
+		return GraderResult{}, fmt.Errorf("grade outcome command output: command is empty")
+	}
+
+	// Expand {{workspace}} template variable in all command arguments.
+	expanded := make([]string, len(cfg.Command))
+	for i, arg := range cfg.Command {
+		expanded[i] = strings.ReplaceAll(arg, "{{workspace}}", artifacts.WorkspaceRoot)
+	}
+
+	// Apply timeout.
+	timeout := 30 * time.Second
+	if cfg.TimeoutSeconds > 0 {
+		timeout = time.Duration(cfg.TimeoutSeconds) * time.Second
+	}
+	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(cmdCtx, expanded[0], expanded[1:]...)
+	cmd.Dir = artifacts.WorkspaceRoot
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	runErr := cmd.Run()
+
+	exitCode := 0
+	timedOut := false
+	if runErr != nil {
+		if cmdCtx.Err() == context.DeadlineExceeded {
+			timedOut = true
+			exitCode = -1
+		} else {
+			var exitErr *exec.ExitError
+			if errors.As(runErr, &exitErr) {
+				exitCode = exitErr.ExitCode()
+			} else {
+				return GraderResult{}, fmt.Errorf("grade outcome command output: %w", runErr)
+			}
+		}
+	}
+
+	evidence := CommandOutputEvidence{
+		Command:          append([]string(nil), cfg.Command...),
+		ExpandedCommand:  expanded,
+		ExitCode:         exitCode,
+		ExpectedExitCode: cfg.ExpectedExitCode,
+		Stdout:           stdout.String(),
+		Stderr:           stderr.String(),
+		TimedOut:         timedOut,
+	}
+
+	result := GraderResult{
+		GraderID:   outcomeCommandOutputGraderID,
+		TargetKind: graderTargetOutcome,
+		Passed:     true,
+		Evidence:   evidence,
+	}
+
+	// Check: timeout
+	if timedOut {
+		result.Passed = false
+		result.Message = fmt.Sprintf("command timed out after %s", timeout)
+		return result, nil
+	}
+
+	// Check: exit code
+	if exitCode != cfg.ExpectedExitCode {
+		result.Passed = false
+		result.Message = fmt.Sprintf("exit code = %d, want %d", exitCode, cfg.ExpectedExitCode)
+		return result, nil
+	}
+
+	// Check: stdout contains
+	stdoutStr := stdout.String()
+	for _, pattern := range cfg.StdoutContains {
+		if !strings.Contains(stdoutStr, pattern) {
+			result.Passed = false
+			result.Message = fmt.Sprintf("stdout does not contain %q", pattern)
+			return result, nil
+		}
+	}
+
+	// Check: stderr must not contain
+	stderrStr := stderr.String()
+	for _, pattern := range cfg.StderrMustNotContain {
+		if strings.Contains(stderrStr, pattern) {
+			result.Passed = false
+			result.Message = fmt.Sprintf("stderr contains forbidden pattern %q", pattern)
+			return result, nil
+		}
+	}
+
+	result.Message = "command output matches"
+	return result, nil
+}
+
 // EvaluateTaskPassPolicy applies the first-wave required-grader pass policy.
 func EvaluateTaskPassPolicy(task Task, graderResults []GraderResult) TrialPolicyResult {
 	resultsByID := make(map[string]GraderResult, len(graderResults))
@@ -187,7 +305,7 @@ func EvaluateTaskPassPolicy(task Task, graderResults []GraderResult) TrialPolicy
 		resultsByID[result.GraderID] = result
 	}
 
-	failed := make([]GraderResult, 0, 2)
+	failed := make([]GraderResult, 0, 3)
 	for _, spec := range []struct {
 		id       string
 		target   string
@@ -211,6 +329,12 @@ func EvaluateTaskPassPolicy(task Task, graderResults []GraderResult) TrialPolicy
 			target:   graderTargetTranscript,
 			enabled:  task.Graders.TranscriptCommandTrace.Enabled,
 			required: task.Graders.TranscriptCommandTrace.Required,
+		},
+		{
+			id:       outcomeCommandOutputGraderID,
+			target:   graderTargetOutcome,
+			enabled:  task.Graders.OutcomeCommandOutput.Enabled,
+			required: task.Graders.OutcomeCommandOutput.Required,
 		},
 	} {
 		if !spec.enabled || !spec.required {
@@ -237,7 +361,7 @@ func EvaluateTaskPassPolicy(task Task, graderResults []GraderResult) TrialPolicy
 	}
 }
 
-func runTrialGraders(task Task, artifacts RunArtifacts) ([]GraderResult, TrialPolicyResult, error) {
+func runTrialGraders(ctx context.Context, task Task, artifacts RunArtifacts) ([]GraderResult, TrialPolicyResult, error) {
 	results := make([]GraderResult, 0, 3)
 	if task.Graders.OutcomeWorkspaceSnapshot.Enabled {
 		result, err := GradeOutcomeWorkspaceSnapshot(task, artifacts)
@@ -255,6 +379,13 @@ func runTrialGraders(task Task, artifacts RunArtifacts) ([]GraderResult, TrialPo
 	}
 	if task.Graders.TranscriptCommandTrace.Enabled {
 		result, err := GradeTranscriptCommandTrace(task, artifacts)
+		if err != nil {
+			return nil, TrialPolicyResult{}, err
+		}
+		results = append(results, result)
+	}
+	if task.Graders.OutcomeCommandOutput.Enabled {
+		result, err := GradeOutcomeCommandOutput(ctx, task, artifacts)
 		if err != nil {
 			return nil, TrialPolicyResult{}, err
 		}

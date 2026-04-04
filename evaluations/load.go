@@ -40,6 +40,7 @@ type graderJSON struct {
 	TranscriptCommandTrace   *transcriptCommandTraceJSON   `json:"transcript_command_trace"`
 	OutcomeWorkspaceSnapshot *outcomeWorkspaceSnapshotJSON `json:"outcome_workspace_snapshot"`
 	OutcomeDiff              *outcomeDiffJSON              `json:"outcome_diff"`
+	OutcomeCommandOutput     *outcomeCommandOutputJSON     `json:"outcome_command_output"`
 }
 
 type outcomeDiffJSON struct {
@@ -58,6 +59,16 @@ type transcriptCommandTraceJSON struct {
 type outcomeWorkspaceSnapshotJSON struct {
 	Enabled  *bool `json:"enabled"`
 	Required *bool `json:"required"`
+}
+
+type outcomeCommandOutputJSON struct {
+	Enabled              *bool    `json:"enabled"`
+	Required             *bool    `json:"required"`
+	Command              []string `json:"command"`
+	ExpectedExitCode     *int     `json:"expected_exit_code"`
+	StdoutContains       []string `json:"stdout_contains"`
+	StderrMustNotContain []string `json:"stderr_must_not_contain"`
+	TimeoutSeconds       *int     `json:"timeout_seconds"`
 }
 
 // LoadSuite loads and validates a suite definition from suite.json or a suite directory.
@@ -294,10 +305,15 @@ func validateGradersJSON(path string, raw graderJSON) (GraderConfig, error) {
 			return GraderConfig{}, err
 		}
 	}
+	outcomeCommandOutput, err := validateOutcomeCommandOutputJSON(path, raw.OutcomeCommandOutput)
+	if err != nil {
+		return GraderConfig{}, err
+	}
 	return GraderConfig{
 		OutcomeWorkspaceSnapshot: outcomeWorkspaceSnapshot,
 		OutcomeDiff:              outcomeDiff,
 		TranscriptCommandTrace:   transcriptCommandTrace,
+		OutcomeCommandOutput:     outcomeCommandOutput,
 	}, nil
 }
 
@@ -362,6 +378,48 @@ func validateTranscriptCommandTraceJSON(path string, raw *transcriptCommandTrace
 		ExpectedCommands:  append([]string(nil), raw.ExpectedCommands...),
 		ExpectedExitCodes: append([]int(nil), raw.ExpectedExitCodes...),
 		MaxCommandCount:   maxCommandCount,
+	}, nil
+}
+
+func validateOutcomeCommandOutputJSON(path string, raw *outcomeCommandOutputJSON) (OutcomeCommandOutputConfig, error) {
+	if raw == nil {
+		return OutcomeCommandOutputConfig{}, nil
+	}
+	enabled, err := requiredBool(path, "graders.outcome_command_output.enabled", raw.Enabled)
+	if err != nil {
+		return OutcomeCommandOutputConfig{}, err
+	}
+	required, err := requiredBool(path, "graders.outcome_command_output.required", raw.Required)
+	if err != nil {
+		return OutcomeCommandOutputConfig{}, err
+	}
+	if enabled && len(raw.Command) == 0 {
+		return OutcomeCommandOutputConfig{}, fmt.Errorf(
+			"%s: graders.outcome_command_output.command must be non-empty when enabled", path)
+	}
+
+	expectedExitCode := 0
+	if raw.ExpectedExitCode != nil {
+		expectedExitCode = *raw.ExpectedExitCode
+	}
+
+	timeoutSeconds := 0
+	if raw.TimeoutSeconds != nil {
+		if *raw.TimeoutSeconds <= 0 {
+			return OutcomeCommandOutputConfig{}, fmt.Errorf(
+				"%s: graders.outcome_command_output.timeout_seconds must be > 0", path)
+		}
+		timeoutSeconds = *raw.TimeoutSeconds
+	}
+
+	return OutcomeCommandOutputConfig{
+		Enabled:              enabled,
+		Required:             required,
+		Command:              append([]string(nil), raw.Command...),
+		ExpectedExitCode:     expectedExitCode,
+		StdoutContains:       append([]string(nil), raw.StdoutContains...),
+		StderrMustNotContain: append([]string(nil), raw.StderrMustNotContain...),
+		TimeoutSeconds:       timeoutSeconds,
 	}, nil
 }
 
