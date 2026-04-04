@@ -39,6 +39,12 @@ type taskJSON struct {
 type graderJSON struct {
 	TranscriptCommandTrace   *transcriptCommandTraceJSON   `json:"transcript_command_trace"`
 	OutcomeWorkspaceSnapshot *outcomeWorkspaceSnapshotJSON `json:"outcome_workspace_snapshot"`
+	OutcomeDiff              *outcomeDiffJSON              `json:"outcome_diff"`
+}
+
+type outcomeDiffJSON struct {
+	Enabled  *bool `json:"enabled"`
+	Required *bool `json:"required"`
 }
 
 type transcriptCommandTraceJSON struct {
@@ -264,23 +270,40 @@ func validateTaskJSON(path string, raw taskJSON) (Task, error) {
 }
 
 func validateGradersJSON(path string, raw graderJSON) (GraderConfig, error) {
-	outcomeWorkspaceSnapshot, err := validateOutcomeWorkspaceSnapshotJSON(path, raw.OutcomeWorkspaceSnapshot)
-	if err != nil {
-		return GraderConfig{}, err
+	var outcomeWorkspaceSnapshot OutcomeWorkspaceSnapshotConfig
+	if raw.OutcomeWorkspaceSnapshot != nil {
+		var err error
+		outcomeWorkspaceSnapshot, err = validateOutcomeWorkspaceSnapshotJSON(path, raw.OutcomeWorkspaceSnapshot)
+		if err != nil {
+			return GraderConfig{}, err
+		}
 	}
-	transcriptCommandTrace, err := validateTranscriptCommandTraceJSON(path, raw.TranscriptCommandTrace)
-	if err != nil {
-		return GraderConfig{}, err
+	var outcomeDiff OutcomeDiffConfig
+	if raw.OutcomeDiff != nil {
+		var err error
+		outcomeDiff, err = validateOutcomeDiffJSON(path, raw.OutcomeDiff)
+		if err != nil {
+			return GraderConfig{}, err
+		}
+	}
+	var transcriptCommandTrace TranscriptCommandTraceConfig
+	if raw.TranscriptCommandTrace != nil {
+		var err error
+		transcriptCommandTrace, err = validateTranscriptCommandTraceJSON(path, raw.TranscriptCommandTrace)
+		if err != nil {
+			return GraderConfig{}, err
+		}
 	}
 	return GraderConfig{
 		OutcomeWorkspaceSnapshot: outcomeWorkspaceSnapshot,
+		OutcomeDiff:              outcomeDiff,
 		TranscriptCommandTrace:   transcriptCommandTrace,
 	}, nil
 }
 
 func validateOutcomeWorkspaceSnapshotJSON(path string, raw *outcomeWorkspaceSnapshotJSON) (OutcomeWorkspaceSnapshotConfig, error) {
 	if raw == nil {
-		return OutcomeWorkspaceSnapshotConfig{}, fmt.Errorf("%s: missing required grader %q", path, "outcome_workspace_snapshot")
+		return OutcomeWorkspaceSnapshotConfig{}, nil
 	}
 	enabled, err := requiredBool(path, "graders.outcome_workspace_snapshot.enabled", raw.Enabled)
 	if err != nil {
@@ -296,9 +319,27 @@ func validateOutcomeWorkspaceSnapshotJSON(path string, raw *outcomeWorkspaceSnap
 	}, nil
 }
 
+func validateOutcomeDiffJSON(path string, raw *outcomeDiffJSON) (OutcomeDiffConfig, error) {
+	if raw == nil {
+		return OutcomeDiffConfig{}, nil
+	}
+	enabled, err := requiredBool(path, "graders.outcome_diff.enabled", raw.Enabled)
+	if err != nil {
+		return OutcomeDiffConfig{}, err
+	}
+	required, err := requiredBool(path, "graders.outcome_diff.required", raw.Required)
+	if err != nil {
+		return OutcomeDiffConfig{}, err
+	}
+	return OutcomeDiffConfig{
+		Enabled:  enabled,
+		Required: required,
+	}, nil
+}
+
 func validateTranscriptCommandTraceJSON(path string, raw *transcriptCommandTraceJSON) (TranscriptCommandTraceConfig, error) {
 	if raw == nil {
-		return TranscriptCommandTraceConfig{}, fmt.Errorf("%s: missing required grader %q", path, "transcript_command_trace")
+		return TranscriptCommandTraceConfig{}, nil
 	}
 	enabled, err := requiredBool(path, "graders.transcript_command_trace.enabled", raw.Enabled)
 	if err != nil {

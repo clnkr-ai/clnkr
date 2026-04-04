@@ -11,6 +11,7 @@ import (
 
 const (
 	outcomeWorkspaceSnapshotGraderID = "outcome_workspace_snapshot"
+	outcomeDiffGraderID              = "outcome_diff"
 	transcriptCommandTraceGraderID   = "transcript_command_trace"
 
 	graderTargetOutcome    = "outcome"
@@ -62,6 +63,34 @@ func GradeOutcomeWorkspaceSnapshot(task Task, artifacts RunArtifacts) (GraderRes
 	result.Message = message
 	if len(evidence.Missing) > 0 || len(evidence.Unexpected) > 0 || len(evidence.Mismatched) > 0 {
 		result.Passed = false
+	}
+	return result, nil
+}
+
+// OutcomeDiffEvidence captures the git diff produced by the agent.
+type OutcomeDiffEvidence struct {
+	DiffSize int  `json:"diff_size"`
+	HasDiff  bool `json:"has_diff"`
+}
+
+// GradeOutcomeDiff checks that the agent produced a non-empty git diff.
+func GradeOutcomeDiff(task Task, artifacts RunArtifacts) (GraderResult, error) {
+	diff := strings.TrimSpace(artifacts.GitDiff)
+	evidence := OutcomeDiffEvidence{
+		DiffSize: len(diff),
+		HasDiff:  diff != "",
+	}
+
+	result := GraderResult{
+		GraderID:   outcomeDiffGraderID,
+		TargetKind: graderTargetOutcome,
+		Passed:     diff != "",
+		Evidence:   evidence,
+	}
+	if diff == "" {
+		result.Message = "agent produced no diff"
+	} else {
+		result.Message = fmt.Sprintf("agent produced %d byte diff", len(diff))
 	}
 	return result, nil
 }
@@ -172,6 +201,12 @@ func EvaluateTaskPassPolicy(task Task, graderResults []GraderResult) TrialPolicy
 			required: task.Graders.OutcomeWorkspaceSnapshot.Required,
 		},
 		{
+			id:       outcomeDiffGraderID,
+			target:   graderTargetOutcome,
+			enabled:  task.Graders.OutcomeDiff.Enabled,
+			required: task.Graders.OutcomeDiff.Required,
+		},
+		{
 			id:       transcriptCommandTraceGraderID,
 			target:   graderTargetTranscript,
 			enabled:  task.Graders.TranscriptCommandTrace.Enabled,
@@ -203,9 +238,16 @@ func EvaluateTaskPassPolicy(task Task, graderResults []GraderResult) TrialPolicy
 }
 
 func runTrialGraders(task Task, artifacts RunArtifacts) ([]GraderResult, TrialPolicyResult, error) {
-	results := make([]GraderResult, 0, 2)
+	results := make([]GraderResult, 0, 3)
 	if task.Graders.OutcomeWorkspaceSnapshot.Enabled {
 		result, err := GradeOutcomeWorkspaceSnapshot(task, artifacts)
+		if err != nil {
+			return nil, TrialPolicyResult{}, err
+		}
+		results = append(results, result)
+	}
+	if task.Graders.OutcomeDiff.Enabled {
+		result, err := GradeOutcomeDiff(task, artifacts)
 		if err != nil {
 			return nil, TrialPolicyResult{}, err
 		}

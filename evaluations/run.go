@@ -7,9 +7,55 @@ import (
 	"path/filepath"
 )
 
+// RunSuiteOption configures RunSuite behavior.
+type RunSuiteOption func(*runSuiteOptions)
+
+type runSuiteOptions struct {
+	evalsDir   string
+	outputDir  string
+	binaryPath string
+}
+
+// WithSuiteEvalsDir overrides the default evaluations directory
+// (repoRoot/evaluations).
+func WithSuiteEvalsDir(path string) RunSuiteOption {
+	return func(o *runSuiteOptions) {
+		o.evalsDir = path
+	}
+}
+
+// WithSuiteOutputDir overrides the default output directory for trials and
+// reports (defaults to the evals dir).
+func WithSuiteOutputDir(path string) RunSuiteOption {
+	return func(o *runSuiteOptions) {
+		o.outputDir = path
+	}
+}
+
+// WithSuiteBinary overrides the clnku binary path for the harness.
+func WithSuiteBinary(path string) RunSuiteOption {
+	return func(o *runSuiteOptions) {
+		o.binaryPath = path
+	}
+}
+
 // RunSuite executes one evaluation suite and writes canonical trial bundles and run exports.
-func RunSuite(ctx context.Context, repoRoot, suiteID string, cfg RunConfig) (RunReport, error) {
-	suiteRoot := filepath.Join(repoRoot, "evaluations", "suites", suiteID)
+func RunSuite(ctx context.Context, repoRoot, suiteID string, cfg RunConfig, opts ...RunSuiteOption) (RunReport, error) {
+	var o runSuiteOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
+	evalsDir := o.evalsDir
+	if evalsDir == "" {
+		evalsDir = filepath.Join(repoRoot, "evaluations")
+	}
+	outputDir := o.outputDir
+	if outputDir == "" {
+		outputDir = evalsDir
+	}
+
+	suiteRoot := filepath.Join(evalsDir, "suites", suiteID)
 	suite, err := LoadSuite(suiteRoot)
 	if err != nil {
 		return RunReport{}, fmt.Errorf("run suite load suite %q: %w", suiteID, err)
@@ -19,14 +65,19 @@ func RunSuite(ctx context.Context, repoRoot, suiteID string, cfg RunConfig) (Run
 		return RunReport{}, fmt.Errorf("run suite load tasks for %q: %w", suiteID, err)
 	}
 
-	if err := resetOutputDir(filepath.Join(repoRoot, "evaluations", "trials")); err != nil {
+	if err := resetOutputDir(filepath.Join(outputDir, "trials")); err != nil {
 		return RunReport{}, fmt.Errorf("run suite reset trial output: %w", err)
 	}
-	if err := resetOutputDir(filepath.Join(repoRoot, "evaluations", "reports")); err != nil {
+	if err := resetOutputDir(filepath.Join(outputDir, "reports")); err != nil {
 		return RunReport{}, fmt.Errorf("run suite reset report output: %w", err)
 	}
 
-	harness, err := NewHarness(ctx, repoRoot)
+	var harnessOpts []HarnessOption
+	if o.binaryPath != "" {
+		harnessOpts = append(harnessOpts, WithBinary(o.binaryPath))
+	}
+	harnessOpts = append(harnessOpts, WithEvalsDir(evalsDir))
+	harness, err := NewHarness(ctx, repoRoot, harnessOpts...)
 	if err != nil {
 		return RunReport{}, fmt.Errorf("run suite create harness: %w", err)
 	}
@@ -34,8 +85,8 @@ func RunSuite(ctx context.Context, repoRoot, suiteID string, cfg RunConfig) (Run
 		_ = harness.Close()
 	}()
 
-	trialsRoot := filepath.Join(repoRoot, "evaluations", "trials")
-	reportsRoot := filepath.Join(repoRoot, "evaluations", "reports")
+	trialsRoot := filepath.Join(outputDir, "trials")
+	reportsRoot := filepath.Join(outputDir, "reports")
 
 	bundles := make([]Bundle, 0, len(tasks)*suite.TrialsPerTask)
 	failedTasks := 0
