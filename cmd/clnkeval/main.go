@@ -126,6 +126,10 @@ Flags:
 		suiteOpts = append(suiteOpts, evaluations.WithSuiteOutputDir(abs))
 	}
 
+	suiteOpts = append(suiteOpts, evaluations.WithProgress(func(msg string) {
+		_, _ = fmt.Fprintf(stderr, "clnkeval: %s\n", msg)
+	}))
+
 	report, err := evaluations.RunSuite(context.Background(), cwd, *suiteID, cfg, suiteOpts...)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)

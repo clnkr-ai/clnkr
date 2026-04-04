@@ -28,8 +28,8 @@ func TestRun(t *testing.T) {
 		if got, want := stdout.String(), "suite=default tasks=1 trials=1 passed=1 failed=0\n"; got != want {
 			t.Fatalf("stdout = %q, want %q", got, want)
 		}
-		if stderr.Len() != 0 {
-			t.Fatalf("stderr = %q, want empty", stderr.String())
+		if !strings.Contains(stderr.String(), "clnkeval:") {
+			t.Fatalf("stderr = %q, want progress output", stderr.String())
 		}
 	})
 

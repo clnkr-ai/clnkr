@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // RunSuiteOption configures RunSuite behavior.
@@ -14,6 +15,23 @@ type runSuiteOptions struct {
 	evalsDir   string
 	outputDir  string
 	binaryPath string
+	progress   ProgressFunc
+}
+
+// ProgressFunc receives progress messages during suite execution.
+type ProgressFunc func(msg string)
+
+// WithProgress sets a callback for suite execution progress.
+func WithProgress(fn ProgressFunc) RunSuiteOption {
+	return func(o *runSuiteOptions) {
+		o.progress = fn
+	}
+}
+
+func (o *runSuiteOptions) emit(format string, args ...any) {
+	if o.progress != nil {
+		o.progress(fmt.Sprintf(format, args...))
+	}
 }
 
 // WithSuiteEvalsDir overrides the default evaluations directory
@@ -75,6 +93,8 @@ func RunSuite(ctx context.Context, repoRoot, suiteID string, cfg RunConfig, opts
 	var harnessOpts []HarnessOption
 	if o.binaryPath != "" {
 		harnessOpts = append(harnessOpts, WithBinary(o.binaryPath))
+	} else if repoRoot != "" {
+		o.emit("building clnku from source...")
 	}
 	harnessOpts = append(harnessOpts, WithEvalsDir(evalsDir))
 	harness, err := NewHarness(ctx, repoRoot, harnessOpts...)
@@ -84,6 +104,7 @@ func RunSuite(ctx context.Context, repoRoot, suiteID string, cfg RunConfig, opts
 	defer func() {
 		_ = harness.Close()
 	}()
+	o.emit("binary ready")
 
 	trialsRoot := filepath.Join(outputDir, "trials")
 	reportsRoot := filepath.Join(outputDir, "reports")
@@ -93,10 +114,16 @@ func RunSuite(ctx context.Context, repoRoot, suiteID string, cfg RunConfig, opts
 	for taskIndex, task := range tasks {
 		taskFailed := false
 		for trialAttempt := 0; trialAttempt < suite.TrialsPerTask; trialAttempt++ {
+			o.emit("task %d/%d %q trial %d/%d ...",
+				taskIndex+1, len(tasks), task.ID,
+				trialAttempt+1, suite.TrialsPerTask)
+
+			trialStart := time.Now()
 			artifacts, err := harness.RunTrial(ctx, suite, task, cfg)
 			if err != nil {
 				return RunReport{}, fmt.Errorf("run suite trial task %q attempt %d: %w", task.ID, trialAttempt, err)
 			}
+			elapsed := time.Since(trialStart).Truncate(100 * time.Millisecond)
 
 			deterministicTrialID := canonicalTrialID(suite.ID, taskIndex, trialAttempt, task.ID)
 			canonicalBundleRoot := filepath.Join(trialsRoot, deterministicTrialID)
@@ -115,9 +142,15 @@ func RunSuite(ctx context.Context, repoRoot, suiteID string, cfg RunConfig, opts
 			}
 			bundles = append(bundles, loaded)
 
+			status := "passed"
 			if !bundle.TrialPassed {
+				status = "failed"
 				taskFailed = true
 			}
+			o.emit("task %d/%d %q trial %d/%d %s (%s)",
+				taskIndex+1, len(tasks), task.ID,
+				trialAttempt+1, suite.TrialsPerTask,
+				status, elapsed)
 		}
 
 		if taskFailed {
