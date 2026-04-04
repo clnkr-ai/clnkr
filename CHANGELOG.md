@@ -3,6 +3,8 @@
 ## 1.4.5 (2026-04-04)
 
 - Add interactive progress output to clnkeval
+- Update CHANGELOG.md for 1.4.4
+- Update CHANGELOG.md for 1.4.4
 
 ## 1.4.4 (2026-04-04)
 
