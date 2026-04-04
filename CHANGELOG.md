@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.5 (2026-04-04)
+
+- Add interactive progress output to clnkeval
+
 ## 1.4.4 (2026-04-04)
 
 - Improve clnkeval CLI UX: add --help, --version, and usage text
