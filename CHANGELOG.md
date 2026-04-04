@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.4.3 (2026-04-04)
+
+- Add outcome_command_output grader for language-agnostic workspace verification
+- Support running evals against external repos with pre-installed binary
+
+## 1.4.2 (2026-04-04)
+
+
+## 1.4.1 (2026-04-04)
+
+- Use fmt.Fprintf in ExportJUnit
+- Ship clnkeval as a first-class binary alongside clnkr and clnku
+- Add evaluations runtime and mock-provider mode
+- Update CHANGELOG.md for 1.4.0
+- Update CHANGELOG.md for 1.4.0
+
 ## 1.4.0 (2026-04-01)
 
 - Retry OpenAI rate limit responses
