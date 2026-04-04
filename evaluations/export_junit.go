@@ -16,16 +16,16 @@ func ExportJUnit(report RunReport, dst string) error {
 
 	var buf bytes.Buffer
 	buf.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
-	buf.WriteString(fmt.Sprintf(`<testsuites tests="%d" failures="%d" errors="0" skipped="0">`+"\n", report.TrialCount, report.Failed))
+	_, _ = fmt.Fprintf(&buf, `<testsuites tests="%d" failures="%d" errors="0" skipped="0">`+"\n", report.TrialCount, report.Failed)
 	for _, task := range report.Tasks {
-		buf.WriteString(fmt.Sprintf(`  <testsuite name="%s" tests="%d" failures="%d" errors="0" skipped="0" time="%0.3f">`+"\n",
-			xmlEscape(task.TaskID), task.TrialCount, task.Failed, taskDurationSeconds(task)))
+		_, _ = fmt.Fprintf(&buf, `  <testsuite name="%s" tests="%d" failures="%d" errors="0" skipped="0" time="%0.3f">`+"\n",
+			xmlEscape(task.TaskID), task.TrialCount, task.Failed, taskDurationSeconds(task))
 		for _, trial := range task.Trials {
-			buf.WriteString(fmt.Sprintf(`    <testcase classname="%s" name="%s" time="%0.3f">`+"\n",
-				xmlEscape(report.SuiteID+"."+task.TaskID), xmlEscape(trial.TrialID), trialDurationSeconds(trial)))
+			_, _ = fmt.Fprintf(&buf, `    <testcase classname="%s" name="%s" time="%0.3f">`+"\n",
+				xmlEscape(report.SuiteID+"."+task.TaskID), xmlEscape(trial.TrialID), trialDurationSeconds(trial))
 			if !trial.Passed {
 				message := trialFailureMessage(trial)
-				buf.WriteString(fmt.Sprintf(`      <failure message="%s">`, xmlEscape(message)))
+				_, _ = fmt.Fprintf(&buf, `      <failure message="%s">`, xmlEscape(message))
 				buf.WriteString(xmlEscape(message))
 				buf.WriteString(`</failure>` + "\n")
 			}
