@@ -3,6 +3,7 @@
 ## 1.4.4 (2026-04-04)
 
 - Improve clnkeval CLI UX: add --help, --version, and usage text
+- Update CHANGELOG.md for 1.4.3
 
 ## 1.4.3 (2026-04-04)
 
