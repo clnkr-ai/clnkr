@@ -2,18 +2,19 @@
 
 ## Overview
 
-clnkr is a coding agent CLI that queries LLMs and executes bash commands in a loop. Core library is stdlib only. Talks to the Anthropic Messages API and any OpenAI-compatible endpoint. Ships three binaries: `clnku` (plain CLI), `clnkr` (TUI frontend), and `clnkeval` (evaluation runner).
+clnkr is a coding agent CLI that queries LLMs and executes bash commands in a loop. Core library is stdlib only. Talks to the Anthropic Messages API and any OpenAI-compatible endpoint. This repo ships two binaries: `clnku` (plain CLI) and `clnkr` (TUI frontend). Evaluations run through the standalone `clankerval` project, which also provides `clnkeval` as a compatibility alias.
 
 ## Commands
 
 ```bash
-make build          # Build all binaries (default target)
+make build          # Build shipped binaries (default target)
 make test           # Run all tests (both modules)
 make check          # Run the full quality suite
 make man            # Generate man page from doc/clnkr.1.md
 make docs           # Build the documentation site
 make docs-serve     # Run the documentation site locally
 make help           # List all targets
+./scripts/install-clankerval.sh  # Install the pinned external eval runner
 
 # Private agent/contributor helpers
 make _fmt           # Format source (both modules)
@@ -45,24 +46,23 @@ make build VERSION=0.2.0
 
 ## Architecture
 
-The core is an importable library at module root (`github.com/clnkr-ai/clnkr`). Three CLI consumers ship in the same repo.
+The core is an importable library at module root (`github.com/clnkr-ai/clnkr`). Two CLI consumers ship in this repo. The checked-in `evaluations/` tree is consumed by the external `clankerval` runner.
 
-**Package structure:**
+**Key package structure:**
 ```
 clnkr/                  # core: types, interfaces, Agent, events (root go.mod, stdlib only)
 ├── anthropic/          # Anthropic Messages API adapter
 ├── openai/             # OpenAI-compatible adapter
 ├── session/            # Session persistence (XDG state, save/load/list)
-├── evaluations/        # Evaluation framework
+├── evaluations/        # Checked-in evaluation suites consumed by clankerval
 ├── cmd/clnku/          # Plain CLI (under root go.mod, no external deps)
-├── cmd/clnkeval/       # Evaluation runner (under root go.mod)
 └── cmd/clnkr/          # TUI frontend (own go.mod with charm deps)
 ```
 
-**Three binaries:**
+**Shipped binaries:**
 - `cmd/clnku/` — plain CLI (under root go.mod, stdlib only).
-- `cmd/clnkeval/` — evaluation runner (under root go.mod).
 - `cmd/clnkr/` — bubbletea TUI (own go.mod with charm v2 deps). Detects non-TTY stdout and falls back to plain-text rendering.
+- `clankerval` — external evaluation runner installed separately. `clnkeval` is its compatibility alias.
 - Do not assume `clnkr` and `clnku` need feature parity. Rich workflow/UI features may belong only in `cmd/clnkr`; keep `cmd/clnku` minimal unless the task explicitly calls for both. Treat frontend-specific slash/workflow commands as TUI policy first, not shared core behavior.
 
 **Multi-module:** `cmd/clnkr/` has its own `go.mod`. Root `go test ./...` does not descend into it. Use `make test` to test both modules. `go install github.com/clnkr-ai/clnkr/cmd/clnkr@latest` does NOT work due to replace directive — use `make build` or install from releases.
@@ -145,6 +145,6 @@ Workflow:
 - Sessions auto-save on exit in conversational mode (no `-p` flag); stored in `$XDG_STATE_HOME/clnkr/projects/`
 ## CI
 
-GitHub Actions runs on push to `main` and PRs targeting `main`. Single job: lint, test (with `-race`), build.
+GitHub Actions runs on push to `main` and PRs targeting `main`. The main `check` job runs lint, tests (with `-race`), build, and docs. A separate `evaluations` job installs the pinned external runner before running `make evaluations`.
 
 **Local setup:** Run `make _hooks` to point Git at the repo-tracked `.githooks/` directory if you want the local pre-commit hook enabled. golangci-lint is required for `make check` — install with `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` or `brew install golangci-lint`.

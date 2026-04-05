@@ -30,6 +30,14 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: cmd/clnkr/go.sum
 
+      - name: Add local user bin to PATH
+        if: steps.config.outputs.configured == 'true'
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install clankerval
+        if: steps.config.outputs.configured == 'true'
+        run: ./scripts/install-clankerval.sh
+
       - name: Run live evaluations
         if: steps.config.outputs.configured == 'true'
         run: |

@@ -8,7 +8,7 @@ Platform note: today `clnkr` is Unix-only. The executor assumes `bash`, process 
 
 A minimal coding agent. Query an LLM, execute bash commands, repeat. Supports the Anthropic Messages API and any OpenAI-compatible endpoint (vLLM, Ollama, LiteLLM, etc.).
 
-Ships three binaries: **clnkr** (TUI), **clnku** (plain CLI), and **clnkeval** (evaluation runner). A **clnk** symlink points to clnkr for convenience.
+Ships two binaries: **clnkr** (TUI) and **clnku** (plain CLI). The evaluation runner lives in the separate **clankerval** project and is installed independently. `clnkeval` remains a compatibility alias to that standalone runner. A **clnk** symlink points to clnkr for convenience.
 
 <img width="512" height="512" alt="Isildur cut the Ring (the ring here is bash -jokeexplainer)from his hand with the hilt-shard of his father's sword, and took it for his own." src="https://github.com/user-attachments/assets/7c9d648c-f5b9-4610-a311-04f5af37b364" />
 
@@ -21,6 +21,9 @@ go install github.com/clnkr-ai/clnkr/cmd/clnku@latest
 
 # TUI requires building from source (due to replace directive)
 make build
+
+# Install the pinned external evaluation runner when you need evals
+./scripts/install-clankerval.sh
 ```
 
 Or build from source:
@@ -204,12 +207,20 @@ The LLM is the agent. clnkr is the scaffold.
 
 ```bash
 make help       # Show all targets
-make build      # Build all binaries
+make build      # Build shipped binaries
 make check      # Full quality suite
 make test       # Tests only
-make evaluations      # Run the mock-provider evaluation suite
-make evaluations-live # Run the live-provider evaluation suite
+make evaluations      # Run the mock-provider evaluation suite (requires clankerval)
+make evaluations-live # Run the live-provider evaluation suite (requires clankerval)
 make docs       # Build documentation site
+```
+
+Install the pinned runner with `./scripts/install-clankerval.sh`. The canonical command name is `clankerval`; `clnkeval` is accepted as a compatibility alias to the same standalone runner.
+
+For example:
+
+```bash
+clankerval run --suite default
 ```
 
 Evaluation suite layout, bundle contents, and maintenance workflows are documented in `evaluations/README.md`.
