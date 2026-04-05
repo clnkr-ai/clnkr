@@ -11,10 +11,11 @@ import (
 
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/openai"
+	"github.com/clnkr-ai/clnkr/turnschema"
 )
 
 func TestModel(t *testing.T) {
-	t.Run("prepends system message", func(t *testing.T) {
+	t.Run("uses structured output request body and prepends system message", func(t *testing.T) {
 		var gotBody map[string]interface{}
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -22,7 +23,7 @@ func TestModel(t *testing.T) {
 			_ = json.Unmarshal(body, &gotBody)
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"choices": []map[string]interface{}{
-					{"message": map[string]string{"role": "assistant", "content": "resp"}},
+					{"message": map[string]string{"role": "assistant", "content": openAIStructuredDone("ok")}},
 				},
 				"usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 20},
 			})
@@ -39,13 +40,41 @@ func TestModel(t *testing.T) {
 		if first["role"] != "system" || first["content"] != "sys prompt" {
 			t.Errorf("first message should be system prompt, got %v", first)
 		}
+		responseFormat, ok := gotBody["response_format"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("response_format = %T, want map[string]interface{}", gotBody["response_format"])
+		}
+		if responseFormat["type"] != "json_schema" {
+			t.Fatalf("response_format.type = %v, want json_schema", responseFormat["type"])
+		}
+		jsonSchema, ok := responseFormat["json_schema"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("response_format.json_schema = %T, want map[string]interface{}", responseFormat["json_schema"])
+		}
+		if jsonSchema["strict"] != true {
+			t.Fatalf("response_format.json_schema.strict = %v, want true", jsonSchema["strict"])
+		}
+		gotSchemaJSON, err := json.Marshal(jsonSchema["schema"])
+		if err != nil {
+			t.Fatalf("marshal got schema: %v", err)
+		}
+		wantSchemaJSON, err := json.Marshal(turnschema.Schema())
+		if err != nil {
+			t.Fatalf("marshal want schema: %v", err)
+		}
+		if string(gotSchemaJSON) != string(wantSchemaJSON) {
+			t.Fatalf("schema mismatch\n got: %s\nwant: %s", gotSchemaJSON, wantSchemaJSON)
+		}
 	})
 
-	t.Run("parses response with usage", func(t *testing.T) {
+	t.Run("returns canonical json text", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"choices": []map[string]interface{}{
-					{"message": map[string]string{"role": "assistant", "content": "hello back"}},
+					{"message": map[string]string{
+						"role":    "assistant",
+						"content": `{"type":"done","command":null,"question":null,"summary":"hello back","reasoning":null}`,
+					}},
 				},
 				"usage": map[string]int{"prompt_tokens": 15, "completion_tokens": 25},
 			})
@@ -57,8 +86,8 @@ func TestModel(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if resp.Message.Content != "hello back" {
-			t.Errorf("got %q, want %q", resp.Message.Content, "hello back")
+		if resp.Message.Content != `{"type":"done","summary":"hello back"}` {
+			t.Errorf("got %q, want %q", resp.Message.Content, `{"type":"done","summary":"hello back"}`)
 		}
 		if resp.Usage.InputTokens != 15 || resp.Usage.OutputTokens != 25 {
 			t.Errorf("got usage %+v, want 15/25", resp.Usage)
@@ -71,7 +100,7 @@ func TestModel(t *testing.T) {
 			gotPath = r.URL.Path
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"choices": []map[string]interface{}{
-					{"message": map[string]string{"role": "assistant", "content": "ok"}},
+					{"message": map[string]string{"role": "assistant", "content": openAIStructuredDone("ok")}},
 				},
 				"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
 			})
@@ -129,7 +158,10 @@ func TestModel(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"choices": []map[string]interface{}{
-					{"message": map[string]string{"role": "assistant", "content": "ok after retry"}},
+					{"message": map[string]string{
+						"role":    "assistant",
+						"content": `{"type":"done","command":null,"question":null,"summary":"ok after retry","reasoning":null}`,
+					}},
 				},
 				"usage": map[string]int{"prompt_tokens": 2, "completion_tokens": 3},
 			})
@@ -144,8 +176,31 @@ func TestModel(t *testing.T) {
 		if attempts != 2 {
 			t.Fatalf("attempt count = %d, want 2", attempts)
 		}
-		if resp.Message.Content != "ok after retry" {
-			t.Fatalf("content = %q, want %q", resp.Message.Content, "ok after retry")
+		if resp.Message.Content != `{"type":"done","summary":"ok after retry"}` {
+			t.Fatalf("content = %q, want %q", resp.Message.Content, `{"type":"done","summary":"ok after retry"}`)
+		}
+	})
+
+	t.Run("fails closed on unsupported structured output backend", func(t *testing.T) {
+		attempts := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			attempts++
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": map[string]interface{}{
+					"message": "response_format json_schema is not supported",
+				},
+			})
+		}))
+		defer server.Close()
+
+		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+		if err == nil {
+			t.Fatal("expected unsupported feature error")
+		}
+		if attempts != 1 {
+			t.Fatalf("attempt count = %d, want 1", attempts)
 		}
 	})
 
@@ -276,4 +331,95 @@ func TestModel(t *testing.T) {
 			t.Error("expected error on empty choices")
 		}
 	})
+
+	t.Run("fails closed on empty choice content", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"message": map[string]string{"role": "assistant", "content": ""}},
+				},
+				"usage": map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
+			})
+		}))
+		defer server.Close()
+
+		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+		if err == nil {
+			t.Fatal("expected empty content error")
+		}
+	})
+
+	t.Run("fails closed on invalid structured payload", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			content string
+		}{
+			{name: "missing summary", content: `{"type":"done"}`},
+			{name: "prose wrapped json", content: "Here is the result:\n{\"type\":\"done\",\"summary\":\"wrapped\"}"},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
+						"choices": []map[string]interface{}{
+							{"message": map[string]string{"role": "assistant", "content": tt.content}},
+						},
+						"usage": map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
+					})
+				}))
+				defer server.Close()
+
+				m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+				_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+				if err == nil {
+					t.Fatal("expected invalid payload error")
+				}
+			})
+		}
+	})
+
+	t.Run("fails closed when response format is ignored", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"message": map[string]string{"role": "assistant", "content": `{"type":"done","summary":"ignored"}`}},
+				},
+				"usage": map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
+			})
+		}))
+		defer server.Close()
+
+		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+		if err == nil {
+			t.Fatal("expected schema-shape error")
+		}
+	})
+
+	t.Run("returns refusal as a distinct error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"message": map[string]string{"role": "assistant", "refusal": "refused"}},
+				},
+				"usage": map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
+			})
+		}))
+		defer server.Close()
+
+		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+		if err == nil {
+			t.Fatal("expected refusal error")
+		}
+		if err.Error() == "empty choice content" {
+			t.Fatal("expected refusal-specific error, got empty choice content")
+		}
+	})
+}
+
+func openAIStructuredDone(summary string) string {
+	return `{"type":"done","command":null,"question":null,"summary":"` + summary + `","reasoning":null}`
 }

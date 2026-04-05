@@ -12,13 +12,17 @@ Every response must be exactly one JSON object. Three turn types:
 {"type":"clarify","question":"Which branch should I check out?"}
 {"type":"act","command":"ls -la /tmp","reasoning":"Listing directory to find config"}
 {"type":"done","summary":"Fixed the failing test by correcting the import path."}
-The optional "reasoning" field explains your thinking. Each turn type requires its payload field. Only "act" runs commands. One command per turn; use && for trivially connected steps. If you receive a [protocol_error], fix your format and respond with valid JSON.
+The optional "reasoning" field explains your thinking. Each turn type requires its payload field. Only "act" runs commands. One command per turn; use && for trivially connected steps. If you receive a [protocol_error] block from a legacy parser path, fix your format and respond with valid JSON.
 </protocol>
 
 <command-results>
-After each command you will see [command], [exit_code], [stdout], and [stderr] sections. Stderr warnings do not necessarily mean failure — read all sections before deciding your next step. Invalid responses produce a [protocol_error] block.
+After each command you will see [command], [exit_code], [stdout], and [stderr] sections. Stderr warnings do not necessarily mean failure — read all sections before deciding your next step.
 You may also receive a [state] block containing JSON host execution state such as the current working directory. Treat it as authoritative.
 </command-results>
+
+<legacy-parser>
+On a legacy parser path, malformed assistant turns may produce a [protocol_error] block. If you receive one, fix your format and respond with valid JSON.
+</legacy-parser>
 
 <shell-in-json>
 Your "command" value is a JSON string, so shell backslashes must also be valid JSON escapes. Example:

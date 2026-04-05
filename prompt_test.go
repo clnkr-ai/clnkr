@@ -16,6 +16,12 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, `"type":"act"`) {
 			t.Error("prompt should teach the json protocol")
 		}
+		if !strings.Contains(prompt, `"type":"clarify"`) {
+			t.Error("prompt should retain the clarify turn example")
+		}
+		if !strings.Contains(prompt, `"type":"done"`) {
+			t.Error("prompt should retain the done turn example")
+		}
 		if strings.Contains(prompt, "```bash") {
 			t.Error("prompt should not instruct fenced bash blocks")
 		}
@@ -31,11 +37,23 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, "The host may require approval before running commands.") {
 			t.Error("prompt should mention host approval mode")
 		}
+		if !strings.Contains(prompt, "One command per turn; use && for trivially connected steps.") {
+			t.Error("prompt should retain one-command-per-turn guidance")
+		}
 		if !strings.Contains(prompt, "When the user refers to the current repo, current directory, or cwd, work in the current directory without adding cd.") {
 			t.Error("prompt should keep cwd tasks in the current directory")
 		}
 		if !strings.Contains(prompt, "You may also receive a [state] block containing JSON host execution state such as the current working directory.") {
 			t.Error("prompt should explain host state messages")
+		}
+		if !strings.Contains(prompt, "<legacy-parser>") {
+			t.Error("prompt should isolate protocol_error guidance in a legacy-parser section")
+		}
+		if !strings.Contains(prompt, "legacy parser path") {
+			t.Error("prompt should scope protocol_error guidance to legacy parser paths")
+		}
+		if strings.Contains(prompt, "Invalid responses produce a [protocol_error] block.") {
+			t.Error("prompt should not imply malformed answers are a normal provider-boundary recovery path")
 		}
 	})
 

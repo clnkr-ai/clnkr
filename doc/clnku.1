@@ -10,7 +10,7 @@ clnku \- a minimal coding agent (plain CLI)
 
 
 .SH DESCRIPTION
-\fBclnku\fP is a minimal coding agent that queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.
+\fBclnku\fP is a minimal coding agent that queries LLMs and executes bash commands using a structured JSON turn protocol. It supports the Anthropic Messages API and OpenAI-compatible APIs that implement structured outputs on the selected model path.
 
 .PP
 In default mode, \fBclnku\fP starts an interactive REPL. With \fB-p\fP, it runs a single task and exits.
@@ -28,6 +28,12 @@ The agent communicates through JSON turns: \fBact\fP (execute a command), \fBcla
 By default, \fBclnku\fP asks for approval before each \fBact\fP turn. Pass \fB--full-send\fP to execute commands immediately without approval.
 
 .PP
+With the default Anthropic endpoint, \fBclnku\fP requests Anthropic's native structured output format on every turn. Keep \fB--model\fP on a model Anthropic documents as supporting structured output; the default \fBclaude-sonnet-4-6\fP is chosen on that basis.
+
+.PP
+On OpenAI-compatible backends, the selected model path must support structured outputs. If a backend rejects that capability, \fBclnku\fP returns the provider error instead of falling back to unconstrained text responses.
+
+.PP
 Project-specific instructions are loaded from an \fBAGENTS.md\fP file in the current working directory, if present.
 
 
@@ -38,7 +44,7 @@ Run the given task and exit. Without this flag, clnku starts in conversational R
 
 .TP
 \fB-m\fP, \fB--model\fP \fIname\fP
-LLM model identifier (default: claude-sonnet-4-20250514). If omitted, \fBCLNKR_MODEL\fP is used when set.
+LLM model identifier (default: claude-sonnet-4-6). If omitted, \fBCLNKR_MODEL\fP is used when set.
 
 .TP
 \fB-u\fP, \fB--base-url\fP \fIurl\fP

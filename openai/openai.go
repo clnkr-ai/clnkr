@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/clnkr-ai/clnkr"
+	"github.com/clnkr-ai/clnkr/turnschema"
 )
 
 // Model talks to any OpenAI-compatible chat completions API.
@@ -36,8 +37,20 @@ func NewModel(baseURL, apiKey, model, systemPrompt string) *Model {
 }
 
 type request struct {
-	Model    string          `json:"model"`
-	Messages []clnkr.Message `json:"messages"`
+	Model          string          `json:"model"`
+	Messages       []clnkr.Message `json:"messages"`
+	ResponseFormat responseFormat  `json:"response_format"`
+}
+
+type responseFormat struct {
+	Type       string             `json:"type"`
+	JSONSchema responseJSONSchema `json:"json_schema"`
+}
+
+type responseJSONSchema struct {
+	Name   string         `json:"name,omitempty"`
+	Strict bool           `json:"strict"`
+	Schema map[string]any `json:"schema"`
 }
 
 type response struct {
@@ -45,6 +58,7 @@ type response struct {
 		Message struct {
 			Role    string `json:"role"`
 			Content string `json:"content"`
+			Refusal string `json:"refusal"`
 		} `json:"message"`
 	} `json:"choices"`
 	Usage struct {
@@ -87,7 +101,18 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 	allMessages = append(allMessages, clnkr.Message{Role: "system", Content: m.systemPrompt})
 	allMessages = append(allMessages, messages...)
 
-	body, err := json.Marshal(request{Model: m.model, Messages: allMessages})
+	body, err := json.Marshal(request{
+		Model:    m.model,
+		Messages: allMessages,
+		ResponseFormat: responseFormat{
+			Type: "json_schema",
+			JSONSchema: responseJSONSchema{
+				Name:   "agent_turn",
+				Strict: true,
+				Schema: turnschema.Schema(),
+			},
+		},
+	})
 	if err != nil {
 		return clnkr.Response{}, fmt.Errorf("marshal request: %w", err)
 	}
@@ -144,8 +169,22 @@ func parseResponse(respBody []byte) (clnkr.Response, error) {
 	}
 
 	choice := apiResp.Choices[0]
+	if strings.TrimSpace(choice.Message.Refusal) != "" {
+		return clnkr.Response{}, fmt.Errorf("structured output refusal: %s", choice.Message.Refusal)
+	}
+	if strings.TrimSpace(choice.Message.Content) == "" {
+		return clnkr.Response{}, fmt.Errorf("empty choice content")
+	}
+	turn, err := turnschema.ParseProvider(choice.Message.Content)
+	if err != nil {
+		return clnkr.Response{}, fmt.Errorf("invalid structured output payload: %w", err)
+	}
+	canonicalContent, err := turnschema.CanonicalJSON(turn)
+	if err != nil {
+		return clnkr.Response{}, fmt.Errorf("canonicalize structured output payload: %w", err)
+	}
 	return clnkr.Response{
-		Message: clnkr.Message{Role: choice.Message.Role, Content: choice.Message.Content},
+		Message: clnkr.Message{Role: choice.Message.Role, Content: canonicalContent},
 		Usage:   clnkr.Usage{InputTokens: apiResp.Usage.PromptTokens, OutputTokens: apiResp.Usage.CompletionTokens},
 	}, nil
 }
