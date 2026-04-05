@@ -1,0 +1,24 @@
+{
+  "id": "001-invalid-turn-then-done",
+  "instruction_file": "input/instruction.txt",
+  "scripted_turns_file": "input/model-turns.json",
+  "working_directory": "workspace",
+  "full_send": true,
+  "step_limit": 3,
+  "graders": {
+    "outcome_workspace_snapshot": {
+      "enabled": true,
+      "required": false
+    },
+    "outcome_diff": {
+      "enabled": true,
+      "required": true
+    },
+    "transcript_command_trace": {
+      "enabled": true,
+      "required": false,
+      "expected_commands": [],
+      "expected_exit_codes": []
+    }
+  }
+}

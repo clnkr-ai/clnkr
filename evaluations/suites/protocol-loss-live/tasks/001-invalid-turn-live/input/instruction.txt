@@ -1,0 +1,1 @@
+Create `note.txt` in the repo root with the contents `hello` and then finish.

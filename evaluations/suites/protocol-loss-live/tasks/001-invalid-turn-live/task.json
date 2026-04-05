@@ -1,0 +1,19 @@
+{
+  "id": "001-invalid-turn-live",
+  "instruction_file": "input/instruction.txt",
+  "working_directory": "workspace",
+  "full_send": true,
+  "step_limit": 3,
+  "mode": "live-provider",
+  "graders": {
+    "outcome_workspace_snapshot": {
+      "enabled": true,
+      "required": true
+    },
+    "transcript_command_trace": {
+      "enabled": true,
+      "required": false,
+      "max_command_count": 3
+    }
+  }
+}

@@ -81,10 +81,22 @@ Mock-provider regression suite:
 make evaluations
 ```
 
+Focused mock-provider protocol-loss suite:
+
+```bash
+clankerval run --suite protocol-loss
+```
+
 Live-provider evaluation suite:
 
 ```bash
 make evaluations-live
+```
+
+Focused live-provider protocol-loss proof suite:
+
+```bash
+CLNKR_EVALUATION_MODE=live-provider clankerval run --suite protocol-loss-live
 ```
 
 Both make targets resolve `clankerval` from `PATH` with `python3 ./scripts/require-clankerval.py`.
@@ -94,6 +106,8 @@ Canonical CLI examples use `clankerval` directly:
 ```bash
 clankerval run --suite default
 CLNKR_EVALUATION_MODE=live-provider clankerval run --suite default
+clankerval run --suite protocol-loss
+CLNKR_EVALUATION_MODE=live-provider clankerval run --suite protocol-loss-live
 ```
 
 `make evaluations-live` reads the first-wave runtime configuration from:
@@ -102,6 +116,8 @@ CLNKR_EVALUATION_MODE=live-provider clankerval run --suite default
 - `CLNKR_EVALUATION_API_KEY`
 - `CLNKR_EVALUATION_BASE_URL`
 - `CLNKR_EVALUATION_MODEL`
+
+The focused `protocol-loss` and `protocol-loss-live` suites are invoked directly with `clankerval run --suite ...` unless you add dedicated Make targets for them. The deterministic suite uses required `outcome_diff`; the live suite uses an isolated workspace plus required `outcome_workspace_snapshot` so successful creation of a new file is measurable without relying on in-place git diff. The checked-in suites live here; execution still belongs to the external runner.
 
 ## Inspect
 
