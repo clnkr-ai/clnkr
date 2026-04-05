@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.0 (2026-04-05)
+
+- Use Debian lintian profile in release workflow
+- docs: align evaluations docs with clankerval
+- Validate clankerval install paths and CI tests
+- Handle clankerval resolver failure cleanly
+- Remove bundled clnkeval source ownership
+- Update CHANGELOG.md for 1.4.5
+- Update CHANGELOG.md for 1.4.5
+
 ## 1.4.5 (2026-04-04)
 
 - Add interactive progress output to clnkeval
