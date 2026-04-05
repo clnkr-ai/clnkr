@@ -1,8 +1,8 @@
 # Evaluations
 
-This directory holds the contributor-facing evaluation runtime for `clnku`.
+This directory holds the checked-in evaluation suites for `clnku`.
 
-The runtime shells out to the real `clnku` binary, records each trial as a canonical bundle under `evaluations/trials/`, and derives run-level reports under `evaluations/reports/`.
+Execution is owned by the external `clankerval` runner. Install it separately with `./scripts/install-clankerval.sh`. `clnkeval` remains a compatibility alias to the same standalone runner.
 
 ## Layout
 
@@ -85,6 +85,15 @@ Live-provider evaluation suite:
 
 ```bash
 make evaluations-live
+```
+
+Both make targets resolve `clankerval` from `PATH` with `python3 ./scripts/require-clankerval.py`.
+
+Canonical CLI examples use `clankerval` directly:
+
+```bash
+clankerval run --suite default
+CLNKR_EVALUATION_MODE=live-provider clankerval run --suite default
 ```
 
 `make evaluations-live` reads the first-wave runtime configuration from:
