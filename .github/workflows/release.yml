@@ -176,9 +176,6 @@ jobs:
               env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
                 go -C cmd/clnkr build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
                 -o "../../clnkr-${GOOS}-${GOARCH}" .
-              env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
-                go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
-                -o "clnkeval-${GOOS}-${GOARCH}" ./cmd/clnkeval/
             done
           done
 
@@ -189,7 +186,6 @@ jobs:
           path: |
             clnku-*
             clnkr-*
-            clnkeval-*
 
   release:
     needs: [debian-amd64, debian-arm64, binaries]
@@ -257,7 +253,6 @@ jobs:
           cp artifacts/deb-arm64/*.deb release/
           cp artifacts/binaries/clnku-* release/
           cp artifacts/binaries/clnkr-* release/
-          cp artifacts/binaries/clnkeval-* release/
 
       - name: Generate source tarball
         run: |
