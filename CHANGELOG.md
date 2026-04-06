@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.4 (2026-04-06)
+
+- Pin clankerval 0.3.0
+- Update CHANGELOG.md for 1.5.3
+
 ## 1.5.3 (2026-04-06)
 
 - Remove clankerval references from clnkr
