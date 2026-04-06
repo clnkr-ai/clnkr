@@ -22,10 +22,10 @@ At the main idle conversational prompt, \fB/compact\fP summarizes older transcri
 At the main idle conversational prompt, \fB/delegate\fP runs a child \fBclnku\fP task seeded with the current transcript and appends a host-generated delegation summary artifact when the child run completes.
 
 .PP
-The agent communicates through JSON turns: \fBact\fP (execute a command), \fBclarify\fP (ask the user), and \fBdone\fP (signal completion).
+The agent communicates through JSON turns: \fBact\fP (execute a command through a nested \fBbash.command\fR plus optional \fBbash.workdir\fR), \fBclarify\fP (ask the user), and \fBdone\fP (signal completion).
 
 .PP
-By default, \fBclnkr\fP asks for approval before each \fBact\fP turn. Pass \fB--full-send\fP to execute commands immediately without approval.
+By default, \fBclnkr\fP asks for approval before each \fBact\fP turn. Approval and proposal UI show the requested command and any explicit workdir override. Pass \fB--full-send\fP to execute commands immediately without approval.
 
 .PP
 With the default Anthropic endpoint, \fBclnkr\fP requests Anthropic's native structured output format on every turn. Keep \fB--model\fP on a model Anthropic documents as supporting structured output; the default \fBclaude-sonnet-4-6\fP is chosen on that basis.

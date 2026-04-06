@@ -80,7 +80,13 @@ func (e *fakeExecutor) SetEnv(env map[string]string) {
 
 func mustCommandPayload(t *testing.T, result CommandResult) string {
 	t.Helper()
-	return transcript.FormatCommandResult(toTranscriptCommandResult(result))
+	return transcript.FormatCommandResult(transcript.CommandResult{
+		Command:  result.Command,
+		Stdout:   result.Stdout,
+		Stderr:   result.Stderr,
+		ExitCode: result.ExitCode,
+		Feedback: result.Feedback,
+	})
 }
 
 func mustStepAct(t *testing.T, agent *Agent) *ActTurn {
@@ -106,6 +112,14 @@ func runActStep(t *testing.T, agent *Agent) StepResult {
 	return result
 }
 
+func actJSON(command string) string {
+	return fmt.Sprintf(`{"type":"act","bash":{"command":%q,"workdir":null}}`, command)
+}
+
+func actJSONWithReasoning(command, reasoning string) string {
+	return fmt.Sprintf(`{"type":"act","bash":{"command":%q,"workdir":null},"reasoning":%q}`, command, reasoning)
+}
+
 // collectEvents returns a Notify function and a pointer to the collected events slice.
 func collectEvents() (func(Event), *[]Event) {
 	var events []Event
@@ -115,7 +129,7 @@ func collectEvents() (func(Event), *[]Event) {
 func TestStep(t *testing.T) {
 	t.Run("returns act turn without executing command", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"ls"}`}},
+			{Message: Message{Role: "assistant", Content: actJSON("ls")}},
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{Stdout: "file1.go\n", ExitCode: 0}}}
 
@@ -130,8 +144,8 @@ func TestStep(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected *ActTurn, got %T", result.Turn)
 		}
-		if act.Command != "ls" {
-			t.Errorf("got command %q, want %q", act.Command, "ls")
+		if act.Bash.Command != "ls" {
+			t.Errorf("got command %q, want %q", act.Bash.Command, "ls")
 		}
 		if executor.calls != 0 {
 			t.Fatalf("Step should not execute commands, got %d calls", executor.calls)
@@ -287,7 +301,7 @@ func TestStep(t *testing.T) {
 
 	t.Run("emits response events via Notify without command events", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"echo hi"}`}, Usage: Usage{InputTokens: 10, OutputTokens: 5}},
+			{Message: Message{Role: "assistant", Content: actJSON("echo hi")}, Usage: Usage{InputTokens: 10, OutputTokens: 5}},
 		}}
 		notify, events := collectEvents()
 
@@ -362,7 +376,7 @@ func TestStep(t *testing.T) {
 
 	t.Run("act with reasoning preserved", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"ls","reasoning":"checking files"}`}},
+			{Message: Message{Role: "assistant", Content: actJSONWithReasoning("ls", "checking files")}},
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -376,8 +390,8 @@ func TestStep(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected *ActTurn, got %T", result.Turn)
 		}
-		if act.Command != "ls" {
-			t.Errorf("got command %q, want %q", act.Command, "ls")
+		if act.Bash.Command != "ls" {
+			t.Errorf("got command %q, want %q", act.Bash.Command, "ls")
 		}
 		if act.Reasoning != "checking files" {
 			t.Errorf("got reasoning %q, want %q", act.Reasoning, "checking files")
@@ -390,7 +404,7 @@ func TestExecuteTurn(t *testing.T) {
 		executor := &fakeExecutor{results: []CommandResult{{ExitCode: 0}}}
 		agent := NewAgent(&fakeModel{}, executor, "/tmp")
 
-		result, err := agent.ExecuteTurn(context.Background(), &ActTurn{Command: "touch /tmp/test"})
+		result, err := agent.ExecuteTurn(context.Background(), &ActTurn{Bash: BashAction{Command: "touch /tmp/test"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -425,7 +439,7 @@ func TestExecuteTurn(t *testing.T) {
 		agent := NewAgent(&fakeModel{}, executor, "/tmp")
 		agent.Notify = notify
 
-		_, err := agent.ExecuteTurn(context.Background(), &ActTurn{Command: "echo hi"})
+		_, err := agent.ExecuteTurn(context.Background(), &ActTurn{Bash: BashAction{Command: "echo hi"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -444,6 +458,40 @@ func TestExecuteTurn(t *testing.T) {
 		}
 		if !hasCmdDone {
 			t.Error("missing EventCommandDone")
+		}
+	})
+
+	t.Run("resolves relative workdir against current cwd", func(t *testing.T) {
+		executor := &fakeExecutor{results: []CommandResult{{ExitCode: 0}}}
+		agent := NewAgent(&fakeModel{}, executor, "/repo")
+
+		result, err := agent.ExecuteTurn(context.Background(), &ActTurn{
+			Bash: BashAction{Command: "pwd", Workdir: "subdir"},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := executor.gotDirs[0]; got != filepath.Join("/repo", "subdir") {
+			t.Fatalf("executor dir = %q, want %q", got, filepath.Join("/repo", "subdir"))
+		}
+		if !strings.Contains(result.Output, "[command]\npwd\n[/command]") {
+			t.Fatalf("output = %q, want command payload for pwd", result.Output)
+		}
+	})
+
+	t.Run("uses absolute workdir directly", func(t *testing.T) {
+		executor := &fakeExecutor{results: []CommandResult{{ExitCode: 0}}}
+		agent := NewAgent(&fakeModel{}, executor, "/repo")
+		absDir := filepath.Join(t.TempDir(), "elsewhere")
+
+		_, err := agent.ExecuteTurn(context.Background(), &ActTurn{
+			Bash: BashAction{Command: "pwd", Workdir: absDir},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := executor.gotDirs[0]; got != absDir {
+			t.Fatalf("executor dir = %q, want %q", got, absDir)
 		}
 	})
 }
@@ -517,7 +565,7 @@ func TestStateMessages(t *testing.T) {
 			Message{Role: "user", Content: transcript.FormatStateMessage("/repo")},
 		)
 
-		if _, err := agent.ExecuteTurn(context.Background(), &ActTurn{Command: "cd subdir"}); err != nil {
+		if _, err := agent.ExecuteTurn(context.Background(), &ActTurn{Bash: BashAction{Command: "cd subdir"}}); err != nil {
 			t.Fatalf("ExecuteTurn: %v", err)
 		}
 
@@ -566,8 +614,8 @@ func TestMessages(t *testing.T) {
 func TestAgentPersistsShellStateBetweenCommands(t *testing.T) {
 	t.Run("persists export to future commands", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"export NANOCHAT_BASE_DIR=/tmp/runtime && echo ok"}`}},
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"printf %s \"$NANOCHAT_BASE_DIR\""}`}},
+			{Message: Message{Role: "assistant", Content: actJSON(`export NANOCHAT_BASE_DIR=/tmp/runtime && echo ok`)}},
+			{Message: Message{Role: "assistant", Content: actJSON(`printf %s "$NANOCHAT_BASE_DIR"`)}},
 		}}
 		executor := &fakeExecutor{results: []CommandResult{
 			{Stdout: "ok\n", ExitCode: 0, PostEnv: map[string]string{"NANOCHAT_BASE_DIR": "/tmp/runtime"}},
@@ -589,10 +637,10 @@ func TestAgentPersistsShellStateBetweenCommands(t *testing.T) {
 
 	t.Run("preserves env snapshots across stateful commands and unsets", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"export CLNKR_CHAIN_ONE=one"}`}},
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"export CLNKR_CHAIN_TWO=two"}`}},
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"unset CLNKR_CHAIN_ONE"}`}},
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"printf %s \"$CLNKR_CHAIN_TWO\""}`}},
+			{Message: Message{Role: "assistant", Content: actJSON("export CLNKR_CHAIN_ONE=one")}},
+			{Message: Message{Role: "assistant", Content: actJSON("export CLNKR_CHAIN_TWO=two")}},
+			{Message: Message{Role: "assistant", Content: actJSON("unset CLNKR_CHAIN_ONE")}},
+			{Message: Message{Role: "assistant", Content: actJSON(`printf %s "$CLNKR_CHAIN_TWO"`)}},
 		}}
 		executor := &fakeExecutor{results: []CommandResult{
 			{Stdout: "ok\n", ExitCode: 0, PostEnv: map[string]string{"CLNKR_CHAIN_ONE": "one"}},
@@ -632,8 +680,8 @@ func TestAgentPersistsShellStateBetweenCommands(t *testing.T) {
 			t.Fatalf("mkdir: %v", err)
 		}
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: fmt.Sprintf(`{"type":"act","command":"cd %s && pwd"}`, next)}},
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"pwd"}`}},
+			{Message: Message{Role: "assistant", Content: actJSON(fmt.Sprintf("cd %s && pwd", next))}},
+			{Message: Message{Role: "assistant", Content: actJSON("pwd")}},
 		}}
 		executor := &fakeExecutor{results: []CommandResult{
 			{Stdout: next + "\n", ExitCode: 0, PostCwd: next},
@@ -734,7 +782,7 @@ func TestAddMessages(t *testing.T) {
 
 	t.Run("restores cwd from the latest state block", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"pwd"}`}},
+			{Message: Message{Role: "assistant", Content: actJSON("pwd")}},
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{Stdout: "/restored\n", ExitCode: 0}}}
 		agent := NewAgent(model, executor, "/wrong")
@@ -760,7 +808,7 @@ func TestAddMessages(t *testing.T) {
 
 	t.Run("ignores non-clnkr state blocks", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"pwd"}`}},
+			{Message: Message{Role: "assistant", Content: actJSON("pwd")}},
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{Stdout: "/wrong\n", ExitCode: 0}}}
 		agent := NewAgent(model, executor, "/original")
@@ -1150,7 +1198,7 @@ func TestRequestStepLimitSummary(t *testing.T) {
 func TestAgent(t *testing.T) {
 	t.Run("single step then exit", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"ls"}`}},
+			{Message: Message{Role: "assistant", Content: actJSON("ls")}},
 			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Listed files."}`}},
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{Stdout: "file1.go\n", ExitCode: 0}}}
@@ -1196,7 +1244,7 @@ func TestAgent(t *testing.T) {
 	t.Run("respects max steps", func(t *testing.T) {
 		responses := make([]Response, 12)
 		for i := 0; i < 10; i++ {
-			responses[i] = Response{Message: Message{Role: "assistant", Content: `{"type":"act","command":"echo step"}`}}
+			responses[i] = Response{Message: Message{Role: "assistant", Content: actJSON("echo step")}}
 		}
 		responses[10] = Response{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Step limit reached."}`}}
 
@@ -1237,8 +1285,8 @@ func TestAgent(t *testing.T) {
 		}
 
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: fmt.Sprintf(`{"type":"act","command":"cd %s"}`, subDir)}},
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"ls"}`}},
+			{Message: Message{Role: "assistant", Content: actJSON(fmt.Sprintf("cd %s", subDir))}},
+			{Message: Message{Role: "assistant", Content: actJSON("ls")}},
 			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{ExitCode: 0, PostCwd: subDir}, {Stdout: "files", ExitCode: 0}}}
@@ -1257,8 +1305,8 @@ func TestAgent(t *testing.T) {
 		startDir := t.TempDir()
 		nonexistent := filepath.Join(t.TempDir(), "does-not-exist")
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: fmt.Sprintf(`{"type":"act","command":"cd %s"}`, nonexistent)}},
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"ls"}`}},
+			{Message: Message{Role: "assistant", Content: actJSON(fmt.Sprintf("cd %s", nonexistent))}},
+			{Message: Message{Role: "assistant", Content: actJSON("ls")}},
 			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{ExitCode: 0}, {Stdout: "files", ExitCode: 0}}}
@@ -1372,7 +1420,7 @@ func TestAgent(t *testing.T) {
 
 	t.Run("emits events for output", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"echo hi"}`}, Usage: Usage{InputTokens: 10, OutputTokens: 5}},
+			{Message: Message{Role: "assistant", Content: actJSON("echo hi")}, Usage: Usage{InputTokens: 10, OutputTokens: 5}},
 			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
@@ -1425,7 +1473,7 @@ func TestAgent(t *testing.T) {
 	t.Run("compound cd does not update cwd", func(t *testing.T) {
 		startDir := t.TempDir()
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"cd /tmp && ls"}`}},
+			{Message: Message{Role: "assistant", Content: actJSON("cd /tmp && ls")}},
 			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{Stdout: "stuff", ExitCode: 0}}}
@@ -1446,8 +1494,8 @@ func TestAgent(t *testing.T) {
 			t.Skip("cannot get home dir")
 		}
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"cd ~"}`}},
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"ls"}`}},
+			{Message: Message{Role: "assistant", Content: actJSON("cd ~")}},
+			{Message: Message{Role: "assistant", Content: actJSON("ls")}},
 			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{ExitCode: 0, PostCwd: home}, {Stdout: "files", ExitCode: 0}}}
@@ -1464,7 +1512,7 @@ func TestAgent(t *testing.T) {
 
 	t.Run("execution error is preserved in command payload", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"false"}`}},
+			{Message: Message{Role: "assistant", Content: actJSON("false")}},
 			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
 		}}
 		failExecutor := &fakeExecutor{

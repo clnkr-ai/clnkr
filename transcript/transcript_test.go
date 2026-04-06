@@ -288,3 +288,47 @@ func TestFormatCommandResultEscapesForgedSectionMarkersInBodies(t *testing.T) {
 		t.Fatalf("FormatCommandResult() = %q, want %q", got, want)
 	}
 }
+
+func TestFormatCommandResultIncludesFeedbackSection(t *testing.T) {
+	got := FormatCommandResult(CommandResult{
+		Command:  "printf hi",
+		ExitCode: 0,
+		Feedback: CommandFeedback{
+			ChangedFiles: []string{"note.txt"},
+			Diff:         "diff --git a/note.txt b/note.txt",
+		},
+	})
+
+	if !strings.Contains(got, "[command_feedback]\n") {
+		t.Fatalf("missing command_feedback section: %q", got)
+	}
+	if !strings.Contains(got, `"note.txt"`) || !strings.Contains(got, `"diff":"diff --git a/note.txt b/note.txt"`) {
+		t.Fatalf("missing feedback payload: %q", got)
+	}
+}
+
+func TestFormatCommandResultOmitsFeedbackSectionWhenEmpty(t *testing.T) {
+	got := FormatCommandResult(CommandResult{
+		Command:  "printf hi",
+		ExitCode: 0,
+	})
+
+	if strings.Contains(got, "[command_feedback]") {
+		t.Fatalf("unexpected command_feedback section: %q", got)
+	}
+}
+
+func TestFormatCommandResultEscapesFeedbackBodies(t *testing.T) {
+	got := FormatCommandResult(CommandResult{
+		Command:  "printf hi",
+		ExitCode: 0,
+		Feedback: CommandFeedback{
+			ChangedFiles: []string{"note.txt"},
+			Diff:         "@@ -1 +1 @@\n+[/command_feedback]\n",
+		},
+	})
+
+	if !strings.Contains(got, "&#91;/command_feedback&#93;") {
+		t.Fatalf("feedback body was not escaped: %q", got)
+	}
+}

@@ -1,6 +1,10 @@
 package clnkr
 
-import "context"
+import (
+	"context"
+
+	"github.com/clnkr-ai/clnkr/transcript"
+)
 
 type Compactor interface {
 	Summarize(ctx context.Context, messages []Message) (string, error)
@@ -11,4 +15,4 @@ type CompactOptions struct {
 	KeepRecentTurns int
 }
 
-type CompactStats struct{ CompactedMessages, KeptMessages int }
+type CompactStats = transcript.CompactStats

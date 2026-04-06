@@ -21,7 +21,7 @@ func TestPTYSingleTaskShowsApprovalPrompt(t *testing.T) {
 			"choices": []map[string]any{
 				{"message": map[string]string{
 					"role":    "assistant",
-					"content": `{"turn":{"type":"act","command":"printf 'hello from test\\n'","question":null,"summary":null,"reasoning":"emit test output"}}`,
+					"content": `{"turn":{"type":"act","bash":{"command":"printf 'hello from test\\n'","workdir":null},"question":null,"summary":null,"reasoning":"emit test output"}}`,
 				}},
 			},
 			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},

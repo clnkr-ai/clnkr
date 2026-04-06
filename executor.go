@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/clnkr-ai/clnkr/feedback"
+	"github.com/clnkr-ai/clnkr/shellstate"
 	"os"
 	"os/exec"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -31,7 +33,9 @@ func (e *CommandExecutor) SetEnv(env map[string]string) {
 
 // Execute runs a command in dir and returns separated stdout/stderr plus exit code.
 func (e *CommandExecutor) Execute(ctx context.Context, command string, dir string) (CommandResult, error) {
-	wrapped, stateFile, cleanup, err := e.wrapCommand(command)
+	baseline := feedback.Detect(dir)
+
+	wrapped, stateFile, cleanup, err := shellstate.Wrap(command)
 	if err != nil {
 		return CommandResult{}, fmt.Errorf("wrap command: %w", err)
 	}
@@ -42,7 +46,7 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 	cmd.Dir = dir
 	baseEnv := os.Environ()
 	if e.ExtraEnv != nil {
-		baseEnv = envMapToList(e.ExtraEnv)
+		baseEnv = shellstate.EnvMapToList(e.ExtraEnv)
 	}
 	cmd.Env = append([]string{}, baseEnv...)
 	// Appended last; exec uses last-wins for duplicate keys.
@@ -75,7 +79,11 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 	}
 
 	if err == nil {
-		return e.applyPostState(result, stateFile)
+		result, stateErr := e.applyPostState(result, stateFile)
+		if stateErr != nil {
+			return result, stateErr
+		}
+		return applyCommandFeedback(result, baseline, dir), nil
 	}
 
 	var exitErr *exec.ExitError
@@ -87,58 +95,33 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 	if stateErr != nil {
 		return result, fmt.Errorf("run command: %w (shell state: %v)", err, stateErr)
 	}
+	result = applyCommandFeedback(result, baseline, dir)
 	return result, fmt.Errorf("run command: %w", err)
 }
 
-func (e *CommandExecutor) wrapCommand(command string) (string, string, func(), error) {
-	stateFile, err := os.CreateTemp("", "clnkr-shell-state-")
-	if err != nil {
-		return "", "", nil, fmt.Errorf("create state file: %w", err)
-	}
-	if err := stateFile.Close(); err != nil {
-		_ = os.Remove(stateFile.Name())
-		return "", "", nil, fmt.Errorf("close state file: %w", err)
-	}
-	// Absolute paths: user command may have mutated PATH.
-	wrapped := "trap 'clnkr_status=$?; trap - EXIT; { /usr/bin/printf \"%s\\0\" \"$PWD\"; /usr/bin/env -0; } > \"$CLNKR_STATE_FILE\"; exit $clnkr_status' EXIT\n" + command
-	return wrapped, stateFile.Name(), func() { _ = os.Remove(stateFile.Name()) }, nil
-}
-
 func (e *CommandExecutor) applyPostState(result CommandResult, stateFile string) (CommandResult, error) {
-	if stateFile == "" {
-		return result, nil
-	}
-	data, err := os.ReadFile(stateFile)
+	snapshot, err := shellstate.Load(stateFile)
 	if err != nil {
-		return result, fmt.Errorf("read state file: %w", err)
+		return result, err
 	}
-	if len(data) == 0 {
-		return result, nil
-	}
-	parts := bytes.Split(data, []byte{0})
-	if len(parts[0]) > 0 {
-		result.PostCwd = string(parts[0])
-	}
-	captured := make(map[string]string, len(parts)-1)
-	for _, part := range parts[1:] {
-		if len(part) == 0 {
-			continue
-		}
-		key, value, ok := strings.Cut(string(part), "=")
-		if !ok {
-			continue
-		}
-		captured[key] = value
-	}
-	delete(captured, "CLNKR_STATE_FILE")
-	result.PostEnv = captured
+	result.PostCwd = snapshot.Cwd
+	result.PostEnv = snapshot.Env
 	return result, nil
 }
 
-func envMapToList(env map[string]string) []string {
-	list := make([]string, 0, len(env))
-	for key, value := range env {
-		list = append(list, key+"="+value)
+func applyCommandFeedback(result CommandResult, baseline feedback.Baseline, dir string) CommandResult {
+	finalCwd := dir
+	if result.PostCwd != "" {
+		finalCwd = result.PostCwd
 	}
-	return list
+
+	summary, ok := baseline.Collect(finalCwd)
+	if !ok {
+		return result
+	}
+	result.Feedback = CommandFeedback{
+		ChangedFiles: summary.ChangedFiles,
+		Diff:         summary.Diff,
+	}
+	return result
 }

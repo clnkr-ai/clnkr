@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -21,6 +22,40 @@ func (ft *fileTracker) track(path string) {
 	}
 	ft.seen[path] = true
 	ft.files = append(ft.files, path)
+}
+
+func (ft *fileTracker) trackFeedback(paths []string, cwd string) {
+	for _, path := range paths {
+		if filepath.IsAbs(path) || cwd == "" {
+			ft.track(path)
+			continue
+		}
+		ft.track(filepath.Join(cwd, path))
+	}
+}
+
+func (ft *fileTracker) pathsForCwd(cwd string) []string {
+	out := make([]string, 0, len(ft.files))
+	seen := make(map[string]bool, len(ft.files))
+	for _, path := range ft.files {
+		normalized := path
+		if !filepath.IsAbs(path) || cwd == "" {
+			normalized = filepath.Clean(path)
+		} else {
+			relative, err := filepath.Rel(cwd, path)
+			if err != nil {
+				normalized = filepath.Clean(path)
+			} else {
+				normalized = filepath.Clean(relative)
+			}
+		}
+		if seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		out = append(out, normalized)
+	}
+	return out
 }
 
 // trackFromCommand parses a command and its output for file modifications.

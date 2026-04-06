@@ -31,6 +31,10 @@ func setupModel() model {
 	return m
 }
 
+func actTurn(command string) *clnkr.ActTurn {
+	return &clnkr.ActTurn{Bash: clnkr.BashAction{Command: command}}
+}
+
 // updateModel is a test helper that calls Update and asserts the result is a model.
 func updateModel(t *testing.T, m model, msg tea.Msg) model {
 	t.Helper()
@@ -316,7 +320,7 @@ func TestModelEventResponseUpdatesStatus(t *testing.T) {
 
 func TestLatestClarifyQuestion(t *testing.T) {
 	msgs := []clnkr.Message{
-		{Role: "assistant", Content: `{"type":"act","command":"ls"}`},
+		{Role: "assistant", Content: `{"type":"act","bash":{"command":"ls","workdir":null}}`},
 		{Role: "assistant", Content: `{"type":"clarify","question":"Bind to 0.0.0.0?"}`},
 		{Role: "user", Content: "yes"},
 	}
@@ -412,6 +416,66 @@ func TestModelDiffOverlayUsesAgentCwd(t *testing.T) {
 	}
 }
 
+func TestModelDiffOverlayRebasesFeedbackPathsAcrossCwdChanges(t *testing.T) {
+	repo := t.TempDir()
+	cmd := exec.Command("git", "init", repo)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", repo, "config", "user.name", "clnkr test").CombinedOutput(); err != nil {
+		t.Fatalf("git config user.name: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", repo, "config", "user.email", "clnkr@example.com").CombinedOutput(); err != nil {
+		t.Fatalf("git config user.email: %v\n%s", err, out)
+	}
+	dir1 := filepath.Join(repo, "dir1")
+	dir2 := filepath.Join(repo, "dir2")
+	if err := os.MkdirAll(dir1, 0o755); err != nil {
+		t.Fatalf("mkdir dir1: %v", err)
+	}
+	if err := os.MkdirAll(dir2, 0o755); err != nil {
+		t.Fatalf("mkdir dir2: %v", err)
+	}
+	file := filepath.Join(dir1, "local.txt")
+	if err := os.WriteFile(file, []byte("before\n"), 0o644); err != nil {
+		t.Fatalf("write local.txt: %v", err)
+	}
+	if out, err := exec.Command("git", "-C", repo, "add", "dir1/local.txt").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", repo, "commit", "-qm", "init").CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(file, []byte("after\n"), 0o644); err != nil {
+		t.Fatalf("rewrite local.txt: %v", err)
+	}
+
+	m := setupModel()
+	m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.shared.agent = clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, dir1)
+	m = updateModel(t, m, eventMsg{event: clnkr.EventCommandDone{
+		Command:  "printf 'after\\n' > local.txt",
+		ExitCode: 0,
+		Feedback: clnkr.CommandFeedback{ChangedFiles: []string{"local.txt"}},
+	}})
+	m.shared.agent = clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, dir2)
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	if !m.diff.visible {
+		t.Fatal("diff overlay should be visible after Ctrl+F")
+	}
+	if strings.Contains(m.diff.content, "git diff error") {
+		t.Fatalf("diff should not fail after cwd change, got %q", m.diff.content)
+	}
+	if strings.Contains(m.diff.content, "(no uncommitted changes") {
+		t.Fatalf("diff should include the tracked change after cwd rebasing, got %q", m.diff.content)
+	}
+	if !strings.Contains(m.diff.content, "local.txt") {
+		t.Fatalf("diff should mention local.txt, got %q", m.diff.content)
+	}
+}
+
 func TestModelDiffOverlayBlocksOtherKeys(t *testing.T) {
 	m := setupModel()
 	m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -439,10 +503,24 @@ func TestModelTracksFilesFromCommands(t *testing.T) {
 	}
 }
 
+func TestModelPrefersFeedbackFilesOverHeuristics(t *testing.T) {
+	m := setupModel()
+	m.chat.lastCmd = "touch wrong.txt"
+	m = updateModel(t, m, eventMsg{event: clnkr.EventCommandDone{
+		Command:  "touch wrong.txt",
+		ExitCode: 0,
+		Feedback: clnkr.CommandFeedback{ChangedFiles: []string{"right.txt"}},
+	}})
+
+	if len(m.files.files) != 1 || m.files.files[0] != "right.txt" {
+		t.Fatalf("tracked files = %#v, want right.txt from feedback", m.files.files)
+	}
+}
+
 func TestModelApprovalReplyBecomesUserGuidance(t *testing.T) {
 	m := setupModel()
-	m.pendingAct = &clnkr.ActTurn{Command: "rm important.txt"}
-	m.chat.setProposedCommand("rm important.txt")
+	m.pendingAct = actTurn("rm important.txt")
+	m.chat.setProposedCommand("rm important.txt", "")
 	m.awaitingApproval = true
 	m.input.textarea.SetValue("list files instead")
 	m.running = true
@@ -487,7 +565,7 @@ func TestModelClarificationSubmitAppendsUserMessage(t *testing.T) {
 
 func TestModelApproveProposalStartsExecution(t *testing.T) {
 	m := setupModel()
-	m.pendingAct = &clnkr.ActTurn{Command: "echo hi"}
+	m.pendingAct = actTurn("echo hi")
 	m.awaitingApproval = true
 	m.input.textarea.SetValue("y")
 	m.running = true
@@ -521,7 +599,7 @@ func TestModelEnterWhileRunningWithoutPendingPromptPreservesDraftInput(t *testin
 func TestModelApprovalHintAppearsWhenCommandIsProposed(t *testing.T) {
 	m := setupModel()
 
-	updated, cmd := m.Update(stepDoneMsg{result: clnkr.StepResult{Turn: &clnkr.ActTurn{Command: "echo hi"}}})
+	updated, cmd := m.Update(stepDoneMsg{result: clnkr.StepResult{Turn: actTurn("echo hi")}})
 	if cmd == nil {
 		t.Fatal("proposal should focus the input")
 	}
@@ -540,9 +618,24 @@ func TestModelApprovalHintAppearsWhenCommandIsProposed(t *testing.T) {
 	}
 }
 
+func TestModelApprovalHintShowsWorkdir(t *testing.T) {
+	m := setupModel()
+
+	updated, _ := m.Update(stepDoneMsg{result: clnkr.StepResult{Turn: &clnkr.ActTurn{
+		Bash: clnkr.BashAction{Command: "echo hi", Workdir: "subdir"},
+	}}})
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if !strings.Contains(um.chat.pendingCmd, "in subdir") {
+		t.Fatalf("pending command should show workdir, got %q", um.chat.pendingCmd)
+	}
+}
+
 func TestModelApprovalRequiresEnter(t *testing.T) {
 	m := setupModel()
-	m.pendingAct = &clnkr.ActTurn{Command: "echo hi"}
+	m.pendingAct = actTurn("echo hi")
 	m.awaitingApproval = true
 	m.input.textarea.SetValue("y")
 	m.running = true
@@ -558,7 +651,7 @@ func TestModelApprovalRequiresEnter(t *testing.T) {
 
 func TestModelCtrlYApprovesPendingCommand(t *testing.T) {
 	m := setupModel()
-	m.pendingAct = &clnkr.ActTurn{Command: "echo hi"}
+	m.pendingAct = actTurn("echo hi")
 	m.awaitingApproval = true
 	m.running = true
 	m.shared.agent = clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
@@ -958,8 +1051,8 @@ func TestCompactCommandNotInterceptedDuringApproval(t *testing.T) {
 	m := setupModel()
 	m.running = true
 	m.awaitingApproval = true
-	m.pendingAct = &clnkr.ActTurn{Command: "echo hi"}
-	m.chat.setProposedCommand("echo hi")
+	m.pendingAct = actTurn("echo hi")
+	m.chat.setProposedCommand("echo hi", "")
 	m.runCtx = context.Background()
 
 	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
@@ -1252,8 +1345,8 @@ func TestDelegateCommandNotInterceptedDuringApproval(t *testing.T) {
 	m := setupModel()
 	m.running = true
 	m.awaitingApproval = true
-	m.pendingAct = &clnkr.ActTurn{Command: "echo hi"}
-	m.chat.setProposedCommand("echo hi")
+	m.pendingAct = actTurn("echo hi")
+	m.chat.setProposedCommand("echo hi", "")
 	m.runCtx = context.Background()
 
 	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")

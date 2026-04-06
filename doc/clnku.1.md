@@ -19,9 +19,9 @@ At the main idle conversational prompt, **/compact** summarizes older transcript
 
 **clnku** is the plain CLI variant of the clnkr project, with no external dependencies beyond the Go standard library. A TUI variant is available as **clnkr**(1).
 
-The agent communicates through JSON turns: **act** (execute a command), **clarify** (ask the user), and **done** (signal completion).
+The agent communicates through JSON turns: **act** (execute a command through a nested `bash.command` plus optional `bash.workdir`), **clarify** (ask the user), and **done** (signal completion).
 
-By default, **clnku** asks for approval before each **act** turn. Pass **--full-send** to execute commands immediately without approval.
+By default, **clnku** asks for approval before each **act** turn. Approval prompts show the requested command and any explicit workdir override. Pass **--full-send** to execute commands immediately without approval.
 
 With the default Anthropic endpoint, **clnku** requests Anthropic's native structured output format on every turn. Keep **--model** on a model Anthropic documents as supporting structured output; the default **claude-sonnet-4-6** is chosen on that basis.
 

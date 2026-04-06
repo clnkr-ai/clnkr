@@ -59,12 +59,13 @@ func writeEventLog(f *os.File, e clnkr.Event) {
 		je = jsonEvent{Type: "command_start", Payload: ev}
 	case clnkr.EventCommandDone:
 		je = jsonEvent{Type: "command_done", Payload: struct {
-			Command  string `json:"command"`
-			Stdout   string `json:"stdout"`
-			Stderr   string `json:"stderr"`
-			ExitCode int    `json:"exit_code"`
-			Err      string `json:"err,omitempty"`
-		}{Command: ev.Command, Stdout: ev.Stdout, Stderr: ev.Stderr, ExitCode: ev.ExitCode, Err: errString(ev.Err)}}
+			Command  string                `json:"command"`
+			Stdout   string                `json:"stdout"`
+			Stderr   string                `json:"stderr"`
+			ExitCode int                   `json:"exit_code"`
+			Feedback clnkr.CommandFeedback `json:"feedback,omitempty"`
+			Err      string                `json:"err,omitempty"`
+		}{Command: ev.Command, Stdout: ev.Stdout, Stderr: ev.Stderr, ExitCode: ev.ExitCode, Feedback: ev.Feedback, Err: errString(ev.Err)}}
 	case clnkr.EventProtocolFailure:
 		je = jsonEvent{Type: "protocol_failure", Payload: struct {
 			Reason string `json:"reason"`

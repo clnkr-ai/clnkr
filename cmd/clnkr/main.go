@@ -205,7 +205,7 @@ func runPlainApproval(ctx context.Context, agent *clnkr.Agent, task string, prom
 			}
 			agent.AppendUserMessage(reply)
 		case *clnkr.ActTurn:
-			reply, err := waitForActReply(ctx, prompter, turn.Command)
+			reply, err := waitForActReply(ctx, prompter, formatActProposal(turn.Bash.Command, turn.Bash.Workdir))
 			if err != nil {
 				return err
 			}
@@ -250,6 +250,13 @@ func waitForClarification(ctx context.Context, prompter approvalPrompter, questi
 		}
 		return reply, nil
 	}
+}
+
+func formatActProposal(command, workdir string) string {
+	if strings.TrimSpace(workdir) == "" {
+		return command
+	}
+	return fmt.Sprintf("%s in %s", command, workdir)
 }
 
 func makeCompactorFactory(baseURL, apiKey, modelName string) compaction.Factory {

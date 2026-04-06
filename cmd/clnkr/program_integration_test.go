@@ -14,7 +14,7 @@ import (
 
 func TestProgramApprovalFlowExecutesProposedCommand(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","command":"printf 'hello from test\\n'","reasoning":"emit test output"}`}},
+		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","bash":{"command":"printf 'hello from test\\n'","workdir":null},"reasoning":"emit test output"}`}},
 		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
 	}}
 	executor := &fakeExecutor{results: []clnkr.CommandResult{
@@ -45,7 +45,7 @@ func TestProgramApprovalFlowExecutesProposedCommand(t *testing.T) {
 
 func TestProgramGuidanceReplyBecomesNextUserTurn(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","command":"rm important.txt","reasoning":"bad idea"}`}},
+		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","bash":{"command":"rm important.txt","workdir":null},"reasoning":"bad idea"}`}},
 		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
 	}}
 	executor := &fakeExecutor{}

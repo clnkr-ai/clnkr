@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/clnkr-ai/clnkr/transcript"
@@ -67,14 +68,13 @@ func (a *Agent) AppendUserMessage(text string) {
 }
 
 func (a *Agent) restoreExecutionStateFromMessages() {
-	if cwd, ok := transcript.ExtractLatestCwd(toTranscriptMessages(a.messages)); ok {
+	if cwd, ok := transcript.ExtractLatestCwd(a.messages); ok {
 		a.cwd = cwd
 	}
 }
 
 func (a *Agent) appendStateMessageIfNeeded() {
-	messages := toTranscriptMessages(a.messages)
-	if cwd, ok := transcript.ExtractLatestCwd(messages); ok && cwd == a.cwd {
+	if cwd, ok := transcript.ExtractLatestCwd(a.messages); ok && cwd == a.cwd {
 		return
 	}
 	a.messages = append(a.messages, Message{Role: "user", Content: transcript.FormatStateMessage(a.cwd)})
@@ -95,7 +95,7 @@ func (a *Agent) Compact(ctx context.Context, compactor Compactor, opts CompactOp
 		keepRecentTurns = 2
 	}
 
-	transcriptMessages := toTranscriptMessages(a.messages)
+	transcriptMessages := a.messages
 	boundary, ok := transcript.FindCompactBoundary(transcriptMessages, keepRecentTurns)
 	if !ok {
 		return CompactStats{}, fmt.Errorf("compact transcript: not enough history to compact")
@@ -116,7 +116,7 @@ func (a *Agent) Compact(ctx context.Context, compactor Compactor, opts CompactOp
 		return CompactStats{}, fmt.Errorf("compact transcript: %w", err)
 	}
 
-	a.messages = fromTranscriptMessages(rewritten)
+	a.messages = rewritten
 	a.restoreExecutionStateFromMessages()
 	return CompactStats(stats), nil
 }
@@ -162,9 +162,17 @@ func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, erro
 	if setter, ok := a.executor.(ExecutorStateSetter); ok {
 		setter.SetEnv(a.env)
 	}
-	a.notify(EventCommandStart{Command: act.Command, Dir: a.cwd})
+	execDir := a.cwd
+	if act.Bash.Workdir != "" {
+		if filepath.IsAbs(act.Bash.Workdir) {
+			execDir = act.Bash.Workdir
+		} else {
+			execDir = filepath.Join(a.cwd, act.Bash.Workdir)
+		}
+	}
+	a.notify(EventCommandStart{Command: act.Bash.Command, Dir: execDir})
 
-	execResult, execErr := a.executor.Execute(ctx, act.Command, a.cwd)
+	execResult, execErr := a.executor.Execute(ctx, act.Bash.Command, execDir)
 	if execResult.PostCwd != "" {
 		a.cwd = execResult.PostCwd
 	}
@@ -173,11 +181,24 @@ func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, erro
 		a.env = execResult.PostEnv
 	}
 	a.notify(EventDebug{Message: fmt.Sprintf("cwd: %s", a.cwd)})
-	payload := transcript.FormatCommandResult(toTranscriptCommandResult(execResult))
+	payload := transcript.FormatCommandResult(transcript.CommandResult{
+		Command:  execResult.Command,
+		Stdout:   execResult.Stdout,
+		Stderr:   execResult.Stderr,
+		ExitCode: execResult.ExitCode,
+		Feedback: execResult.Feedback,
+	})
 	if execErr != nil {
 		a.notify(EventDebug{Message: fmt.Sprintf("command error: %v", execErr)})
 	}
-	a.notify(EventCommandDone{Command: act.Command, Stdout: execResult.Stdout, Stderr: execResult.Stderr, ExitCode: execResult.ExitCode, Err: execErr})
+	a.notify(EventCommandDone{
+		Command:  act.Bash.Command,
+		Stdout:   execResult.Stdout,
+		Stderr:   execResult.Stderr,
+		ExitCode: execResult.ExitCode,
+		Feedback: execResult.Feedback,
+		Err:      execErr,
+	})
 
 	a.messages = append(a.messages, Message{Role: "user", Content: payload})
 	a.appendStateMessageIfNeeded()

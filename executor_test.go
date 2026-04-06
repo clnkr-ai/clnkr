@@ -3,6 +3,8 @@ package clnkr
 import (
 	"context"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -232,4 +234,101 @@ func TestCommandExecutor(t *testing.T) {
 			t.Fatalf("state file leaked into PostEnv: %+v", out3.PostEnv)
 		}
 	})
+
+	t.Run("collects feedback from a clean git baseline", func(t *testing.T) {
+		repo := initGitRepo(t)
+		writeFile(t, filepath.Join(repo, "note.txt"), "before\n")
+		runGit(t, repo, "add", "note.txt")
+		runGit(t, repo, "commit", "-qm", "add note")
+
+		out, err := exec.Execute(ctx, "printf 'next\\n' > note.txt", repo)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := out.Feedback.ChangedFiles; !reflect.DeepEqual(got, []string{"note.txt"}) {
+			t.Fatalf("changed files = %#v, want %#v", got, []string{"note.txt"})
+		}
+		if !strings.Contains(out.Feedback.Diff, "note.txt") || !strings.Contains(out.Feedback.Diff, "+next") {
+			t.Fatalf("diff = %q, want note.txt and +next", out.Feedback.Diff)
+		}
+	})
+
+	t.Run("omits feedback when repo was dirty before command", func(t *testing.T) {
+		repo := initGitRepo(t)
+		writeFile(t, filepath.Join(repo, "dirty.txt"), "dirty\n")
+
+		out, err := exec.Execute(ctx, "printf 'next\\n' > note.txt", repo)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(out.Feedback.ChangedFiles) != 0 || out.Feedback.Diff != "" {
+			t.Fatalf("feedback = %#v, want empty", out.Feedback)
+		}
+	})
+
+	t.Run("tracks both sides of a rename", func(t *testing.T) {
+		repo := initGitRepo(t)
+		writeFile(t, filepath.Join(repo, "old.txt"), "before\n")
+		runGit(t, repo, "add", "old.txt")
+		runGit(t, repo, "commit", "-qm", "add old")
+
+		out, err := exec.Execute(ctx, "git mv old.txt new.txt", repo)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := out.Feedback.ChangedFiles; !reflect.DeepEqual(got, []string{"new.txt", "old.txt"}) {
+			t.Fatalf("changed files = %#v, want %#v", got, []string{"new.txt", "old.txt"})
+		}
+	})
+
+	t.Run("normalizes feedback paths relative to final cwd", func(t *testing.T) {
+		repo := initGitRepo(t)
+		subdir := filepath.Join(repo, "dir", "subdir")
+
+		out, err := exec.Execute(ctx, "mkdir -p dir/subdir && cd dir/subdir && printf 'nested\\n' > local.txt", repo)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := out.PostCwd; got != subdir {
+			t.Fatalf("PostCwd = %q, want %q", got, subdir)
+		}
+		if got := out.Feedback.ChangedFiles; !reflect.DeepEqual(got, []string{"local.txt"}) {
+			t.Fatalf("changed files = %#v, want %#v", got, []string{"local.txt"})
+		}
+	})
+}
+
+func initGitRepo(t *testing.T) string {
+	t.Helper()
+
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	runGit(t, repo, "config", "user.name", "clnkr test")
+	runGit(t, repo, "config", "user.email", "clnkr@example.com")
+	writeFile(t, filepath.Join(repo, ".gitignore"), "")
+	runGit(t, repo, "add", ".gitignore")
+	runGit(t, repo, "commit", "-qm", "init")
+	return repo
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
 }

@@ -396,7 +396,7 @@ func (m model) handleStepDone(msg stepDoneMsg) (tea.Model, tea.Cmd) {
 		m.awaitingApproval = true
 		m.shared.setAwaitingApproval(true)
 		m.input.setPlaceholder(approvalPromptText)
-		m.chat.setProposedCommand(turn.Command)
+		m.chat.setProposedCommand(turn.Bash.Command, turn.Bash.Workdir)
 		m.chat.appendHostNote(approvalPromptText)
 		m.chat.updateViewport()
 		m.focus = focusInput
@@ -492,7 +492,15 @@ func (m *model) routeEvent(e clnkr.Event) {
 		m.status.updateFromResponse(ev.Usage)
 	case clnkr.EventCommandDone:
 		m.status.incrementStep()
-		m.files.trackFromCommand(lastCmd, ev.Stdout)
+		if len(ev.Feedback.ChangedFiles) > 0 {
+			cwd := m.shared.cwd
+			if m.shared.agent != nil {
+				cwd = m.shared.agent.Cwd()
+			}
+			m.files.trackFeedback(ev.Feedback.ChangedFiles, cwd)
+		} else {
+			m.files.trackFromCommand(lastCmd, ev.Stdout)
+		}
 	case clnkr.EventCommandStart, clnkr.EventProtocolFailure, clnkr.EventDebug:
 		// handled by chat.appendEvent only
 	default:
@@ -886,7 +894,7 @@ func (m model) handleViewportKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.shared.agent != nil {
 			cwd = m.shared.agent.Cwd()
 		}
-		m.diff.toggle(m.files.files, cwd, m.width, chatH)
+		m.diff.toggle(m.files.pathsForCwd(cwd), cwd, m.width, chatH)
 		return m, nil
 	}
 
