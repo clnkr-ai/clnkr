@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.0 (2026-04-06)
+
+- Replace act.command with bash turns and clean git feedback
+- Update CHANGELOG.md for 1.5.4
+
 ## 1.5.4 (2026-04-06)
 
 - Pin clankerval 0.3.0
