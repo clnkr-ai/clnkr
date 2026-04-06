@@ -2,7 +2,7 @@
 
 ## Overview
 
-clnkr is a coding agent CLI that queries LLMs and executes bash commands in a loop. Core library is stdlib only. Talks to the Anthropic Messages API and any OpenAI-compatible endpoint. This repo ships two binaries: `clnku` (plain CLI) and `clnkr` (TUI frontend). Evaluations run through the standalone `clankerval` project, which also provides `clnkeval` as a compatibility alias.
+clnkr is a coding agent CLI that queries LLMs and executes bash commands in a loop. Core library is stdlib only. Talks to the Anthropic Messages API and any OpenAI-compatible endpoint. This repo ships two binaries: `clnku` (plain CLI) and `clnkr` (TUI frontend). Evaluations run through the standalone `clankerval` project.
 
 ## Commands
 
@@ -62,7 +62,7 @@ clnkr/                  # core: types, interfaces, Agent, events (root go.mod, s
 **Shipped binaries:**
 - `cmd/clnku/` — plain CLI (under root go.mod, stdlib only).
 - `cmd/clnkr/` — bubbletea TUI (own go.mod with charm v2 deps). Detects non-TTY stdout and falls back to plain-text rendering.
-- `clankerval` — external evaluation runner installed separately. `clnkeval` is its compatibility alias.
+- `clankerval` — external evaluation runner installed separately.
 - Do not assume `clnkr` and `clnku` need feature parity. Rich workflow/UI features may belong only in `cmd/clnkr`; keep `cmd/clnku` minimal unless the task explicitly calls for both. Treat frontend-specific slash/workflow commands as TUI policy first, not shared core behavior.
 
 **Multi-module:** `cmd/clnkr/` has its own `go.mod`. Root `go test ./...` does not descend into it. Use `make test` to test both modules. `go install github.com/clnkr-ai/clnkr/cmd/clnkr@latest` does NOT work due to replace directive — use `make build` or install from releases.

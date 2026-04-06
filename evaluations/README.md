@@ -2,7 +2,7 @@
 
 This directory holds the checked-in evaluation suites for `clnku`.
 
-Execution is owned by the external `clankerval` runner. Install it separately with `./scripts/install-clankerval.sh`. `clnkeval` remains a compatibility alias to the same standalone runner.
+Execution is owned by the external `clankerval` runner. Install it separately with `./scripts/install-clankerval.sh`.
 
 ## Layout
 
@@ -48,10 +48,8 @@ Current bundle structure:
 evaluations/trials/<trial-id>/
   bundle.json
   raw/
-    transcript.json
-    events.jsonl
-    provider-requests.jsonl
-    provider-responses.jsonl
+    agent/
+    commands.jsonl
   normalized/
     transcript.jsonl
     outcome.json
@@ -71,7 +69,7 @@ Useful maintenance files:
 - `normalized/transcript.jsonl`: canonicalized transcript records.
 - `normalized/outcome.json`: normalized final outcome summary.
 - `normalized/graders.jsonl`: one normalized record per enabled grader.
-- `raw/events.jsonl`: exact command lifecycle events from the run.
+- `raw/commands.jsonl`: exact normalized command records from the run.
 
 ## Run
 
@@ -111,6 +109,6 @@ After a run:
 2. Inspect `evaluations/trials/<trial-id>/normalized/transcript.jsonl` for canonical transcript flow.
 3. Inspect `evaluations/trials/<trial-id>/normalized/outcome.json` for the normalized end-state.
 4. Inspect `evaluations/trials/<trial-id>/normalized/graders.jsonl` for required/advisory grading results.
-5. Inspect `evaluations/trials/<trial-id>/raw/events.jsonl` for exact command start/done events.
+5. Inspect `evaluations/trials/<trial-id>/raw/commands.jsonl` for exact command trace records.
 
 The `evaluations/trials/` and `evaluations/reports/` directories are regenerated per run.
