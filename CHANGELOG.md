@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.2 (2026-04-06)
+
+- Preserve literal command output in model transcripts
+- Update CHANGELOG.md for 1.5.1
+
 ## 1.5.1 (2026-04-06)
 
 - Recover structured turn boundaries across providers
