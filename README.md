@@ -8,7 +8,7 @@ Platform note: today `clnkr` is Unix-only. The executor assumes `bash`, process 
 
 A minimal coding agent. Query an LLM, execute bash commands, repeat. Supports the Anthropic Messages API and OpenAI-compatible endpoints that implement structured outputs on the selected model path.
 
-Ships two binaries: **clnkr** (TUI) and **clnku** (plain CLI). The evaluation runner lives in the separate **clankerval** project and is installed independently. `clnkeval` remains a compatibility alias to that standalone runner. A **clnk** symlink points to clnkr for convenience.
+Ships two binaries: **clnkr** (TUI) and **clnku** (plain CLI). The evaluation runner lives in the separate **clankerval** project and is installed independently. A **clnk** symlink points to clnkr for convenience.
 
 <img width="512" height="512" alt="Isildur cut the Ring (the ring here is bash -jokeexplainer)from his hand with the hilt-shard of his father's sword, and took it for his own." src="https://github.com/user-attachments/assets/7c9d648c-f5b9-4610-a311-04f5af37b364" />
 
@@ -219,7 +219,7 @@ make evaluations-live # Run the live-provider evaluation suite (requires clanker
 make docs       # Build documentation site
 ```
 
-Install the pinned runner with `./scripts/install-clankerval.sh`. The canonical command name is `clankerval`; `clnkeval` is accepted as a compatibility alias to the same standalone runner.
+Install the pinned runner with `./scripts/install-clankerval.sh`.
 
 For example:
 

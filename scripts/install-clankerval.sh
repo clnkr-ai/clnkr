@@ -113,23 +113,21 @@ install_deb() {
 }
 
 install_raw_binary() {
-    local os arch bindir binary_path alias_path binary_url
+    local os arch bindir binary_path binary_url
 
     os="$(detect_os)"
     arch="$(detect_arch)"
     bindir="${HOME}/.local/bin"
     binary_path="${bindir}/clankerval"
-    alias_path="${bindir}/clnkeval"
     binary_url="https://github.com/${REPO}/releases/download/${CLANKERVAL_PINNED_TAG}/clankerval-${os}-${arch}"
 
     log "installing clankerval ${CLANKERVAL_PINNED_VERSION} to ${bindir}"
     mkdir -p "$bindir"
     download "$binary_url" "$binary_path"
     chmod 755 "$binary_path"
-    ln -sf clankerval "$alias_path"
     hash -r 2>/dev/null || true
 
-    if ! verify_installed_command "clankerval" "$binary_path" || ! verify_installed_command "clnkeval" "$alias_path"; then
+    if ! verify_installed_command "clankerval" "$binary_path"; then
         log "error: add ${bindir} to PATH before using the installed runner"
         return 1
     fi
@@ -143,7 +141,7 @@ if install_deb; then
 fi
 
 if install_raw_binary; then
-    log "installed clankerval ${CLANKERVAL_PINNED_VERSION} and clnkeval alias"
+    log "installed clankerval ${CLANKERVAL_PINNED_VERSION}"
     exit 0
 fi
 

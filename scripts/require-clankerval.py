@@ -87,16 +87,16 @@ def discover_candidates(path_entries: Iterable[str]) -> list[tuple[str, pathlib.
         if not entry:
             continue
         directory = pathlib.Path(entry)
-        for name in ("clankerval", "clnkeval"):
-            candidate = (directory / name)
-            if not candidate.is_file() or not os.access(candidate, os.X_OK):
-                continue
-            resolved = candidate.resolve()
-            key = (name, resolved)
-            if key in seen:
-                continue
-            seen.add(key)
-            discovered.append((name, resolved))
+        name = "clankerval"
+        candidate = (directory / name)
+        if not candidate.is_file() or not os.access(candidate, os.X_OK):
+            continue
+        resolved = candidate.resolve()
+        key = (name, resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        discovered.append((name, resolved))
     return discovered
 
 
@@ -133,7 +133,6 @@ def probe_candidate(name: str, path: pathlib.Path) -> Candidate:
 def resolve_runner(path_entries: Iterable[str], minimum_version: str) -> tuple[pathlib.Path | None, list[Candidate]]:
     required = SemVer.parse(minimum_version)
     discovered: list[Candidate] = []
-    fallback: pathlib.Path | None = None
     for name, path in discover_candidates(path_entries):
         candidate = probe_candidate(name, path)
         discovered.append(candidate)
@@ -141,11 +140,8 @@ def resolve_runner(path_entries: Iterable[str], minimum_version: str) -> tuple[p
             continue
         if SemVer.parse(candidate.version) < required:
             continue
-        if candidate.name == "clankerval":
-            return candidate.path, discovered
-        if fallback is None:
-            fallback = candidate.path
-    return fallback, discovered
+        return candidate.path, discovered
+    return None, discovered
 
 
 def failure_message(minimum_version: str, discovered: list[Candidate]) -> str:

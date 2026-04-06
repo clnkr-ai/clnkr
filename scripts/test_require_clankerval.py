@@ -33,10 +33,10 @@ class RequireClankervalTest(unittest.TestCase):
         self.env_file.write_text(
             textwrap.dedent(
                 """\
-                CLANKERVAL_MIN_VERSION=0.1.3
-                CLANKERVAL_PINNED_VERSION=0.1.3
-                CLANKERVAL_PINNED_TAG=v0.1.3
-                CLANKERVAL_PINNED_DEB_VERSION=0.1.3-1
+                CLANKERVAL_MIN_VERSION=0.2.1
+                CLANKERVAL_PINNED_VERSION=0.2.1
+                CLANKERVAL_PINNED_TAG=v0.2.1
+                CLANKERVAL_PINNED_DEB_VERSION=0.2.1-1
                 """
             ),
             encoding="utf-8",
@@ -77,57 +77,32 @@ class RequireClankervalTest(unittest.TestCase):
         path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         return path.resolve()
 
-    def make_alias(self, directory: pathlib.Path, name: str, target: pathlib.Path) -> pathlib.Path:
-        directory.mkdir(parents=True, exist_ok=True)
-        alias = directory / name
-        alias.symlink_to(target.name)
-        return alias
-
     def test_returns_clankerval_when_present_and_new_enough(self) -> None:
-        path = self.make_binary(self.workspace / "bin", "clankerval", "clankerval version 0.1.3")
+        path = self.make_binary(self.workspace / "bin", "clankerval", "clankerval version 0.2.1")
 
         proc = self.run_resolver(self.workspace / "bin")
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout.strip(), str(path))
 
-    def test_falls_back_to_clnkeval_when_clankerval_is_too_old(self) -> None:
-        self.make_binary(self.workspace / "early", "clankerval", "clankerval version 0.1.2")
-        path = self.make_binary(self.workspace / "late", "clnkeval", "clnkeval version 0.1.3")
+    def test_rejects_too_old_clankerval_even_when_present(self) -> None:
+        self.make_binary(self.workspace / "bin", "clankerval", "clankerval version 0.2.0")
 
-        proc = self.run_resolver(self.workspace / "early", self.workspace / "late")
+        proc = self.run_resolver(self.workspace / "bin")
 
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(proc.stdout.strip(), str(path))
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("clankerval 0.2.0", proc.stderr)
+        self.assertIn("0.2.1", proc.stderr)
 
-    def test_falls_back_to_clnkeval_when_clankerval_version_is_malformed(self) -> None:
+    def test_rejects_malformed_clankerval_version(self) -> None:
         self.make_binary(self.workspace / "early", "clankerval", "clankerval version banana")
-        path = self.make_binary(self.workspace / "late", "clnkeval", "clnkeval version 0.1.3")
+        proc = self.run_resolver(self.workspace / "early")
 
-        proc = self.run_resolver(self.workspace / "early", self.workspace / "late")
-
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(proc.stdout.strip(), str(path))
-
-    def test_prefers_clankerval_over_compatible_clnkeval_earlier_on_path(self) -> None:
-        self.make_binary(self.workspace / "early", "clnkeval", "clnkeval version 0.1.3")
-        path = self.make_binary(self.workspace / "late", "clankerval", "clankerval version 0.1.3")
-
-        proc = self.run_resolver(self.workspace / "early", self.workspace / "late")
-
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(proc.stdout.strip(), str(path))
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("unparseable version output", proc.stderr)
 
     def test_accepts_trailing_clankerval_version_token(self) -> None:
-        path = self.make_binary(self.workspace / "bin", "clankerval", "clankerval 0.1.3")
-
-        proc = self.run_resolver(self.workspace / "bin")
-
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(proc.stdout.strip(), str(path))
-
-    def test_accepts_trailing_clnkeval_version_token(self) -> None:
-        path = self.make_binary(self.workspace / "bin", "clnkeval", "clnkeval 0.1.3")
+        path = self.make_binary(self.workspace / "bin", "clankerval", "clankerval 0.2.1")
 
         proc = self.run_resolver(self.workspace / "bin")
 
@@ -139,48 +114,34 @@ class RequireClankervalTest(unittest.TestCase):
 
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("install", proc.stderr.lower())
-        self.assertIn("clankerval >= 0.1.3", proc.stderr)
+        self.assertIn("clankerval >= 0.2.1", proc.stderr)
 
     def test_exits_non_zero_when_all_discovered_runners_are_too_old(self) -> None:
         self.make_binary(self.workspace / "early", "clankerval", "clankerval version 0.1.1")
-        self.make_binary(self.workspace / "late", "clnkeval", "clnkeval version 0.1.2")
 
-        proc = self.run_resolver(self.workspace / "early", self.workspace / "late")
+        proc = self.run_resolver(self.workspace / "early")
 
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("clankerval 0.1.1", proc.stderr)
-        self.assertIn("clnkeval 0.1.2", proc.stderr)
-        self.assertIn("0.1.3", proc.stderr)
+        self.assertIn("0.2.1", proc.stderr)
 
-    def test_discover_candidates_preserves_both_alias_names_for_same_binary(self) -> None:
+    def test_discover_candidates_deduplicates_repeated_path_entries(self) -> None:
         bin_dir = self.workspace / "bin"
         path = self.make_binary(bin_dir, "clankerval", "clankerval version 0.1.2")
-        self.make_alias(bin_dir, "clnkeval", path)
 
-        discovered = REQUIRE_CLANKERVAL.discover_candidates([str(bin_dir)])
+        discovered = REQUIRE_CLANKERVAL.discover_candidates([str(bin_dir), str(bin_dir)])
 
         self.assertEqual(
             discovered,
-            [("clankerval", path), ("clnkeval", path)],
+            [("clankerval", path)],
         )
-
-    def test_reports_both_alias_names_when_same_binary_is_too_old(self) -> None:
-        bin_dir = self.workspace / "bin"
-        path = self.make_binary(bin_dir, "clankerval", "clankerval version 0.1.2")
-        self.make_alias(bin_dir, "clnkeval", path)
-
-        proc = self.run_resolver(bin_dir)
-
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("clankerval 0.1.2", proc.stderr)
-        self.assertIn("clnkeval 0.1.2", proc.stderr)
 
     def test_make_evaluations_targets_fail_cleanly_when_resolver_exits_non_zero(self) -> None:
         make_path = shutil.which("make")
         self.assertIsNotNone(make_path)
         self.env_file.write_text("CLANKERVAL_MIN_VERSION=9.9.9\n", encoding="utf-8")
         tool_bin = self.workspace / "tool-bin"
-        self.make_binary(tool_bin, "clankerval", "clankerval version 0.1.2")
+        self.make_binary(tool_bin, "clankerval", "clankerval version 0.2.1")
         python_bin = self.workspace / "python-bin"
         python_bin.mkdir()
         (python_bin / "python3").symlink_to(pathlib.Path(sys.executable).resolve())
@@ -202,7 +163,7 @@ class RequireClankervalTest(unittest.TestCase):
                 combined = f"{proc.stdout}\n{proc.stderr}"
                 self.assertNotEqual(proc.returncode, 0)
                 self.assertIn("error: clankerval >= 9.9.9 is required.", combined)
-                self.assertIn("clankerval 0.1.2", combined)
+                self.assertIn("clankerval 0.2.1", combined)
                 self.assertNotRegex(combined, r"(?i)command not found|permission denied")
 
 
