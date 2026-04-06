@@ -31,6 +31,9 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, `grep 'A\\\\|B' file.txt`) {
 			t.Error("prompt should teach shell escaping inside JSON")
 		}
+		if !strings.Contains(prompt, `"bash":{"command":"ls -la /tmp","workdir":null}`) {
+			t.Error("prompt should teach the nested bash act shape")
+		}
 		if !strings.Contains(prompt, "Exported environment changes and environment updates from source or . also persist between commands.") {
 			t.Error("prompt should explain shell env persistence")
 		}
@@ -43,8 +46,17 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, "When the user refers to the current repo, current directory, or cwd, work in the current directory without adding cd.") {
 			t.Error("prompt should keep cwd tasks in the current directory")
 		}
+		if !strings.Contains(prompt, "If the user names a file or path, inspect that exact path first.") {
+			t.Error("prompt should prioritize exact user-named paths")
+		}
 		if !strings.Contains(prompt, "You may also receive a [state] block containing JSON host execution state such as the current working directory.") {
 			t.Error("prompt should explain host state messages")
+		}
+		if !strings.Contains(prompt, "[command_feedback]") {
+			t.Error("prompt should mention command feedback")
+		}
+		if !strings.Contains(prompt, "clean pre-command git baseline") {
+			t.Error("prompt should explain feedback scope")
 		}
 		if !strings.Contains(prompt, `do not emit "done" until you have completed the change with at least one "act" turn`) {
 			t.Error("prompt should require an act turn before done for workspace-changing tasks")
@@ -57,6 +69,12 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		}
 		if !strings.Contains(prompt, "For exact literal text writes, prefer quoted literals such as printf 'hello\\n' > note.txt instead of shell-fragile format strings.") {
 			t.Error("prompt should teach a stable literal-text write pattern")
+		}
+		if strings.Contains(prompt, "check status before and after making changes") {
+			t.Error("prompt should not recommend git status before and after edits")
+		}
+		if strings.Contains(prompt, "For targeted edits use sed.") {
+			t.Error("prompt should not default targeted edits to sed")
 		}
 		if !strings.Contains(prompt, "When writing plain-text file contents like hello, write a newline-terminated line unless the user explicitly asks for no trailing newline or exact byte-for-byte content.") {
 			t.Error("prompt should default plain-text file writes to newline-terminated lines")

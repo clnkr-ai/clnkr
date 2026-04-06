@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,10 @@ import (
 
 	clnkr "github.com/clnkr-ai/clnkr"
 )
+
+func actJSON(command string) string {
+	return fmt.Sprintf(`{"type":"act","bash":{"command":%q,"workdir":null}}`, command)
+}
 
 type fakeModel struct {
 	responses []clnkr.Response
@@ -310,7 +315,7 @@ func TestRunSingleTaskRejectsCompactCommandBeforeApprovalCheck(t *testing.T) {
 
 func TestRunApprovalTaskRejectsCompactApprovalReply(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","command":"echo hi"}`}},
+		{Message: clnkr.Message{Role: "assistant", Content: actJSON("echo hi")}},
 		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
 	}}
 	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
@@ -377,7 +382,7 @@ func TestRunApprovalTaskRejectsCompactClarificationReply(t *testing.T) {
 
 func TestRunTaskFullSendUsesRun(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","command":"echo hi"}`}},
+		{Message: clnkr.Message{Role: "assistant", Content: actJSON("echo hi")}},
 		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
 	}}
 	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
@@ -394,7 +399,7 @@ func TestRunTaskFullSendUsesRun(t *testing.T) {
 
 func TestRunApprovalTaskApproveExecutesCommand(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","command":"echo hi"}`}},
+		{Message: clnkr.Message{Role: "assistant", Content: actJSON("echo hi")}},
 		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
 	}}
 	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
@@ -412,7 +417,7 @@ func TestRunApprovalTaskApproveExecutesCommand(t *testing.T) {
 
 func TestRunApprovalTaskNonApprovalReplyBecomesGuidance(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","command":"rm important.txt"}`}},
+		{Message: clnkr.Message{Role: "assistant", Content: actJSON("rm important.txt")}},
 		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"okay"}`}},
 	}}
 	executor := &fakeExecutor{}
@@ -456,7 +461,7 @@ func TestRunApprovalTaskClarifyTurnAppendsReply(t *testing.T) {
 
 func TestRunApprovalTaskEmptyActReplyIsNoOp(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","command":"rm important.txt"}`}},
+		{Message: clnkr.Message{Role: "assistant", Content: actJSON("rm important.txt")}},
 	}}
 	executor := &fakeExecutor{}
 	agent := clnkr.NewAgent(model, executor, "/tmp")
@@ -508,6 +513,23 @@ func TestStdinPrompterConfirmWritesPromptToStderr(t *testing.T) {
 	}
 }
 
+func TestStdinPrompterConfirmShowsWorkdir(t *testing.T) {
+	stderr := captureStderr(t, func() {
+		p := &stdinPrompter{reader: newLineReader(strings.NewReader("y\n"))}
+		reply, err := p.ActReply(context.Background(), formatActProposal("rm important.txt", "subdir"))
+		if err != nil {
+			t.Fatalf("ActReply: %v", err)
+		}
+		if reply != "y" {
+			t.Fatalf("reply = %q, want y", reply)
+		}
+	})
+
+	if !strings.Contains(stderr, "rm important.txt in subdir") {
+		t.Fatalf("stderr should contain workdir note, got %q", stderr)
+	}
+}
+
 func TestStdinPrompterActReplyCanBeCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -519,6 +541,40 @@ func TestStdinPrompterActReplyCanBeCanceled(t *testing.T) {
 			t.Fatalf("got %v, want context.Canceled", err)
 		}
 	})
+}
+
+func TestWriteEventLogIncludesFeedback(t *testing.T) {
+	f, err := os.CreateTemp("", "clnku-event-log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name()) //nolint:errcheck
+	defer f.Close()           //nolint:errcheck
+
+	writeEventLog(f, clnkr.EventCommandDone{
+		Command:  "touch note.txt",
+		ExitCode: 0,
+		Feedback: clnkr.CommandFeedback{ChangedFiles: []string{"note.txt"}},
+	})
+
+	if _, err := f.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Feedback clnkr.CommandFeedback `json:"feedback"`
+		} `json:"payload"`
+	}
+	if err := json.NewDecoder(f).Decode(&payload); err != nil {
+		t.Fatalf("decode event log: %v", err)
+	}
+	if payload.Type != "command_done" {
+		t.Fatalf("type = %q, want command_done", payload.Type)
+	}
+	if len(payload.Payload.Feedback.ChangedFiles) != 1 || payload.Payload.Feedback.ChangedFiles[0] != "note.txt" {
+		t.Fatalf("feedback = %#v, want note.txt", payload.Payload.Feedback)
+	}
 }
 
 func captureStderr(t *testing.T, fn func()) string {

@@ -15,7 +15,7 @@ func TestParseTurn(t *testing.T) {
 	}{
 		{
 			name:  "valid act turn",
-			input: `{"type":"act","command":"ls -la"}`,
+			input: `{"type":"act","bash":{"command":"ls -la","workdir":null}}`,
 		},
 		{
 			name:  "valid clarify turn",
@@ -27,19 +27,19 @@ func TestParseTurn(t *testing.T) {
 		},
 		{
 			name:  "act with reasoning preserved",
-			input: `{"type":"act","command":"echo hi","reasoning":"testing output"}`,
+			input: `{"type":"act","bash":{"command":"echo hi","workdir":null},"reasoning":"testing output"}`,
 		},
 		{
 			name:  "repairs invalid pipe escape in command",
-			input: `{"type":"act","command":"grep 'A\|B' file.txt"}`,
+			input: `{"type":"act","bash":{"command":"grep 'A\|B' file.txt","workdir":null}}`,
 		},
 		{
 			name:  "repairs invalid backtick escape in command",
-			input: "{\"type\":\"act\",\"command\":\"printf \\`hi\\`\"}",
+			input: "{\"type\":\"act\",\"bash\":{\"command\":\"printf \\`hi\\`\",\"workdir\":null}}",
 		},
 		{
 			name:  "repairs malformed unicode escape in command",
-			input: `{"type":"act","command":"printf '\u12XZ'"}`,
+			input: `{"type":"act","bash":{"command":"printf '\u12XZ'","workdir":null}}`,
 		},
 		{
 			name:    "invalid json",
@@ -48,23 +48,38 @@ func TestParseTurn(t *testing.T) {
 		},
 		{
 			name:    "missing type field",
-			input:   `{"command":"ls"}`,
+			input:   `{}`,
 			wantErr: ErrUnknownTurnType,
 		},
 		{
 			name:    "unknown type",
-			input:   `{"type":"explode","data":"boom"}`,
+			input:   `{"type":"explode"}`,
 			wantErr: ErrUnknownTurnType,
 		},
 		{
+			name:    "legacy act shape rejected",
+			input:   `{"type":"act","command":"ls -la"}`,
+			wantErr: ErrInvalidJSON,
+		},
+		{
 			name:    "act missing command",
-			input:   `{"type":"act"}`,
+			input:   `{"type":"act","bash":{"workdir":null}}`,
 			wantErr: ErrMissingCommand,
 		},
 		{
 			name:    "act empty command",
-			input:   `{"type":"act","command":""}`,
+			input:   `{"type":"act","bash":{"command":"","workdir":null}}`,
 			wantErr: ErrMissingCommand,
+		},
+		{
+			name:    "act missing workdir field",
+			input:   `{"type":"act","bash":{"command":"pwd"}}`,
+			wantErr: ErrInvalidJSON,
+		},
+		{
+			name:    "act rejects non-null question field",
+			input:   `{"type":"act","bash":{"command":"pwd","workdir":null},"question":"extra"}`,
+			wantErr: ErrInvalidJSON,
 		},
 		{
 			name:    "clarify missing question",
@@ -87,8 +102,13 @@ func TestParseTurn(t *testing.T) {
 			wantErr: ErrEmptySummary,
 		},
 		{
+			name:    "done rejects non-null bash field",
+			input:   `{"type":"done","summary":"ok","bash":{"command":"pwd","workdir":null}}`,
+			wantErr: ErrInvalidJSON,
+		},
+		{
 			name:  "json wrapped in prose with json fence",
-			input: "Here is my response:\n\n```json\n{\"type\":\"act\",\"command\":\"ls\"}\n```\n\nLet me know.",
+			input: "Here is my response:\n\n```json\n{\"type\":\"act\",\"bash\":{\"command\":\"ls\",\"workdir\":null}}\n```\n\nLet me know.",
 		},
 		{
 			name:  "json wrapped in plain code fence",
@@ -96,7 +116,7 @@ func TestParseTurn(t *testing.T) {
 		},
 		{
 			name:  "bare json with surrounding prose",
-			input: "I'll run this command:\n{\"type\":\"act\",\"command\":\"echo hello\"}\nThat should work.",
+			input: "I'll run this command:\n{\"type\":\"act\",\"bash\":{\"command\":\"echo hello\",\"workdir\":null}}\nThat should work.",
 		},
 		{
 			name:    "empty input",
@@ -145,7 +165,7 @@ func TestParseTurn(t *testing.T) {
 
 func TestParseTurnTypeAssertions(t *testing.T) {
 	t.Run("act turn fields", func(t *testing.T) {
-		turn, err := ParseTurn(`{"type":"act","command":"ls -la"}`)
+		turn, err := ParseTurn(`{"type":"act","bash":{"command":"ls -la","workdir":"subdir"}}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -153,8 +173,11 @@ func TestParseTurnTypeAssertions(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected *ActTurn, got %T", turn)
 		}
-		if act.Command != "ls -la" {
-			t.Errorf("got command %q, want %q", act.Command, "ls -la")
+		if act.Bash.Command != "ls -la" {
+			t.Errorf("got command %q, want %q", act.Bash.Command, "ls -la")
+		}
+		if act.Bash.Workdir != "subdir" {
+			t.Errorf("got workdir %q, want %q", act.Bash.Workdir, "subdir")
 		}
 	})
 
@@ -189,7 +212,7 @@ func TestParseTurnTypeAssertions(t *testing.T) {
 
 func TestParseTurnReasoningPreserved(t *testing.T) {
 	t.Run("act reasoning", func(t *testing.T) {
-		turn, err := ParseTurn(`{"type":"act","command":"ls","reasoning":"checking files"}`)
+		turn, err := ParseTurn(`{"type":"act","bash":{"command":"ls","workdir":null},"reasoning":"checking files"}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -222,7 +245,7 @@ func TestParseTurnReasoningPreserved(t *testing.T) {
 	})
 
 	t.Run("empty reasoning is omitted", func(t *testing.T) {
-		turn, err := ParseTurn(`{"type":"act","command":"ls"}`)
+		turn, err := ParseTurn(`{"type":"act","bash":{"command":"ls","workdir":null}}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -275,6 +298,12 @@ func TestProtocolCorrectionMessage(t *testing.T) {
 		if !strings.Contains(msg, "Do not jump to done unless prior command results in this conversation already prove the task is complete.") {
 			t.Fatalf("expected done-guard guidance, got %q", msg)
 		}
+		if !strings.Contains(msg, `{"type":"act","bash":{"command":"...","workdir":null}}`) {
+			t.Fatalf("expected new bash-shape guidance, got %q", msg)
+		}
+		if strings.Contains(msg, `{"type":"act","command":"..."}`) {
+			t.Fatalf("expected legacy act shape to be absent, got %q", msg)
+		}
 	})
 
 	t.Run("mentions invalid pipe escape", func(t *testing.T) {
@@ -294,11 +323,11 @@ func TestProtocolCorrectionMessage(t *testing.T) {
 
 func TestParseTurnTypes(t *testing.T) {
 	t.Run("ActTurn implements Turn via value", func(t *testing.T) {
-		var turn Turn = ActTurn{Command: "ls"}
+		var turn Turn = ActTurn{Bash: BashAction{Command: "ls"}}
 		turn.turn() // compile-time check
 	})
 	t.Run("ActTurn implements Turn via pointer", func(t *testing.T) {
-		var turn Turn = &ActTurn{Command: "ls"}
+		var turn Turn = &ActTurn{Bash: BashAction{Command: "ls"}}
 		turn.turn()
 	})
 	t.Run("ClarifyTurn implements Turn", func(t *testing.T) {
@@ -314,6 +343,7 @@ func TestParseTurnTypes(t *testing.T) {
 func TestExtractJSON_NestedBraces(t *testing.T) {
 	// Verify that braces inside JSON string values are handled correctly.
 	input := `{"type":"act","command":"echo '{}'"}`
+	input = `{"type":"act","bash":{"command":"echo '{}'","workdir":null}}`
 	turn, err := ParseTurn(input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -322,8 +352,8 @@ func TestExtractJSON_NestedBraces(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *ActTurn, got %T", turn)
 	}
-	if act.Command != "echo '{}'" {
-		t.Errorf("got command %q, want %q", act.Command, "echo '{}'")
+	if act.Bash.Command != "echo '{}'" {
+		t.Errorf("got command %q, want %q", act.Bash.Command, "echo '{}'")
 	}
 }
 
@@ -335,10 +365,10 @@ func TestExtractJSON(t *testing.T) {
 		wantErr bool
 	}{
 		{"raw object", `{"type":"act"}`, `{"type":"act"}`, false},
-		{"prose before", "Let me check.\n" + `{"type":"act","command":"ls"}`, `{"type":"act","command":"ls"}`, false},
+		{"prose before", "Let me check.\n" + `{"type":"act","bash":{"command":"ls","workdir":null}}`, `{"type":"act","bash":{"command":"ls","workdir":null}}`, false},
 		{"code fenced json", "```json\n{\"type\":\"done\",\"summary\":\"ok\"}\n```", `{"type":"done","summary":"ok"}`, false},
 		{"code fenced plain", "```\n{\"type\":\"done\",\"summary\":\"ok\"}\n```", `{"type":"done","summary":"ok"}`, false},
-		{"nested braces", `{"type":"act","command":"echo '{}'"}`, `{"type":"act","command":"echo '{}'"}`, false},
+		{"nested braces", `{"type":"act","bash":{"command":"echo '{}'","workdir":null}}`, `{"type":"act","bash":{"command":"echo '{}'","workdir":null}}`, false},
 		{"empty input", "", "", true},
 		{"no json", "just plain text", "", true},
 		{"unbalanced", `{"type":"act"`, "", true},

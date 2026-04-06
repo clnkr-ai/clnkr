@@ -360,7 +360,7 @@ func TestModel(t *testing.T) {
 			wantErr error
 		}{
 			{name: "missing wrapped fields", content: `{"turn":{"type":"done","summary":"ignored schema"}}`, wantErr: clnkr.ErrInvalidJSON},
-			{name: "semantic invalid act turn", content: `{"turn":{"type":"act","command":"","question":null,"summary":null,"reasoning":null}}`, wantErr: clnkr.ErrMissingCommand},
+			{name: "semantic invalid act turn", content: `{"turn":{"type":"act","bash":{"command":"","workdir":null},"question":null,"summary":null,"reasoning":null}}`, wantErr: clnkr.ErrMissingCommand},
 			{name: "prose wrapped json", content: "Here is the result:\n{\"turn\":{\"type\":\"done\",\"summary\":\"wrapped\"}}", wantErr: clnkr.ErrInvalidJSON},
 		}
 
@@ -439,5 +439,5 @@ func TestModel(t *testing.T) {
 }
 
 func openAIWrappedDone(summary string) string {
-	return `{"turn":{"type":"done","command":null,"question":null,"summary":"` + summary + `","reasoning":null}}`
+	return `{"turn":{"type":"done","bash":null,"question":null,"summary":"` + summary + `","reasoning":null}}`
 }

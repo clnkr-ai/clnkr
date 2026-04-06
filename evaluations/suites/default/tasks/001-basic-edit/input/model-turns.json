@@ -1,4 +1,4 @@
 [
-  "{\"turn\":{\"type\":\"act\",\"command\":\"printf 'hello\\\\n' > note.txt\",\"question\":null,\"summary\":null,\"reasoning\":null}}",
-  "{\"turn\":{\"type\":\"done\",\"command\":null,\"question\":null,\"summary\":\"created note.txt\",\"reasoning\":null}}"
+  "{\"turn\":{\"type\":\"act\",\"bash\":{\"command\":\"printf 'hello\\\\n' > note.txt\",\"workdir\":null},\"question\":null,\"summary\":null,\"reasoning\":null}}",
+  "{\"turn\":{\"type\":\"done\",\"bash\":null,\"question\":null,\"summary\":\"created note.txt\",\"reasoning\":null}}"
 ]

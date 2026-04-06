@@ -8,16 +8,22 @@ import (
 	"strings"
 
 	clnkr "github.com/clnkr-ai/clnkr"
+	"github.com/clnkr-ai/clnkr/turnjson"
 )
 
 var ErrUnsupportedTurn = errors.New("unsupported turn")
 
 type envelope struct {
-	Type      string `json:"type"`
-	Command   string `json:"command,omitempty"`
-	Question  string `json:"question,omitempty"`
-	Summary   string `json:"summary,omitempty"`
-	Reasoning string `json:"reasoning,omitempty"`
+	Type      string        `json:"type"`
+	Bash      *bashEnvelope `json:"bash,omitempty"`
+	Question  string        `json:"question,omitempty"`
+	Summary   string        `json:"summary,omitempty"`
+	Reasoning string        `json:"reasoning,omitempty"`
+}
+
+type bashEnvelope struct {
+	Command string  `json:"command"`
+	Workdir *string `json:"workdir"`
 }
 
 // Schema returns the shared JSON schema used for structured provider output.
@@ -36,8 +42,18 @@ func Schema() map[string]any {
 								"type":  "string",
 								"const": "act",
 							},
-							"command": map[string]any{
-								"type": "string",
+							"bash": map[string]any{
+								"type":                 "object",
+								"additionalProperties": false,
+								"properties": map[string]any{
+									"command": map[string]any{
+										"type": "string",
+									},
+									"workdir": map[string]any{
+										"type": []string{"string", "null"},
+									},
+								},
+								"required": []string{"command", "workdir"},
 							},
 							"question": map[string]any{
 								"type": "null",
@@ -49,7 +65,7 @@ func Schema() map[string]any {
 								"type": []string{"string", "null"},
 							},
 						},
-						"required": []string{"type", "command", "question", "summary", "reasoning"},
+						"required": []string{"type", "bash", "question", "summary", "reasoning"},
 					},
 					map[string]any{
 						"type":                 "object",
@@ -59,7 +75,7 @@ func Schema() map[string]any {
 								"type":  "string",
 								"const": "clarify",
 							},
-							"command": map[string]any{
+							"bash": map[string]any{
 								"type": "null",
 							},
 							"question": map[string]any{
@@ -72,7 +88,7 @@ func Schema() map[string]any {
 								"type": []string{"string", "null"},
 							},
 						},
-						"required": []string{"type", "command", "question", "summary", "reasoning"},
+						"required": []string{"type", "bash", "question", "summary", "reasoning"},
 					},
 					map[string]any{
 						"type":                 "object",
@@ -82,7 +98,7 @@ func Schema() map[string]any {
 								"type":  "string",
 								"const": "done",
 							},
-							"command": map[string]any{
+							"bash": map[string]any{
 								"type": "null",
 							},
 							"question": map[string]any{
@@ -95,7 +111,7 @@ func Schema() map[string]any {
 								"type": []string{"string", "null"},
 							},
 						},
-						"required": []string{"type", "command", "question", "summary", "reasoning"},
+						"required": []string{"type", "bash", "question", "summary", "reasoning"},
 					},
 				},
 			},
@@ -210,9 +226,44 @@ func validateProviderTurnShape(raw string) error {
 	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
 		return fmt.Errorf("%w: %v", clnkr.ErrInvalidJSON, err)
 	}
-	for _, field := range []string{"type", "command", "question", "summary", "reasoning"} {
+	for _, field := range []string{"type", "bash", "question", "summary", "reasoning"} {
 		if _, ok := fields[field]; !ok {
 			return fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, field)
+		}
+	}
+
+	var turnType string
+	if err := json.Unmarshal(fields["type"], &turnType); err != nil {
+		return fmt.Errorf("%w: structured output field %q must be string", clnkr.ErrInvalidJSON, "type")
+	}
+
+	switch turnType {
+	case "act":
+		var bashFields map[string]json.RawMessage
+		if err := json.Unmarshal(fields["bash"], &bashFields); err != nil {
+			return fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, "bash")
+		}
+		if bashFields == nil {
+			return fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, "bash")
+		}
+		for _, field := range []string{"command", "workdir"} {
+			if _, ok := bashFields[field]; !ok {
+				return fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, "bash."+field)
+			}
+		}
+		var command string
+		if err := json.Unmarshal(bashFields["command"], &command); err != nil {
+			return fmt.Errorf("%w: structured output field %q must be string", clnkr.ErrInvalidJSON, "bash.command")
+		}
+		if string(bashFields["workdir"]) != "null" {
+			var workdir string
+			if err := json.Unmarshal(bashFields["workdir"], &workdir); err != nil {
+				return fmt.Errorf("%w: structured output field %q must be string or null", clnkr.ErrInvalidJSON, "bash.workdir")
+			}
+		}
+	case "clarify", "done":
+		if string(fields["bash"]) != "null" {
+			return fmt.Errorf("%w: structured output field %q must be null", clnkr.ErrInvalidJSON, "bash")
 		}
 	}
 	return nil
@@ -221,8 +272,13 @@ func validateProviderTurnShape(raw string) error {
 func strictTurnFromEnvelope(env envelope, fields map[string]json.RawMessage) (clnkr.Turn, error) {
 	switch env.Type {
 	case "act":
-		if env.Command == "" {
+		if env.Bash == nil || env.Bash.Command == "" {
 			return nil, clnkr.ErrMissingCommand
+		}
+		if fields != nil {
+			if err := turnjson.RequireObjectFields(fields, "bash", "command", "workdir"); err != nil {
+				return nil, fmt.Errorf("%w: %v", clnkr.ErrInvalidJSON, err)
+			}
 		}
 		if err := rejectPresentNonNullField(fields, "question", "act turn only allows question when it is null"); err != nil {
 			return nil, err
@@ -230,12 +286,19 @@ func strictTurnFromEnvelope(env envelope, fields map[string]json.RawMessage) (cl
 		if err := rejectPresentNonNullField(fields, "summary", "act turn only allows summary when it is null"); err != nil {
 			return nil, err
 		}
-		return &clnkr.ActTurn{Command: env.Command, Reasoning: env.Reasoning}, nil
+		act := &clnkr.ActTurn{
+			Bash:      clnkr.BashAction{Command: env.Bash.Command},
+			Reasoning: env.Reasoning,
+		}
+		if env.Bash.Workdir != nil {
+			act.Bash.Workdir = *env.Bash.Workdir
+		}
+		return act, nil
 	case "clarify":
 		if env.Question == "" {
 			return nil, clnkr.ErrEmptyClarify
 		}
-		if err := rejectPresentNonNullField(fields, "command", "clarify turn only allows command when it is null"); err != nil {
+		if err := rejectPresentNonNullField(fields, "bash", "clarify turn only allows bash when it is null"); err != nil {
 			return nil, err
 		}
 		if err := rejectPresentNonNullField(fields, "summary", "clarify turn only allows summary when it is null"); err != nil {
@@ -246,7 +309,7 @@ func strictTurnFromEnvelope(env envelope, fields map[string]json.RawMessage) (cl
 		if env.Summary == "" {
 			return nil, clnkr.ErrEmptySummary
 		}
-		if err := rejectPresentNonNullField(fields, "command", "done turn only allows command when it is null"); err != nil {
+		if err := rejectPresentNonNullField(fields, "bash", "done turn only allows bash when it is null"); err != nil {
 			return nil, err
 		}
 		if err := rejectPresentNonNullField(fields, "question", "done turn only allows question when it is null"); err != nil {
@@ -277,7 +340,7 @@ func rejectPresentNonNullField(fields map[string]json.RawMessage, field, detail 
 func strictEnvelopeFromTurn(turn clnkr.Turn) (envelope, error) {
 	switch v := turn.(type) {
 	case clnkr.ActTurn:
-		env := envelope{Type: "act", Command: v.Command, Reasoning: v.Reasoning}
+		env := envelope{Type: "act", Bash: bashEnvelopeFromAction(v.Bash), Reasoning: v.Reasoning}
 		if _, err := strictTurnFromEnvelope(env, nil); err != nil {
 			return envelope{}, err
 		}
@@ -286,7 +349,7 @@ func strictEnvelopeFromTurn(turn clnkr.Turn) (envelope, error) {
 		if v == nil {
 			return envelope{}, fmt.Errorf("canonical turn json: %w: nil *ActTurn", ErrUnsupportedTurn)
 		}
-		env := envelope{Type: "act", Command: v.Command, Reasoning: v.Reasoning}
+		env := envelope{Type: "act", Bash: bashEnvelopeFromAction(v.Bash), Reasoning: v.Reasoning}
 		if _, err := strictTurnFromEnvelope(env, nil); err != nil {
 			return envelope{}, err
 		}
@@ -325,5 +388,16 @@ func strictEnvelopeFromTurn(turn clnkr.Turn) (envelope, error) {
 		return envelope{}, fmt.Errorf("canonical turn json: %w: nil turn", ErrUnsupportedTurn)
 	default:
 		return envelope{}, fmt.Errorf("canonical turn json: %w: %T", ErrUnsupportedTurn, turn)
+	}
+}
+
+func bashEnvelopeFromAction(action clnkr.BashAction) *bashEnvelope {
+	var workdir *string
+	if action.Workdir != "" {
+		workdir = &action.Workdir
+	}
+	return &bashEnvelope{
+		Command: action.Command,
+		Workdir: workdir,
 	}
 }

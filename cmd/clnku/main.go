@@ -300,7 +300,7 @@ func runApprovalLoop(ctx context.Context, agent *clnkr.Agent, prompter approvalP
 			}
 			agent.AppendUserMessage(reply)
 		case *clnkr.ActTurn:
-			reply, err := waitForActReply(ctx, prompter, turn.Command)
+			reply, err := waitForActReply(ctx, prompter, formatActProposal(turn.Bash.Command, turn.Bash.Workdir))
 			if err != nil {
 				return err
 			}
@@ -336,6 +336,13 @@ func waitForActReply(ctx context.Context, prompter approvalPrompter, command str
 		}
 		return reply, nil
 	}
+}
+
+func formatActProposal(command, workdir string) string {
+	if strings.TrimSpace(workdir) == "" {
+		return command
+	}
+	return fmt.Sprintf("%s in %s", command, workdir)
 }
 
 func waitForClarification(ctx context.Context, prompter approvalPrompter, question string) (string, error) {
@@ -682,12 +689,13 @@ func writeEventLog(f *os.File, e clnkr.Event) {
 		je = jsonEvent{Type: "command_start", Payload: e}
 	case clnkr.EventCommandDone:
 		je = jsonEvent{Type: "command_done", Payload: struct {
-			Command  string `json:"command"`
-			Stdout   string `json:"stdout"`
-			Stderr   string `json:"stderr"`
-			ExitCode int    `json:"exit_code"`
-			Err      string `json:"err,omitempty"`
-		}{Command: e.Command, Stdout: e.Stdout, Stderr: e.Stderr, ExitCode: e.ExitCode, Err: errString(e.Err)}}
+			Command  string                `json:"command"`
+			Stdout   string                `json:"stdout"`
+			Stderr   string                `json:"stderr"`
+			ExitCode int                   `json:"exit_code"`
+			Feedback clnkr.CommandFeedback `json:"feedback,omitempty"`
+			Err      string                `json:"err,omitempty"`
+		}{Command: e.Command, Stdout: e.Stdout, Stderr: e.Stderr, ExitCode: e.ExitCode, Feedback: e.Feedback, Err: errString(e.Err)}}
 	case clnkr.EventProtocolFailure:
 		je = jsonEvent{Type: "protocol_failure", Payload: struct {
 			Reason string `json:"reason"`

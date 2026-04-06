@@ -13,6 +13,10 @@ import (
 	clnkr "github.com/clnkr-ai/clnkr"
 )
 
+func actJSON(command string) string {
+	return fmt.Sprintf(`{"type":"act","bash":{"command":%q,"workdir":null}}`, command)
+}
+
 type fakeModel struct {
 	responses []clnkr.Response
 	calls     int
@@ -101,7 +105,7 @@ func (p *scriptPrompter) Clarify(context.Context, string) (string, error) {
 
 func TestRunPlainApprovalNonApprovalReplyBecomesGuidance(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","command":"rm important.txt"}`}},
+		{Message: clnkr.Message{Role: "assistant", Content: actJSON("rm important.txt")}},
 		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"okay"}`}},
 	}}
 	executor := &fakeExecutor{}
@@ -158,7 +162,7 @@ func TestResolveModelValue(t *testing.T) {
 
 func TestRunPlainApprovalEmptyActReplyIsNoOp(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","command":"rm important.txt"}`}},
+		{Message: clnkr.Message{Role: "assistant", Content: actJSON("rm important.txt")}},
 	}}
 	executor := &fakeExecutor{}
 	agent := clnkr.NewAgent(model, executor, "/tmp")
@@ -209,6 +213,23 @@ func TestStdinPrompterActReplyCanBeCanceled(t *testing.T) {
 			t.Fatalf("got %v, want context.Canceled", err)
 		}
 	})
+}
+
+func TestStdinPrompterActReplyShowsWorkdir(t *testing.T) {
+	stderr := captureStderr(t, func() {
+		p := &stdinPrompter{reader: newLineReader(strings.NewReader("y\n"))}
+		reply, err := p.ActReply(context.Background(), formatActProposal("rm important.txt", "subdir"))
+		if err != nil {
+			t.Fatalf("ActReply: %v", err)
+		}
+		if reply != "y" {
+			t.Fatalf("reply = %q, want y", reply)
+		}
+	})
+
+	if !strings.Contains(stderr, "rm important.txt in subdir") {
+		t.Fatalf("stderr should contain workdir note, got %q", stderr)
+	}
 }
 
 func captureStderr(t *testing.T, fn func()) string {

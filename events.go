@@ -21,6 +21,7 @@ type EventCommandDone struct {
 	Stdout   string
 	Stderr   string
 	ExitCode int
+	Feedback CommandFeedback
 	Err      error
 }
 

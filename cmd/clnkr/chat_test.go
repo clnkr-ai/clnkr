@@ -9,6 +9,10 @@ import (
 	"github.com/clnkr-ai/clnkr/transcript"
 )
 
+func chatActJSON(command string) string {
+	return fmt.Sprintf(`{"type":"act","bash":{"command":%q,"workdir":null}}`, command)
+}
+
 func TestChatAppendEventResponse(t *testing.T) {
 	s := defaultStyles(true)
 	c := newChatModel(80, 24, s, false)
@@ -28,7 +32,7 @@ func TestChatSuppressesStructuredActResponse(t *testing.T) {
 	c := newChatModel(80, 24, s, false)
 
 	c.appendEvent(clnkr.EventResponse{
-		Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","command":"ls -la"}`},
+		Message: clnkr.Message{Role: "assistant", Content: chatActJSON("ls -la")},
 	})
 
 	content := c.content.String()
@@ -141,6 +145,21 @@ func TestChatPendingCommandBuffer(t *testing.T) {
 	}
 }
 
+func TestChatCommandDoneShowsChangedFilesNote(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.appendEvent(clnkr.EventCommandDone{
+		Command:  "touch note.txt",
+		ExitCode: 0,
+		Feedback: clnkr.CommandFeedback{ChangedFiles: []string{"note.txt"}},
+	})
+
+	if !strings.Contains(c.content.String(), "Changed: note.txt") {
+		t.Fatalf("content should show changed-files note, got %q", c.content.String())
+	}
+}
+
 func TestParseCommandTranscriptPreservesLiteralBodyText(t *testing.T) {
 	content := transcript.FormatCommandResult(transcript.CommandResult{
 		Command:  "printf 'a&b <c> [d]'",
@@ -167,6 +186,28 @@ func TestParseCommandTranscriptPreservesLiteralBodyText(t *testing.T) {
 	}
 }
 
+func TestParseCommandTranscriptParsesFeedback(t *testing.T) {
+	content := transcript.FormatCommandResult(transcript.CommandResult{
+		Command:  "printf hi",
+		ExitCode: 0,
+		Feedback: transcript.CommandFeedback{
+			ChangedFiles: []string{"note.txt"},
+			Diff:         "@@ -1 +1 @@\n+[/command_feedback]\n",
+		},
+	})
+
+	got, ok := parseCommandTranscript(content)
+	if !ok {
+		t.Fatal("expected command transcript to parse")
+	}
+	if got.feedback.Diff != "@@ -1 +1 @@\n+[/command_feedback]\n" {
+		t.Fatalf("feedback diff = %q, want literal command_feedback marker", got.feedback.Diff)
+	}
+	if len(got.feedback.ChangedFiles) != 1 || got.feedback.ChangedFiles[0] != "note.txt" {
+		t.Fatalf("feedback changed files = %#v, want note.txt", got.feedback.ChangedFiles)
+	}
+}
+
 func TestChatHydrateHistoryRendersClarifyQuestion(t *testing.T) {
 	s := defaultStyles(true)
 	c := newChatModel(80, 24, s, false)
@@ -188,12 +229,35 @@ func TestChatSetProposedCommand(t *testing.T) {
 	s := defaultStyles(true)
 	c := newChatModel(80, 24, s, false)
 
-	c.setProposedCommand("rm important.txt")
+	c.setProposedCommand("rm important.txt", "")
 	if c.pendingCmd == "" {
 		t.Fatal("pendingCmd should be set after proposing a command")
 	}
 	if strings.Contains(c.content.String(), "rm important.txt") {
 		t.Fatal("proposed command should not be committed before execution")
+	}
+}
+
+func TestChatSetProposedCommandShowsWorkdir(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.setProposedCommand("rm important.txt", "subdir")
+	if !strings.Contains(c.pendingCmd, "in subdir") {
+		t.Fatalf("pendingCmd should show workdir, got %q", c.pendingCmd)
+	}
+}
+
+func TestChatSuppressesLegacyStructuredActHistory(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.hydrateHistory([]clnkr.Message{
+		{Role: "assistant", Content: `{"type":"act","command":"ls -la"}`},
+	})
+
+	if strings.Contains(c.content.String(), `"type":"act"`) {
+		t.Fatalf("legacy act JSON should be suppressed, got %q", c.content.String())
 	}
 }
 

@@ -96,6 +96,7 @@ func TestWriteEventLogAllTypes(t *testing.T) {
 		}, `"type":"response"`},
 		{"command_start", clnkr.EventCommandStart{Command: "ls", Dir: "/tmp"}, `"type":"command_start"`},
 		{"command_done_ok", clnkr.EventCommandDone{Command: "ls", Stdout: "file.txt", ExitCode: 0, Err: nil}, `"type":"command_done"`},
+		{"command_done_feedback", clnkr.EventCommandDone{Command: "ls", ExitCode: 0, Feedback: clnkr.CommandFeedback{ChangedFiles: []string{"note.txt"}}}, `"feedback":{"changed_files":["note.txt"]}`},
 		{"command_done_err", clnkr.EventCommandDone{Command: "false", ExitCode: 1, Err: fmt.Errorf("exit 1")}, `"err":"exit 1"`},
 		{"protocol_failure", clnkr.EventProtocolFailure{Reason: "parse_error", Raw: "bad"}, `"type":"protocol_failure"`},
 		{"debug", clnkr.EventDebug{Message: "test"}, `"type":"debug"`},

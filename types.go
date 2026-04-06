@@ -1,12 +1,13 @@
 package clnkr
 
-import "context"
+import (
+	"context"
+
+	"github.com/clnkr-ai/clnkr/transcript"
+)
 
 // Message is one message in the conversation.
-type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
+type Message = transcript.Message
 
 // Usage tracks token consumption for a single LLM call.
 type Usage struct{ InputTokens, OutputTokens int }
@@ -18,6 +19,9 @@ type Response struct {
 	ProtocolErr error
 }
 
+// CommandFeedback captures git-backed host feedback for the last command.
+type CommandFeedback = transcript.CommandFeedback
+
 // CommandResult captures one shell command execution.
 // Zero PostCwd = no change; nil PostEnv = no snapshot.
 type CommandResult struct {
@@ -27,6 +31,7 @@ type CommandResult struct {
 	ExitCode int
 	PostCwd  string
 	PostEnv  map[string]string
+	Feedback CommandFeedback
 }
 
 // Model sends messages to an LLM and returns a response.

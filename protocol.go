@@ -6,14 +6,21 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/clnkr-ai/clnkr/turnjson"
 )
 
 // Turn is a sealed interface for structured model turns.
 type Turn interface{ turn() }
 
+type BashAction struct {
+	Command string `json:"command"`
+	Workdir string `json:"workdir,omitempty"`
+}
+
 type ActTurn struct {
-	Command   string `json:"command"`
-	Reasoning string `json:"reasoning,omitempty"`
+	Bash      BashAction `json:"bash"`
+	Reasoning string     `json:"reasoning,omitempty"`
 }
 
 type ClarifyTurn struct {
@@ -31,11 +38,16 @@ func (ClarifyTurn) turn() {}
 func (DoneTurn) turn()    {}
 
 type jsonEnvelope struct {
-	Type      string `json:"type"`
-	Command   string `json:"command,omitempty"`
-	Question  string `json:"question,omitempty"`
-	Summary   string `json:"summary,omitempty"`
-	Reasoning string `json:"reasoning,omitempty"`
+	Type      string            `json:"type"`
+	Bash      *jsonBashEnvelope `json:"bash,omitempty"`
+	Question  string            `json:"question,omitempty"`
+	Summary   string            `json:"summary,omitempty"`
+	Reasoning string            `json:"reasoning,omitempty"`
+}
+
+type jsonBashEnvelope struct {
+	Command string  `json:"command"`
+	Workdir *string `json:"workdir"`
 }
 
 var (
@@ -162,24 +174,58 @@ func ParseTurn(raw string) (Turn, error) {
 	// invalid-escape hinting below is still useful as a fallback.
 	jsonStr = sanitizeJSONEscapes(jsonStr)
 	var env jsonEnvelope
-	if err := json.Unmarshal([]byte(jsonStr), &env); err != nil {
+	dec := json.NewDecoder(strings.NewReader(jsonStr))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&env); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+	}
+	if err := turnjson.EnsureSingleJSONObject(dec); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(jsonStr), &fields); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
 	}
 
 	switch env.Type {
 	case "act":
-		if env.Command == "" {
+		if env.Bash == nil || strings.TrimSpace(env.Bash.Command) == "" {
 			return nil, ErrMissingCommand
 		}
-		return &ActTurn{Command: env.Command, Reasoning: env.Reasoning}, nil
+		if err := turnjson.RequireObjectFields(fields, "bash", "command", "workdir"); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+		}
+		if err := turnjson.RejectPresentNonNullField(fields, "question", "act turn only allows question when it is null"); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+		}
+		if err := turnjson.RejectPresentNonNullField(fields, "summary", "act turn only allows summary when it is null"); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+		}
+		act := &ActTurn{Bash: BashAction{Command: env.Bash.Command}, Reasoning: env.Reasoning}
+		if env.Bash.Workdir != nil {
+			act.Bash.Workdir = *env.Bash.Workdir
+		}
+		return act, nil
 	case "clarify":
 		if env.Question == "" {
 			return nil, ErrEmptyClarify
+		}
+		if err := turnjson.RejectPresentNonNullField(fields, "bash", "clarify turn only allows bash when it is null"); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+		}
+		if err := turnjson.RejectPresentNonNullField(fields, "summary", "clarify turn only allows summary when it is null"); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
 		}
 		return &ClarifyTurn{Question: env.Question, Reasoning: env.Reasoning}, nil
 	case "done":
 		if env.Summary == "" {
 			return nil, ErrEmptySummary
+		}
+		if err := turnjson.RejectPresentNonNullField(fields, "bash", "done turn only allows bash when it is null"); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+		}
+		if err := turnjson.RejectPresentNonNullField(fields, "question", "done turn only allows question when it is null"); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
 		}
 		return &DoneTurn{Summary: env.Summary, Reasoning: env.Reasoning}, nil
 	case "":
@@ -220,7 +266,7 @@ func errorToReason(err error) string {
 
 // protocolCorrectionMessage returns a tagged-text correction message for the model.
 func protocolCorrectionMessage(err error) string {
-	hint := "Your previous response was ignored and no command ran. Respond with exactly one JSON object for the next turn from the current state: {\"type\":\"act\",\"command\":\"...\"} or {\"type\":\"clarify\",\"question\":\"...\"} or {\"type\":\"done\",\"summary\":\"...\"}. If you intended to run a command, resend only that act turn. Do not jump to done unless prior command results in this conversation already prove the task is complete."
+	hint := "Your previous response was ignored and no command ran. Respond with exactly one JSON object for the next turn from the current state: {\"type\":\"act\",\"bash\":{\"command\":\"...\",\"workdir\":null}} or {\"type\":\"clarify\",\"question\":\"...\"} or {\"type\":\"done\",\"summary\":\"...\"}. If you intended to run a command, resend only that act turn. Do not jump to done unless prior command results in this conversation already prove the task is complete."
 	invalid, hasInvalid := invalidEscapeChar(err)
 	switch {
 	case hasInvalid && invalid == '|':

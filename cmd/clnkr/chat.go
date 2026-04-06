@@ -113,6 +113,10 @@ func (c *chatModel) appendEvent(e clnkr.Event) {
 			c.content.WriteString(c.styles.Chat.CommandOutput.Render(truncateOutput(output, 20)))
 			c.content.WriteString("\n")
 		}
+		if note := feedbackSummary(ev.Feedback.ChangedFiles, ev.Feedback.Diff); note != "" {
+			c.content.WriteString(c.styles.Chat.CommandOutput.Render(note))
+			c.content.WriteString("\n")
+		}
 		c.content.WriteString("\n")
 		c.pendingCmd = ""
 		c.lastCmd = ""
@@ -148,10 +152,10 @@ func (c *chatModel) appendHostNote(text string) {
 	c.content.WriteString("\n\n")
 }
 
-func (c *chatModel) setProposedCommand(command string) {
+func (c *chatModel) setProposedCommand(command, workdir string) {
 	c.lastCmd = command
 	c.pendingCmd = c.styles.Chat.CommandPending.Render(
-		fmt.Sprintf("%s proposed: %s", iconPending, summarizeCommand(command)),
+		fmt.Sprintf("%s proposed: %s", iconPending, summarizeCommand(formatActProposal(command, workdir))),
 	)
 }
 
@@ -197,6 +201,10 @@ func (c *chatModel) hydrateHistory(messages []clnkr.Message) {
 					c.content.WriteString(c.styles.Chat.CommandOutput.Render(truncateOutput(output, 20)))
 					c.content.WriteString("\n")
 				}
+				if note := feedbackSummary(transcript.feedback.ChangedFiles, transcript.feedback.Diff); note != "" {
+					c.content.WriteString(c.styles.Chat.CommandOutput.Render(note))
+					c.content.WriteString("\n")
+				}
 				c.content.WriteString("\n")
 				continue
 			}
@@ -210,6 +218,9 @@ func (c *chatModel) hydrateHistory(messages []clnkr.Message) {
 func (c *chatModel) renderAssistantMessage(content string, includeClarify bool) string {
 	turn, err := clnkr.ParseTurn(content)
 	if err != nil {
+		if isLegacyAssistantAct(content) {
+			return ""
+		}
 		return content
 	}
 
@@ -284,6 +295,7 @@ type transcriptCommand struct {
 	stdout   string
 	stderr   string
 	exitCode int
+	feedback transcript.CommandFeedback
 }
 
 func parseCommandTranscript(content string) (transcriptCommand, bool) {
@@ -309,12 +321,51 @@ func parseCommandTranscript(content string) (transcriptCommand, bool) {
 		return transcriptCommand{}, false
 	}
 
-	return transcriptCommand{
+	cmd := transcriptCommand{
 		command:  html.UnescapeString(command),
 		stdout:   html.UnescapeString(stdout),
 		stderr:   html.UnescapeString(stderr),
 		exitCode: exitCode,
-	}, true
+	}
+	if feedbackBody, ok := extractTaggedSection(content, "command_feedback"); ok {
+		if err := json.Unmarshal([]byte(html.UnescapeString(feedbackBody)), &cmd.feedback); err != nil {
+			return transcriptCommand{}, false
+		}
+	}
+
+	return cmd, true
+}
+
+func feedbackSummary(changedFiles []string, diff string) string {
+	if len(changedFiles) > 0 {
+		display := append([]string(nil), changedFiles...)
+		if len(display) > 5 {
+			display = append(display[:5], fmt.Sprintf("... (%d more)", len(changedFiles)-5))
+		}
+		return "Changed: " + strings.Join(display, ", ")
+	}
+	if diff == "" {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(diff), "\n")
+	if len(lines) == 0 || lines[0] == "" {
+		return ""
+	}
+	return "Diff: " + lines[0]
+}
+
+func isLegacyAssistantAct(content string) bool {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(strings.TrimSpace(content)), &raw); err != nil {
+		return false
+	}
+
+	var turnType string
+	if err := json.Unmarshal(raw["type"], &turnType); err != nil || turnType != "act" {
+		return false
+	}
+	var command string
+	return json.Unmarshal(raw["command"], &command) == nil && strings.TrimSpace(command) != ""
 }
 
 func extractTaggedSection(content, tag string) (string, bool) {

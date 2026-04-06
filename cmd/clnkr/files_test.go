@@ -1,6 +1,8 @@
 package main
 
 import (
+	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -89,5 +91,35 @@ func TestFileTrackerFromCommandEvent(t *testing.T) {
 
 	if len(ft.files) != 1 || ft.files[0] != "hello.txt" {
 		t.Errorf("expected [hello.txt], got %v", ft.files)
+	}
+}
+
+func TestFileTrackerRebasesFeedbackPathsForCurrentCwd(t *testing.T) {
+	ft := &fileTracker{}
+	repo := t.TempDir()
+	dir1 := filepath.Join(repo, "dir1")
+	dir2 := filepath.Join(repo, "dir2")
+
+	ft.trackFeedback([]string{"local.txt"}, dir1)
+
+	got := ft.pathsForCwd(dir2)
+	want := []string{filepath.Clean(filepath.Join("..", "dir1", "local.txt"))}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pathsForCwd(%q) = %#v, want %#v", dir2, got, want)
+	}
+}
+
+func TestFileTrackerDeduplicatesNormalizedPaths(t *testing.T) {
+	ft := &fileTracker{}
+	repo := t.TempDir()
+	dir1 := filepath.Join(repo, "dir1")
+
+	ft.trackFeedback([]string{"local.txt"}, dir1)
+	ft.track("local.txt")
+
+	got := ft.pathsForCwd(dir1)
+	want := []string{"local.txt"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pathsForCwd(%q) = %#v, want %#v", dir1, got, want)
 	}
 }
