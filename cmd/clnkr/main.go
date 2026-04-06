@@ -25,6 +25,8 @@ import (
 // version is set at build time via -ldflags.
 var version = "dev"
 
+const defaultAnthropicModel = "claude-sonnet-4-6"
+
 const exitClarificationNeeded = 2
 
 var errApprovalPending = errors.New("approval pending")
@@ -36,6 +38,54 @@ type approvalPrompter interface {
 
 type stdinPrompter struct {
 	reader *lineReader
+}
+
+func usageText() string {
+	return `clnkr - a minimal coding agent
+
+Usage:
+  clnkr                    Start conversational mode
+  clnkr -p "task"          Run a single task and exit
+
+Core:
+  -p, --prompt string       Task to run (exits after completion)
+  -m, --model string        Model identifier (env: $CLNKR_MODEL, default: ` + defaultAnthropicModel + `)
+  -u, --base-url string     LLM endpoint (env: $CLNKR_BASE_URL, default: https://api.anthropic.com)
+      --max-steps int       Maximum agent steps (default: 100)
+      --full-send           Execute every Act turn without approval
+  -v, --verbose             Show internal decisions
+
+Sessions:
+  -c, --continue            Resume most recent session for this project
+  -l, --list-sessions       List saved sessions for this project
+
+System prompt:
+  -S, --no-system-prompt              Skip the built-in system prompt entirely
+      --system-prompt-append string   Append text to the built-in system prompt
+      --dump-system-prompt            Print the composed system prompt and exit
+
+Debugging:
+      --load-messages string   Seed conversation from a JSON file
+      --event-log string       Stream JSONL events to file during execution
+      --trajectory string      Save message history as JSON on exit (single-task only)
+
+  -V, --version             Print version and exit
+
+Environment:
+  CLNKR_API_KEY     API key for the LLM provider (required)
+  CLNKR_MODEL       Model identifier override
+  CLNKR_BASE_URL    LLM endpoint override
+`
+}
+
+func resolveModelValue(flagValue, envValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if envValue != "" {
+		return envValue
+	}
+	return defaultAnthropicModel
 }
 
 type lineResult struct {
@@ -215,41 +265,7 @@ func makeCompactorFactory(baseURL, apiKey, modelName string) compaction.Factory 
 func main() {
 	flags := flag.NewFlagSet("clnkr", flag.ContinueOnError)
 	flags.Usage = func() {
-		fmt.Fprint(os.Stderr, `clnkr - a minimal coding agent
-
-Usage:
-  clnkr                    Start conversational mode
-  clnkr -p "task"          Run a single task and exit
-
-Core:
-  -p, --prompt string       Task to run (exits after completion)
-  -m, --model string        Model identifier (env: $CLNKR_MODEL, default: claude-sonnet-4-20250514)
-  -u, --base-url string     LLM endpoint (env: $CLNKR_BASE_URL, default: https://api.anthropic.com)
-      --max-steps int       Maximum agent steps (default: 100)
-      --full-send           Execute every Act turn without approval
-  -v, --verbose             Show internal decisions
-
-Sessions:
-  -c, --continue            Resume most recent session for this project
-  -l, --list-sessions       List saved sessions for this project
-
-System prompt:
-  -S, --no-system-prompt              Skip the built-in system prompt entirely
-      --system-prompt-append string   Append text to the built-in system prompt
-      --dump-system-prompt            Print the composed system prompt and exit
-
-Debugging:
-      --load-messages string   Seed conversation from a JSON file
-      --event-log string       Stream JSONL events to file during execution
-      --trajectory string      Save message history as JSON on exit (single-task only)
-
-  -V, --version             Print version and exit
-
-Environment:
-  CLNKR_API_KEY     API key for the LLM provider (required)
-  CLNKR_MODEL       Model identifier override
-  CLNKR_BASE_URL    LLM endpoint override
-`)
+		fmt.Fprint(os.Stderr, usageText())
 	}
 
 	prompt := flags.String("p", "", "")
@@ -319,13 +335,7 @@ Environment:
 	if *modelShort != "" {
 		*modelFlag = *modelShort
 	}
-	if *modelFlag == "" {
-		if env := os.Getenv("CLNKR_MODEL"); env != "" {
-			*modelFlag = env
-		} else {
-			*modelFlag = "claude-sonnet-4-20250514"
-		}
-	}
+	*modelFlag = resolveModelValue(*modelFlag, os.Getenv("CLNKR_MODEL"))
 
 	if *baseURLShort != "" {
 		*baseURL = *baseURLShort

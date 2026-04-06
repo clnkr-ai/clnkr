@@ -6,7 +6,7 @@ Warning: `clnkr` executes bash directly and currently has no permissions or sand
 
 Platform note: today `clnkr` is Unix-only. The executor assumes `bash`, process groups, and tools like `/usr/bin/env`, so Linux and macOS are supported targets. Windows is not supported.
 
-A minimal coding agent. Query an LLM, execute bash commands, repeat. Supports the Anthropic Messages API and any OpenAI-compatible endpoint (vLLM, Ollama, LiteLLM, etc.).
+A minimal coding agent. Query an LLM, execute bash commands, repeat. Supports the Anthropic Messages API and OpenAI-compatible endpoints that implement structured outputs on the selected model path.
 
 Ships two binaries: **clnkr** (TUI) and **clnku** (plain CLI). The evaluation runner lives in the separate **clankerval** project and is installed independently. `clnkeval` remains a compatibility alias to that standalone runner. A **clnk** symlink points to clnkr for convenience.
 
@@ -53,7 +53,7 @@ clnkr --full-send -p "fix the failing test"
 
 ### OpenAI-compatible providers
 
-Point `--base-url` at any OpenAI-compatible endpoint:
+Point `--base-url` at an OpenAI-compatible endpoint that supports structured outputs for the model you select:
 
 ```bash
 # vLLM
@@ -69,11 +69,15 @@ clnkr --base-url http://proxy:4000/v1 --model gpt-4o
 clnkr --base-url https://generativelanguage.googleapis.com/v1beta/openai --model gemini-2.0-flash
 ```
 
+If the backend rejects structured outputs, clnkr now returns that provider error instead of falling back to unconstrained text responses.
+
+With the default Anthropic endpoint, clnkr requests Anthropic's native structured output format on every turn. Keep Anthropic runs on a model Anthropic documents as supporting structured output; the default `claude-sonnet-4-6` is chosen on that basis.
+
 ### Common flags
 
 ```
 -p, --prompt string            Task to run (exits after completion)
--m, --model string             Model identifier (default: claude-sonnet-4-20250514)
+-m, --model string             Model identifier (default: claude-sonnet-4-6)
 -u, --base-url string          LLM API endpoint (default: https://api.anthropic.com)
 --max-steps int                Maximum agent steps (default: 100)
 --full-send                    Execute every Act turn without approval

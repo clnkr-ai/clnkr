@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/clnkr-ai/clnkr"
+	"github.com/clnkr-ai/clnkr/turnschema"
 )
 
 // Model talks to the Anthropic Messages API.
@@ -35,10 +37,20 @@ func NewModel(baseURL, apiKey, model, systemPrompt string) *Model {
 }
 
 type request struct {
-	Model     string          `json:"model"`
-	MaxTokens int             `json:"max_tokens"`
-	System    string          `json:"system,omitempty"`
-	Messages  []clnkr.Message `json:"messages"`
+	Model        string          `json:"model"`
+	MaxTokens    int             `json:"max_tokens"`
+	System       string          `json:"system,omitempty"`
+	Messages     []clnkr.Message `json:"messages"`
+	OutputConfig outputConfig    `json:"output_config"`
+}
+
+type outputConfig struct {
+	Format outputFormat `json:"format"`
+}
+
+type outputFormat struct {
+	Type   string         `json:"type"`
+	Schema map[string]any `json:"schema"`
 }
 
 type response struct {
@@ -83,6 +95,12 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 		MaxTokens: m.maxTokens,
 		System:    m.systemPrompt,
 		Messages:  messages,
+		OutputConfig: outputConfig{
+			Format: outputFormat{
+				Type:   "json_schema",
+				Schema: turnschema.Schema(),
+			},
+		},
 	})
 	if err != nil {
 		return clnkr.Response{}, fmt.Errorf("marshal request: %w", err)
@@ -116,13 +134,33 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 	}
 
 	var text string
+	textBlocks := 0
 	for _, block := range apiResp.Content {
 		if block.Type == "text" {
+			textBlocks++
 			text += block.Text
 		}
 	}
+	if textBlocks != 1 {
+		return clnkr.Response{}, fmt.Errorf("structured output response: expected exactly one text block, got %d", textBlocks)
+	}
+	if strings.TrimSpace(text) == "" {
+		return clnkr.Response{}, fmt.Errorf("structured output response: empty text payload")
+	}
+	turn, err := turnschema.ParseProvider(text)
+	if err != nil {
+		return clnkr.Response{
+			Message:     clnkr.Message{Role: "assistant", Content: text},
+			Usage:       clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens},
+			ProtocolErr: err,
+		}, nil
+	}
+	canonicalText, err := turnschema.CanonicalJSON(turn)
+	if err != nil {
+		return clnkr.Response{}, fmt.Errorf("structured output response: canonicalize turn payload: %w", err)
+	}
 	return clnkr.Response{
-		Message: clnkr.Message{Role: "assistant", Content: text},
+		Message: clnkr.Message{Role: "assistant", Content: canonicalText},
 		Usage:   clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens},
 	}, nil
 }

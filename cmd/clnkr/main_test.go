@@ -123,6 +123,39 @@ func TestRunPlainApprovalNonApprovalReplyBecomesGuidance(t *testing.T) {
 	}
 }
 
+func TestDefaultAnthropicModel(t *testing.T) {
+	if defaultAnthropicModel != "claude-sonnet-4-6" {
+		t.Fatalf("defaultAnthropicModel = %q, want %q", defaultAnthropicModel, "claude-sonnet-4-6")
+	}
+}
+
+func TestUsageTextIncludesDefaultAnthropicModel(t *testing.T) {
+	if !strings.Contains(usageText(), defaultAnthropicModel) {
+		t.Fatalf("usageText() does not mention defaultAnthropicModel %q", defaultAnthropicModel)
+	}
+}
+
+func TestResolveModelValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		flag     string
+		env      string
+		expected string
+	}{
+		{name: "flag wins", flag: "flag-model", env: "env-model", expected: "flag-model"},
+		{name: "env used when flag empty", env: "env-model", expected: "env-model"},
+		{name: "default used when flag and env empty", expected: defaultAnthropicModel},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveModelValue(tt.flag, tt.env); got != tt.expected {
+				t.Fatalf("resolveModelValue(%q, %q) = %q, want %q", tt.flag, tt.env, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestRunPlainApprovalEmptyActReplyIsNoOp(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
 		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","command":"rm important.txt"}`}},

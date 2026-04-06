@@ -13,8 +13,9 @@ type Usage struct{ InputTokens, OutputTokens int }
 
 // Response pairs an LLM reply with its token usage.
 type Response struct {
-	Message Message
-	Usage   Usage
+	Message     Message
+	Usage       Usage
+	ProtocolErr error
 }
 
 // CommandResult captures one shell command execution.

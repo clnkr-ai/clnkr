@@ -1,0 +1,13 @@
+{
+  "id": "protocol-loss-live",
+  "description": "Live-provider protocol-loss proof suite",
+  "mode": "live-provider",
+  "trials_per_task": 50,
+  "failure_policy": {
+    "stop_on_first_failure": true,
+    "max_failed_tasks": 1
+  },
+  "tasks": [
+    "001-invalid-turn-live"
+  ]
+}

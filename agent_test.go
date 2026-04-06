@@ -237,6 +237,54 @@ func TestStep(t *testing.T) {
 		}
 	})
 
+	t.Run("protocol failure on response protocol error", func(t *testing.T) {
+		raw := `{"type":"done","summary":"ignored schema"}`
+		model := &fakeModel{responses: []Response{
+			{
+				Message:     Message{Role: "assistant", Content: raw},
+				ProtocolErr: fmt.Errorf("%w: missing required structured output field %q", ErrInvalidJSON, "turn"),
+			},
+		}}
+		notify, events := collectEvents()
+
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		agent.Notify = notify
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "do it"})
+
+		result, err := agent.Step(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Turn != nil {
+			t.Fatalf("expected nil Turn, got %T", result.Turn)
+		}
+		if !errors.Is(result.ParseErr, ErrInvalidJSON) {
+			t.Fatalf("expected ErrInvalidJSON, got %v", result.ParseErr)
+		}
+		if got := agent.messages[len(agent.messages)-2]; got != (Message{Role: "assistant", Content: raw}) {
+			t.Fatalf("assistant message = %#v, want raw payload", got)
+		}
+		if last := agent.messages[len(agent.messages)-1]; !strings.Contains(last.Content, "[protocol_error]") {
+			t.Fatalf("last message = %q, want protocol correction", last.Content)
+		}
+
+		var sawResponse, sawProtocolFailure bool
+		for _, e := range *events {
+			switch e.(type) {
+			case EventResponse:
+				sawResponse = true
+			case EventProtocolFailure:
+				sawProtocolFailure = true
+			}
+		}
+		if !sawProtocolFailure {
+			t.Fatal("missing EventProtocolFailure")
+		}
+		if sawResponse {
+			t.Fatal("unexpected EventResponse for response protocol error")
+		}
+	})
+
 	t.Run("emits response events via Notify without command events", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: `{"type":"act","command":"echo hi"}`}, Usage: Usage{InputTokens: 10, OutputTokens: 5}},
@@ -1050,6 +1098,55 @@ func TestAppendUserMessage(t *testing.T) {
 	}
 }
 
+func TestRequestStepLimitSummary(t *testing.T) {
+	t.Run("treats response protocol errors as invalid final turns", func(t *testing.T) {
+		raw := `{"type":"done","summary":"ignored schema"}`
+		model := &fakeModel{responses: []Response{
+			{
+				Message:     Message{Role: "assistant", Content: raw},
+				ProtocolErr: fmt.Errorf("%w: missing required structured output field %q", ErrInvalidJSON, "turn"),
+			},
+		}}
+		notify, events := collectEvents()
+
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		agent.Notify = notify
+		agent.messages = append(agent.messages, Message{Role: "user", Content: "do it"})
+
+		if err := agent.RequestStepLimitSummary(context.Background()); err != nil {
+			t.Fatalf("RequestStepLimitSummary: %v", err)
+		}
+		if got := agent.messages[len(agent.messages)-1]; got != (Message{Role: "assistant", Content: raw}) {
+			t.Fatalf("assistant message = %#v, want raw payload", got)
+		}
+
+		found := false
+		sawResponse := false
+		sawProtocolFailure := false
+		for _, e := range *events {
+			switch ev := e.(type) {
+			case EventDebug:
+				if strings.Contains(ev.Message, "final response not a valid turn") {
+					found = true
+				}
+			case EventResponse:
+				sawResponse = true
+			case EventProtocolFailure:
+				sawProtocolFailure = true
+			}
+		}
+		if !found {
+			t.Fatal("expected final invalid-turn debug message")
+		}
+		if !sawProtocolFailure {
+			t.Fatal("expected EventProtocolFailure")
+		}
+		if sawResponse {
+			t.Fatal("unexpected EventResponse for final response protocol error")
+		}
+	})
+}
+
 func TestAgent(t *testing.T) {
 	t.Run("single step then exit", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
@@ -1201,6 +1298,34 @@ func TestAgent(t *testing.T) {
 		}
 	})
 
+	t.Run("response protocol error then recovery", func(t *testing.T) {
+		raw := `{"type":"done","summary":"ignored schema"}`
+		model := &fakeModel{responses: []Response{
+			{
+				Message:     Message{Role: "assistant", Content: raw},
+				ProtocolErr: fmt.Errorf("%w: missing required structured output field %q", ErrInvalidJSON, "turn"),
+			},
+			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
+		}}
+
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		err := agent.Run(context.Background(), "do something")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		lastMsgs := model.got[len(model.got)-1]
+		found := false
+		for _, msg := range lastMsgs {
+			if strings.Contains(msg.Content, "[protocol_error]") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatal("protocol correction message should be in conversation")
+		}
+	})
+
 	t.Run("exits on consecutive protocol errors", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: "no json 1"}},
@@ -1215,6 +1340,33 @@ func TestAgent(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "protocol") {
 			t.Errorf("error should mention protocol, got: %v", err)
+		}
+	})
+
+	t.Run("exits on consecutive response protocol errors", func(t *testing.T) {
+		raw := `{"type":"done","summary":"ignored schema"}`
+		model := &fakeModel{responses: []Response{
+			{
+				Message:     Message{Role: "assistant", Content: raw},
+				ProtocolErr: fmt.Errorf("%w: missing required structured output field %q", ErrInvalidJSON, "turn"),
+			},
+			{
+				Message:     Message{Role: "assistant", Content: raw},
+				ProtocolErr: fmt.Errorf("%w: missing required structured output field %q", ErrInvalidJSON, "turn"),
+			},
+			{
+				Message:     Message{Role: "assistant", Content: raw},
+				ProtocolErr: fmt.Errorf("%w: missing required structured output field %q", ErrInvalidJSON, "turn"),
+			},
+		}}
+
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		err := agent.Run(context.Background(), "do something")
+		if err == nil {
+			t.Fatal("expected error on consecutive protocol failures")
+		}
+		if !strings.Contains(err.Error(), "protocol") {
+			t.Fatalf("error should mention protocol, got: %v", err)
 		}
 	})
 
