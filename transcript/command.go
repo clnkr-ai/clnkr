@@ -5,7 +5,9 @@ import (
 	"strings"
 )
 
-var sectionEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "[", "&#91;", "]", "&#93;")
+// Escape only transcript delimiters inside section bodies. Literal shell and
+// file content should stay readable to the model.
+var sectionEscaper = strings.NewReplacer("[", "&#91;", "]", "&#93;")
 
 // FormatCommandResult renders a command result using the host transcript envelope.
 func FormatCommandResult(result CommandResult) string {

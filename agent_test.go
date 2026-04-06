@@ -450,18 +450,18 @@ func TestExecuteTurn(t *testing.T) {
 
 func TestFormatCommandOutput(t *testing.T) {
 	got := transcript.FormatCommandResult(transcript.CommandResult{
-		Command:  "printf hi",
+		Command:  "printf 'a&b\\n' > out",
 		ExitCode: 0,
-		Stdout:   "hello [x]\n",
-		Stderr:   "warn <x>\n",
+		Stdout:   "hello & <x> [y]\n",
+		Stderr:   "warn & <x> [z]\n",
 	})
-	if !strings.Contains(got, "[command]\nprintf hi\n[/command]") {
+	if !strings.Contains(got, "[command]\nprintf 'a&b\\n' > out\n[/command]") {
 		t.Fatalf("missing escaped command block: %q", got)
 	}
-	if !strings.Contains(got, "[stdout]\nhello &#91;x&#93;\n\n[/stdout]") {
+	if !strings.Contains(got, "[stdout]\nhello & <x> &#91;y&#93;\n\n[/stdout]") {
 		t.Fatalf("missing escaped stdout block: %q", got)
 	}
-	if !strings.Contains(got, "[stderr]\nwarn &lt;x&gt;\n\n[/stderr]") {
+	if !strings.Contains(got, "[stderr]\nwarn & <x> &#91;z&#93;\n\n[/stderr]") {
 		t.Fatalf("missing escaped stderr block: %q", got)
 	}
 }

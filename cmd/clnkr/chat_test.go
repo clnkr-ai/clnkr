@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	clnkr "github.com/clnkr-ai/clnkr"
+	"github.com/clnkr-ai/clnkr/transcript"
 )
 
 func TestChatAppendEventResponse(t *testing.T) {
@@ -137,6 +138,32 @@ func TestChatPendingCommandBuffer(t *testing.T) {
 	}
 	if !strings.Contains(c.content.String(), "ls -la") {
 		t.Error("committed content should contain the command after EventCommandDone")
+	}
+}
+
+func TestParseCommandTranscriptPreservesLiteralBodyText(t *testing.T) {
+	content := transcript.FormatCommandResult(transcript.CommandResult{
+		Command:  "printf 'a&b <c> [d]'",
+		ExitCode: 7,
+		Stdout:   "one [stdout]\ntwo & < >\n[/stdout]\n",
+		Stderr:   "[stderr]\nerr & < >\n[/stderr]\n",
+	})
+
+	got, ok := parseCommandTranscript(content)
+	if !ok {
+		t.Fatal("expected command transcript to parse")
+	}
+	if got.command != "printf 'a&b <c> [d]'" {
+		t.Fatalf("command = %q, want %q", got.command, "printf 'a&b <c> [d]'")
+	}
+	if got.stdout != "one [stdout]\ntwo & < >\n[/stdout]" {
+		t.Fatalf("stdout = %q, want %q", got.stdout, "one [stdout]\ntwo & < >\n[/stdout]")
+	}
+	if got.stderr != "[stderr]\nerr & < >\n[/stderr]" {
+		t.Fatalf("stderr = %q, want %q", got.stderr, "[stderr]\nerr & < >\n[/stderr]")
+	}
+	if got.exitCode != 7 {
+		t.Fatalf("exitCode = %d, want 7", got.exitCode)
 	}
 }
 
