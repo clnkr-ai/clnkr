@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.3 (2026-04-06)
+
+- Remove clankerval references from clnkr
+- Add clankerval section to homepage
+- Update CHANGELOG.md for 1.5.2
+
 ## 1.5.2 (2026-04-06)
 
 - Preserve literal command output in model transcripts
