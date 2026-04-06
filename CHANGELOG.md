@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.1 (2026-04-06)
+
+- Recover structured turn boundaries across providers
+- Update CHANGELOG.md for 1.5.0
+
 ## 1.5.0 (2026-04-05)
 
 - Use Debian lintian profile in release workflow
