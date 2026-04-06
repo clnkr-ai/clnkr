@@ -59,8 +59,8 @@
 <p>In default mode, <strong>clnkr</strong> starts the TUI. With <strong>-p</strong>, it runs a single task and exits. When stdout is not a TTY, <strong>clnkr</strong> falls back to plain-text rendering.</p>
 <p>At the main idle conversational prompt, <strong>/compact</strong> summarizes older transcript history while keeping recent context intact for the current working thread.</p>
 <p>At the main idle conversational prompt, <strong>/delegate</strong> runs a child <strong>clnku</strong> task seeded with the current transcript and appends a host-generated delegation summary artifact when the child run completes.</p>
-<p>The agent communicates through JSON turns: <strong>act</strong> (execute a command), <strong>clarify</strong> (ask the user), and <strong>done</strong> (signal completion).</p>
-<p>By default, <strong>clnkr</strong> asks for approval before each <strong>act</strong> turn. Pass <strong>&ndash;full-send</strong> to execute commands immediately without approval.</p>
+<p>The agent communicates through JSON turns: <strong>act</strong> (execute a command through a nested <code>bash.command</code> plus optional <code>bash.workdir</code>), <strong>clarify</strong> (ask the user), and <strong>done</strong> (signal completion).</p>
+<p>By default, <strong>clnkr</strong> asks for approval before each <strong>act</strong> turn. Approval and proposal UI show the requested command and any explicit workdir override. Pass <strong>&ndash;full-send</strong> to execute commands immediately without approval.</p>
 <p>With the default Anthropic endpoint, <strong>clnkr</strong> requests Anthropic&rsquo;s native structured output format on every turn. Keep <strong>&ndash;model</strong> on a model Anthropic documents as supporting structured output; the default <strong>claude-sonnet-4-6</strong> is chosen on that basis.</p>
 <p>On OpenAI-compatible backends, the selected model path must support structured outputs. If a backend rejects that capability, <strong>clnkr</strong> returns the provider error instead of falling back to unconstrained text responses.</p>
 <p>A plain CLI variant is available as <strong>clnku</strong>(1).</p>
