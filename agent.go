@@ -138,8 +138,14 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	}
 	a.notify(EventDebug{Message: fmt.Sprintf("usage: %d input, %d output tokens", resp.Usage.InputTokens, resp.Usage.OutputTokens)})
 	a.messages = append(a.messages, resp.Message)
-	a.notify(EventResponse{Message: resp.Message, Usage: resp.Usage})
 
+	if resp.ProtocolErr != nil {
+		a.notify(EventProtocolFailure{Reason: errorToReason(resp.ProtocolErr), Raw: resp.Message.Content})
+		a.messages = append(a.messages, Message{Role: "user", Content: protocolCorrectionMessage(resp.ProtocolErr)})
+		return StepResult{Response: resp, ParseErr: resp.ProtocolErr}, nil
+	}
+
+	a.notify(EventResponse{Message: resp.Message, Usage: resp.Usage})
 	turn, parseErr := ParseTurn(resp.Message.Content)
 	if parseErr != nil {
 		a.notify(EventProtocolFailure{Reason: errorToReason(parseErr), Raw: resp.Message.Content})
@@ -189,8 +195,14 @@ func (a *Agent) RequestStepLimitSummary(ctx context.Context) error {
 		return fmt.Errorf("query model (final): %w", err)
 	}
 	a.messages = append(a.messages, resp.Message)
+	if resp.ProtocolErr != nil {
+		a.notify(EventProtocolFailure{Reason: errorToReason(resp.ProtocolErr), Raw: resp.Message.Content})
+		a.notify(EventDebug{Message: fmt.Sprintf("final response not a valid turn: %v", resp.ProtocolErr)})
+		return nil
+	}
 	a.notify(EventResponse{Message: resp.Message, Usage: resp.Usage})
 	if turn, parseErr := ParseTurn(resp.Message.Content); parseErr != nil {
+		a.notify(EventProtocolFailure{Reason: errorToReason(parseErr), Raw: resp.Message.Content})
 		a.notify(EventDebug{Message: fmt.Sprintf("final response not a valid turn: %v", parseErr)})
 	} else {
 		a.notify(EventDebug{Message: fmt.Sprintf("final response turn: %T", turn)})

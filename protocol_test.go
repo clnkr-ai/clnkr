@@ -264,6 +264,19 @@ func TestSanitizeJSONEscapes(t *testing.T) {
 }
 
 func TestProtocolCorrectionMessage(t *testing.T) {
+	t.Run("states prior response was ignored", func(t *testing.T) {
+		msg := protocolCorrectionMessage(fmt.Errorf("%w: unexpected trailing JSON value", ErrInvalidJSON))
+		if !strings.Contains(msg, "Your previous response was ignored and no command ran.") {
+			t.Fatalf("expected ignored-response guidance, got %q", msg)
+		}
+		if !strings.Contains(msg, "If you intended to run a command, resend only that act turn.") {
+			t.Fatalf("expected resend-act guidance, got %q", msg)
+		}
+		if !strings.Contains(msg, "Do not jump to done unless prior command results in this conversation already prove the task is complete.") {
+			t.Fatalf("expected done-guard guidance, got %q", msg)
+		}
+	})
+
 	t.Run("mentions invalid pipe escape", func(t *testing.T) {
 		msg := protocolCorrectionMessage(fmt.Errorf("%w: invalid character '|' in string escape code", ErrInvalidJSON))
 		if !strings.Contains(msg, `\|`) || !strings.Contains(msg, `\\|`) {

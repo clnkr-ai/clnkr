@@ -26,92 +26,81 @@ func Schema() map[string]any {
 		"type":                 "object",
 		"additionalProperties": false,
 		"properties": map[string]any{
-			"type": map[string]any{
-				"type": "string",
-				"enum": []string{"act", "clarify", "done"},
-			},
-			"command": map[string]any{
-				"type": []string{"string", "null"},
-			},
-			"question": map[string]any{
-				"type": []string{"string", "null"},
-			},
-			"summary": map[string]any{
-				"type": []string{"string", "null"},
-			},
-			"reasoning": map[string]any{
-				"type": []string{"string", "null"},
+			"turn": map[string]any{
+				"anyOf": []any{
+					map[string]any{
+						"type":                 "object",
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"type": map[string]any{
+								"type":  "string",
+								"const": "act",
+							},
+							"command": map[string]any{
+								"type": "string",
+							},
+							"question": map[string]any{
+								"type": "null",
+							},
+							"summary": map[string]any{
+								"type": "null",
+							},
+							"reasoning": map[string]any{
+								"type": []string{"string", "null"},
+							},
+						},
+						"required": []string{"type", "command", "question", "summary", "reasoning"},
+					},
+					map[string]any{
+						"type":                 "object",
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"type": map[string]any{
+								"type":  "string",
+								"const": "clarify",
+							},
+							"command": map[string]any{
+								"type": "null",
+							},
+							"question": map[string]any{
+								"type": "string",
+							},
+							"summary": map[string]any{
+								"type": "null",
+							},
+							"reasoning": map[string]any{
+								"type": []string{"string", "null"},
+							},
+						},
+						"required": []string{"type", "command", "question", "summary", "reasoning"},
+					},
+					map[string]any{
+						"type":                 "object",
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"type": map[string]any{
+								"type":  "string",
+								"const": "done",
+							},
+							"command": map[string]any{
+								"type": "null",
+							},
+							"question": map[string]any{
+								"type": "null",
+							},
+							"summary": map[string]any{
+								"type": "string",
+							},
+							"reasoning": map[string]any{
+								"type": []string{"string", "null"},
+							},
+						},
+						"required": []string{"type", "command", "question", "summary", "reasoning"},
+					},
+				},
 			},
 		},
-		"required": []string{"type", "command", "question", "summary", "reasoning"},
-		"anyOf": []any{
-			map[string]any{
-				"type":                 "object",
-				"additionalProperties": false,
-				"properties": map[string]any{
-					"type": map[string]any{
-						"const": "act",
-					},
-					"command": map[string]any{
-						"type": "string",
-					},
-					"question": map[string]any{
-						"type": "null",
-					},
-					"summary": map[string]any{
-						"type": "null",
-					},
-					"reasoning": map[string]any{
-						"type": []string{"string", "null"},
-					},
-				},
-				"required": []string{"type", "command", "question", "summary", "reasoning"},
-			},
-			map[string]any{
-				"type":                 "object",
-				"additionalProperties": false,
-				"properties": map[string]any{
-					"type": map[string]any{
-						"const": "clarify",
-					},
-					"command": map[string]any{
-						"type": "null",
-					},
-					"question": map[string]any{
-						"type": "string",
-					},
-					"summary": map[string]any{
-						"type": "null",
-					},
-					"reasoning": map[string]any{
-						"type": []string{"string", "null"},
-					},
-				},
-				"required": []string{"type", "command", "question", "summary", "reasoning"},
-			},
-			map[string]any{
-				"type":                 "object",
-				"additionalProperties": false,
-				"properties": map[string]any{
-					"type": map[string]any{
-						"const": "done",
-					},
-					"command": map[string]any{
-						"type": "null",
-					},
-					"question": map[string]any{
-						"type": "null",
-					},
-					"summary": map[string]any{
-						"type": "string",
-					},
-					"reasoning": map[string]any{
-						"type": []string{"string", "null"},
-					},
-				},
-				"required": []string{"type", "command", "question", "summary", "reasoning"},
-			},
-		},
+		"required": []string{"turn"},
 	}
 }
 
@@ -144,10 +133,14 @@ func Parse(raw string) (clnkr.Turn, error) {
 // ParseProvider validates a provider payload against the required schema shape
 // before parsing it into a canonical turn.
 func ParseProvider(raw string) (clnkr.Turn, error) {
-	if err := validateProviderShape(raw); err != nil {
+	innerRaw, err := extractProviderTurn(raw)
+	if err != nil {
 		return nil, err
 	}
-	return Parse(raw)
+	if err := validateProviderTurnShape(innerRaw); err != nil {
+		return nil, err
+	}
+	return Parse(innerRaw)
 }
 
 // CanonicalJSON marshals a validated turn into canonical compact JSON.
@@ -175,7 +168,44 @@ func ensureSingleJSONObject(dec *json.Decoder) error {
 	return nil
 }
 
-func validateProviderShape(raw string) error {
+func extractProviderTurn(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", fmt.Errorf("%w: empty response", clnkr.ErrInvalidJSON)
+	}
+
+	var envFields map[string]json.RawMessage
+	dec := json.NewDecoder(strings.NewReader(trimmed))
+	if err := dec.Decode(&envFields); err != nil {
+		return "", fmt.Errorf("%w: %v", clnkr.ErrInvalidJSON, err)
+	}
+	if err := ensureSingleJSONObject(dec); err != nil {
+		return "", fmt.Errorf("%w: %v", clnkr.ErrInvalidJSON, err)
+	}
+
+	turnRaw, ok := envFields["turn"]
+	if !ok {
+		return "", fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, "turn")
+	}
+	if len(envFields) != 1 {
+		for field := range envFields {
+			if field != "turn" {
+				return "", fmt.Errorf("%w: unknown structured output field %q", clnkr.ErrInvalidJSON, field)
+			}
+		}
+	}
+
+	var turnFields map[string]json.RawMessage
+	if err := json.Unmarshal(turnRaw, &turnFields); err != nil {
+		return "", fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, "turn")
+	}
+	if turnFields == nil {
+		return "", fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, "turn")
+	}
+	return string(turnRaw), nil
+}
+
+func validateProviderTurnShape(raw string) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
 		return fmt.Errorf("%w: %v", clnkr.ErrInvalidJSON, err)

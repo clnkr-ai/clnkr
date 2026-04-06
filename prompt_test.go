@@ -46,6 +46,18 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, "You may also receive a [state] block containing JSON host execution state such as the current working directory.") {
 			t.Error("prompt should explain host state messages")
 		}
+		if !strings.Contains(prompt, `do not emit "done" until you have completed the change with at least one "act" turn`) {
+			t.Error("prompt should require an act turn before done for workspace-changing tasks")
+		}
+		if !strings.Contains(prompt, "Never claim to have created, modified, or verified something unless that happened through a prior command result in this conversation.") {
+			t.Error("prompt should forbid unsupported completion claims")
+		}
+		if !strings.Contains(prompt, "If a verification command shows the result does not match the request exactly, issue another \"act\" turn to fix it instead of emitting \"done\".") {
+			t.Error("prompt should require a corrective act turn after failed verification")
+		}
+		if !strings.Contains(prompt, "For exact literal text writes, prefer quoted literals such as printf 'hello\\n' > note.txt instead of shell-fragile format strings.") {
+			t.Error("prompt should teach a stable literal-text write pattern")
+		}
 		if !strings.Contains(prompt, "<legacy-parser>") {
 			t.Error("prompt should isolate protocol_error guidance in a legacy-parser section")
 		}

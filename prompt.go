@@ -49,6 +49,7 @@ Do not emit invalid JSON escapes like backslash-pipe or backslash-backtick.
 - For targeted edits use sed. Reserve cat <<EOF for new files.
 - Never reconstruct files with head -n X > /tmp && cat >> /tmp patterns. If you need to rewrite a file, write the full file in one command.
 - Prefer commands that are safe to re-run.
+- For exact literal text writes, prefer quoted literals such as printf 'hello\n' > note.txt instead of shell-fragile format strings.
 </file-ops>
 
 <debugging>
@@ -60,6 +61,9 @@ Do not emit invalid JSON escapes like backslash-pipe or backslash-backtick.
 
 <finishing>
 - After making changes, verify they work before signaling done.
+- If the task requires changing files or other workspace state, do not emit "done" until you have completed the change with at least one "act" turn and seen the relevant command result.
+- Never claim to have created, modified, or verified something unless that happened through a prior command result in this conversation.
+- If a verification command shows the result does not match the request exactly, issue another "act" turn to fix it instead of emitting "done".
 - Never rm -rf or force-push without being asked.
 </finishing>`
 

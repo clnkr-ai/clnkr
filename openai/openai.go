@@ -177,7 +177,11 @@ func parseResponse(respBody []byte) (clnkr.Response, error) {
 	}
 	turn, err := turnschema.ParseProvider(choice.Message.Content)
 	if err != nil {
-		return clnkr.Response{}, fmt.Errorf("invalid structured output payload: %w", err)
+		return clnkr.Response{
+			Message:     clnkr.Message{Role: choice.Message.Role, Content: choice.Message.Content},
+			Usage:       clnkr.Usage{InputTokens: apiResp.Usage.PromptTokens, OutputTokens: apiResp.Usage.CompletionTokens},
+			ProtocolErr: err,
+		}, nil
 	}
 	canonicalContent, err := turnschema.CanonicalJSON(turn)
 	if err != nil {

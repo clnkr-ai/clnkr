@@ -23,7 +23,7 @@ func TestModel(t *testing.T) {
 			_ = json.Unmarshal(body, &gotBody)
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"choices": []map[string]interface{}{
-					{"message": map[string]string{"role": "assistant", "content": openAIStructuredDone("ok")}},
+					{"message": map[string]string{"role": "assistant", "content": openAIWrappedDone("ok")}},
 				},
 				"usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 20},
 			})
@@ -73,7 +73,7 @@ func TestModel(t *testing.T) {
 				"choices": []map[string]interface{}{
 					{"message": map[string]string{
 						"role":    "assistant",
-						"content": `{"type":"done","command":null,"question":null,"summary":"hello back","reasoning":null}`,
+						"content": openAIWrappedDone("hello back"),
 					}},
 				},
 				"usage": map[string]int{"prompt_tokens": 15, "completion_tokens": 25},
@@ -89,6 +89,9 @@ func TestModel(t *testing.T) {
 		if resp.Message.Content != `{"type":"done","summary":"hello back"}` {
 			t.Errorf("got %q, want %q", resp.Message.Content, `{"type":"done","summary":"hello back"}`)
 		}
+		if resp.ProtocolErr != nil {
+			t.Fatalf("got protocol error %v, want nil", resp.ProtocolErr)
+		}
 		if resp.Usage.InputTokens != 15 || resp.Usage.OutputTokens != 25 {
 			t.Errorf("got usage %+v, want 15/25", resp.Usage)
 		}
@@ -100,7 +103,7 @@ func TestModel(t *testing.T) {
 			gotPath = r.URL.Path
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"choices": []map[string]interface{}{
-					{"message": map[string]string{"role": "assistant", "content": openAIStructuredDone("ok")}},
+					{"message": map[string]string{"role": "assistant", "content": openAIWrappedDone("ok")}},
 				},
 				"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
 			})
@@ -160,7 +163,7 @@ func TestModel(t *testing.T) {
 				"choices": []map[string]interface{}{
 					{"message": map[string]string{
 						"role":    "assistant",
-						"content": `{"type":"done","command":null,"question":null,"summary":"ok after retry","reasoning":null}`,
+						"content": openAIWrappedDone("ok after retry"),
 					}},
 				},
 				"usage": map[string]int{"prompt_tokens": 2, "completion_tokens": 3},
@@ -350,13 +353,15 @@ func TestModel(t *testing.T) {
 		}
 	})
 
-	t.Run("fails closed on invalid structured payload", func(t *testing.T) {
+	t.Run("returns raw payload plus protocol error on invalid structured payload", func(t *testing.T) {
 		tests := []struct {
 			name    string
 			content string
+			wantErr error
 		}{
-			{name: "missing summary", content: `{"type":"done"}`},
-			{name: "prose wrapped json", content: "Here is the result:\n{\"type\":\"done\",\"summary\":\"wrapped\"}"},
+			{name: "missing wrapped fields", content: `{"turn":{"type":"done","summary":"ignored schema"}}`, wantErr: clnkr.ErrInvalidJSON},
+			{name: "semantic invalid act turn", content: `{"turn":{"type":"act","command":"","question":null,"summary":null,"reasoning":null}}`, wantErr: clnkr.ErrMissingCommand},
+			{name: "prose wrapped json", content: "Here is the result:\n{\"turn\":{\"type\":\"done\",\"summary\":\"wrapped\"}}", wantErr: clnkr.ErrInvalidJSON},
 		}
 
 		for _, tt := range tests {
@@ -372,19 +377,26 @@ func TestModel(t *testing.T) {
 				defer server.Close()
 
 				m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-				_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-				if err == nil {
-					t.Fatal("expected invalid payload error")
+				resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if resp.Message.Content != tt.content {
+					t.Fatalf("content = %q, want %q", resp.Message.Content, tt.content)
+				}
+				if !errors.Is(resp.ProtocolErr, tt.wantErr) {
+					t.Fatalf("protocol error = %v, want %v", resp.ProtocolErr, tt.wantErr)
 				}
 			})
 		}
 	})
 
-	t.Run("fails closed when response format is ignored", func(t *testing.T) {
+	t.Run("returns raw payload plus protocol error when response format is ignored", func(t *testing.T) {
+		raw := `{"type":"done","summary":"ignored"}`
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"choices": []map[string]interface{}{
-					{"message": map[string]string{"role": "assistant", "content": `{"type":"done","summary":"ignored"}`}},
+					{"message": map[string]string{"role": "assistant", "content": raw}},
 				},
 				"usage": map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
 			})
@@ -392,9 +404,15 @@ func TestModel(t *testing.T) {
 		defer server.Close()
 
 		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-		if err == nil {
-			t.Fatal("expected schema-shape error")
+		resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Message.Content != raw {
+			t.Fatalf("content = %q, want %q", resp.Message.Content, raw)
+		}
+		if !errors.Is(resp.ProtocolErr, clnkr.ErrInvalidJSON) {
+			t.Fatalf("protocol error = %v, want ErrInvalidJSON", resp.ProtocolErr)
 		}
 	})
 
@@ -420,6 +438,6 @@ func TestModel(t *testing.T) {
 	})
 }
 
-func openAIStructuredDone(summary string) string {
-	return `{"type":"done","command":null,"question":null,"summary":"` + summary + `","reasoning":null}`
+func openAIWrappedDone(summary string) string {
+	return `{"turn":{"type":"done","command":null,"question":null,"summary":"` + summary + `","reasoning":null}}`
 }

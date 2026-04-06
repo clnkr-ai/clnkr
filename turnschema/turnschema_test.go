@@ -18,16 +18,30 @@ func TestSchema(t *testing.T) {
 	if got := schema["additionalProperties"]; got != false {
 		t.Fatalf("schema additionalProperties = %v, want false", got)
 	}
-	if got, want := schema["required"], []any{"type", "command", "question", "summary", "reasoning"}; !sameStringSlice(got, want) {
+	if got, want := schema["required"], []any{"turn"}; !sameStringSlice(got, want) {
 		t.Fatalf("schema required = %#v, want %#v", got, want)
 	}
+	if got := schema["anyOf"]; got != nil {
+		t.Fatalf("schema anyOf = %#v, want nil", got)
+	}
 
-	branches, ok := schema["anyOf"].([]any)
+	properties, ok := schema["properties"].(map[string]any)
 	if !ok {
-		t.Fatalf("schema anyOf = %T, want []any", schema["anyOf"])
+		t.Fatalf("schema properties = %T, want map[string]any", schema["properties"])
+	}
+	if got := len(properties); got != 1 {
+		t.Fatalf("len(schema properties) = %d, want 1", got)
+	}
+	turnProp, ok := properties["turn"].(map[string]any)
+	if !ok {
+		t.Fatalf("schema properties[turn] = %T, want map[string]any", properties["turn"])
+	}
+	branches, ok := turnProp["anyOf"].([]any)
+	if !ok {
+		t.Fatalf("schema properties[turn].anyOf = %T, want []any", turnProp["anyOf"])
 	}
 	if len(branches) != 3 {
-		t.Fatalf("len(schema anyOf) = %d, want 3", len(branches))
+		t.Fatalf("len(schema properties[turn].anyOf) = %d, want 3", len(branches))
 	}
 
 	for _, turnType := range []string{"act", "clarify", "done"} {
@@ -37,6 +51,20 @@ func TestSchema(t *testing.T) {
 		}
 		if got, want := branch["required"], []any{"type", "command", "question", "summary", "reasoning"}; !sameStringSlice(got, want) {
 			t.Fatalf("%s branch required = %#v, want %#v", turnType, got, want)
+		}
+		branchProperties, ok := branch["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s branch properties = %T, want map[string]any", turnType, branch["properties"])
+		}
+		typeProp, ok := branchProperties["type"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s branch properties[type] = %T, want map[string]any", turnType, branchProperties["type"])
+		}
+		if got := typeProp["type"]; got != "string" {
+			t.Fatalf("%s branch properties[type].type = %v, want string", turnType, got)
+		}
+		if got := typeProp["const"]; got != turnType {
+			t.Fatalf("%s branch properties[type].const = %v, want %q", turnType, got, turnType)
 		}
 	}
 }
@@ -102,8 +130,8 @@ func TestParse(t *testing.T) {
 }
 
 func TestParseProvider(t *testing.T) {
-	t.Run("accepts provider-shaped turns", func(t *testing.T) {
-		turn, err := turnschema.ParseProvider(`{"type":"act","command":"ls -la","question":null,"summary":null,"reasoning":null}`)
+	t.Run("accepts wrapped provider-shaped turns", func(t *testing.T) {
+		turn, err := turnschema.ParseProvider(`{"turn":{"type":"act","command":"ls -la","question":null,"summary":null,"reasoning":null}}`)
 		if err != nil {
 			t.Fatalf("ParseProvider error = %v", err)
 		}
@@ -112,8 +140,30 @@ func TestParseProvider(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects missing required provider fields", func(t *testing.T) {
+	t.Run("rejects missing turn wrapper", func(t *testing.T) {
 		_, err := turnschema.ParseProvider(`{"type":"done","summary":"ignored schema"}`)
+		if !errors.Is(err, clnkr.ErrInvalidJSON) {
+			t.Fatalf("ParseProvider error = %v, want ErrInvalidJSON", err)
+		}
+		if !strings.Contains(err.Error(), `missing required structured output field "turn"`) {
+			t.Fatalf("ParseProvider error = %v, want missing turn detail", err)
+		}
+	})
+
+	t.Run("rejects non-object turn wrapper", func(t *testing.T) {
+		for _, raw := range []string{`{"turn":"nope"}`, `{"turn":null}`} {
+			_, err := turnschema.ParseProvider(raw)
+			if !errors.Is(err, clnkr.ErrInvalidJSON) {
+				t.Fatalf("ParseProvider(%q) error = %v, want ErrInvalidJSON", raw, err)
+			}
+			if !strings.Contains(err.Error(), `structured output field "turn" must be object`) {
+				t.Fatalf("ParseProvider(%q) error = %v, want object detail", raw, err)
+			}
+		}
+	})
+
+	t.Run("rejects missing required wrapped provider fields", func(t *testing.T) {
+		_, err := turnschema.ParseProvider(`{"turn":{"type":"done","summary":"ignored schema"}}`)
 		if !errors.Is(err, clnkr.ErrInvalidJSON) {
 			t.Fatalf("ParseProvider error = %v, want ErrInvalidJSON", err)
 		}

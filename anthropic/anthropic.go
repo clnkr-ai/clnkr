@@ -149,7 +149,11 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 	}
 	turn, err := turnschema.ParseProvider(text)
 	if err != nil {
-		return clnkr.Response{}, fmt.Errorf("structured output response: invalid turn payload: %w", err)
+		return clnkr.Response{
+			Message:     clnkr.Message{Role: "assistant", Content: text},
+			Usage:       clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens},
+			ProtocolErr: err,
+		}, nil
 	}
 	canonicalText, err := turnschema.CanonicalJSON(turn)
 	if err != nil {
