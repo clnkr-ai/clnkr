@@ -16,6 +16,12 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, `"type":"act"`) {
 			t.Error("prompt should teach the json protocol")
 		}
+		if !strings.Contains(prompt, `"type":"clarify"`) {
+			t.Error("prompt should retain the clarify turn example")
+		}
+		if !strings.Contains(prompt, `"type":"done"`) {
+			t.Error("prompt should retain the done turn example")
+		}
 		if strings.Contains(prompt, "```bash") {
 			t.Error("prompt should not instruct fenced bash blocks")
 		}
@@ -31,11 +37,38 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, "The host may require approval before running commands.") {
 			t.Error("prompt should mention host approval mode")
 		}
+		if !strings.Contains(prompt, "One command per turn; use && for trivially connected steps.") {
+			t.Error("prompt should retain one-command-per-turn guidance")
+		}
 		if !strings.Contains(prompt, "When the user refers to the current repo, current directory, or cwd, work in the current directory without adding cd.") {
 			t.Error("prompt should keep cwd tasks in the current directory")
 		}
 		if !strings.Contains(prompt, "You may also receive a [state] block containing JSON host execution state such as the current working directory.") {
 			t.Error("prompt should explain host state messages")
+		}
+		if !strings.Contains(prompt, `do not emit "done" until you have completed the change with at least one "act" turn`) {
+			t.Error("prompt should require an act turn before done for workspace-changing tasks")
+		}
+		if !strings.Contains(prompt, "Never claim to have created, modified, or verified something unless that happened through a prior command result in this conversation.") {
+			t.Error("prompt should forbid unsupported completion claims")
+		}
+		if !strings.Contains(prompt, "If a verification command shows the result does not match the request exactly, issue another \"act\" turn to fix it instead of emitting \"done\".") {
+			t.Error("prompt should require a corrective act turn after failed verification")
+		}
+		if !strings.Contains(prompt, "For exact literal text writes, prefer quoted literals such as printf 'hello\\n' > note.txt instead of shell-fragile format strings.") {
+			t.Error("prompt should teach a stable literal-text write pattern")
+		}
+		if !strings.Contains(prompt, "When writing plain-text file contents like hello, write a newline-terminated line unless the user explicitly asks for no trailing newline or exact byte-for-byte content.") {
+			t.Error("prompt should default plain-text file writes to newline-terminated lines")
+		}
+		if !strings.Contains(prompt, "<legacy-parser>") {
+			t.Error("prompt should isolate protocol_error guidance in a legacy-parser section")
+		}
+		if !strings.Contains(prompt, "legacy parser path") {
+			t.Error("prompt should scope protocol_error guidance to legacy parser paths")
+		}
+		if strings.Contains(prompt, "Invalid responses produce a [protocol_error] block.") {
+			t.Error("prompt should not imply malformed answers are a normal provider-boundary recovery path")
 		}
 	})
 

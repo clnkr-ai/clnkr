@@ -3,6 +3,7 @@ package anthropic_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,10 +11,11 @@ import (
 
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/anthropic"
+	"github.com/clnkr-ai/clnkr/turnschema"
 )
 
 func TestModel(t *testing.T) {
-	t.Run("sends correct request", func(t *testing.T) {
+	t.Run("uses structured output request body", func(t *testing.T) {
 		var gotBody map[string]interface{}
 		var gotHeaders http.Header
 
@@ -22,7 +24,7 @@ func TestModel(t *testing.T) {
 			body, _ := io.ReadAll(r.Body)
 			_ = json.Unmarshal(body, &gotBody)
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"content": []map[string]string{{"type": "text", "text": "response"}},
+				"content": []map[string]string{{"type": "text", "text": anthropicWrappedDone("ok")}},
 				"usage":   map[string]int{"input_tokens": 10, "output_tokens": 20},
 			})
 		}))
@@ -42,13 +44,38 @@ func TestModel(t *testing.T) {
 		if gotBody["system"] != "sys prompt" {
 			t.Errorf("got system %v, want %q", gotBody["system"], "sys prompt")
 		}
+		outputConfig, ok := gotBody["output_config"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("output_config = %T, want map[string]interface{}", gotBody["output_config"])
+		}
+		format, ok := outputConfig["format"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("output_config.format = %T, want map[string]interface{}", outputConfig["format"])
+		}
+		if format["type"] != "json_schema" {
+			t.Fatalf("output_config.format.type = %v, want json_schema", format["type"])
+		}
+		gotSchemaJSON, err := json.Marshal(format["schema"])
+		if err != nil {
+			t.Fatalf("marshal got schema: %v", err)
+		}
+		wantSchemaJSON, err := json.Marshal(turnschema.Schema())
+		if err != nil {
+			t.Fatalf("marshal want schema: %v", err)
+		}
+		if string(gotSchemaJSON) != string(wantSchemaJSON) {
+			t.Fatalf("schema mismatch\n got: %s\nwant: %s", gotSchemaJSON, wantSchemaJSON)
+		}
 	})
 
-	t.Run("parses response with usage", func(t *testing.T) {
+	t.Run("returns canonical json text", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"content": []map[string]string{{"type": "text", "text": "hello back"}},
-				"usage":   map[string]int{"input_tokens": 50, "output_tokens": 30},
+				"content": []map[string]interface{}{{
+					"type": "text",
+					"text": anthropicWrappedDone("hello back"),
+				}},
+				"usage": map[string]int{"input_tokens": 50, "output_tokens": 30},
 			})
 		}))
 		defer server.Close()
@@ -61,11 +88,108 @@ func TestModel(t *testing.T) {
 		if resp.Message.Role != "assistant" {
 			t.Errorf("got role %q, want assistant", resp.Message.Role)
 		}
-		if resp.Message.Content != "hello back" {
-			t.Errorf("got content %q, want %q", resp.Message.Content, "hello back")
+		if resp.Message.Content != `{"type":"done","summary":"hello back"}` {
+			t.Errorf("got content %q, want %q", resp.Message.Content, `{"type":"done","summary":"hello back"}`)
+		}
+		if resp.ProtocolErr != nil {
+			t.Fatalf("got protocol error %v, want nil", resp.ProtocolErr)
 		}
 		if resp.Usage.InputTokens != 50 || resp.Usage.OutputTokens != 30 {
 			t.Errorf("got usage %+v, want 50/30", resp.Usage)
+		}
+	})
+
+	t.Run("fails closed on missing or empty structured text payload", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			content []map[string]string
+		}{
+			{name: "no text block", content: []map[string]string{{"type": "tool_use", "text": ""}}},
+			{name: "empty text block", content: []map[string]string{{"type": "text", "text": ""}}},
+			{
+				name: "multiple text blocks",
+				content: []map[string]string{
+					{"type": "text", "text": `{"type":"done","summary":"one"}`},
+					{"type": "text", "text": `{"type":"done","summary":"two"}`},
+				},
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
+						"content": tt.content,
+						"usage":   map[string]int{"input_tokens": 1, "output_tokens": 1},
+					})
+				}))
+				defer server.Close()
+
+				m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
+				_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+				if err == nil {
+					t.Fatal("expected fail-closed error")
+				}
+			})
+		}
+	})
+
+	t.Run("returns raw payload plus protocol error on invalid structured payload", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			text    string
+			wantErr error
+		}{
+			{name: "missing wrapped fields", text: `{"turn":{"type":"done","summary":"ignored schema"}}`, wantErr: clnkr.ErrInvalidJSON},
+			{name: "semantic invalid act turn", text: `{"turn":{"type":"act","command":"","question":null,"summary":null,"reasoning":null}}`, wantErr: clnkr.ErrMissingCommand},
+			{name: "prose wrapped json", text: "Here is the result:\n{\"turn\":{\"type\":\"done\",\"summary\":\"wrapped\"}}", wantErr: clnkr.ErrInvalidJSON},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
+						"content": []map[string]string{{"type": "text", "text": tt.text}},
+						"usage":   map[string]int{"input_tokens": 1, "output_tokens": 1},
+					})
+				}))
+				defer server.Close()
+
+				m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
+				resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if resp.Message.Content != tt.text {
+					t.Fatalf("content = %q, want %q", resp.Message.Content, tt.text)
+				}
+				if !errors.Is(resp.ProtocolErr, tt.wantErr) {
+					t.Fatalf("protocol error = %v, want %v", resp.ProtocolErr, tt.wantErr)
+				}
+			})
+		}
+	})
+
+	t.Run("returns raw payload plus protocol error when output config is ignored", func(t *testing.T) {
+		raw := `{"type":"done","summary":"ignored schema"}`
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"content": []map[string]string{{"type": "text", "text": raw}},
+				"usage":   map[string]int{"input_tokens": 1, "output_tokens": 1},
+			})
+		}))
+		defer server.Close()
+
+		m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
+		resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Message.Content != raw {
+			t.Fatalf("content = %q, want %q", resp.Message.Content, raw)
+		}
+		if !errors.Is(resp.ProtocolErr, clnkr.ErrInvalidJSON) {
+			t.Fatalf("protocol error = %v, want ErrInvalidJSON", resp.ProtocolErr)
 		}
 	})
 
@@ -110,4 +234,8 @@ func TestModel(t *testing.T) {
 			t.Errorf("got %q, want %q", err.Error(), want)
 		}
 	})
+}
+
+func anthropicWrappedDone(summary string) string {
+	return `{"turn":{"type":"done","command":null,"question":null,"summary":"` + summary + `","reasoning":null}}`
 }

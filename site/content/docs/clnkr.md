@@ -17,7 +17,7 @@ clnkr - a minimal coding agent (TUI)
 
 # DESCRIPTION
 
-**clnkr** is a minimal coding agent with a terminal user interface (TUI), built with bubbletea. It queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.
+**clnkr** is a minimal coding agent with a terminal user interface (TUI), built with bubbletea. It queries LLMs and executes bash commands using a structured JSON turn protocol. It supports the Anthropic Messages API and OpenAI-compatible APIs that implement structured outputs on the selected model path.
 
 In default mode, **clnkr** starts the TUI. With **-p**, it runs a single task and exits. When stdout is not a TTY, **clnkr** falls back to plain-text rendering.
 
@@ -29,6 +29,10 @@ The agent communicates through JSON turns: **act** (execute a command), **clarif
 
 By default, **clnkr** asks for approval before each **act** turn. Pass **--full-send** to execute commands immediately without approval.
 
+With the default Anthropic endpoint, **clnkr** requests Anthropic's native structured output format on every turn. Keep **--model** on a model Anthropic documents as supporting structured output; the default **claude-sonnet-4-6** is chosen on that basis.
+
+On OpenAI-compatible backends, the selected model path must support structured outputs. If a backend rejects that capability, **clnkr** returns the provider error instead of falling back to unconstrained text responses.
+
 A plain CLI variant is available as **clnku**(1).
 
 Project-specific instructions are loaded from an **AGENTS.md** file in the current working directory, if present.
@@ -39,7 +43,7 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : Run the given task and exit. Without this flag, clnkr starts the TUI.
 
 **-m**, **--model** *name*
-: LLM model identifier (default: claude-sonnet-4-20250514). If omitted, **CLNKR_MODEL** is used when set.
+: LLM model identifier (default: claude-sonnet-4-6). If omitted, **CLNKR_MODEL** is used when set.
 
 **-u**, **--base-url** *url*
 : LLM API endpoint (default: https://api.anthropic.com). If omitted, **CLNKR_BASE_URL** is used when set. If the URL contains "anthropic.com", the Anthropic adapter is used; otherwise, the OpenAI-compatible adapter is used.

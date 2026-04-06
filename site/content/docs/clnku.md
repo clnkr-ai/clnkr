@@ -17,7 +17,7 @@ clnku - a minimal coding agent (plain CLI)
 
 # DESCRIPTION
 
-**clnku** is a minimal coding agent that queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.
+**clnku** is a minimal coding agent that queries LLMs and executes bash commands using a structured JSON turn protocol. It supports the Anthropic Messages API and OpenAI-compatible APIs that implement structured outputs on the selected model path.
 
 In default mode, **clnku** starts an interactive REPL. With **-p**, it runs a single task and exits.
 
@@ -29,6 +29,10 @@ The agent communicates through JSON turns: **act** (execute a command), **clarif
 
 By default, **clnku** asks for approval before each **act** turn. Pass **--full-send** to execute commands immediately without approval.
 
+With the default Anthropic endpoint, **clnku** requests Anthropic's native structured output format on every turn. Keep **--model** on a model Anthropic documents as supporting structured output; the default **claude-sonnet-4-6** is chosen on that basis.
+
+On OpenAI-compatible backends, the selected model path must support structured outputs. If a backend rejects that capability, **clnku** returns the provider error instead of falling back to unconstrained text responses.
+
 Project-specific instructions are loaded from an **AGENTS.md** file in the current working directory, if present.
 
 # OPTIONS
@@ -37,7 +41,7 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : Run the given task and exit. Without this flag, clnku starts in conversational REPL mode.
 
 **-m**, **--model** *name*
-: LLM model identifier (default: claude-sonnet-4-20250514). If omitted, **CLNKR_MODEL** is used when set.
+: LLM model identifier (default: claude-sonnet-4-6). If omitted, **CLNKR_MODEL** is used when set.
 
 **-u**, **--base-url** *url*
 : LLM API endpoint (default: https://api.anthropic.com). If omitted, **CLNKR_BASE_URL** is used when set. If the URL contains "anthropic.com", the Anthropic adapter is used; otherwise, the OpenAI-compatible adapter is used.

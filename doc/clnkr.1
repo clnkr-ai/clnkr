@@ -10,7 +10,7 @@ clnkr \- a minimal coding agent (TUI)
 
 
 .SH DESCRIPTION
-\fBclnkr\fP is a minimal coding agent with a terminal user interface (TUI), built with bubbletea. It queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.
+\fBclnkr\fP is a minimal coding agent with a terminal user interface (TUI), built with bubbletea. It queries LLMs and executes bash commands using a structured JSON turn protocol. It supports the Anthropic Messages API and OpenAI-compatible APIs that implement structured outputs on the selected model path.
 
 .PP
 In default mode, \fBclnkr\fP starts the TUI. With \fB-p\fP, it runs a single task and exits. When stdout is not a TTY, \fBclnkr\fP falls back to plain-text rendering.
@@ -28,6 +28,12 @@ The agent communicates through JSON turns: \fBact\fP (execute a command), \fBcla
 By default, \fBclnkr\fP asks for approval before each \fBact\fP turn. Pass \fB--full-send\fP to execute commands immediately without approval.
 
 .PP
+With the default Anthropic endpoint, \fBclnkr\fP requests Anthropic's native structured output format on every turn. Keep \fB--model\fP on a model Anthropic documents as supporting structured output; the default \fBclaude-sonnet-4-6\fP is chosen on that basis.
+
+.PP
+On OpenAI-compatible backends, the selected model path must support structured outputs. If a backend rejects that capability, \fBclnkr\fP returns the provider error instead of falling back to unconstrained text responses.
+
+.PP
 A plain CLI variant is available as \fBclnku\fP(1).
 
 .PP
@@ -41,7 +47,7 @@ Run the given task and exit. Without this flag, clnkr starts the TUI.
 
 .TP
 \fB-m\fP, \fB--model\fP \fIname\fP
-LLM model identifier (default: claude-sonnet-4-20250514). If omitted, \fBCLNKR_MODEL\fP is used when set.
+LLM model identifier (default: claude-sonnet-4-6). If omitted, \fBCLNKR_MODEL\fP is used when set.
 
 .TP
 \fB-u\fP, \fB--base-url\fP \fIurl\fP

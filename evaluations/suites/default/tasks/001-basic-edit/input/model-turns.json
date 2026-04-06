@@ -1,4 +1,4 @@
 [
-  "{\"type\":\"act\",\"command\":\"printf 'hello\\\\n' > note.txt\"}",
-  "{\"type\":\"done\",\"summary\":\"created note.txt\"}"
+  "{\"turn\":{\"type\":\"act\",\"command\":\"printf 'hello\\\\n' > note.txt\",\"question\":null,\"summary\":null,\"reasoning\":null}}",
+  "{\"turn\":{\"type\":\"done\",\"command\":null,\"question\":null,\"summary\":\"created note.txt\",\"reasoning\":null}}"
 ]

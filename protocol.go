@@ -220,7 +220,7 @@ func errorToReason(err error) string {
 
 // protocolCorrectionMessage returns a tagged-text correction message for the model.
 func protocolCorrectionMessage(err error) string {
-	hint := "Respond with a single JSON object: {\"type\":\"act\",\"command\":\"...\"} or {\"type\":\"clarify\",\"question\":\"...\"} or {\"type\":\"done\",\"summary\":\"...\"}."
+	hint := "Your previous response was ignored and no command ran. Respond with exactly one JSON object for the next turn from the current state: {\"type\":\"act\",\"command\":\"...\"} or {\"type\":\"clarify\",\"question\":\"...\"} or {\"type\":\"done\",\"summary\":\"...\"}. If you intended to run a command, resend only that act turn. Do not jump to done unless prior command results in this conversation already prove the task is complete."
 	invalid, hasInvalid := invalidEscapeChar(err)
 	switch {
 	case hasInvalid && invalid == '|':
