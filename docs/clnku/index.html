@@ -55,19 +55,21 @@
 <h1 id="synopsis">SYNOPSIS</h1>
 <p><strong>clnku</strong> [<strong>-p</strong>|<strong>&ndash;prompt</strong> <em>task</em>] [<strong>-m</strong>|<strong>&ndash;model</strong> <em>name</em>] [<strong>-u</strong>|<strong>&ndash;base-url</strong> <em>url</em>] [<strong>&ndash;max-steps</strong> <em>n</em>] [<strong>&ndash;full-send</strong>] [<strong>-c</strong>|<strong>&ndash;continue</strong>] [<strong>-l</strong>|<strong>&ndash;list-sessions</strong>] [<strong>-S</strong>|<strong>&ndash;no-system-prompt</strong>] [<strong>&ndash;system-prompt-append</strong> <em>text</em>] [<strong>&ndash;dump-system-prompt</strong>] [<strong>&ndash;load-messages</strong> <em>file</em>] [<strong>&ndash;event-log</strong> <em>file</em>] [<strong>&ndash;trajectory</strong> <em>file</em>] [<strong>-v</strong>|<strong>&ndash;verbose</strong>] [<strong>-V</strong>|<strong>&ndash;version</strong>]</p>
 <h1 id="description">DESCRIPTION</h1>
-<p><strong>clnku</strong> is a minimal coding agent that queries LLMs and executes bash commands using a structured JSON turn protocol. It supports both Anthropic and OpenAI-compatible APIs.</p>
+<p><strong>clnku</strong> is a minimal coding agent that queries LLMs and executes bash commands using a structured JSON turn protocol. It supports the Anthropic Messages API and OpenAI-compatible APIs that implement structured outputs on the selected model path.</p>
 <p>In default mode, <strong>clnku</strong> starts an interactive REPL. With <strong>-p</strong>, it runs a single task and exits.</p>
 <p>At the main idle conversational prompt, <strong>/compact</strong> summarizes older transcript history while keeping recent context intact for the current working thread.</p>
 <p><strong>clnku</strong> is the plain CLI variant of the clnkr project, with no external dependencies beyond the Go standard library. A TUI variant is available as <strong>clnkr</strong>(1).</p>
 <p>The agent communicates through JSON turns: <strong>act</strong> (execute a command), <strong>clarify</strong> (ask the user), and <strong>done</strong> (signal completion).</p>
 <p>By default, <strong>clnku</strong> asks for approval before each <strong>act</strong> turn. Pass <strong>&ndash;full-send</strong> to execute commands immediately without approval.</p>
+<p>With the default Anthropic endpoint, <strong>clnku</strong> requests Anthropic&rsquo;s native structured output format on every turn. Keep <strong>&ndash;model</strong> on a model Anthropic documents as supporting structured output; the default <strong>claude-sonnet-4-6</strong> is chosen on that basis.</p>
+<p>On OpenAI-compatible backends, the selected model path must support structured outputs. If a backend rejects that capability, <strong>clnku</strong> returns the provider error instead of falling back to unconstrained text responses.</p>
 <p>Project-specific instructions are loaded from an <strong>AGENTS.md</strong> file in the current working directory, if present.</p>
 <h1 id="options">OPTIONS</h1>
 <dl>
 <dt><strong>-p</strong>, <strong>&ndash;prompt</strong> <em>task</em></dt>
 <dd>Run the given task and exit. Without this flag, clnku starts in conversational REPL mode.</dd>
 <dt><strong>-m</strong>, <strong>&ndash;model</strong> <em>name</em></dt>
-<dd>LLM model identifier (default: claude-sonnet-4-20250514). If omitted, <strong>CLNKR_MODEL</strong> is used when set.</dd>
+<dd>LLM model identifier (default: claude-sonnet-4-6). If omitted, <strong>CLNKR_MODEL</strong> is used when set.</dd>
 <dt><strong>-u</strong>, <strong>&ndash;base-url</strong> <em>url</em></dt>
 <dd>LLM API endpoint (default: <a href="https://api.anthropic.com">https://api.anthropic.com</a>). If omitted, <strong>CLNKR_BASE_URL</strong> is used when set. If the URL contains &ldquo;anthropic.com&rdquo;, the Anthropic adapter is used; otherwise, the OpenAI-compatible adapter is used.</dd>
 <dt><strong>&ndash;max-steps</strong> <em>n</em></dt>
