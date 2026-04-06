@@ -199,6 +199,11 @@ kbd {
   flex: 1;
 }
 
+.pane-full {
+  grid-column: 1 / -1;
+  border-right: 0;
+}
+
 .pane-wide {
   min-width: 0;
 }
