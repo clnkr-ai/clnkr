@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.0 (2026-04-07)
+
+- Add TUI reasoning trace modal
+- Update CHANGELOG.md for 1.7.0
+
 ## 1.7.0 (2026-04-07)
 
 - Implement bounded multi-command act turns
