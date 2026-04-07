@@ -75,10 +75,10 @@ func TestParse(t *testing.T) {
 			name  string
 			input string
 		}{
-			{name: "act", input: `{"type":"act","bash":{"command":"ls -la","workdir":null},"reasoning":"inspect files"}`},
+			{name: "act", input: `{"type":"act","bash":{"commands":[{"command":"ls -la","workdir":null}]},"reasoning":"inspect files"}`},
 			{name: "clarify", input: `{"type":"clarify","question":"Which directory?"}`},
 			{name: "done", input: `{"type":"done","summary":"Finished the task."}`},
-			{name: "provider shaped act", input: `{"type":"act","bash":{"command":"ls -la","workdir":null},"question":null,"summary":null,"reasoning":null}`},
+			{name: "provider shaped act", input: `{"type":"act","bash":{"commands":[{"command":"ls -la","workdir":null}]},"question":null,"summary":null,"reasoning":null}`},
 		}
 
 		for _, tt := range tests {
@@ -94,8 +94,8 @@ func TestParse(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects prose wrapped json that legacy parser accepts", func(t *testing.T) {
-		raw := "Here is the turn:\n{\"type\":\"act\",\"bash\":{\"command\":\"pwd\",\"workdir\":null}}\nThanks."
+	t.Run("rejects prose wrapped json that ParseTurn accepts", func(t *testing.T) {
+		raw := "Here is the turn:\n{\"type\":\"act\",\"bash\":{\"commands\":[{\"command\":\"pwd\",\"workdir\":null}]}}\nThanks."
 
 		if _, err := clnkr.ParseTurn(raw); err != nil {
 			t.Fatalf("ParseTurn(%q) error = %v, want nil", raw, err)
@@ -108,7 +108,7 @@ func TestParse(t *testing.T) {
 	})
 
 	t.Run("rejects wrapped provider turns so the wrapper stays provider-only", func(t *testing.T) {
-		raw := `{"turn":{"type":"act","bash":{"command":"pwd","workdir":null},"question":null,"summary":null,"reasoning":null}}`
+		raw := `{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`
 
 		_, err := turnschema.Parse(raw)
 		if !errors.Is(err, clnkr.ErrInvalidJSON) {
@@ -117,7 +117,7 @@ func TestParse(t *testing.T) {
 	})
 
 	t.Run("rejects unknown fields", func(t *testing.T) {
-		raw := `{"type":"act","bash":{"command":"pwd","workdir":null},"extra":"nope"}`
+		raw := `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"extra":"nope"}`
 
 		_, err := turnschema.Parse(raw)
 		if !errors.Is(err, clnkr.ErrInvalidJSON) {
@@ -129,7 +129,7 @@ func TestParse(t *testing.T) {
 	})
 
 	t.Run("rejects wrong turn specific fields", func(t *testing.T) {
-		raw := `{"type":"act","bash":{"command":"pwd","workdir":null},"question":""}`
+		raw := `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"question":""}`
 
 		_, err := turnschema.Parse(raw)
 		if !errors.Is(err, clnkr.ErrInvalidJSON) {
@@ -137,8 +137,8 @@ func TestParse(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects missing bash workdir in canonical act", func(t *testing.T) {
-		raw := `{"type":"act","bash":{"command":"pwd"}}`
+	t.Run("rejects missing command workdir in canonical act", func(t *testing.T) {
+		raw := `{"type":"act","bash":{"commands":[{"command":"pwd"}]}}`
 
 		_, err := turnschema.Parse(raw)
 		if !errors.Is(err, clnkr.ErrInvalidJSON) {
@@ -149,7 +149,7 @@ func TestParse(t *testing.T) {
 
 func TestParseProvider(t *testing.T) {
 	t.Run("accepts wrapped provider-shaped turns", func(t *testing.T) {
-		turn, err := turnschema.ParseProvider(`{"turn":{"type":"act","bash":{"command":"ls -la","workdir":null},"question":null,"summary":null,"reasoning":null}}`)
+		turn, err := turnschema.ParseProvider(`{"turn":{"type":"act","bash":{"commands":[{"command":"ls -la","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`)
 		if err != nil {
 			t.Fatalf("ParseProvider error = %v", err)
 		}
@@ -190,8 +190,8 @@ func TestParseProvider(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects malformed bash object missing workdir", func(t *testing.T) {
-		_, err := turnschema.ParseProvider(`{"turn":{"type":"act","bash":{"command":"ls -la"},"question":null,"summary":null,"reasoning":null}}`)
+	t.Run("rejects malformed bash command missing workdir", func(t *testing.T) {
+		_, err := turnschema.ParseProvider(`{"turn":{"type":"act","bash":{"commands":[{"command":"ls -la"}]},"question":null,"summary":null,"reasoning":null}}`)
 		if !errors.Is(err, clnkr.ErrInvalidJSON) {
 			t.Fatalf("ParseProvider error = %v, want ErrInvalidJSON", err)
 		}
@@ -217,8 +217,8 @@ func TestCanonicalJSON(t *testing.T) {
 		}{
 			{
 				name: "act",
-				turn: &clnkr.ActTurn{Bash: clnkr.BashAction{Command: "ls -la"}, Reasoning: "inspect files"},
-				want: `{"type":"act","bash":{"command":"ls -la","workdir":null},"reasoning":"inspect files"}`,
+				turn: &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: []clnkr.BashAction{{Command: "ls -la"}}}, Reasoning: "inspect files"},
+				want: `{"type":"act","bash":{"commands":[{"command":"ls -la","workdir":null}]},"reasoning":"inspect files"}`,
 			},
 			{
 				name: "clarify",
@@ -245,9 +245,9 @@ func TestCanonicalJSON(t *testing.T) {
 		}
 	})
 
-	t.Run("round trips through strict and legacy parsers", func(t *testing.T) {
+	t.Run("round trips through strict and ParseTurn parsers", func(t *testing.T) {
 		turns := []clnkr.Turn{
-			&clnkr.ActTurn{Bash: clnkr.BashAction{Command: "ls -la"}, Reasoning: "inspect files"},
+			&clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: []clnkr.BashAction{{Command: "ls -la"}}}, Reasoning: "inspect files"},
 			&clnkr.ClarifyTurn{Question: "Which directory?"},
 			&clnkr.DoneTurn{Summary: "Finished the task."},
 		}
@@ -270,16 +270,16 @@ func TestCanonicalJSON(t *testing.T) {
 				t.Fatalf("strict round trip = %q, want %q", strictRaw, raw)
 			}
 
-			legacyTurn, err := clnkr.ParseTurn(raw)
+			parsedTurn, err := clnkr.ParseTurn(raw)
 			if err != nil {
 				t.Fatalf("ParseTurn(%q) error = %v", raw, err)
 			}
-			legacyRaw, err := turnschema.CanonicalJSON(legacyTurn)
+			parsedRaw, err := turnschema.CanonicalJSON(parsedTurn)
 			if err != nil {
-				t.Fatalf("CanonicalJSON(legacyTurn) error = %v", err)
+				t.Fatalf("CanonicalJSON(parsedTurn) error = %v", err)
 			}
-			if legacyRaw != raw {
-				t.Fatalf("legacy round trip = %q, want %q", legacyRaw, raw)
+			if parsedRaw != raw {
+				t.Fatalf("ParseTurn round trip = %q, want %q", parsedRaw, raw)
 			}
 		}
 	})

@@ -42,9 +42,10 @@ func (EventDebug) event()           {}
 
 // StepResult is the outcome of one agent operation.
 type StepResult struct {
-	Response Response
-	Turn     Turn
-	ParseErr error
-	Output   string
-	ExecErr  error
+	Response  Response
+	Turn      Turn
+	ParseErr  error
+	Output    string
+	ExecErr   error
+	ExecCount int
 }

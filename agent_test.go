@@ -112,12 +112,24 @@ func runActStep(t *testing.T, agent *Agent) StepResult {
 	return result
 }
 
-func actJSON(command string) string {
-	return fmt.Sprintf(`{"type":"act","bash":{"command":%q,"workdir":null}}`, command)
+func bashBatch(commands ...BashAction) BashBatch {
+	return BashBatch{Commands: commands}
 }
 
-func actJSONWithReasoning(command, reasoning string) string {
-	return fmt.Sprintf(`{"type":"act","bash":{"command":%q,"workdir":null},"reasoning":%q}`, command, reasoning)
+func actJSON(commands ...string) string {
+	items := make([]string, 0, len(commands))
+	for _, command := range commands {
+		items = append(items, fmt.Sprintf(`{"command":%q,"workdir":null}`, command))
+	}
+	return fmt.Sprintf(`{"type":"act","bash":{"commands":[%s]}}`, strings.Join(items, ","))
+}
+
+func actJSONWithReasoning(reasoning string, commands ...string) string {
+	items := make([]string, 0, len(commands))
+	for _, command := range commands {
+		items = append(items, fmt.Sprintf(`{"command":%q,"workdir":null}`, command))
+	}
+	return fmt.Sprintf(`{"type":"act","bash":{"commands":[%s]},"reasoning":%q}`, strings.Join(items, ","), reasoning)
 }
 
 // collectEvents returns a Notify function and a pointer to the collected events slice.
@@ -144,8 +156,11 @@ func TestStep(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected *ActTurn, got %T", result.Turn)
 		}
-		if act.Bash.Command != "ls" {
-			t.Errorf("got command %q, want %q", act.Bash.Command, "ls")
+		if got := len(act.Bash.Commands); got != 1 {
+			t.Fatalf("len(commands) = %d, want 1", got)
+		}
+		if act.Bash.Commands[0].Command != "ls" {
+			t.Errorf("got command %q, want %q", act.Bash.Commands[0].Command, "ls")
 		}
 		if executor.calls != 0 {
 			t.Fatalf("Step should not execute commands, got %d calls", executor.calls)
@@ -230,7 +245,7 @@ func TestStep(t *testing.T) {
 
 	t.Run("protocol failure on missing command", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"act"}`}},
+			{Message: Message{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"workdir":null}]}}`}},
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -376,7 +391,7 @@ func TestStep(t *testing.T) {
 
 	t.Run("act with reasoning preserved", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSONWithReasoning("ls", "checking files")}},
+			{Message: Message{Role: "assistant", Content: actJSONWithReasoning("checking files", "ls")}},
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -390,8 +405,11 @@ func TestStep(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected *ActTurn, got %T", result.Turn)
 		}
-		if act.Bash.Command != "ls" {
-			t.Errorf("got command %q, want %q", act.Bash.Command, "ls")
+		if got := len(act.Bash.Commands); got != 1 {
+			t.Fatalf("len(commands) = %d, want 1", got)
+		}
+		if act.Bash.Commands[0].Command != "ls" {
+			t.Errorf("got command %q, want %q", act.Bash.Commands[0].Command, "ls")
 		}
 		if act.Reasoning != "checking files" {
 			t.Errorf("got reasoning %q, want %q", act.Reasoning, "checking files")
@@ -404,7 +422,7 @@ func TestExecuteTurn(t *testing.T) {
 		executor := &fakeExecutor{results: []CommandResult{{ExitCode: 0}}}
 		agent := NewAgent(&fakeModel{}, executor, "/tmp")
 
-		result, err := agent.ExecuteTurn(context.Background(), &ActTurn{Bash: BashAction{Command: "touch /tmp/test"}})
+		result, err := agent.ExecuteTurn(context.Background(), &ActTurn{Bash: bashBatch(BashAction{Command: "touch /tmp/test"})})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -439,7 +457,7 @@ func TestExecuteTurn(t *testing.T) {
 		agent := NewAgent(&fakeModel{}, executor, "/tmp")
 		agent.Notify = notify
 
-		_, err := agent.ExecuteTurn(context.Background(), &ActTurn{Bash: BashAction{Command: "echo hi"}})
+		_, err := agent.ExecuteTurn(context.Background(), &ActTurn{Bash: bashBatch(BashAction{Command: "echo hi"})})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -466,7 +484,7 @@ func TestExecuteTurn(t *testing.T) {
 		agent := NewAgent(&fakeModel{}, executor, "/repo")
 
 		result, err := agent.ExecuteTurn(context.Background(), &ActTurn{
-			Bash: BashAction{Command: "pwd", Workdir: "subdir"},
+			Bash: bashBatch(BashAction{Command: "pwd", Workdir: "subdir"}),
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -485,13 +503,141 @@ func TestExecuteTurn(t *testing.T) {
 		absDir := filepath.Join(t.TempDir(), "elsewhere")
 
 		_, err := agent.ExecuteTurn(context.Background(), &ActTurn{
-			Bash: BashAction{Command: "pwd", Workdir: absDir},
+			Bash: bashBatch(BashAction{Command: "pwd", Workdir: absDir}),
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if got := executor.gotDirs[0]; got != absDir {
 			t.Fatalf("executor dir = %q, want %q", got, absDir)
+		}
+	})
+
+	t.Run("executes two commands and appends two payload messages", func(t *testing.T) {
+		executor := &fakeExecutor{results: []CommandResult{
+			{Stdout: "one\n", ExitCode: 0},
+			{Stdout: "two\n", ExitCode: 0},
+		}}
+		agent := NewAgent(&fakeModel{}, executor, "/repo")
+
+		result, err := agent.ExecuteTurn(context.Background(), &ActTurn{
+			Bash: bashBatch(
+				BashAction{Command: "echo one"},
+				BashAction{Command: "echo two"},
+			),
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.ExecErr != nil {
+			t.Fatalf("unexpected exec error: %v", result.ExecErr)
+		}
+		if result.ExecCount != 2 {
+			t.Fatalf("ExecCount = %d, want 2", result.ExecCount)
+		}
+		if executor.calls != 2 {
+			t.Fatalf("executor calls = %d, want 2", executor.calls)
+		}
+
+		wantFirst := mustCommandPayload(t, CommandResult{Command: "echo one", Stdout: "one\n", ExitCode: 0})
+		wantSecond := mustCommandPayload(t, CommandResult{Command: "echo two", Stdout: "two\n", ExitCode: 0})
+		if result.Output != wantFirst+"\n\n"+wantSecond {
+			t.Fatalf("Output = %q, want joined payloads", result.Output)
+		}
+		if len(agent.messages) != 3 {
+			t.Fatalf("expected two payload messages plus state message, got %#v", agent.messages)
+		}
+		if agent.messages[0] != (Message{Role: "user", Content: wantFirst}) {
+			t.Fatalf("first payload message = %#v, want %#v", agent.messages[0], Message{Role: "user", Content: wantFirst})
+		}
+		if agent.messages[1] != (Message{Role: "user", Content: wantSecond}) {
+			t.Fatalf("second payload message = %#v, want %#v", agent.messages[1], Message{Role: "user", Content: wantSecond})
+		}
+		if agent.messages[2] != (Message{Role: "user", Content: transcript.FormatStateMessage("/repo")}) {
+			t.Fatalf("final state message = %#v", agent.messages[2])
+		}
+	})
+
+	t.Run("stops after first failing command", func(t *testing.T) {
+		execErr := fmt.Errorf("run command: exit status 1")
+		executor := &fakeExecutor{
+			results: []CommandResult{
+				{Stdout: "one\n", ExitCode: 0},
+				{Stderr: "boom\n", ExitCode: 1},
+				{Stdout: "three\n", ExitCode: 0},
+			},
+			errs: []error{nil, execErr},
+		}
+		agent := NewAgent(&fakeModel{}, executor, "/repo")
+
+		result, err := agent.ExecuteTurn(context.Background(), &ActTurn{
+			Bash: bashBatch(
+				BashAction{Command: "echo one"},
+				BashAction{Command: "false"},
+				BashAction{Command: "echo three"},
+			),
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !errors.Is(result.ExecErr, execErr) {
+			t.Fatalf("ExecErr = %v, want %v", result.ExecErr, execErr)
+		}
+		if result.ExecCount != 2 {
+			t.Fatalf("ExecCount = %d, want 2", result.ExecCount)
+		}
+		if executor.calls != 2 {
+			t.Fatalf("executor calls = %d, want 2", executor.calls)
+		}
+
+		wantFirst := mustCommandPayload(t, CommandResult{Command: "echo one", Stdout: "one\n", ExitCode: 0})
+		wantSecond := mustCommandPayload(t, CommandResult{Command: "false", Stderr: "boom\n", ExitCode: 1})
+		if result.Output != wantFirst+"\n\n"+wantSecond {
+			t.Fatalf("Output = %q, want payloads through failing command", result.Output)
+		}
+		if len(agent.messages) != 3 {
+			t.Fatalf("expected two payload messages plus state message, got %#v", agent.messages)
+		}
+		if agent.messages[0] != (Message{Role: "user", Content: wantFirst}) {
+			t.Fatalf("first payload message = %#v, want %#v", agent.messages[0], Message{Role: "user", Content: wantFirst})
+		}
+		if agent.messages[1] != (Message{Role: "user", Content: wantSecond}) {
+			t.Fatalf("second payload message = %#v, want %#v", agent.messages[1], Message{Role: "user", Content: wantSecond})
+		}
+		if got := executor.gotCmds; len(got) != 2 || got[0] != "echo one" || got[1] != "false" {
+			t.Fatalf("executed commands = %#v, want first two only", got)
+		}
+	})
+
+	t.Run("cd in command one affects workdir resolution of command two", func(t *testing.T) {
+		root := t.TempDir()
+		next := filepath.Join(root, "subdir")
+		executor := &fakeExecutor{results: []CommandResult{
+			{ExitCode: 0, PostCwd: next},
+			{ExitCode: 0},
+		}}
+		agent := NewAgent(&fakeModel{}, executor, root)
+
+		result, err := agent.ExecuteTurn(context.Background(), &ActTurn{
+			Bash: bashBatch(
+				BashAction{Command: "cd subdir"},
+				BashAction{Command: "pwd", Workdir: "nested"},
+			),
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.ExecCount != 2 {
+			t.Fatalf("ExecCount = %d, want 2", result.ExecCount)
+		}
+		if executor.calls != 2 {
+			t.Fatalf("executor calls = %d, want 2", executor.calls)
+		}
+		if got := executor.gotDirs[0]; got != root {
+			t.Fatalf("first dir = %q, want %q", got, root)
+		}
+		if got := executor.gotDirs[1]; got != filepath.Join(next, "nested") {
+			t.Fatalf("second dir = %q, want %q", got, filepath.Join(next, "nested"))
 		}
 	})
 }
@@ -565,7 +711,7 @@ func TestStateMessages(t *testing.T) {
 			Message{Role: "user", Content: transcript.FormatStateMessage("/repo")},
 		)
 
-		if _, err := agent.ExecuteTurn(context.Background(), &ActTurn{Bash: BashAction{Command: "cd subdir"}}); err != nil {
+		if _, err := agent.ExecuteTurn(context.Background(), &ActTurn{Bash: bashBatch(BashAction{Command: "cd subdir"})}); err != nil {
 			t.Fatalf("ExecuteTurn: %v", err)
 		}
 
@@ -1598,6 +1744,32 @@ func TestAgent(t *testing.T) {
 		err := agent.Run(ctx, "do something")
 		if err == nil {
 			t.Error("expected error on cancelled context")
+		}
+	})
+}
+
+func TestRun(t *testing.T) {
+	t.Run("counts executed commands toward max steps", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Message: Message{Role: "assistant", Content: actJSON("echo one", "echo two")}},
+			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Step limit reached."}`}},
+		}}
+		executor := &fakeExecutor{results: []CommandResult{
+			{Stdout: "one\n", ExitCode: 0},
+			{Stdout: "two\n", ExitCode: 0},
+		}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		agent.MaxSteps = 2
+		err := agent.Run(context.Background(), "do stuff")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if executor.calls != 2 {
+			t.Fatalf("executor calls = %d, want 2", executor.calls)
+		}
+		if model.calls != 2 {
+			t.Fatalf("model calls = %d, want 2", model.calls)
 		}
 	})
 }

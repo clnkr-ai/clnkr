@@ -152,10 +152,10 @@ func (c *chatModel) appendHostNote(text string) {
 	c.content.WriteString("\n\n")
 }
 
-func (c *chatModel) setProposedCommand(command, workdir string) {
-	c.lastCmd = command
+func (c *chatModel) setProposedCommand(proposal string) {
+	c.lastCmd = ""
 	c.pendingCmd = c.styles.Chat.CommandPending.Render(
-		fmt.Sprintf("%s proposed: %s", iconPending, summarizeCommand(formatActProposal(command, workdir))),
+		fmt.Sprintf("%s proposed:\n%s", iconPending, proposal),
 	)
 }
 
@@ -218,9 +218,6 @@ func (c *chatModel) hydrateHistory(messages []clnkr.Message) {
 func (c *chatModel) renderAssistantMessage(content string, includeClarify bool) string {
 	turn, err := clnkr.ParseTurn(content)
 	if err != nil {
-		if isLegacyAssistantAct(content) {
-			return ""
-		}
 		return content
 	}
 
@@ -352,20 +349,6 @@ func feedbackSummary(changedFiles []string, diff string) string {
 		return ""
 	}
 	return "Diff: " + lines[0]
-}
-
-func isLegacyAssistantAct(content string) bool {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(strings.TrimSpace(content)), &raw); err != nil {
-		return false
-	}
-
-	var turnType string
-	if err := json.Unmarshal(raw["type"], &turnType); err != nil || turnType != "act" {
-		return false
-	}
-	var command string
-	return json.Unmarshal(raw["command"], &command) == nil && strings.TrimSpace(command) != ""
 }
 
 func extractTaggedSection(content, tag string) (string, bool) {

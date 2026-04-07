@@ -19,9 +19,13 @@ type wireTurn struct {
 	Reasoning any       `json:"reasoning"`
 }
 
-type wireBash struct {
+type WireCommand struct {
 	Command string  `json:"command"`
 	Workdir *string `json:"workdir"`
+}
+
+type wireBash struct {
+	Commands []WireCommand `json:"commands"`
 }
 
 func EnsureSingleJSONObject(dec *json.Decoder) error {
@@ -49,6 +53,41 @@ func RequireObjectFields(fields map[string]json.RawMessage, field string, requir
 			return fmt.Errorf("missing required field %q", field+"."+name)
 		}
 	}
+	return nil
+}
+
+func RequireNestedArrayObjectFields(fields map[string]json.RawMessage, field, nested string, required ...string) error {
+	raw, ok := fields[field]
+	if !ok {
+		return fmt.Errorf("missing required field %q", field)
+	}
+
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
+		return fmt.Errorf("field %q must be object", field)
+	}
+
+	arrayRaw, ok := obj[nested]
+	if !ok {
+		return fmt.Errorf("missing required field %q", field+"."+nested)
+	}
+
+	var items []map[string]json.RawMessage
+	if err := json.Unmarshal(arrayRaw, &items); err != nil {
+		return fmt.Errorf("field %q must be array", field+"."+nested)
+	}
+
+	for i, item := range items {
+		if item == nil {
+			return fmt.Errorf("field %q must be object", fmt.Sprintf("%s.%s[%d]", field, nested, i))
+		}
+		for _, name := range required {
+			if _, ok := item[name]; !ok {
+				return fmt.Errorf("missing required field %q", fmt.Sprintf("%s.%s[%d].%s", field, nested, i, name))
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -83,11 +122,11 @@ func ExtractTurnEnvelope(raw string) (string, bool, error) {
 	return string(turnRaw), true, nil
 }
 
-func WireActJSON(command string, workdir *string, reasoning *string) (string, error) {
+func WireActJSON(commands []WireCommand, reasoning *string) (string, error) {
 	return marshalWireEnvelope(wireEnvelope{
 		Turn: wireTurn{
 			Type:      "act",
-			Bash:      &wireBash{Command: command, Workdir: workdir},
+			Bash:      &wireBash{Commands: commands},
 			Question:  nil,
 			Summary:   nil,
 			Reasoning: derefString(reasoning),
@@ -119,8 +158,8 @@ func WireDoneJSON(summary string, reasoning *string) (string, error) {
 	})
 }
 
-func MustWireActJSON(command string, workdir *string, reasoning *string) string {
-	return mustWireJSON(WireActJSON(command, workdir, reasoning))
+func MustWireActJSON(commands []WireCommand, reasoning *string) string {
+	return mustWireJSON(WireActJSON(commands, reasoning))
 }
 
 func MustWireClarifyJSON(question string, reasoning *string) string {

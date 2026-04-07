@@ -14,7 +14,7 @@ import (
 )
 
 func actJSON(command string) string {
-	return fmt.Sprintf(`{"type":"act","bash":{"command":%q,"workdir":null}}`, command)
+	return fmt.Sprintf(`{"type":"act","bash":{"commands":[{"command":%q,"workdir":null}]}}`, command)
 }
 
 type fakeModel struct {
@@ -218,7 +218,7 @@ func TestStdinPrompterActReplyCanBeCanceled(t *testing.T) {
 func TestStdinPrompterActReplyShowsWorkdir(t *testing.T) {
 	stderr := captureStderr(t, func() {
 		p := &stdinPrompter{reader: newLineReader(strings.NewReader("y\n"))}
-		reply, err := p.ActReply(context.Background(), formatActProposal("rm important.txt", "subdir"))
+		reply, err := p.ActReply(context.Background(), formatActProposal([]clnkr.BashAction{{Command: "rm important.txt", Workdir: "subdir"}}))
 		if err != nil {
 			t.Fatalf("ActReply: %v", err)
 		}
@@ -229,6 +229,18 @@ func TestStdinPrompterActReplyShowsWorkdir(t *testing.T) {
 
 	if !strings.Contains(stderr, "rm important.txt in subdir") {
 		t.Fatalf("stderr should contain workdir note, got %q", stderr)
+	}
+}
+
+func TestFormatActProposal(t *testing.T) {
+	got := formatActProposal([]clnkr.BashAction{
+		{Command: "pwd"},
+		{Command: "go test ./...", Workdir: "subdir"},
+	})
+
+	want := "1. pwd\n2. go test ./... in subdir"
+	if got != want {
+		t.Fatalf("formatActProposal() = %q, want %q", got, want)
 	}
 }
 

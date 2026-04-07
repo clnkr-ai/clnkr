@@ -15,6 +15,13 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 		prompt := LoadPromptWithOptions(dir, PromptOptions{})
+		expectedActExample := turnjson.MustWireActJSON(
+			[]turnjson.WireCommand{
+				{Command: "ls -la /tmp", Workdir: nil},
+				{Command: "sed -n '1,40p' README.md", Workdir: nil},
+			},
+			stringPtr("Inspect the directory and the file before deciding."),
+		)
 		if !strings.Contains(prompt, `"type":"act"`) {
 			t.Error("prompt should teach the json protocol")
 		}
@@ -36,8 +43,11 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, `grep 'A\\\\|B' file.txt`) {
 			t.Error("prompt should teach shell escaping inside JSON")
 		}
-		if !strings.Contains(prompt, `"turn":{"type":"act","bash":{"command":"ls -la /tmp","workdir":null},"question":null,"summary":null,"reasoning":"Listing directory to find config"}`) {
-			t.Error("prompt should teach the wrapped act wire shape")
+		if !strings.Contains(prompt, "Each turn.bash.commands item is an object whose command value is a JSON string") {
+			t.Error("prompt should describe commands[] items as objects with command strings")
+		}
+		if !strings.Contains(prompt, expectedActExample) {
+			t.Error("prompt should teach the wrapped commands[] act wire shape")
 		}
 		if !strings.Contains(prompt, `Include turn.reasoning in every response; use a string when it helps and null when you have nothing to add.`) {
 			t.Error("prompt should require the reasoning field even when it is null")
@@ -54,8 +64,11 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, "The host may require approval before running commands.") {
 			t.Error("prompt should mention host approval mode")
 		}
-		if !strings.Contains(prompt, "One command per turn; use && for trivially connected steps.") {
-			t.Error("prompt should retain one-command-per-turn guidance")
+		if !strings.Contains(prompt, "Use 1 or 2 commands in each act turn.") {
+			t.Error("prompt should bound act turns to 1 or 2 commands")
+		}
+		if !strings.Contains(prompt, "Batch only mechanical follow-up steps that do not require interpreting earlier command output.") {
+			t.Error("prompt should limit batching to mechanical follow-up steps")
 		}
 		if !strings.Contains(prompt, "Do not emit multiple JSON objects in one response.") {
 			t.Error("prompt should explicitly forbid multiple JSON objects")

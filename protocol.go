@@ -18,9 +18,13 @@ type BashAction struct {
 	Workdir string `json:"workdir,omitempty"`
 }
 
+type BashBatch struct {
+	Commands []BashAction `json:"commands"`
+}
+
 type ActTurn struct {
-	Bash      BashAction `json:"bash"`
-	Reasoning string     `json:"reasoning,omitempty"`
+	Bash      BashBatch `json:"bash"`
+	Reasoning string    `json:"reasoning,omitempty"`
 }
 
 type ClarifyTurn struct {
@@ -46,13 +50,13 @@ type jsonEnvelope struct {
 }
 
 type jsonBashEnvelope struct {
-	Command string  `json:"command"`
-	Workdir *string `json:"workdir"`
+	Commands []turnjson.WireCommand `json:"commands"`
 }
 
 var (
 	ErrInvalidJSON     = errors.New("invalid JSON")
-	ErrMissingCommand  = errors.New("act turn requires command")
+	ErrMissingCommand  = errors.New("act turn requires at least one command")
+	ErrTooManyCommands = errors.New("act turn allows at most 3 commands")
 	ErrEmptyClarify    = errors.New("clarify turn requires non-empty question")
 	ErrEmptySummary    = errors.New("done turn requires non-empty summary")
 	ErrUnknownTurnType = errors.New("unknown turn type")
@@ -189,11 +193,14 @@ func ParseTurn(raw string) (Turn, error) {
 
 	switch env.Type {
 	case "act":
-		if env.Bash == nil || strings.TrimSpace(env.Bash.Command) == "" {
+		if err := turnjson.RequireNestedArrayObjectFields(fields, "bash", "commands", "workdir"); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+		}
+		if env.Bash == nil || len(env.Bash.Commands) == 0 {
 			return nil, ErrMissingCommand
 		}
-		if err := turnjson.RequireObjectFields(fields, "bash", "command", "workdir"); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+		if len(env.Bash.Commands) > 3 {
+			return nil, ErrTooManyCommands
 		}
 		if err := turnjson.RejectPresentNonNullField(fields, "question", "act turn only allows question when it is null"); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
@@ -201,11 +208,21 @@ func ParseTurn(raw string) (Turn, error) {
 		if err := turnjson.RejectPresentNonNullField(fields, "summary", "act turn only allows summary when it is null"); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
 		}
-		act := &ActTurn{Bash: BashAction{Command: env.Bash.Command}, Reasoning: env.Reasoning}
-		if env.Bash.Workdir != nil {
-			act.Bash.Workdir = *env.Bash.Workdir
+		actions := make([]BashAction, 0, len(env.Bash.Commands))
+		for _, cmd := range env.Bash.Commands {
+			if strings.TrimSpace(cmd.Command) == "" {
+				return nil, ErrMissingCommand
+			}
+			action := BashAction{Command: cmd.Command}
+			if cmd.Workdir != nil {
+				action.Workdir = *cmd.Workdir
+			}
+			actions = append(actions, action)
 		}
-		return act, nil
+		return &ActTurn{
+			Bash:      BashBatch{Commands: actions},
+			Reasoning: env.Reasoning,
+		}, nil
 	case "clarify":
 		if env.Question == "" {
 			return nil, ErrEmptyClarify
@@ -253,6 +270,8 @@ func errorToReason(err error) string {
 		return "invalid_json"
 	case errors.Is(err, ErrMissingCommand):
 		return "missing_command"
+	case errors.Is(err, ErrTooManyCommands):
+		return "too_many_commands"
 	case errors.Is(err, ErrEmptyClarify):
 		return "empty_clarify"
 	case errors.Is(err, ErrEmptySummary):
@@ -267,8 +286,8 @@ func errorToReason(err error) string {
 // protocolCorrectionMessage returns a tagged-text correction message for the model.
 func protocolCorrectionMessage(err error) string {
 	hint := fmt.Sprintf(
-		"Your previous response was ignored and no command ran. Respond with exactly one JSON object with exactly one top-level \"turn\" field for the next turn from the current state. Use this wrapped act example as the shape guide: %s. Set turn.type to exactly one of \"act\", \"clarify\", or \"done\". If turn.type is \"act\", include turn.bash and keep turn.question/turn.summary null. If turn.type is \"clarify\", include turn.question and keep turn.bash/turn.summary null. If turn.type is \"done\", include turn.summary and keep turn.bash/turn.question null. Include turn.reasoning in every response; use null if you have nothing to add. Do not emit multiple JSON objects in one response. Do not emit an act turn and a done turn together. If you intended to run a command, resend only that act turn. Do not jump to done unless prior command results in this conversation already prove the task is complete.",
-		turnjson.MustWireActJSON("...", nil, nil),
+		"Your previous response was ignored and no command ran. Respond with exactly one JSON object with exactly one top-level \"turn\" field for the next turn from the current state. Use this wrapped act example as the shape guide: %s. Set turn.type to exactly one of \"act\", \"clarify\", or \"done\". If turn.type is \"act\", include turn.bash and keep turn.question/turn.summary null. If turn.type is \"clarify\", include turn.question and keep turn.bash/turn.summary null. If turn.type is \"done\", include turn.summary and keep turn.bash/turn.question null. Include turn.reasoning in every response; use null if you have nothing to add. Do not emit multiple JSON objects in one response. Do not emit an act turn and a done turn together. If you intended to run commands, resend only that act turn. Do not jump to done unless prior command results in this conversation already prove the task is complete.",
+		turnjson.MustWireActJSON([]turnjson.WireCommand{{Command: "..."}}, nil),
 	)
 	invalid, hasInvalid := invalidEscapeChar(err)
 	switch {

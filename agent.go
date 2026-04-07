@@ -160,50 +160,66 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 
 // ExecuteTurn runs an act turn and appends the command result payload.
 func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, error) {
-	if setter, ok := a.executor.(ExecutorStateSetter); ok {
-		setter.SetEnv(a.env)
+	if len(act.Bash.Commands) == 0 {
+		return StepResult{Turn: act}, fmt.Errorf("execute act turn: %w", ErrMissingCommand)
 	}
-	execDir := a.cwd
-	if act.Bash.Workdir != "" {
-		if filepath.IsAbs(act.Bash.Workdir) {
-			execDir = act.Bash.Workdir
-		} else {
-			execDir = filepath.Join(a.cwd, act.Bash.Workdir)
+
+	outputs, execCount := make([]string, 0, len(act.Bash.Commands)), 0
+	var execErr error
+
+	for _, action := range act.Bash.Commands {
+		if setter, ok := a.executor.(ExecutorStateSetter); ok {
+			setter.SetEnv(a.env)
+		}
+
+		execDir := a.cwd
+		if action.Workdir != "" {
+			if filepath.IsAbs(action.Workdir) {
+				execDir = action.Workdir
+			} else {
+				execDir = filepath.Join(a.cwd, action.Workdir)
+			}
+		}
+		a.notify(EventCommandStart{Command: action.Command, Dir: execDir})
+
+		execResult, commandErr := a.executor.Execute(ctx, action.Command, execDir)
+		execCount++
+		if execResult.PostCwd != "" {
+			a.cwd = execResult.PostCwd
+		}
+		// PostEnv is a full next-turn snapshot; nil means no new snapshot captured.
+		if execResult.PostEnv != nil {
+			a.env = execResult.PostEnv
+		}
+		a.notify(EventDebug{Message: fmt.Sprintf("cwd: %s", a.cwd)})
+		payload := transcript.FormatCommandResult(transcript.CommandResult{
+			Command:  execResult.Command,
+			Stdout:   execResult.Stdout,
+			Stderr:   execResult.Stderr,
+			ExitCode: execResult.ExitCode,
+			Feedback: execResult.Feedback,
+		})
+		if commandErr != nil {
+			a.notify(EventDebug{Message: fmt.Sprintf("command error: %v", commandErr)})
+		}
+		a.notify(EventCommandDone{
+			Command:  action.Command,
+			Stdout:   execResult.Stdout,
+			Stderr:   execResult.Stderr,
+			ExitCode: execResult.ExitCode,
+			Feedback: execResult.Feedback,
+			Err:      commandErr,
+		})
+
+		a.messages = append(a.messages, Message{Role: "user", Content: payload})
+		outputs = append(outputs, payload)
+		if execErr = commandErr; execErr != nil {
+			break
 		}
 	}
-	a.notify(EventCommandStart{Command: act.Bash.Command, Dir: execDir})
 
-	execResult, execErr := a.executor.Execute(ctx, act.Bash.Command, execDir)
-	if execResult.PostCwd != "" {
-		a.cwd = execResult.PostCwd
-	}
-	// PostEnv is a full next-turn snapshot; nil means no new snapshot captured.
-	if execResult.PostEnv != nil {
-		a.env = execResult.PostEnv
-	}
-	a.notify(EventDebug{Message: fmt.Sprintf("cwd: %s", a.cwd)})
-	payload := transcript.FormatCommandResult(transcript.CommandResult{
-		Command:  execResult.Command,
-		Stdout:   execResult.Stdout,
-		Stderr:   execResult.Stderr,
-		ExitCode: execResult.ExitCode,
-		Feedback: execResult.Feedback,
-	})
-	if execErr != nil {
-		a.notify(EventDebug{Message: fmt.Sprintf("command error: %v", execErr)})
-	}
-	a.notify(EventCommandDone{
-		Command:  act.Bash.Command,
-		Stdout:   execResult.Stdout,
-		Stderr:   execResult.Stderr,
-		ExitCode: execResult.ExitCode,
-		Feedback: execResult.Feedback,
-		Err:      execErr,
-	})
-
-	a.messages = append(a.messages, Message{Role: "user", Content: payload})
 	a.appendStateMessageIfNeeded()
-	return StepResult{Turn: act, Output: payload, ExecErr: execErr}, nil
+	return StepResult{Turn: act, Output: strings.Join(outputs, "\n\n"), ExecErr: execErr, ExecCount: execCount}, nil
 }
 
 // RequestStepLimitSummary asks the model for a final done summary after the
@@ -262,10 +278,11 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 			return ErrClarificationNeeded
 		case *ActTurn:
 			act := result.Turn.(*ActTurn)
-			if _, err := a.ExecuteTurn(ctx, act); err != nil {
+			execResult, err := a.ExecuteTurn(ctx, act)
+			if err != nil {
 				return err
 			}
-			steps++
+			steps += execResult.ExecCount
 			a.notify(EventDebug{Message: fmt.Sprintf("step %d/%d", steps, a.MaxSteps)})
 			if a.MaxSteps > 0 && steps >= a.MaxSteps {
 				return a.RequestStepLimitSummary(ctx)

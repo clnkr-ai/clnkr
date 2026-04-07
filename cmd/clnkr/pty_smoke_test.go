@@ -21,7 +21,7 @@ func TestPTYSingleTaskShowsApprovalPrompt(t *testing.T) {
 			"choices": []map[string]any{
 				{"message": map[string]string{
 					"role":    "assistant",
-					"content": `{"turn":{"type":"act","bash":{"command":"printf 'hello from test\\n'","workdir":null},"question":null,"summary":null,"reasoning":"emit test output"}}`,
+					"content": `{"turn":{"type":"act","bash":{"commands":[{"command":"printf 'hello from test\\n'","workdir":null}]},"question":null,"summary":null,"reasoning":"emit test output"}}`,
 				}},
 			},
 			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
@@ -45,7 +45,7 @@ func TestPTYSingleTaskShowsApprovalPrompt(t *testing.T) {
 	})
 	defer app.Close()
 
-	app.WaitFor("● proposed: printf 'hello from test\\n'")
+	app.WaitFor("● proposed:\n1. printf 'hello from test\\n'")
 	app.WaitFor("Send 'y' to approve")
 }
 
