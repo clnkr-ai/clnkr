@@ -12,16 +12,18 @@ import (
 )
 
 type chatModel struct {
-	viewport     viewport.Model
-	content      *strings.Builder
-	streamBuf    *strings.Builder
-	pendingCmd   string
-	pendingQuery string
-	streaming    bool
-	wasAtBottom  bool
-	hasNew       bool // new content arrived while scrolled up
-	verbose      bool
-	styles       *styles
+	viewport         viewport.Model
+	content          *strings.Builder
+	streamBuf        *strings.Builder
+	pendingCmd       string
+	pendingQuery     string
+	streaming        bool
+	wasAtBottom      bool
+	hasNew           bool // new content arrived while scrolled up
+	verbose          bool
+	reasoningEnabled bool
+	reasoningKeyHint string
+	styles           *styles
 	// lastCmd caches the raw command text from EventCommandStart
 	// for use in the EventCommandDone commit line.
 	lastCmd string
@@ -76,13 +78,14 @@ func (c *chatModel) appendEvent(e clnkr.Event) {
 	switch ev := e.(type) {
 	case clnkr.EventResponse:
 		c.pendingQuery = ""
+		rendered := c.renderAssistantTurn(ev.Message.Content, false)
 		if c.streaming {
-			c.commitStream(c.renderAssistantMessage(ev.Message.Content, false))
-		} else {
-			rendered := c.renderAssistantMessage(ev.Message.Content, false)
-			if rendered != "" {
-				c.writeRendered(rendered)
-			}
+			c.commitStream(rendered.body)
+		} else if rendered.body != "" {
+			c.writeRendered(rendered.body)
+		}
+		if rendered.reasoning != "" {
+			c.appendReasoningBreadcrumb(c.reasoningPrompt())
 		}
 	case clnkr.EventCommandStart:
 		c.lastCmd = ev.Command
@@ -168,9 +171,12 @@ func (c *chatModel) hydrateHistory(messages []clnkr.Message) {
 	for _, msg := range messages {
 		switch msg.Role {
 		case "assistant":
-			rendered := c.renderAssistantMessage(msg.Content, true)
-			if rendered != "" {
-				c.writeRendered(rendered)
+			rendered := c.renderAssistantTurn(msg.Content, true)
+			if rendered.body != "" {
+				c.writeRendered(rendered.body)
+			}
+			if rendered.reasoning != "" {
+				c.appendReasoningBreadcrumb(c.reasoningPrompt())
 			}
 		case "user":
 			if isStateTranscript(msg.Content) || isCompactTranscript(msg.Content) {
@@ -213,28 +219,49 @@ func (c *chatModel) hydrateHistory(messages []clnkr.Message) {
 	}
 }
 
-// renderAssistantMessage converts structured protocol JSON turns into user-facing
-// text for TUI rendering. Returning "" suppresses message rendering.
-func (c *chatModel) renderAssistantMessage(content string, includeClarify bool) string {
+type assistantRender struct {
+	body      string
+	reasoning string
+}
+
+// renderAssistantTurn converts structured protocol JSON turns into user-facing
+// text for TUI rendering. Empty body suppresses message rendering.
+func (c *chatModel) renderAssistantTurn(content string, includeClarify bool) assistantRender {
 	turn, err := clnkr.ParseTurn(content)
 	if err != nil {
-		return content
+		return assistantRender{body: content}
 	}
 
 	switch t := turn.(type) {
 	case *clnkr.ActTurn:
 		// Act turns are rendered by command proposal/execution UI.
-		return ""
+		return assistantRender{reasoning: t.Reasoning}
 	case *clnkr.ClarifyTurn:
+		body := ""
 		if includeClarify {
-			return t.Question
+			body = t.Question
 		}
-		return ""
+		return assistantRender{body: body, reasoning: t.Reasoning}
 	case *clnkr.DoneTurn:
-		return t.Summary
+		return assistantRender{body: t.Summary, reasoning: t.Reasoning}
 	default:
-		return content
+		return assistantRender{body: content}
 	}
+}
+
+func (c *chatModel) reasoningPrompt() string {
+	if c.reasoningKeyHint == "" {
+		return "Reasoning trace available"
+	}
+	return fmt.Sprintf("Reasoning trace available (press %s)", c.reasoningKeyHint)
+}
+
+func (c *chatModel) appendReasoningBreadcrumb(prompt string) {
+	if !c.reasoningEnabled || strings.TrimSpace(prompt) == "" {
+		return
+	}
+	c.content.WriteString(c.styles.Chat.Warning.Render(prompt))
+	c.content.WriteString("\n\n")
 }
 
 func (c *chatModel) updateViewport() {

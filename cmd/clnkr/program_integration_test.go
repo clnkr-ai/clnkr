@@ -78,6 +78,29 @@ func TestProgramGuidanceReplyBecomesNextUserTurn(t *testing.T) {
 	}
 }
 
+func TestSeedModelHistoryRendersReasoningBreadcrumbWhenEnabled(t *testing.T) {
+	model := &fakeModel{}
+	executor := &fakeExecutor{}
+	agent := clnkr.NewAgent(model, executor, t.TempDir())
+	if err := agent.AddMessages([]clnkr.Message{
+		{Role: "user", Content: "inspect this repo"},
+		{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"command":"ls","workdir":null}]},"reasoning":"checked repo root first"}`},
+	}); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+
+	m := setupModel()
+	m.chat.reasoningEnabled = true
+	seedModelHistory(&m, agent)
+	view := m.View()
+	if !strings.Contains(view.Content, "inspect this repo") {
+		t.Fatalf("view should contain resumed user message, got: %q", view.Content)
+	}
+	if !strings.Contains(view.Content, "Reasoning trace available") {
+		t.Fatalf("view should contain reasoning breadcrumb when enabled, got: %q", view.Content)
+	}
+}
+
 func TestSeedModelHistoryRendersResumedHistory(t *testing.T) {
 	model := &fakeModel{}
 	executor := &fakeExecutor{}
@@ -109,25 +132,50 @@ func TestSeedModelHistoryRendersResumedHistory(t *testing.T) {
 	}
 }
 
+func TestProgramResponseCachesLatestReasoningWhenEnabled(t *testing.T) {
+	model := &fakeModel{responses: []clnkr.Response{
+		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done","reasoning":"checked parser -> protocol -> ui"}`}},
+	}}
+	executor := &fakeExecutor{}
+	agent := clnkr.NewAgent(model, executor, t.TempDir())
+
+	h := startProgramHarness(t, agent, "explain it")
+	defer h.Quit()
+	h.WaitFinished()
+
+	fm := h.FinalModel()
+	if fm == nil {
+		t.Fatal("final model unavailable")
+	}
+	if got, want := fm.reasoningInfo.latest, "checked parser -> protocol -> ui"; got != want {
+		t.Fatalf("latest reasoning = %q, want %q", got, want)
+	}
+	if !fm.reasoningInfo.enabled {
+		t.Fatal("reasoning cache should be enabled")
+	}
+}
+
 type programHarness struct {
 	t      *testing.T
 	p      *tea.Program
 	output *lockedBuffer
 	shared *shared
 	done   chan tea.Model
+	final  tea.Model
 }
 
-func startProgramHarness(t *testing.T, agent *clnkr.Agent, task string) *programHarness {
+func startProgramHarness(t *testing.T, agent *clnkr.Agent, task string, opts ...modelOpts) *programHarness {
 	t.Helper()
 
 	s := defaultStyles(true)
-	m := newModel(modelOpts{
+	cfg := modelOpts{
 		styles:          s,
 		modelName:       "test-model",
 		maxSteps:        agent.MaxSteps,
 		fullSend:        false,
 		exitOnRunFinish: true,
-	})
+	}
+	m := newModel(cfg)
 	m.shared.agent = agent
 	m.shared.cwd = agent.Cwd()
 	m.chat.appendUserMessage(task)
@@ -167,6 +215,7 @@ func startProgramHarness(t *testing.T, agent *clnkr.Agent, task string) *program
 			close(h.done)
 			return
 		}
+		h.final = finalModel
 		h.done <- finalModel
 		close(h.done)
 	}()
@@ -186,11 +235,24 @@ func (h *programHarness) Type(text string) {
 	}
 }
 
+func (h *programHarness) FinalModel() *model {
+	h.t.Helper()
+	if h.final == nil {
+		return nil
+	}
+	m, ok := h.final.(model)
+	if !ok {
+		return nil
+	}
+	return &m
+}
+
 func (h *programHarness) WaitFinished() {
 	h.t.Helper()
 
 	select {
-	case <-h.done:
+	case fm := <-h.done:
+		h.final = fm
 	case <-time.After(5 * time.Second):
 		h.t.Fatalf("timed out waiting for program finish\n\noutput:\n%s", normalizePTYOutput(h.output.String()))
 	}

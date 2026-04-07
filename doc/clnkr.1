@@ -97,6 +97,8 @@ After the task finishes, write the full message history as pretty-printed JSON t
 \fB-v\fP, \fB--verbose\fP
 Show internal decisions (queries, parsing, working directory).
 
+.PP
+In the interactive TUI, parsed assistant turns with non-empty \fBreasoning\fR expose a reasoning trace. The chat shows a breadcrumb (\fBReasoning trace available (press Ctrl+Y)\fR), and \fBCtrl+Y\fP opens a modal with the latest cached reasoning trace. This is separate from \fB--verbose\fP: verbose mode shows debug/internal event lines, while the reasoning modal shows the model-provided \fBreasoning\fR field from the structured turn protocol.
 .TP
 \fB-V\fP, \fB--version\fP
 Print version and exit.

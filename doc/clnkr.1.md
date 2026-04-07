@@ -75,6 +75,8 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 **-v**, **--verbose**
 : Show internal decisions (queries, parsing, working directory).
 
+In the interactive TUI, parsed assistant turns with non-empty `reasoning` expose a reasoning trace. The chat shows a breadcrumb (`Reasoning trace available (press Ctrl+Y)`), and **Ctrl+Y** opens a modal with the latest cached reasoning trace. This is separate from **--verbose**: verbose mode shows debug/internal event lines, while the reasoning modal shows the model-provided `reasoning` field from the structured turn protocol.
+
 **-V**, **--version**
 : Print version and exit.
 

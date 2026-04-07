@@ -145,6 +145,18 @@ clnkr executes commands with structured results in the core: command text, exit 
 
 This is intentional. The only downstream machine consumers are clnkr and clnku, so the protocol is optimized for model readability rather than external XML tooling. In practice, weaker models follow explicit flat delimiters more reliably than nested structure, while the frontends still receive fully structured events.
 
+### Reasoning trace in the TUI
+
+In the `clnkr` TUI, model `reasoning` is available as a lightweight trace rather than being printed inline with every assistant message. When a parsed assistant turn includes non-empty `reasoning`, the chat shows a breadcrumb like `Reasoning trace available (press Ctrl+Y)`. Press `Ctrl+Y` to open a modal with the latest reasoning trace.
+
+A few important details:
+
+- Act turns do not render their command text as assistant chat; command proposals and execution are shown through the command UI instead. The reasoning breadcrumb can still appear for those turns.
+- Done turns render their summary in chat and can also attach a reasoning breadcrumb.
+- Live clarify turns do not print the clarify text directly in the chat stream, but their reasoning can still be cached for the reasoning modal.
+- If there is no cached reasoning trace, pressing `Ctrl+Y` shows `No reasoning trace available.`
+- This is separate from `--verbose`. Verbose mode shows debug/internal event lines; the reasoning modal shows the model-provided `reasoning` field from the structured turn protocol.
+
 ### Prompt customization
 
 Place an `AGENTS.md` file in your working directory. Its contents are appended to the system prompt, giving the LLM project-specific context.

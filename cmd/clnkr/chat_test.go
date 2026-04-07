@@ -418,3 +418,57 @@ func TestHydrateHistoryRendersForeignCompactBlockAsUserContent(t *testing.T) {
 		t.Fatalf("content should include later assistant content, got %q", content)
 	}
 }
+
+func TestChatAppendEventResponseAddsReasoningBreadcrumbWhenEnabled(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+	c.reasoningEnabled = true
+	c.reasoningKeyHint = "Ctrl+Y"
+
+	c.appendEvent(clnkr.EventResponse{
+		Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"Finished.","reasoning":"checked the parser path first"}`},
+	})
+
+	content := c.content.String()
+	if !strings.Contains(content, "Finished.") {
+		t.Fatalf("expected summary in content, got: %q", content)
+	}
+	if !strings.Contains(content, "Reasoning trace available (press Ctrl+Y)") {
+		t.Fatalf("expected reasoning breadcrumb in content, got: %q", content)
+	}
+}
+
+func TestChatAppendEventResponseOmitsReasoningBreadcrumbWhenReasoningEmpty(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+	c.reasoningEnabled = true
+	c.reasoningKeyHint = "Ctrl+Y"
+
+	c.appendEvent(clnkr.EventResponse{
+		Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"Finished.","reasoning":""}`},
+	})
+
+	content := c.content.String()
+	if strings.Contains(content, "Reasoning trace available") {
+		t.Fatalf("did not expect reasoning breadcrumb, got: %q", content)
+	}
+}
+
+func TestChatAppendEventResponseDoesNotAddReasoningBreadcrumbWhenDisabled(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+	c.reasoningEnabled = false
+	c.reasoningKeyHint = "Ctrl+Y"
+
+	c.appendEvent(clnkr.EventResponse{
+		Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"Finished.","reasoning":"checked the parser path first"}`},
+	})
+
+	content := c.content.String()
+	if !strings.Contains(content, "Finished.") {
+		t.Fatalf("expected summary in content, got: %q", content)
+	}
+	if strings.Contains(content, "Reasoning trace available") {
+		t.Fatalf("did not expect reasoning breadcrumb when disabled, got: %q", content)
+	}
+}
