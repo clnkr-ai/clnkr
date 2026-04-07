@@ -1374,6 +1374,54 @@ func TestAgent(t *testing.T) {
 		}
 	})
 
+	t.Run("wrapped multi-object response protocol error then recovery", func(t *testing.T) {
+		raw := `{"turn":{"type":"act","bash":{"command":"pwd","workdir":null},"question":null,"summary":null,"reasoning":null}}` +
+			`{"turn":{"type":"done","bash":null,"question":null,"summary":"Done.","reasoning":null}}`
+		model := &fakeModel{responses: []Response{
+			{
+				Message:     Message{Role: "assistant", Content: raw},
+				ProtocolErr: fmt.Errorf("%w: unexpected trailing JSON value", ErrInvalidJSON),
+			},
+			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
+		}}
+		executor := &fakeExecutor{}
+
+		agent := NewAgent(model, executor, "/tmp")
+		err := agent.Run(context.Background(), "do something")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if executor.calls != 0 {
+			t.Fatalf("executor calls = %d, want 0", executor.calls)
+		}
+		if len(model.got) != 2 {
+			t.Fatalf("model calls = %d, want 2", len(model.got))
+		}
+		secondQuery := model.got[1]
+		foundRaw := false
+		foundCorrection := false
+		for _, msg := range secondQuery {
+			if msg.Role == "assistant" && msg.Content == raw {
+				foundRaw = true
+			}
+			if msg.Role == "user" && strings.Contains(msg.Content, "[protocol_error]") {
+				foundCorrection = true
+				if !strings.Contains(msg.Content, "Do not emit multiple JSON objects in one response.") {
+					t.Fatalf("protocol correction message = %q, want multiple-object guidance", msg.Content)
+				}
+			}
+		}
+		if !foundRaw {
+			t.Fatal("second query should include the rejected wrapped multi-object assistant reply")
+		}
+		if !foundCorrection {
+			t.Fatal("second query should include a protocol_error correction message")
+		}
+		if got := agent.messages[len(agent.messages)-1].Content; got != `{"type":"done","summary":"Done."}` {
+			t.Fatalf("final assistant message = %q, want canonical done turn", got)
+		}
+	})
+
 	t.Run("exits on consecutive protocol errors", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Message: Message{Role: "assistant", Content: "no json 1"}},

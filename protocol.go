@@ -266,7 +266,10 @@ func errorToReason(err error) string {
 
 // protocolCorrectionMessage returns a tagged-text correction message for the model.
 func protocolCorrectionMessage(err error) string {
-	hint := "Your previous response was ignored and no command ran. Respond with exactly one JSON object for the next turn from the current state: {\"type\":\"act\",\"bash\":{\"command\":\"...\",\"workdir\":null}} or {\"type\":\"clarify\",\"question\":\"...\"} or {\"type\":\"done\",\"summary\":\"...\"}. If you intended to run a command, resend only that act turn. Do not jump to done unless prior command results in this conversation already prove the task is complete."
+	hint := fmt.Sprintf(
+		"Your previous response was ignored and no command ran. Respond with exactly one JSON object with exactly one top-level \"turn\" field for the next turn from the current state. Use this wrapped act example as the shape guide: %s. Set turn.type to exactly one of \"act\", \"clarify\", or \"done\". If turn.type is \"act\", include turn.bash and keep turn.question/turn.summary null. If turn.type is \"clarify\", include turn.question and keep turn.bash/turn.summary null. If turn.type is \"done\", include turn.summary and keep turn.bash/turn.question null. Include turn.reasoning in every response; use null if you have nothing to add. Do not emit multiple JSON objects in one response. Do not emit an act turn and a done turn together. If you intended to run a command, resend only that act turn. Do not jump to done unless prior command results in this conversation already prove the task is complete.",
+		turnjson.MustWireActJSON("...", nil, nil),
+	)
 	invalid, hasInvalid := invalidEscapeChar(err)
 	switch {
 	case hasInvalid && invalid == '|':

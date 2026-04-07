@@ -90,6 +90,7 @@ func extractErrorMessage(body []byte) string {
 }
 
 func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
+	messages = turnschema.NormalizeMessagesForProvider(messages)
 	body, err := json.Marshal(request{
 		Model:     m.model,
 		MaxTokens: m.maxTokens,

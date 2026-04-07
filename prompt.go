@@ -1,18 +1,28 @@
 package clnkr
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/clnkr-ai/clnkr/turnjson"
 )
 
-const basePrompt = `You are an expert software engineer that solves problems using bash commands. Be concise.
+const basePromptTemplate = `You are an expert software engineer that solves problems using bash commands. Be concise.
 
 <protocol>
-Every response must be exactly one JSON object. Three turn types:
-{"type":"clarify","question":"Which branch should I check out?"}
-{"type":"act","bash":{"command":"ls -la /tmp","workdir":null},"reasoning":"Listing directory to find config"}
-{"type":"done","summary":"Fixed the failing test by correcting the import path."}
-The optional "reasoning" field explains your thinking. Each turn type requires its payload field. Only "act" runs commands. One command per turn; use && for trivially connected steps. If you receive a [protocol_error] block from a legacy parser path, fix your format and respond with valid JSON.
+Every response must be exactly one JSON object with exactly one top-level "turn" field.
+Use this wrapped wire shape:
+%s
+Set turn.type to exactly one of "act", "clarify", or "done".
+If turn.type is "act", turn.bash must be an object and turn.question/turn.summary must be null.
+If turn.type is "clarify", turn.question must be a non-empty string and turn.bash/turn.summary must be null.
+If turn.type is "done", turn.summary must be a non-empty string and turn.bash/turn.question must be null.
+Include turn.reasoning in every response; use a string when it helps and null when you have nothing to add.
+Only "act" runs commands. One command per turn; use && for trivially connected steps.
+Do not emit multiple JSON objects in one response.
+Do not emit an act turn and a done turn together.
+If you receive a [protocol_error] block, fix your format and respond with exactly one valid wrapped turn object.
 </protocol>
 
 <command-results>
@@ -21,13 +31,13 @@ You may also receive [command_feedback]. Read it before running extra verificati
 You may also receive a [state] block containing JSON host execution state such as the current working directory. Treat it as authoritative.
 </command-results>
 
-<legacy-parser>
-On a legacy parser path, malformed assistant turns may produce a [protocol_error] block. If you receive one, fix your format and respond with valid JSON.
-</legacy-parser>
+<protocol-error-recovery>
+If you receive a [protocol_error] block, your previous response was rejected and no command ran. Fix the format and respond with exactly one valid wrapped turn object.
+</protocol-error-recovery>
 
 <shell-in-json>
-Your bash.command value is a JSON string, so shell backslashes must also be valid JSON escapes. Example:
-{"type":"act","bash":{"command":"grep 'A\\\\|B' file.txt","workdir":null}}
+Your turn.bash.command value is a JSON string, so shell backslashes must also be valid JSON escapes. Example:
+%s
 Do not emit invalid JSON escapes like backslash-pipe or backslash-backtick.
 </shell-in-json>
 
@@ -40,7 +50,7 @@ Do not emit invalid JSON escapes like backslash-pipe or backslash-backtick.
 - A denied command is not the same as a command failure.
 - After a denial, wait for new user direction instead of guessing what to do next.
 - If the user has not given you a task, use "clarify" to ask one question.
-- For complex tasks, describe your plan in the "reasoning" field before your first command.
+- For complex tasks, describe your plan in turn.reasoning before your first command.
 - Stay focused on the task. Do not refactor or improve unrelated code.
 - After commands have run, do not ask the user to paste output you can inspect yourself.
 </rules>
@@ -82,7 +92,11 @@ func LoadPromptWithOptions(dir string, opts PromptOptions) string {
 		return opts.SystemPromptAppend
 	}
 
-	prompt := basePrompt
+	prompt := fmt.Sprintf(
+		basePromptTemplate,
+		turnjson.MustWireActJSON("ls -la /tmp", nil, stringPtr("Listing directory to find config")),
+		fmt.Sprintf("%q", `grep 'A\\|B' file.txt`),
+	)
 	if home, err := os.UserHomeDir(); err == nil {
 		if data, err := os.ReadFile(filepath.Join(home, "AGENTS.md")); err == nil && len(data) > 0 {
 			prompt += "\n\n<user-instructions>\n" + string(data) + "\n</user-instructions>"
@@ -108,3 +122,5 @@ func LoadPromptWithOptions(dir string, opts PromptOptions) string {
 
 	return prompt
 }
+
+func stringPtr(s string) *string { return &s }

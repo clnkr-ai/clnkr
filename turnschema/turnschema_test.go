@@ -107,6 +107,15 @@ func TestParse(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects wrapped provider turns so the wrapper stays provider-only", func(t *testing.T) {
+		raw := `{"turn":{"type":"act","bash":{"command":"pwd","workdir":null},"question":null,"summary":null,"reasoning":null}}`
+
+		_, err := turnschema.Parse(raw)
+		if !errors.Is(err, clnkr.ErrInvalidJSON) {
+			t.Fatalf("Parse(%q) error = %v, want ErrInvalidJSON", raw, err)
+		}
+	})
+
 	t.Run("rejects unknown fields", func(t *testing.T) {
 		raw := `{"type":"act","bash":{"command":"pwd","workdir":null},"extra":"nope"}`
 
@@ -185,6 +194,16 @@ func TestParseProvider(t *testing.T) {
 		_, err := turnschema.ParseProvider(`{"turn":{"type":"act","bash":{"command":"ls -la"},"question":null,"summary":null,"reasoning":null}}`)
 		if !errors.Is(err, clnkr.ErrInvalidJSON) {
 			t.Fatalf("ParseProvider error = %v, want ErrInvalidJSON", err)
+		}
+	})
+
+	t.Run("rejects missing reasoning field", func(t *testing.T) {
+		_, err := turnschema.ParseProvider(`{"turn":{"type":"done","bash":null,"question":null,"summary":"ignored schema"}}`)
+		if !errors.Is(err, clnkr.ErrInvalidJSON) {
+			t.Fatalf("ParseProvider error = %v, want ErrInvalidJSON", err)
+		}
+		if !strings.Contains(err.Error(), `missing required structured output field "reasoning"`) {
+			t.Fatalf("ParseProvider error = %v, want missing reasoning detail", err)
 		}
 	})
 }

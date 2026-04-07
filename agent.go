@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/clnkr-ai/clnkr/transcript"
+	"github.com/clnkr-ai/clnkr/turnjson"
 )
 
 const DefaultMaxSteps = 100
@@ -209,7 +210,7 @@ func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, erro
 // caller decides the step budget is exhausted.
 func (a *Agent) RequestStepLimitSummary(ctx context.Context) error {
 	a.notify(EventDebug{Message: "step limit reached, requesting summary"})
-	a.AppendUserMessage("Step limit reached. Respond with {\"type\":\"done\",\"summary\":\"...\"} summarizing your progress.")
+	a.AppendUserMessage("Step limit reached. Respond with " + turnjson.MustWireDoneJSON("...", nil) + " summarizing your progress.")
 
 	resp, err := a.model.Query(ctx, a.messages)
 	if err != nil {

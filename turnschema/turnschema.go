@@ -121,7 +121,7 @@ func Schema() map[string]any {
 }
 
 // Parse validates an exact JSON turn without recovery or prose extraction.
-// It accepts both canonical internal turns and provider-shaped turns.
+// It accepts canonical internal turns and unwrapped provider-shaped turns.
 func Parse(raw string) (clnkr.Turn, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -171,6 +171,61 @@ func CanonicalJSON(turn clnkr.Turn) (string, error) {
 		return "", fmt.Errorf("marshal canonical turn json: %w", err)
 	}
 	return string(body), nil
+}
+
+// ProviderJSON marshals a validated turn into the wrapped provider wire shape.
+func ProviderJSON(turn clnkr.Turn) (string, error) {
+	switch v := turn.(type) {
+	case clnkr.ActTurn:
+		return turnjson.WireActJSON(v.Bash.Command, workdirPtr(v.Bash.Workdir), nilIfEmpty(v.Reasoning))
+	case *clnkr.ActTurn:
+		if v == nil {
+			return "", fmt.Errorf("provider turn json: %w: nil *ActTurn", ErrUnsupportedTurn)
+		}
+		return turnjson.WireActJSON(v.Bash.Command, workdirPtr(v.Bash.Workdir), nilIfEmpty(v.Reasoning))
+	case clnkr.ClarifyTurn:
+		return turnjson.WireClarifyJSON(v.Question, nilIfEmpty(v.Reasoning))
+	case *clnkr.ClarifyTurn:
+		if v == nil {
+			return "", fmt.Errorf("provider turn json: %w: nil *ClarifyTurn", ErrUnsupportedTurn)
+		}
+		return turnjson.WireClarifyJSON(v.Question, nilIfEmpty(v.Reasoning))
+	case clnkr.DoneTurn:
+		return turnjson.WireDoneJSON(v.Summary, nilIfEmpty(v.Reasoning))
+	case *clnkr.DoneTurn:
+		if v == nil {
+			return "", fmt.Errorf("provider turn json: %w: nil *DoneTurn", ErrUnsupportedTurn)
+		}
+		return turnjson.WireDoneJSON(v.Summary, nilIfEmpty(v.Reasoning))
+	case nil:
+		return "", fmt.Errorf("provider turn json: %w: nil turn", ErrUnsupportedTurn)
+	default:
+		return "", fmt.Errorf("provider turn json: %w: %T", ErrUnsupportedTurn, turn)
+	}
+}
+
+// NormalizeMessagesForProvider rewrites assistant turns into the wrapped wire
+// shape so the model sees one deterministic protocol throughout history.
+func NormalizeMessagesForProvider(messages []clnkr.Message) []clnkr.Message {
+	normalized := make([]clnkr.Message, len(messages))
+	for i, msg := range messages {
+		normalized[i] = msg
+		if msg.Role != "assistant" {
+			continue
+		}
+		if turn, err := ParseProvider(msg.Content); err == nil {
+			if wrapped, err := ProviderJSON(turn); err == nil {
+				normalized[i].Content = wrapped
+			}
+			continue
+		}
+		if turn, err := Parse(msg.Content); err == nil {
+			if wrapped, err := ProviderJSON(turn); err == nil {
+				normalized[i].Content = wrapped
+			}
+		}
+	}
+	return normalized
 }
 
 func ensureSingleJSONObject(dec *json.Decoder) error {
@@ -400,4 +455,18 @@ func bashEnvelopeFromAction(action clnkr.BashAction) *bashEnvelope {
 		Command: action.Command,
 		Workdir: workdir,
 	}
+}
+
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func workdirPtr(workdir string) *string {
+	if workdir == "" {
+		return nil
+	}
+	return &workdir
 }
