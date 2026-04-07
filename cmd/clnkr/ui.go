@@ -38,7 +38,10 @@ type stepDoneMsg struct {
 	result clnkr.StepResult
 	err    error
 }
-type executeDoneMsg struct{ err error }
+type executeDoneMsg struct {
+	err       error
+	execCount int
+}
 type compactDoneMsg struct {
 	stats clnkr.CompactStats
 	err   error
@@ -331,8 +334,8 @@ func stepCmd(agent *clnkr.Agent, ctx context.Context) tea.Cmd {
 
 func executeCmd(agent *clnkr.Agent, ctx context.Context, act *clnkr.ActTurn) tea.Cmd {
 	return func() tea.Msg {
-		_, err := agent.ExecuteTurn(ctx, act)
-		return executeDoneMsg{err: err}
+		result, err := agent.ExecuteTurn(ctx, act)
+		return executeDoneMsg{err: err, execCount: result.ExecCount}
 	}
 }
 
@@ -396,7 +399,7 @@ func (m model) handleStepDone(msg stepDoneMsg) (tea.Model, tea.Cmd) {
 		m.awaitingApproval = true
 		m.shared.setAwaitingApproval(true)
 		m.input.setPlaceholder(approvalPromptText)
-		m.chat.setProposedCommand(turn.Bash.Command, turn.Bash.Workdir)
+		m.chat.setProposedCommand(formatActProposal(turn.Bash.Commands))
 		m.chat.appendHostNote(approvalPromptText)
 		m.chat.updateViewport()
 		m.focus = focusInput
@@ -421,7 +424,7 @@ func (m model) handleExecuteDone(msg executeDoneMsg) (tea.Model, tea.Cmd) {
 	m.awaitingApproval = false
 	m.shared.setAwaitingApproval(false)
 	m.input.resetPlaceholder()
-	m.executedSteps++
+	m.executedSteps += msg.execCount
 	if m.shared.agent.MaxSteps > 0 && m.executedSteps >= m.shared.agent.MaxSteps {
 		return m, requestFinalSummaryCmd(m.shared.agent, m.runCtx)
 	}

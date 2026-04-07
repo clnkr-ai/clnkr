@@ -300,7 +300,7 @@ func runApprovalLoop(ctx context.Context, agent *clnkr.Agent, prompter approvalP
 			}
 			agent.AppendUserMessage(reply)
 		case *clnkr.ActTurn:
-			reply, err := waitForActReply(ctx, prompter, formatActProposal(turn.Bash.Command, turn.Bash.Workdir))
+			reply, err := waitForActReply(ctx, prompter, formatActProposal(turn.Bash.Commands))
 			if err != nil {
 				return err
 			}
@@ -308,10 +308,11 @@ func runApprovalLoop(ctx context.Context, agent *clnkr.Agent, prompter approvalP
 				agent.AppendUserMessage(reply)
 				continue
 			}
-			if _, err := agent.ExecuteTurn(ctx, turn); err != nil {
+			result, err := agent.ExecuteTurn(ctx, turn)
+			if err != nil {
 				return err
 			}
-			steps++
+			steps += result.ExecCount
 			if agent.MaxSteps > 0 && steps >= agent.MaxSteps {
 				return agent.RequestStepLimitSummary(ctx)
 			}
@@ -338,11 +339,19 @@ func waitForActReply(ctx context.Context, prompter approvalPrompter, command str
 	}
 }
 
-func formatActProposal(command, workdir string) string {
-	if strings.TrimSpace(workdir) == "" {
-		return command
+func formatActProposal(commands []clnkr.BashAction) string {
+	var b strings.Builder
+	for i, action := range commands {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		command := action.Command
+		if workdir := strings.TrimSpace(action.Workdir); workdir != "" {
+			command = fmt.Sprintf("%s in %s", command, workdir)
+		}
+		fmt.Fprintf(&b, "%d. %s", i+1, command)
 	}
-	return fmt.Sprintf("%s in %s", command, workdir)
+	return b.String()
 }
 
 func waitForClarification(ctx context.Context, prompter approvalPrompter, question string) (string, error) {

@@ -19,24 +19,20 @@ If turn.type is "act", turn.bash must be an object and turn.question/turn.summar
 If turn.type is "clarify", turn.question must be a non-empty string and turn.bash/turn.summary must be null.
 If turn.type is "done", turn.summary must be a non-empty string and turn.bash/turn.question must be null.
 Include turn.reasoning in every response; use a string when it helps and null when you have nothing to add.
-Only "act" runs commands. One command per turn; use && for trivially connected steps.
+Only "act" runs commands. Use 1 or 2 commands in each act turn. Batch only mechanical follow-up steps that do not require interpreting earlier command output.
 Do not emit multiple JSON objects in one response.
 Do not emit an act turn and a done turn together.
 If you receive a [protocol_error] block, fix your format and respond with exactly one valid wrapped turn object.
 </protocol>
 
-<command-results>
-After each command you will see [command], [exit_code], [stdout], and [stderr] sections. Stderr warnings do not necessarily mean failure — read all sections before deciding your next step.
+<command-results> After each command you will see [command], [exit_code], [stdout], and [stderr] sections. Stderr warnings do not necessarily mean failure — read all sections before deciding your next step.
 You may also receive [command_feedback]. Read it before running extra verification commands. When present, it only describes the last command because the host emits it only from a clean pre-command git baseline.
 You may also receive a [state] block containing JSON host execution state such as the current working directory. Treat it as authoritative.
 </command-results>
 
-<protocol-error-recovery>
-If you receive a [protocol_error] block, your previous response was rejected and no command ran. Fix the format and respond with exactly one valid wrapped turn object.
-</protocol-error-recovery>
+<protocol-error-recovery>If you receive a [protocol_error] block, your previous response was rejected and no command ran. Fix the format and respond with exactly one valid wrapped turn object.</protocol-error-recovery>
 
-<shell-in-json>
-Your turn.bash.command value is a JSON string, so shell backslashes must also be valid JSON escapes. Example:
+<shell-in-json> Each turn.bash.commands item is an object whose command value is a JSON string, so shell backslashes must also be valid JSON escapes. Example:
 %s
 Do not emit invalid JSON escapes like backslash-pipe or backslash-backtick.
 </shell-in-json>
@@ -94,7 +90,10 @@ func LoadPromptWithOptions(dir string, opts PromptOptions) string {
 
 	prompt := fmt.Sprintf(
 		basePromptTemplate,
-		turnjson.MustWireActJSON("ls -la /tmp", nil, stringPtr("Listing directory to find config")),
+		turnjson.MustWireActJSON([]turnjson.WireCommand{
+			{Command: "ls -la /tmp"},
+			{Command: "sed -n '1,40p' README.md"},
+		}, stringPtr("Inspect the directory and the file before deciding.")),
 		fmt.Sprintf("%q", `grep 'A\\|B' file.txt`),
 	)
 	if home, err := os.UserHomeDir(); err == nil {

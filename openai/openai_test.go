@@ -395,8 +395,9 @@ func TestModel(t *testing.T) {
 		}{
 			{name: "missing wrapped fields", content: `{"turn":{"type":"done","summary":"ignored schema"}}`, wantErr: clnkr.ErrInvalidJSON},
 			{name: "missing reasoning field", content: `{"turn":{"type":"done","bash":null,"question":null,"summary":"ignored schema"}}`, wantErr: clnkr.ErrInvalidJSON},
-			{name: "semantic invalid act turn", content: `{"turn":{"type":"act","bash":{"command":"","workdir":null},"question":null,"summary":null,"reasoning":null}}`, wantErr: clnkr.ErrMissingCommand},
-			{name: "multiple wrapped objects", content: `{"turn":{"type":"act","bash":{"command":"pwd","workdir":null},"question":null,"summary":null,"reasoning":null}}{"turn":{"type":"done","bash":null,"question":null,"summary":"done","reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
+			{name: "single-command wrapped act turn", content: `{"turn":{"type":"act","bash":{"command":"pwd","workdir":null},"question":null,"summary":null,"reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
+			{name: "semantic invalid act turn", content: `{"turn":{"type":"act","bash":{"commands":[{"command":"","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`, wantErr: clnkr.ErrMissingCommand},
+			{name: "multiple wrapped objects", content: `{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"question":null,"summary":null,"reasoning":null}}{"turn":{"type":"done","bash":null,"question":null,"summary":"done","reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
 			{name: "prose wrapped json", content: "Here is the result:\n{\"turn\":{\"type\":\"done\",\"summary\":\"wrapped\"}}", wantErr: clnkr.ErrInvalidJSON},
 		}
 

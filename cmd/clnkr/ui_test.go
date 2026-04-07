@@ -32,7 +32,7 @@ func setupModel() model {
 }
 
 func actTurn(command string) *clnkr.ActTurn {
-	return &clnkr.ActTurn{Bash: clnkr.BashAction{Command: command}}
+	return &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: []clnkr.BashAction{{Command: command}}}}
 }
 
 // updateModel is a test helper that calls Update and asserts the result is a model.
@@ -320,7 +320,7 @@ func TestModelEventResponseUpdatesStatus(t *testing.T) {
 
 func TestLatestClarifyQuestion(t *testing.T) {
 	msgs := []clnkr.Message{
-		{Role: "assistant", Content: `{"type":"act","bash":{"command":"ls","workdir":null}}`},
+		{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"command":"ls","workdir":null}]}}`},
 		{Role: "assistant", Content: `{"type":"clarify","question":"Bind to 0.0.0.0?"}`},
 		{Role: "user", Content: "yes"},
 	}
@@ -520,7 +520,7 @@ func TestModelPrefersFeedbackFilesOverHeuristics(t *testing.T) {
 func TestModelApprovalReplyBecomesUserGuidance(t *testing.T) {
 	m := setupModel()
 	m.pendingAct = actTurn("rm important.txt")
-	m.chat.setProposedCommand("rm important.txt", "")
+	m.chat.setProposedCommand(formatActProposal([]clnkr.BashAction{{Command: "rm important.txt"}}))
 	m.awaitingApproval = true
 	m.input.textarea.SetValue("list files instead")
 	m.running = true
@@ -622,14 +622,46 @@ func TestModelApprovalHintShowsWorkdir(t *testing.T) {
 	m := setupModel()
 
 	updated, _ := m.Update(stepDoneMsg{result: clnkr.StepResult{Turn: &clnkr.ActTurn{
-		Bash: clnkr.BashAction{Command: "echo hi", Workdir: "subdir"},
+		Bash: clnkr.BashBatch{Commands: []clnkr.BashAction{{Command: "echo hi", Workdir: "subdir"}}},
 	}}})
 	um, ok := updated.(model)
 	if !ok {
 		t.Fatalf("expected model, got %T", updated)
 	}
-	if !strings.Contains(um.chat.pendingCmd, "in subdir") {
+	if !strings.Contains(um.chat.pendingCmd, "1. echo hi in subdir") {
 		t.Fatalf("pending command should show workdir, got %q", um.chat.pendingCmd)
+	}
+}
+
+func TestModelExecuteDoneCountsBatchCommands(t *testing.T) {
+	m := setupModel()
+	m.running = true
+	m.pendingAct = actTurn("echo hi")
+	m.runCtx = context.Background()
+	m.shared.agent = clnkr.NewAgent(&fakeModel{responses: []clnkr.Response{
+		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"step limit summary"}`}},
+	}}, &fakeExecutor{}, "/tmp")
+	m.shared.agent.MaxSteps = 2
+
+	updated, cmd := m.handleExecuteDone(executeDoneMsg{execCount: 2})
+	if cmd == nil {
+		t.Fatal("batch execution should trigger the final summary when max steps are reached")
+	}
+	um, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if um.executedSteps != 2 {
+		t.Fatalf("executedSteps = %d, want 2", um.executedSteps)
+	}
+
+	msg := cmd()
+	done, ok := msg.(agentDoneMsg)
+	if !ok {
+		t.Fatalf("expected agentDoneMsg, got %T", msg)
+	}
+	if done.err != nil {
+		t.Fatalf("agentDoneMsg.err = %v, want nil", done.err)
 	}
 }
 
@@ -1052,7 +1084,7 @@ func TestCompactCommandNotInterceptedDuringApproval(t *testing.T) {
 	m.running = true
 	m.awaitingApproval = true
 	m.pendingAct = actTurn("echo hi")
-	m.chat.setProposedCommand("echo hi", "")
+	m.chat.setProposedCommand(formatActProposal([]clnkr.BashAction{{Command: "echo hi"}}))
 	m.runCtx = context.Background()
 
 	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
@@ -1346,7 +1378,7 @@ func TestDelegateCommandNotInterceptedDuringApproval(t *testing.T) {
 	m.running = true
 	m.awaitingApproval = true
 	m.pendingAct = actTurn("echo hi")
-	m.chat.setProposedCommand("echo hi", "")
+	m.chat.setProposedCommand(formatActProposal([]clnkr.BashAction{{Command: "echo hi"}}))
 	m.runCtx = context.Background()
 
 	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")

@@ -10,7 +10,7 @@ import (
 )
 
 func chatActJSON(command string) string {
-	return fmt.Sprintf(`{"type":"act","bash":{"command":%q,"workdir":null}}`, command)
+	return fmt.Sprintf(`{"type":"act","bash":{"commands":[{"command":%q,"workdir":null}]}}`, command)
 }
 
 func TestChatAppendEventResponse(t *testing.T) {
@@ -229,9 +229,12 @@ func TestChatSetProposedCommand(t *testing.T) {
 	s := defaultStyles(true)
 	c := newChatModel(80, 24, s, false)
 
-	c.setProposedCommand("rm important.txt", "")
+	c.setProposedCommand(formatActProposal([]clnkr.BashAction{{Command: "rm important.txt"}}))
 	if c.pendingCmd == "" {
 		t.Fatal("pendingCmd should be set after proposing a command")
+	}
+	if !strings.Contains(c.pendingCmd, "1. rm important.txt") {
+		t.Fatalf("pendingCmd should include numbered proposal, got %q", c.pendingCmd)
 	}
 	if strings.Contains(c.content.String(), "rm important.txt") {
 		t.Fatal("proposed command should not be committed before execution")
@@ -242,22 +245,9 @@ func TestChatSetProposedCommandShowsWorkdir(t *testing.T) {
 	s := defaultStyles(true)
 	c := newChatModel(80, 24, s, false)
 
-	c.setProposedCommand("rm important.txt", "subdir")
-	if !strings.Contains(c.pendingCmd, "in subdir") {
+	c.setProposedCommand(formatActProposal([]clnkr.BashAction{{Command: "rm important.txt", Workdir: "subdir"}}))
+	if !strings.Contains(c.pendingCmd, "1. rm important.txt in subdir") {
 		t.Fatalf("pendingCmd should show workdir, got %q", c.pendingCmd)
-	}
-}
-
-func TestChatSuppressesLegacyStructuredActHistory(t *testing.T) {
-	s := defaultStyles(true)
-	c := newChatModel(80, 24, s, false)
-
-	c.hydrateHistory([]clnkr.Message{
-		{Role: "assistant", Content: `{"type":"act","command":"ls -la"}`},
-	})
-
-	if strings.Contains(c.content.String(), `"type":"act"`) {
-		t.Fatalf("legacy act JSON should be suppressed, got %q", c.content.String())
 	}
 }
 

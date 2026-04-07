@@ -16,7 +16,7 @@ import (
 )
 
 func actJSON(command string) string {
-	return fmt.Sprintf(`{"type":"act","bash":{"command":%q,"workdir":null}}`, command)
+	return fmt.Sprintf(`{"type":"act","bash":{"commands":[{"command":%q,"workdir":null}]}}`, command)
 }
 
 type fakeModel struct {
@@ -439,6 +439,39 @@ func TestRunApprovalTaskNonApprovalReplyBecomesGuidance(t *testing.T) {
 	}
 }
 
+func TestRunApprovalTaskCountsBatchCommandsTowardStepLimit(t *testing.T) {
+	model := &fakeModel{responses: []clnkr.Response{
+		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null},{"command":"go test ./...","workdir":"subdir"}]}}`}},
+		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"step limit summary"}`}},
+	}}
+	executor := &fakeExecutor{results: []clnkr.CommandResult{
+		{Stdout: "/tmp\n", ExitCode: 0},
+		{Stdout: "ok\n", ExitCode: 0},
+	}}
+	agent := clnkr.NewAgent(model, executor, "/tmp")
+	agent.MaxSteps = 2
+	prompter := &scriptPrompter{actReplies: []clarifyReply{{text: "y"}}}
+
+	err := runApprovalTask(context.Background(), agent, "do it", prompter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if executor.calls != 2 {
+		t.Fatalf("expected 2 command executions, got %d", executor.calls)
+	}
+	msgs := agent.Messages()
+	found := false
+	for _, msg := range msgs {
+		if msg.Role == "user" && strings.HasPrefix(msg.Content, "Step limit reached.") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected step-limit prompt in transcript, got %#v", msgs)
+	}
+}
+
 func TestRunApprovalTaskClarifyTurnAppendsReply(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
 		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"clarify","question":"Which repo?"}`}},
@@ -516,7 +549,7 @@ func TestStdinPrompterConfirmWritesPromptToStderr(t *testing.T) {
 func TestStdinPrompterConfirmShowsWorkdir(t *testing.T) {
 	stderr := captureStderr(t, func() {
 		p := &stdinPrompter{reader: newLineReader(strings.NewReader("y\n"))}
-		reply, err := p.ActReply(context.Background(), formatActProposal("rm important.txt", "subdir"))
+		reply, err := p.ActReply(context.Background(), formatActProposal([]clnkr.BashAction{{Command: "rm important.txt", Workdir: "subdir"}}))
 		if err != nil {
 			t.Fatalf("ActReply: %v", err)
 		}
@@ -527,6 +560,18 @@ func TestStdinPrompterConfirmShowsWorkdir(t *testing.T) {
 
 	if !strings.Contains(stderr, "rm important.txt in subdir") {
 		t.Fatalf("stderr should contain workdir note, got %q", stderr)
+	}
+}
+
+func TestFormatActProposal(t *testing.T) {
+	got := formatActProposal([]clnkr.BashAction{
+		{Command: "pwd"},
+		{Command: "go test ./...", Workdir: "subdir"},
+	})
+
+	want := "1. pwd\n2. go test ./... in subdir"
+	if got != want {
+		t.Fatalf("formatActProposal() = %q, want %q", got, want)
 	}
 }
 

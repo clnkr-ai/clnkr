@@ -8,6 +8,7 @@
     "max_failed_tasks": 1
   },
   "tasks": [
-    "001-basic-edit"
+    "001-basic-edit",
+    "002-batched-basic-edit"
   ]
 }
