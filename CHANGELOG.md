@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.0 (2026-04-07)
+
+- Implement bounded multi-command act turns
+- Document workflow make target checker
+- Update CHANGELOG.md for 1.6.1
+
 ## 1.6.1 (2026-04-07)
 
 - Tighten wrapped turn boundaries across prompts and parsers
