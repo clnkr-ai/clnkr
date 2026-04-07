@@ -199,7 +199,7 @@ In the TUI, `/delegate TASK` runs a child `clnku` session seeded with the curren
 clnkr runs a loop using a structured JSON turn protocol:
 
 1. Send conversation history to the LLM
-2. Parse the model's JSON response into a typed turn (`clarify`, `act`, or `done`). `act` turns now carry a nested bash payload such as `{"type":"act","bash":{"command":"pwd","workdir":null}}`.
+2. Parse the model's JSON response into a typed turn (`clarify`, `act`, or `done`). The model-facing provider wire format is one wrapped object, for example `{"turn":{"type":"act","bash":{"command":"pwd","workdir":null},"question":null,"summary":null,"reasoning":null}}`, and successful provider responses are canonicalized back to the unwrapped internal turn shape before the agent loop parses them.
 3. If `clarify`: return control to the frontend for more input
 4. If `act`: either ask the user for approval or execute the bash command immediately, then append structured output to the conversation, including optional `[command_feedback]` when the host started from a clean git worktree
 5. If `done`: exit with the model's summary

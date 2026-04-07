@@ -97,6 +97,7 @@ func extractErrorMessage(body []byte) string {
 }
 
 func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
+	messages = turnschema.NormalizeMessagesForProvider(messages)
 	allMessages := make([]clnkr.Message, 0, len(messages)+1)
 	allMessages = append(allMessages, clnkr.Message{Role: "system", Content: m.systemPrompt})
 	allMessages = append(allMessages, messages...)

@@ -26,6 +26,11 @@ func TestParseTurn(t *testing.T) {
 			input: `{"type":"done","summary":"Created the file and verified it works."}`,
 		},
 		{
+			name:    "wrapped provider turn rejected",
+			input:   `{"turn":{"type":"act","bash":{"command":"ls -la","workdir":null},"question":null,"summary":null,"reasoning":null}}`,
+			wantErr: ErrInvalidJSON,
+		},
+		{
 			name:  "act with reasoning preserved",
 			input: `{"type":"act","bash":{"command":"echo hi","workdir":null},"reasoning":"testing output"}`,
 		},
@@ -298,11 +303,29 @@ func TestProtocolCorrectionMessage(t *testing.T) {
 		if !strings.Contains(msg, "Do not jump to done unless prior command results in this conversation already prove the task is complete.") {
 			t.Fatalf("expected done-guard guidance, got %q", msg)
 		}
-		if !strings.Contains(msg, `{"type":"act","bash":{"command":"...","workdir":null}}`) {
-			t.Fatalf("expected new bash-shape guidance, got %q", msg)
+		if !strings.Contains(msg, `{"turn":{"type":"act","bash":{"command":"...","workdir":null},"question":null,"summary":null,"reasoning":null}}`) {
+			t.Fatalf("expected wrapped act guidance, got %q", msg)
 		}
-		if strings.Contains(msg, `{"type":"act","command":"..."}`) {
-			t.Fatalf("expected legacy act shape to be absent, got %q", msg)
+		if !strings.Contains(msg, `top-level "turn" field`) {
+			t.Fatalf("expected top-level turn guidance, got %q", msg)
+		}
+		if !strings.Contains(msg, "Do not emit multiple JSON objects in one response.") {
+			t.Fatalf("expected multiple-object warning, got %q", msg)
+		}
+		if !strings.Contains(msg, "Do not emit an act turn and a done turn together.") {
+			t.Fatalf("expected act-plus-done warning, got %q", msg)
+		}
+		if !strings.Contains(msg, "Include turn.reasoning in every response; use null if you have nothing to add.") {
+			t.Fatalf("expected explicit reasoning-field guidance, got %q", msg)
+		}
+		if strings.Contains(msg, `{"turn":{"type":"clarify"`) {
+			t.Fatalf("expected separate wrapped clarify example to be absent, got %q", msg)
+		}
+		if strings.Contains(msg, `{"turn":{"type":"done"`) {
+			t.Fatalf("expected separate wrapped done example to be absent, got %q", msg)
+		}
+		if strings.Contains(msg, `{"type":"act","bash":{"command":"...","workdir":null}}`) {
+			t.Fatalf("expected unwrapped act shape to be absent, got %q", msg)
 		}
 	})
 

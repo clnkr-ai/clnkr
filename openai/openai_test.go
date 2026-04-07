@@ -97,6 +97,40 @@ func TestModel(t *testing.T) {
 		}
 	})
 
+	t.Run("normalizes assistant history to wrapped provider json", func(t *testing.T) {
+		var gotBody map[string]interface{}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &gotBody)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"message": map[string]string{
+						"role":    "assistant",
+						"content": openAIWrappedDone("ok"),
+					}},
+				},
+				"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
+			})
+		}))
+		defer server.Close()
+
+		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+		_, err := m.Query(context.Background(), []clnkr.Message{
+			{Role: "user", Content: "hi"},
+			{Role: "assistant", Content: `{"type":"done","summary":"hello back"}`},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		msgs := gotBody["messages"].([]interface{})
+		last := msgs[len(msgs)-1].(map[string]interface{})
+		if got, want := last["content"], openAIWrappedDone("hello back"); got != want {
+			t.Fatalf("assistant history content = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("posts to base URL plus chat/completions", func(t *testing.T) {
 		var gotPath string
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -360,7 +394,9 @@ func TestModel(t *testing.T) {
 			wantErr error
 		}{
 			{name: "missing wrapped fields", content: `{"turn":{"type":"done","summary":"ignored schema"}}`, wantErr: clnkr.ErrInvalidJSON},
+			{name: "missing reasoning field", content: `{"turn":{"type":"done","bash":null,"question":null,"summary":"ignored schema"}}`, wantErr: clnkr.ErrInvalidJSON},
 			{name: "semantic invalid act turn", content: `{"turn":{"type":"act","bash":{"command":"","workdir":null},"question":null,"summary":null,"reasoning":null}}`, wantErr: clnkr.ErrMissingCommand},
+			{name: "multiple wrapped objects", content: `{"turn":{"type":"act","bash":{"command":"pwd","workdir":null},"question":null,"summary":null,"reasoning":null}}{"turn":{"type":"done","bash":null,"question":null,"summary":"done","reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
 			{name: "prose wrapped json", content: "Here is the result:\n{\"turn\":{\"type\":\"done\",\"summary\":\"wrapped\"}}", wantErr: clnkr.ErrInvalidJSON},
 		}
 
