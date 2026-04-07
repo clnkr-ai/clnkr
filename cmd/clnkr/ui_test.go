@@ -145,6 +145,49 @@ func TestModelWindowResize(t *testing.T) {
 	}
 }
 
+func TestModelCtrlYOpensReasoningModal(t *testing.T) {
+	m := setupModel()
+	m.reasoningInfo.enabled = true
+	m.reasoningInfo.latest = "checked parser -> protocol -> ui"
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+	if !m.reasoning.visible {
+		t.Fatal("expected reasoning modal to be visible")
+	}
+	if !strings.Contains(m.reasoning.view(), "checked parser -> protocol -> ui") {
+		t.Fatalf("expected reasoning modal content, got: %q", m.reasoning.view())
+	}
+}
+
+func TestModelEscapeDismissesReasoningModal(t *testing.T) {
+	m := setupModel()
+	m.reasoningInfo.enabled = true
+	m.reasoningInfo.latest = "checked parser -> protocol -> ui"
+	m.reasoning.show(m.reasoningInfo.latest, 80, 20)
+	m.focus = focusInput
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.reasoning.visible {
+		t.Fatal("expected reasoning modal to be dismissed")
+	}
+	if m.focus != focusInput {
+		t.Fatalf("expected focus to remain unchanged after dismiss, got %v", m.focus)
+	}
+}
+
+func TestModelCtrlYWithoutReasoningDoesNotOpenModal(t *testing.T) {
+	m := setupModel()
+	m.reasoningInfo.enabled = true
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+	if m.reasoning.visible {
+		t.Fatal("did not expect reasoning modal to open")
+	}
+	if !strings.Contains(m.chat.content.String(), "No reasoning trace available.") {
+		t.Fatalf("expected no-reasoning note, got: %q", m.chat.content.String())
+	}
+}
+
 func TestModelViewportScrollKeys(t *testing.T) {
 	m := setupModel()
 	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})

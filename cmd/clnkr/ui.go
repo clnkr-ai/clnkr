@@ -88,12 +88,19 @@ func (s *shared) getAwaitingApproval() bool {
 	return s.awaitingApproval
 }
 
+type reasoningState struct {
+	enabled bool
+	latest  string
+}
+
 type model struct {
 	chat                  chatModel
 	input                 inputModel
 	status                statusModel
 	diff                  diffModel
+	reasoning             reasoningModel
 	files                 fileTracker
+	reasoningInfo         reasoningState
 	styles                *styles
 	shared                *shared
 	eventCh               chan clnkr.Event
@@ -136,11 +143,16 @@ type modelOpts struct {
 }
 
 func newModel(opts modelOpts) model {
+	chat := newChatModel(0, 0, opts.styles, opts.verbose)
+	chat.reasoningEnabled = true
+	chat.reasoningKeyHint = "Ctrl+Y"
+
 	return model{
-		chat:            newChatModel(0, 0, opts.styles, opts.verbose),
+		chat:            chat,
 		input:           newInputModel(0, &opts.styles.Input),
 		status:          newStatusModel(opts.modelName, opts.maxSteps, &opts.styles.Status),
 		diff:            newDiffModel(opts.styles),
+		reasoning:       newReasoningModel(opts.styles),
 		styles:          opts.styles,
 		shared:          &shared{compactorFactory: opts.compactorFactory, delegateRunner: opts.delegateRunner},
 		eventCh:         opts.eventCh,
@@ -148,6 +160,7 @@ func newModel(opts modelOpts) model {
 		focus:           focusInput,
 		verbose:         opts.verbose,
 		fullSend:        opts.fullSend,
+		reasoningInfo:   reasoningState{enabled: true},
 		exitOnRunFinish: opts.exitOnRunFinish,
 	}
 }
@@ -206,6 +219,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			chatH = 1
 		}
 		m.diff.resize(m.width, chatH)
+		m.reasoning.resize(m.width, chatH)
 		return m, nil
 
 	case agentDoneMsg:
@@ -493,6 +507,7 @@ func (m *model) routeEvent(e clnkr.Event) {
 	switch ev := e.(type) {
 	case clnkr.EventResponse:
 		m.status.updateFromResponse(ev.Usage)
+		m.reasoningInfo.latest = m.chat.renderAssistantTurn(ev.Message.Content, false).reasoning
 	case clnkr.EventCommandDone:
 		m.status.incrementStep()
 		if len(ev.Feedback.ChangedFiles) > 0 {
@@ -516,10 +531,53 @@ func tickCmd() tea.Cmd {
 	})
 }
 
+func (m *model) openReasoningModal() {
+	if !m.reasoningInfo.enabled {
+		return
+	}
+	if strings.TrimSpace(m.reasoningInfo.latest) == "" {
+		m.chat.appendHostNote("No reasoning trace available.")
+		m.chat.updateViewport()
+		return
+	}
+	if m.diff.visible {
+		m.diff.visible = false
+	}
+	chatH := m.height - statusHeight - m.inputHeight()
+	if chatH < 1 {
+		chatH = 1
+	}
+	m.reasoning.show(m.reasoningInfo.latest, m.width, chatH)
+}
+
+func (m model) handleReasoningKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Code == tea.KeyEscape:
+		m.reasoning.hide()
+	case msg.Code == 'j':
+		m.reasoning.viewport.ScrollDown(1)
+	case msg.Code == 'k':
+		m.reasoning.viewport.ScrollUp(1)
+	case msg.Mod == tea.ModCtrl && msg.Code == 'd':
+		m.reasoning.viewport.HalfPageDown()
+	case msg.Mod == tea.ModCtrl && msg.Code == 'u':
+		m.reasoning.viewport.HalfPageUp()
+	case msg.Code == 'G':
+		m.reasoning.viewport.GotoBottom()
+	case msg.Code == 'g':
+		m.reasoning.viewport.GotoTop()
+	}
+	return m, nil
+}
+
 func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Diff overlay active — intercept all keys
 	if m.diff.visible {
 		return m.handleDiffKey(msg)
+	}
+
+	if m.reasoning.visible {
+		return m.handleReasoningKey(msg)
 	}
 
 	// gg chord handling
@@ -540,6 +598,10 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case m.awaitingApproval && msg.Code == 'y' && msg.Mod == tea.ModCtrl:
 		return m.approvePendingCommand()
+
+	case !m.awaitingApproval && msg.Code == 'y' && msg.Mod == tea.ModCtrl:
+		m.openReasoningModal()
+		return m, nil
 
 	case msg.Code == tea.KeyEscape:
 		m.focus = focusViewport
@@ -914,7 +976,9 @@ func (m model) View() tea.View {
 	}
 
 	var topPane string
-	if m.diff.visible {
+	if m.reasoning.visible {
+		topPane = m.reasoning.view()
+	} else if m.diff.visible {
 		topPane = m.diff.view()
 	} else {
 		topPane = m.chat.viewport.View()
