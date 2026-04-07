@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.1 (2026-04-07)
+
+- Tighten wrapped turn boundaries across prompts and parsers
+- Update CHANGELOG.md for 1.6.0
+
 ## 1.6.0 (2026-04-06)
 
 - Replace act.command with bash turns and clean git feedback
