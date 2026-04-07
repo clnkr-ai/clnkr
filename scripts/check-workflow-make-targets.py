@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""
+Check GitHub Actions workflows for `make <target>` calls that do not exist in this repo's Makefile.
+This keeps workflow `run:` steps from silently drifting away from the targets developers can actually invoke.
+"""
 
 from __future__ import annotations
 
