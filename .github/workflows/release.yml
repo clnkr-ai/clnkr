@@ -313,20 +313,19 @@ jobs:
             git push
           }
 
-  homebrew-macos:
+  check-homebrew:
     needs: [release]
     runs-on: macos-latest
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v5
+
       - name: Install from Homebrew tap
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
-        run: |
-          brew tap clnkr-ai/tap
-          brew install clnkr-ai/tap/clnkr
+        run: ./scripts/check-homebrew.sh install
 
       - name: Verify installed version
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          clnkr --version | grep -F "$VERSION"
-          clnku --version | grep -F "$VERSION"
+        env:
+          CLNKR_HOMEBREW_EXPECTED_VERSION: ${{ github.ref_name }}
+        run: ./scripts/check-homebrew.sh verify
