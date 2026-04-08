@@ -33,6 +33,8 @@ make build
 
 ## Docs
 
+- [evaluations](/evaluations/)
 - [clnkr manual](/docs/clnkr/)
 - [clnku manual](/docs/clnku/)
+- [clankerval manual](/docs/clankerval/)
 - [GitHub repository](https://github.com/clnkr-ai/clnkr)

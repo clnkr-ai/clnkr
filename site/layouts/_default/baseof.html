@@ -7,7 +7,7 @@
     <meta name="description" content="{{ with .Description }}{{ . }}{{ else }}{{ .Site.Params.description }}{{ end }}">
     <link rel="stylesheet" href="/styles.css">
   </head>
-  <body class="{{ if .IsHome }}page-home{{ else if eq .Section "docs" }}page-docs{{ else }}page-default{{ end }}">
+  <body class="{{ if .IsHome }}page-home{{ else if eq .Section "docs" }}page-docs{{ else if eq .Section "evaluations" }}page-home{{ else }}page-default{{ end }}">
     <a class="skip-link" href="#main-content">Skip to content</a>
     <div class="viewport">
       <div class="screen">
@@ -23,6 +23,7 @@
 
         <footer class="window-bar window-bar-bottom">
           <a href="/docs/clnkr/">man clnkr</a>
+          <a href="/evaluations/">/evals/</a>
           <a href="/docs/">/docs/</a>
           <a href="{{ .Site.Params.shortcuts.github }}">github.com/clnkr-ai/clnkr</a>
         </footer>
