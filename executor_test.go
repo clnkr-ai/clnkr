@@ -27,6 +27,22 @@ func envListToMap(list []string) map[string]string {
 	return env
 }
 
+func assertSamePath(t *testing.T, got, want string) {
+	t.Helper()
+
+	gotResolved, err := filepath.EvalSymlinks(got)
+	if err != nil {
+		t.Fatalf("resolve got path %q: %v", got, err)
+	}
+	wantResolved, err := filepath.EvalSymlinks(want)
+	if err != nil {
+		t.Fatalf("resolve want path %q: %v", want, err)
+	}
+	if gotResolved != wantResolved {
+		t.Fatalf("path = %q (resolved %q), want %q (resolved %q)", got, gotResolved, want, wantResolved)
+	}
+}
+
 func TestCommandExecutor(t *testing.T) {
 	exec := &CommandExecutor{}
 	ctx := context.Background()
@@ -289,9 +305,7 @@ func TestCommandExecutor(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got := out.PostCwd; got != subdir {
-			t.Fatalf("PostCwd = %q, want %q", got, subdir)
-		}
+		assertSamePath(t, out.PostCwd, subdir)
 		if got := out.Feedback.ChangedFiles; !reflect.DeepEqual(got, []string{"local.txt"}) {
 			t.Fatalf("changed files = %#v, want %#v", got, []string{"local.txt"})
 		}
