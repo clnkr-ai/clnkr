@@ -333,6 +333,14 @@ pre {
   color: var(--ink);
 }
 
+.docs-grid-single aside .pane-body h1 {
+  font-size: clamp(1.35rem, 3vw, 2.2rem);
+  line-height: 1;
+  margin-bottom: 0.55rem;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
 .doc-body h1,
 .doc-body h2,
 .doc-body h3 {
@@ -377,9 +385,19 @@ pre {
   width: 100%;
 }
 
+.doc-body .highlight {
+  margin: 0.9rem 0 0;
+}
+
 .doc-body pre {
   padding: 0.75rem;
   border: 1px solid var(--line-soft);
+}
+
+.doc-body .highlight pre,
+.doc-body .highlight code {
+  color: var(--ink) !important;
+  background: transparent !important;
 }
 
 .doc-body blockquote {
