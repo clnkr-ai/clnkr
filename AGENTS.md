@@ -27,6 +27,8 @@ go test . -v -run TestParseTurn
 make build VERSION=0.2.0
 ```
 
+Repo-maintenance helpers live under `scripts/`. Read [`scripts/README.md`](scripts/README.md) before adding new ones.
+
 <rules>
 - Before committing, run `make _fmt` then `make check`. Do not commit if either fails.
 - Do not add external dependencies to root go.mod. Core library is stdlib only. Charm deps live only in `cmd/clnkr/go.mod`.

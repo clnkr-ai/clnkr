@@ -1,0 +1,32 @@
+name: Check Homebrew
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: Expected clnkr version for verify when not dispatching a tag
+        required: false
+        type: string
+
+jobs:
+  homebrew-macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Require expected version for non-tag dispatch
+        if: ${{ github.ref_type != 'tag' && github.event.inputs.expected_version == '' }}
+        run: |
+          echo "error: expected_version input is required when dispatching from a branch" >&2
+          exit 1
+
+      - name: Install from Homebrew tap
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+        run: ./scripts/check-homebrew.sh install
+
+      - name: Verify installed version
+        env:
+          CLNKR_HOMEBREW_EXPECTED_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.expected_version }}
+        run: ./scripts/check-homebrew.sh verify
