@@ -312,3 +312,21 @@ jobs:
             git commit -m "Update clnkr to ${VERSION}"
             git push
           }
+
+  homebrew-macos:
+    needs: [release]
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Install from Homebrew tap
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+        run: |
+          brew tap clnkr-ai/tap
+          brew install clnkr-ai/tap/clnkr
+
+      - name: Verify installed version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          clnkr --version | grep -F "$VERSION"
+          clnku --version | grep -F "$VERSION"
