@@ -66,7 +66,34 @@ func TestSchema(t *testing.T) {
 		if got := typeProp["const"]; got != turnType {
 			t.Fatalf("%s branch properties[type].const = %v, want %q", turnType, got, turnType)
 		}
+
+		assertNullableStringUnion(t, branchProperties["reasoning"])
+		if turnType == "act" {
+			bashProp, ok := branchProperties["bash"].(map[string]any)
+			if !ok {
+				t.Fatalf("%s branch properties[bash] = %T, want map[string]any", turnType, branchProperties["bash"])
+			}
+			bashProps, ok := bashProp["properties"].(map[string]any)
+			if !ok {
+				t.Fatalf("%s branch properties[bash].properties = %T, want map[string]any", turnType, bashProp["properties"])
+			}
+			commandsProp, ok := bashProps["commands"].(map[string]any)
+			if !ok {
+				t.Fatalf("%s branch properties[bash].properties[commands] = %T, want map[string]any", turnType, bashProps["commands"])
+			}
+			itemProp, ok := commandsProp["items"].(map[string]any)
+			if !ok {
+				t.Fatalf("%s branch properties[bash].properties[commands].items = %T, want map[string]any", turnType, commandsProp["items"])
+			}
+			itemProps, ok := itemProp["properties"].(map[string]any)
+			if !ok {
+				t.Fatalf("%s branch properties[bash].properties[commands].items.properties = %T, want map[string]any", turnType, itemProp["properties"])
+			}
+			assertNullableStringUnion(t, itemProps["workdir"])
+		}
 	}
+
+	assertNoTypeArrays(t, schema)
 }
 
 func TestParse(t *testing.T) {
@@ -315,6 +342,62 @@ func schemaBranchForType(t *testing.T, branches []any, turnType string) map[stri
 
 	t.Fatalf("no schema branch found for type %q", turnType)
 	return nil
+}
+
+func assertNullableStringUnion(t *testing.T, raw any) {
+	t.Helper()
+
+	prop, ok := raw.(map[string]any)
+	if !ok {
+		t.Fatalf("nullable property = %T, want map[string]any", raw)
+	}
+	branches, ok := prop["anyOf"].([]any)
+	if !ok {
+		t.Fatalf("nullable property anyOf = %T, want []any", prop["anyOf"])
+	}
+	if len(branches) != 2 {
+		t.Fatalf("len(nullable property anyOf) = %d, want 2", len(branches))
+	}
+
+	assertSchemaTypeBranch(t, branches, "string")
+	assertSchemaTypeBranch(t, branches, "null")
+}
+
+func assertSchemaTypeBranch(t *testing.T, branches []any, wantType string) {
+	t.Helper()
+
+	for _, branch := range branches {
+		branchMap, ok := branch.(map[string]any)
+		if !ok {
+			continue
+		}
+		if branchMap["type"] == wantType {
+			return
+		}
+	}
+
+	t.Fatalf("missing anyOf branch with type %q", wantType)
+}
+
+func assertNoTypeArrays(t *testing.T, raw any) {
+	t.Helper()
+
+	switch v := raw.(type) {
+	case map[string]any:
+		for key, value := range v {
+			if key == "type" {
+				switch value.(type) {
+				case []any, []string:
+					t.Fatalf("schema contains deprecated type array at key %q: %#v", key, value)
+				}
+			}
+			assertNoTypeArrays(t, value)
+		}
+	case []any:
+		for _, item := range v {
+			assertNoTypeArrays(t, item)
+		}
+	}
 }
 
 func sameStringSlice(got any, want []any) bool {
