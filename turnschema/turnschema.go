@@ -30,6 +30,15 @@ type bashAction struct {
 	Workdir *string `json:"workdir"`
 }
 
+func nullableStringSchema() map[string]any {
+	return map[string]any{
+		"anyOf": []any{
+			map[string]any{"type": "string"},
+			map[string]any{"type": "null"},
+		},
+	}
+}
+
 // Schema returns the shared JSON schema used for structured provider output.
 func Schema() map[string]any {
 	return map[string]any{
@@ -61,9 +70,7 @@ func Schema() map[string]any {
 												"command": map[string]any{
 													"type": "string",
 												},
-												"workdir": map[string]any{
-													"type": []string{"string", "null"},
-												},
+												"workdir": nullableStringSchema(),
 											},
 											"required": []string{"command", "workdir"},
 										},
@@ -77,9 +84,7 @@ func Schema() map[string]any {
 							"summary": map[string]any{
 								"type": "null",
 							},
-							"reasoning": map[string]any{
-								"type": []string{"string", "null"},
-							},
+							"reasoning": nullableStringSchema(),
 						},
 						"required": []string{"type", "bash", "question", "summary", "reasoning"},
 					},
@@ -100,9 +105,7 @@ func Schema() map[string]any {
 							"summary": map[string]any{
 								"type": "null",
 							},
-							"reasoning": map[string]any{
-								"type": []string{"string", "null"},
-							},
+							"reasoning": nullableStringSchema(),
 						},
 						"required": []string{"type", "bash", "question", "summary", "reasoning"},
 					},
@@ -123,9 +126,7 @@ func Schema() map[string]any {
 							"summary": map[string]any{
 								"type": "string",
 							},
-							"reasoning": map[string]any{
-								"type": []string{"string", "null"},
-							},
+							"reasoning": nullableStringSchema(),
 						},
 						"required": []string{"type", "bash", "question", "summary", "reasoning"},
 					},
