@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.4 (2026-04-10)
+
+- Wrap reasoning modal viewport
+- Update CHANGELOG.md for 1.8.3
+
 ## 1.8.3 (2026-04-10)
 
 - Normalize escaped clarify text in parsed turns
