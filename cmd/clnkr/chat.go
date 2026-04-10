@@ -31,6 +31,7 @@ type chatModel struct {
 
 func newChatModel(width, height int, s *styles, verbose bool) chatModel {
 	vp := viewport.New()
+	vp.SoftWrap = true
 	vp.SetWidth(width)
 	vp.SetHeight(height)
 	return chatModel{

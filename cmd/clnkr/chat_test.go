@@ -160,6 +160,19 @@ func TestChatCommandDoneShowsChangedFilesNote(t *testing.T) {
 	}
 }
 
+func TestChatViewportWrapsLongLines(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(20, 4, s, false)
+
+	c.content.WriteString("This is a very long line that should wrap in a narrow viewport.")
+	c.updateViewport()
+
+	view := c.viewport.View()
+	if !strings.Contains(view, "line that should wra") {
+		t.Fatalf("expected wrapped continuation in viewport, got %q", view)
+	}
+}
+
 func TestParseCommandTranscriptPreservesLiteralBodyText(t *testing.T) {
 	content := transcript.FormatCommandResult(transcript.CommandResult{
 		Command:  "printf 'a&b <c> [d]'",
