@@ -5,7 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
+	"strconv"
+	"strings"
 )
+
+var escapedListMarker = regexp.MustCompile(`(?m)^\\([*-])\s`)
+var inlineEscapedListMarker = regexp.MustCompile(`\\([*-])\s`)
 
 type wireEnvelope struct {
 	Turn wireTurn `json:"turn"`
@@ -190,4 +196,48 @@ func derefString(value *string) any {
 		return nil
 	}
 	return *value
+}
+
+// NormalizeHumanText repairs model outputs that accidentally serialize
+// user-facing turn text twice, leaving literal escape sequences like \n or \-.
+func NormalizeHumanText(value string) string {
+	if value == "" || !strings.Contains(value, `\`) {
+		return value
+	}
+
+	normalized := value
+	for i := 0; i < 2; i++ {
+		decoded, ok := decodeEscapedHumanText(normalized)
+		if !ok || decoded == normalized {
+			break
+		}
+		normalized = decoded
+	}
+
+	normalized = escapedListMarker.ReplaceAllString(normalized, `$1 `)
+	if strings.Contains(normalized, "\n- ") ||
+		strings.Contains(normalized, "\n* ") ||
+		strings.HasPrefix(normalized, "- ") ||
+		strings.HasPrefix(normalized, "* ") {
+		normalized = inlineEscapedListMarker.ReplaceAllString(normalized, "\n$1 ")
+	}
+
+	return normalized
+}
+
+func decodeEscapedHumanText(value string) (string, bool) {
+	if !strings.Contains(value, `\n`) &&
+		!strings.Contains(value, `\r`) &&
+		!strings.Contains(value, `\\-`) &&
+		!strings.Contains(value, `\\*`) &&
+		!strings.Contains(value, `\"`) {
+		return "", false
+	}
+
+	quoted := `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
+	decoded, err := strconv.Unquote(quoted)
+	if err != nil {
+		return "", false
+	}
+	return decoded, true
 }

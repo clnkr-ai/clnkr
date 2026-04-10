@@ -200,6 +200,30 @@ func TestParseProvider(t *testing.T) {
 		}
 	})
 
+	t.Run("normalizes escaped clarify text", func(t *testing.T) {
+		raw := `{"turn":{"type":"clarify","question":"Here are the skills I found:\\n- **citations-agent**: Verify claims.\\\\- **humanizer**: Sound more natural.\\nWhat would you like to work on?","reasoning":"Need to list the available skills.\\\\nThen I can ask a follow-up."}}`
+
+		turn, err := turnschema.ParseProvider(raw)
+		if err != nil {
+			t.Fatalf("ParseProvider(%q) error = %v", raw, err)
+		}
+
+		clarify, ok := turn.(*clnkr.ClarifyTurn)
+		if !ok {
+			t.Fatalf("expected *clnkr.ClarifyTurn, got %T", turn)
+		}
+
+		wantQuestion := "Here are the skills I found:\n- **citations-agent**: Verify claims.\n- **humanizer**: Sound more natural.\nWhat would you like to work on?"
+		if clarify.Question != wantQuestion {
+			t.Fatalf("question = %q, want %q", clarify.Question, wantQuestion)
+		}
+
+		wantReasoning := "Need to list the available skills.\nThen I can ask a follow-up."
+		if clarify.Reasoning != wantReasoning {
+			t.Fatalf("reasoning = %q, want %q", clarify.Reasoning, wantReasoning)
+		}
+	})
+
 	t.Run("rejects missing turn wrapper", func(t *testing.T) {
 		_, err := turnschema.ParseProvider(`{"type":"done","summary":"ignored schema"}`)
 		if !errors.Is(err, clnkr.ErrInvalidJSON) {

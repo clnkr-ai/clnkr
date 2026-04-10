@@ -136,6 +136,31 @@ func TestModelAgentDoneClarificationRendersQuestion(t *testing.T) {
 	}
 }
 
+func TestModelAgentDoneClarificationNormalizesEscapedQuestion(t *testing.T) {
+	m := setupModel()
+	m.shared.agent = clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := m.shared.agent.AddMessages([]clnkr.Message{
+		{Role: "assistant", Content: `{"type":"clarify","question":"Here are the skills I found:\\n- **citations-agent**: Verify claims.\\\\- **humanizer**: Sound more natural.\\nWhat would you like to work on?"}`},
+	}); err != nil {
+		t.Fatalf("seed messages: %v", err)
+	}
+
+	um := updateModel(t, m, agentDoneMsg{err: clnkr.ErrClarificationNeeded})
+	content := um.chat.content.String()
+	if strings.Contains(content, `\n-`) {
+		t.Fatalf("clarify question should not render literal escaped newlines, got: %q", content)
+	}
+	if strings.Contains(content, `\- **humanizer**`) {
+		t.Fatalf("clarify question should not render escaped list markers, got: %q", content)
+	}
+	if !strings.Contains(content, "- **citations-agent**: Verify claims.") {
+		t.Fatalf("expected first bullet in chat, got: %q", content)
+	}
+	if !strings.Contains(content, "- **humanizer**: Sound more natural.") {
+		t.Fatalf("expected second bullet in chat, got: %q", content)
+	}
+}
+
 func TestModelWindowResize(t *testing.T) {
 	m := setupModel()
 	um := updateModel(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})

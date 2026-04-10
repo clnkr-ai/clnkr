@@ -190,6 +190,7 @@ func ParseTurn(raw string) (Turn, error) {
 	if err := json.Unmarshal([]byte(jsonStr), &fields); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
 	}
+	env.Question, env.Summary, env.Reasoning = turnjson.NormalizeHumanText(env.Question), turnjson.NormalizeHumanText(env.Summary), turnjson.NormalizeHumanText(env.Reasoning)
 
 	switch env.Type {
 	case "act":

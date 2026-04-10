@@ -159,6 +159,7 @@ func Parse(raw string) (clnkr.Turn, error) {
 	if err := json.Unmarshal([]byte(trimmed), &fields); err != nil {
 		return nil, fmt.Errorf("%w: %v", clnkr.ErrInvalidJSON, err)
 	}
+	env.Question, env.Summary, env.Reasoning = turnjson.NormalizeHumanText(env.Question), turnjson.NormalizeHumanText(env.Summary), turnjson.NormalizeHumanText(env.Reasoning)
 
 	return strictTurnFromEnvelope(env, fields)
 }
