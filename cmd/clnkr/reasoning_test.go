@@ -36,10 +36,12 @@ func TestReasoningModelViewEmptyWhenHidden(t *testing.T) {
 
 func TestReasoningModelWrapsLongLines(t *testing.T) {
 	r := newReasoningModel(defaultStyles(true))
-	r.show("This is a very long line that should wrap in the reasoning modal.", 20, 4)
+	content := "This is a very long line that should wrap in the reasoning modal."
+	r.show(content, 20, 8)
 
 	view := r.view()
-	if !strings.Contains(view, "line that should wra") {
-		t.Fatalf("expected wrapped continuation in modal view, got %q", view)
+	want := strings.TrimSpace(renderMarkdown(content, 20))
+	if !strings.Contains(view, want) {
+		t.Fatalf("expected modal view to contain markdown-wrapped content %q, got %q", want, view)
 	}
 }
