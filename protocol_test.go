@@ -284,6 +284,28 @@ func TestParseTurnReasoningPreserved(t *testing.T) {
 	})
 }
 
+func TestParseTurnNormalizesEscapedClarifyText(t *testing.T) {
+	turn, err := ParseTurn(`{"type":"clarify","question":"Here are the skills I found:\\n- **citations-agent**: Verify claims.\\\\- **humanizer**: Sound more natural.\\nWhat would you like to work on?","reasoning":"Need to list the available skills.\\\\nThen I can ask a follow-up."}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cl, ok := turn.(*ClarifyTurn)
+	if !ok {
+		t.Fatalf("expected *ClarifyTurn, got %T", turn)
+	}
+
+	wantQuestion := "Here are the skills I found:\n- **citations-agent**: Verify claims.\n- **humanizer**: Sound more natural.\nWhat would you like to work on?"
+	if cl.Question != wantQuestion {
+		t.Fatalf("question = %q, want %q", cl.Question, wantQuestion)
+	}
+
+	wantReasoning := "Need to list the available skills.\nThen I can ask a follow-up."
+	if cl.Reasoning != wantReasoning {
+		t.Fatalf("reasoning = %q, want %q", cl.Reasoning, wantReasoning)
+	}
+}
+
 func TestSanitizeJSONEscapes(t *testing.T) {
 	tests := []struct {
 		name  string
