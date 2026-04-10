@@ -2,13 +2,26 @@
   "id": "001-basic-edit",
   "instruction_file": "input/instruction.txt",
   "scripted_turns_file": "input/model-turns.json",
-  "working_directory": "workspace",
+  "working_directory": ".",
   "full_send": true,
   "step_limit": 10,
   "graders": {
-    "outcome_workspace_snapshot": {
+    "outcome_diff": {
       "enabled": true,
       "required": true
+    },
+    "outcome_command_output": {
+      "enabled": true,
+      "required": true,
+      "command": [
+        "bash",
+        "-lc",
+        "actual=$(cat note.txt); [ \"$actual\" = \"hello\" ] && printf '%s\\n' \"$actual\""
+      ],
+      "expected_exit_code": 0,
+      "stdout_contains": [
+        "hello"
+      ]
     },
     "transcript_command_trace": {
       "enabled": true,

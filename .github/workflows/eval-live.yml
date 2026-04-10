@@ -56,7 +56,7 @@ jobs:
       - name: Show live evaluation bundles on failure
         if: failure() && steps.config.outputs.configured == 'true'
         run: |
-          find evaluations/trials -maxdepth 3 -type f | sort || true
+          find evaluations/trials -maxdepth 5 -type f | sort || true
           echo
           find evaluations/reports -maxdepth 1 -type f | sort || true
           for trial_dir in $(find evaluations/trials -mindepth 1 -maxdepth 1 -type d | sort); do
@@ -67,8 +67,21 @@ jobs:
             echo "== $(basename "$trial_dir") normalized graders =="
             sed -n '1,200p' "$trial_dir/normalized/graders.jsonl" || true
             echo
-            echo "== $(basename "$trial_dir") raw events =="
-            sed -n '1,200p' "$trial_dir/raw/events.jsonl" || true
+            echo "== $(basename "$trial_dir") outcome diff =="
+            sed -n '1,200p' "$trial_dir/outcome/diff.patch" || true
+            echo
+            echo "== $(basename "$trial_dir") raw commands =="
+            sed -n '1,200p' "$trial_dir/raw/commands.jsonl" || true
+            if [ -f "$trial_dir/raw/agent/events.jsonl" ]; then
+              echo
+              echo "== $(basename "$trial_dir") raw agent events =="
+              sed -n '1,200p' "$trial_dir/raw/agent/events.jsonl" || true
+            fi
+            if [ -f "$trial_dir/raw/provider-responses.jsonl" ]; then
+              echo
+              echo "== $(basename "$trial_dir") raw provider responses =="
+              sed -n '1,200p' "$trial_dir/raw/provider-responses.jsonl" || true
+            fi
           done
 
       - name: Upload live evaluation artifacts
