@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.1 (2026-04-09)
+
+- Rewrite nullable structured-output unions with anyOf
+- Move evals content into its own page and add clankerval docs
+- Add shared Homebrew check workflows
+- Add Homebrew install check to release workflow
+- Update CHANGELOG.md for 1.8.0
+
 ## 1.8.0 (2026-04-07)
 
 - Add TUI reasoning trace modal
