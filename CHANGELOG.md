@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.2 (2026-04-10)
+
+- Accept wrapped clarify and done turns without null siblings
+- Wrap chat viewport and dedupe HOME AGENTS.md
+- Update CHANGELOG.md for 1.8.1
+
 ## 1.8.1 (2026-04-09)
 
 - Rewrite nullable structured-output unions with anyOf
