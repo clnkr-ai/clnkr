@@ -24,7 +24,7 @@ func (r *reasoningModel) show(content string, width, height int) {
 	r.content = content
 	r.viewport.SetWidth(width)
 	r.viewport.SetHeight(height)
-	r.viewport.SetContent(r.content)
+	r.viewport.SetContent(r.rendered(width))
 	r.viewport.GotoTop()
 }
 
@@ -36,7 +36,7 @@ func (r *reasoningModel) resize(width, height int) {
 	r.viewport.SetWidth(width)
 	r.viewport.SetHeight(height)
 	if r.visible {
-		r.viewport.SetContent(r.content)
+		r.viewport.SetContent(r.rendered(width))
 	}
 }
 
@@ -45,4 +45,10 @@ func (r *reasoningModel) view() string {
 		return ""
 	}
 	return r.viewport.View()
+}
+
+func (r *reasoningModel) rendered(width int) string {
+	// Reset the shared glamour renderer so reasoning re-wraps to the modal width.
+	renderer = nil
+	return renderMarkdown(r.content, width)
 }
