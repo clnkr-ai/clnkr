@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestReasoningModelShowSetsVisibleAndContent(t *testing.T) {
 	r := newReasoningModel(defaultStyles(true))
@@ -28,5 +31,15 @@ func TestReasoningModelViewEmptyWhenHidden(t *testing.T) {
 	r := newReasoningModel(defaultStyles(true))
 	if got := r.view(); got != "" {
 		t.Fatalf("view = %q, want empty string", got)
+	}
+}
+
+func TestReasoningModelWrapsLongLines(t *testing.T) {
+	r := newReasoningModel(defaultStyles(true))
+	r.show("This is a very long line that should wrap in the reasoning modal.", 20, 4)
+
+	view := r.view()
+	if !strings.Contains(view, "line that should wra") {
+		t.Fatalf("expected wrapped continuation in modal view, got %q", view)
 	}
 }
