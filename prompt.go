@@ -96,24 +96,24 @@ func LoadPromptWithOptions(dir string, opts PromptOptions) string {
 		}, stringPtr("Inspect the directory and the file before deciding.")),
 		fmt.Sprintf("%q", `grep 'A\\|B' file.txt`),
 	)
-	if home, err := os.UserHomeDir(); err == nil {
-		if data, err := os.ReadFile(filepath.Join(home, "AGENTS.md")); err == nil && len(data) > 0 {
-			prompt += "\n\n<user-instructions>\n" + string(data) + "\n</user-instructions>"
+	appendInstructions := func(path, tag string) {
+		if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
+			prompt += "\n\n<" + tag + ">\n" + string(data) + "\n</" + tag + ">"
 		}
+	}
+	homeDir, _ := os.UserHomeDir()
+	if homeDir != "" {
+		appendInstructions(filepath.Join(homeDir, "AGENTS.md"), "user-instructions")
 	}
 	configDir := os.Getenv("XDG_CONFIG_HOME")
-	if configDir == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			configDir = filepath.Join(home, ".config")
-		}
+	if configDir == "" && homeDir != "" {
+		configDir = filepath.Join(homeDir, ".config")
 	}
 	if configDir != "" {
-		if data, err := os.ReadFile(filepath.Join(configDir, "clnkr", "AGENTS.md")); err == nil && len(data) > 0 {
-			prompt += "\n\n<config-instructions>\n" + string(data) + "\n</config-instructions>"
-		}
+		appendInstructions(filepath.Join(configDir, "clnkr", "AGENTS.md"), "config-instructions")
 	}
-	if data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")); err == nil && len(data) > 0 {
-		prompt += "\n\n<project-instructions>\n" + string(data) + "\n</project-instructions>"
+	if dir != homeDir {
+		appendInstructions(filepath.Join(dir, "AGENTS.md"), "project-instructions")
 	}
 	if opts.SystemPromptAppend != "" {
 		prompt += "\n\n" + opts.SystemPromptAppend

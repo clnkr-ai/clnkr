@@ -372,6 +372,28 @@ func TestLoadPromptWithOptions_LayeredAgentsMD(t *testing.T) {
 		}
 	})
 
+	t.Run("project dir matching HOME is not loaded twice", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+		content := "Home instructions should only appear once."
+		if err := os.WriteFile(filepath.Join(home, "AGENTS.md"), []byte(content), 0644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+
+		prompt := LoadPromptWithOptions(home, PromptOptions{})
+		if got := strings.Count(prompt, content); got != 1 {
+			t.Fatalf("content appeared %d times, want 1", got)
+		}
+		if !strings.Contains(prompt, "<user-instructions>") {
+			t.Error("prompt should keep the HOME layer when project dir matches HOME")
+		}
+		if strings.Contains(prompt, "<project-instructions>\n"+content+"\n</project-instructions>") {
+			t.Error("prompt should not duplicate HOME AGENTS.md as project instructions")
+		}
+	})
+
 	t.Run("XDG_CONFIG_HOME defaults to HOME/.config", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
