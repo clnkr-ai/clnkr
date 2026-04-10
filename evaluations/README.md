@@ -4,6 +4,8 @@ This directory holds the checked-in evaluation suites for `clnku`.
 
 Execution is owned by the external `clankerval` runner. Install it separately with `./scripts/install-clankerval.sh`.
 
+The current runner contract is `clankerval` v0.4.0 or newer. Tasks now run from the repo root (`"working_directory": "."`) and verify outcomes with diff- and command-based graders instead of checked-in workspace snapshots.
+
 ## Layout
 
 ```text
@@ -15,7 +17,10 @@ evaluations/
         <task-id>/
           task.json
           input/
-          expected/
+            instruction.txt
+            model-turns.json      # mock-provider tasks only
+            project/
+              AGENTS.md           # optional clnku prompt file
   trials/
     <trial-id>/
       bundle.json
@@ -27,13 +32,17 @@ evaluations/
     junit.xml
 ```
 
-Task inputs live under `evaluations/suites/<suite-id>/tasks/<task-id>/input/`.
-
-Expected task outputs live under `evaluations/suites/<suite-id>/tasks/<task-id>/expected/`.
-
 Generated trial bundles live under `evaluations/trials/<trial-id>/`.
 
 Generated run-level reports live under `evaluations/reports/`.
+
+## Task Conventions
+
+- `suite.json` declares the suite id, mode, failure policy, task order, and optional default agent.
+- `task.json` declares the instruction file, `working_directory`, step limit, grader config, and optional `scripted_turns_file`.
+- `working_directory` must be `"."` with the current runner.
+- Mock-provider tasks keep scripted turns in `input/model-turns.json`.
+- Live-provider tasks verify outcomes with `outcome_diff`, `outcome_command_output`, and optional transcript grading.
 
 ## Bundle Layout
 
@@ -50,26 +59,36 @@ evaluations/trials/<trial-id>/
   raw/
     agent/
     commands.jsonl
+    provider-requests.jsonl
+    provider-responses.jsonl
   normalized/
     transcript.jsonl
     outcome.json
     graders.jsonl
   outcome/
-    workspace/
+    diff.patch
+    name-status.txt
+    numstat.txt
 ```
 
 ## Artifact Meanings
 
 - `transcript`: the structured conversation and command lifecycle for a trial.
-- `outcome`: the final end-state, including the materialized workspace snapshot.
+- `outcome`: the normalized end-state plus git diff artifacts for the trial.
 - `grader`: one normalized grading record describing pass/fail status, message, and structured evidence.
 
 Useful maintenance files:
 
+- `raw/agent/`: native agent artifacts such as `trajectory.json` and `events.jsonl`.
 - `normalized/transcript.jsonl`: canonicalized transcript records.
 - `normalized/outcome.json`: normalized final outcome summary.
 - `normalized/graders.jsonl`: one normalized record per enabled grader.
 - `raw/commands.jsonl`: exact normalized command records from the run.
+- `raw/provider-requests.jsonl`: exact provider requests captured during the run.
+- `raw/provider-responses.jsonl`: exact provider responses captured during the run.
+- `outcome/diff.patch`: patch-format git diff for the trial workspace.
+- `outcome/name-status.txt`: git name-status summary for the trial workspace.
+- `outcome/numstat.txt`: git numstat summary for the trial workspace.
 
 ## Run
 
@@ -109,6 +128,7 @@ After a run:
 2. Inspect `evaluations/trials/<trial-id>/normalized/transcript.jsonl` for canonical transcript flow.
 3. Inspect `evaluations/trials/<trial-id>/normalized/outcome.json` for the normalized end-state.
 4. Inspect `evaluations/trials/<trial-id>/normalized/graders.jsonl` for required/advisory grading results.
-5. Inspect `evaluations/trials/<trial-id>/raw/commands.jsonl` for exact command trace records.
+5. Inspect `evaluations/trials/<trial-id>/raw/commands.jsonl` and `evaluations/trials/<trial-id>/raw/agent/` for exact execution details.
+6. Inspect `evaluations/trials/<trial-id>/outcome/diff.patch` when you need the concrete workspace diff.
 
 The `evaluations/trials/` and `evaluations/reports/` directories are regenerated per run.
