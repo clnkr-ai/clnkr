@@ -185,6 +185,21 @@ func TestParseProvider(t *testing.T) {
 		}
 	})
 
+	t.Run("accepts wrapped clarify and done turns without explicit null siblings", func(t *testing.T) {
+		for _, raw := range []string{
+			`{"turn":{"type":"clarify","question":"Which directory?"}}`,
+			`{"turn":{"type":"done","summary":"Finished the task."}}`,
+		} {
+			turn, err := turnschema.ParseProvider(raw)
+			if err != nil {
+				t.Fatalf("ParseProvider(%q) error = %v", raw, err)
+			}
+			if turn == nil {
+				t.Fatalf("ParseProvider(%q) returned nil turn", raw)
+			}
+		}
+	})
+
 	t.Run("rejects missing turn wrapper", func(t *testing.T) {
 		_, err := turnschema.ParseProvider(`{"type":"done","summary":"ignored schema"}`)
 		if !errors.Is(err, clnkr.ErrInvalidJSON) {
@@ -207,8 +222,8 @@ func TestParseProvider(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects missing required wrapped provider fields", func(t *testing.T) {
-		_, err := turnschema.ParseProvider(`{"turn":{"type":"done","summary":"ignored schema"}}`)
+	t.Run("rejects wrapped act turns missing bash", func(t *testing.T) {
+		_, err := turnschema.ParseProvider(`{"turn":{"type":"act","question":null,"summary":null,"reasoning":null}}`)
 		if !errors.Is(err, clnkr.ErrInvalidJSON) {
 			t.Fatalf("ParseProvider error = %v, want ErrInvalidJSON", err)
 		}
@@ -224,15 +239,6 @@ func TestParseProvider(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects missing reasoning field", func(t *testing.T) {
-		_, err := turnschema.ParseProvider(`{"turn":{"type":"done","bash":null,"question":null,"summary":"ignored schema"}}`)
-		if !errors.Is(err, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ParseProvider error = %v, want ErrInvalidJSON", err)
-		}
-		if !strings.Contains(err.Error(), `missing required structured output field "reasoning"`) {
-			t.Fatalf("ParseProvider error = %v, want missing reasoning detail", err)
-		}
-	})
 }
 
 func TestCanonicalJSON(t *testing.T) {

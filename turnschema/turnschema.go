@@ -298,10 +298,8 @@ func validateProviderTurnShape(raw string) error {
 	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
 		return fmt.Errorf("%w: %v", clnkr.ErrInvalidJSON, err)
 	}
-	for _, field := range []string{"type", "bash", "question", "summary", "reasoning"} {
-		if _, ok := fields[field]; !ok {
-			return fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, field)
-		}
+	if _, ok := fields["type"]; !ok {
+		return fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, "type")
 	}
 
 	var turnType string
@@ -309,10 +307,16 @@ func validateProviderTurnShape(raw string) error {
 		return fmt.Errorf("%w: structured output field %q must be string", clnkr.ErrInvalidJSON, "type")
 	}
 
+	// Some providers omit explicit null siblings on wrapped clarify/done turns.
+	// Keep act-specific structural checks here and let Parse enforce turn semantics.
 	switch turnType {
 	case "act":
+		rawBash, ok := fields["bash"]
+		if !ok {
+			return fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, "bash")
+		}
 		var bashFields map[string]json.RawMessage
-		if err := json.Unmarshal(fields["bash"], &bashFields); err != nil {
+		if err := json.Unmarshal(rawBash, &bashFields); err != nil {
 			return fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, "bash")
 		}
 		if bashFields == nil {
@@ -356,10 +360,6 @@ func validateProviderTurnShape(raw string) error {
 					return fmt.Errorf("%w: structured output field %q must be string or null", clnkr.ErrInvalidJSON, fmt.Sprintf("bash.commands[%d].workdir", i))
 				}
 			}
-		}
-	case "clarify", "done":
-		if string(fields["bash"]) != "null" {
-			return fmt.Errorf("%w: structured output field %q must be null", clnkr.ErrInvalidJSON, "bash")
 		}
 	}
 	return nil

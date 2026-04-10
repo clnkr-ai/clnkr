@@ -172,8 +172,6 @@ func TestModel(t *testing.T) {
 			text    string
 			wantErr error
 		}{
-			{name: "missing wrapped fields", text: `{"turn":{"type":"done","summary":"ignored schema"}}`, wantErr: clnkr.ErrInvalidJSON},
-			{name: "missing reasoning field", text: `{"turn":{"type":"done","bash":null,"question":null,"summary":"ignored schema"}}`, wantErr: clnkr.ErrInvalidJSON},
 			{name: "single-command wrapped act turn", text: `{"turn":{"type":"act","bash":{"command":"pwd","workdir":null},"question":null,"summary":null,"reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
 			{name: "semantic invalid act turn", text: `{"turn":{"type":"act","bash":{"commands":[{"command":"","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`, wantErr: clnkr.ErrMissingCommand},
 			{name: "multiple wrapped objects", text: `{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"question":null,"summary":null,"reasoning":null}}{"turn":{"type":"done","bash":null,"question":null,"summary":"done","reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
@@ -200,6 +198,41 @@ func TestModel(t *testing.T) {
 				}
 				if !errors.Is(resp.ProtocolErr, tt.wantErr) {
 					t.Fatalf("protocol error = %v, want %v", resp.ProtocolErr, tt.wantErr)
+				}
+			})
+		}
+	})
+
+	t.Run("canonicalizes wrapped clarify and done payloads without null siblings", func(t *testing.T) {
+		tests := []struct {
+			name string
+			text string
+			want string
+		}{
+			{name: "clarify", text: `{"turn":{"type":"clarify","question":"Which directory?"}}`, want: `{"type":"clarify","question":"Which directory?"}`},
+			{name: "done", text: `{"turn":{"type":"done","summary":"ignored schema"}}`, want: `{"type":"done","summary":"ignored schema"}`},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
+						"content": []map[string]string{{"type": "text", "text": tt.text}},
+						"usage":   map[string]int{"input_tokens": 1, "output_tokens": 1},
+					})
+				}))
+				defer server.Close()
+
+				m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
+				resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if resp.Message.Content != tt.want {
+					t.Fatalf("content = %q, want %q", resp.Message.Content, tt.want)
+				}
+				if resp.ProtocolErr != nil {
+					t.Fatalf("protocol error = %v, want nil", resp.ProtocolErr)
 				}
 			})
 		}
