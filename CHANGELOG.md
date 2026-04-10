@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.3 (2026-04-10)
+
+- Normalize escaped clarify text in parsed turns
+- Update CHANGELOG.md for 1.8.2
+
 ## 1.8.2 (2026-04-10)
 
 - Accept wrapped clarify and done turns without null siblings
