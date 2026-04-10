@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.5 (2026-04-10)
+
+- Render reasoning modal with width-aware wrapping
+- Update CHANGELOG.md for 1.8.4
+
 ## 1.8.4 (2026-04-10)
 
 - Wrap reasoning modal viewport
