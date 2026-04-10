@@ -12,6 +12,7 @@ type reasoningModel struct {
 
 func newReasoningModel(s *styles) reasoningModel {
 	vp := viewport.New()
+	vp.SoftWrap = true
 	return reasoningModel{
 		viewport: vp,
 		styles:   s,
