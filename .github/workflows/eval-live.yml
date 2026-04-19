@@ -34,9 +34,19 @@ jobs:
         if: steps.config.outputs.configured == 'true'
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Install clankerval
+      - name: Install clankerval release package
         if: steps.config.outputs.configured == 'true'
-        run: ./scripts/install-clankerval.sh
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(sed -n 's/^CLANKERVAL_MIN_VERSION := //p' Makefile)"
+          arch="$(dpkg --print-architecture)"
+          pattern="clankerval_${version}-*_${arch}.deb"
+          gh release download "v${version}" --repo clnkr-ai/clankerval --pattern "$pattern"
+          deb="$(find . -maxdepth 1 -name "$pattern" -print -quit)"
+          sudo apt-get update
+          sudo apt-get install -y "$deb"
 
       - name: Run live evaluations
         if: steps.config.outputs.configured == 'true'
@@ -116,9 +126,19 @@ jobs:
         if: steps.config.outputs.configured == 'true'
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Install clankerval
+      - name: Install clankerval release package
         if: steps.config.outputs.configured == 'true'
-        run: ./scripts/install-clankerval.sh
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(sed -n 's/^CLANKERVAL_MIN_VERSION := //p' Makefile)"
+          arch="$(dpkg --print-architecture)"
+          pattern="clankerval_${version}-*_${arch}.deb"
+          gh release download "v${version}" --repo clnkr-ai/clankerval --pattern "$pattern"
+          deb="$(find . -maxdepth 1 -name "$pattern" -print -quit)"
+          sudo apt-get update
+          sudo apt-get install -y "$deb"
 
       - name: Run live evaluations
         if: steps.config.outputs.configured == 'true'

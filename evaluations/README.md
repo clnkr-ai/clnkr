@@ -2,9 +2,9 @@
 
 This directory holds the checked-in evaluation suites for `clnku`.
 
-Execution is owned by the external `clankerval` runner. Install it separately with `./scripts/install-clankerval.sh`.
+Execution is owned by the external `clankerval` runner. Install it separately from the packages published by the `clankerval` project.
 
-The current runner contract is `clankerval` v0.4.0 or newer. Tasks now run from the repo root (`"working_directory": "."`) and verify outcomes with diff- and command-based graders instead of checked-in workspace snapshots.
+The minimum supported runner version is enforced in [`Makefile`](../Makefile). Tasks now run from the repo root (`"working_directory": "."`) and verify outcomes with diff- and command-based graders instead of checked-in workspace snapshots.
 
 ## Layout
 
@@ -105,7 +105,7 @@ make evaluations-live-openai
 make evaluations-live-anthropic
 ```
 
-Both make targets resolve `clankerval` from `PATH` with `python3 ./scripts/require-clankerval.py`.
+Both make targets call `clankerval` directly after a `Makefile` preflight that checks `PATH` and the minimum supported version.
 
 Canonical CLI examples use `clankerval` directly:
 

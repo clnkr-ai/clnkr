@@ -14,7 +14,6 @@ make man            # Generate man page from doc/clnkr.1.md
 make docs           # Build the documentation site
 make docs-serve     # Run the documentation site locally
 make help           # List all targets
-./scripts/install-clankerval.sh  # Install the pinned external eval runner
 
 # Private agent/contributor helpers
 make _fmt           # Format source (both modules)
@@ -101,6 +100,8 @@ The primary purpose of evals is to improve the real agent. Treat live evals as t
 Fixture evals exist to keep the harness deterministic in CI and to catch harness regressions. They support the optimization loop, but they are not the main reason the eval system exists.
 
 When choosing tasks, metrics, or follow-on eval work, optimize first for live runs that measure actual agent behavior. Do not judge the value of the eval system mainly by regression protection.
+
+The `clankerval` evaluation harness requires a clean git checkout. If you need to run `make evaluations` or `make check` from a dirty worktree, make a temporary commit first, run the harness, then unroll that temporary commit before you finish the task.
 
 ## Website
 

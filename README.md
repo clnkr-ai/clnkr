@@ -22,8 +22,10 @@ go install github.com/clnkr-ai/clnkr/cmd/clnku@latest
 # TUI requires building from source (due to replace directive)
 make build
 
-# Install the pinned external evaluation runner when you need evals
-./scripts/install-clankerval.sh
+# Install clankerval separately when you need evals.
+# Debian-family example:
+#   curl -fsSLO https://github.com/clnkr-ai/clankerval/releases/download/v<VERSION>/clankerval_<VERSION>-1_<ARCH>.deb
+#   sudo apt install ./clankerval_<VERSION>-1_<ARCH>.deb
 ```
 
 Or build from source:
@@ -238,7 +240,9 @@ The provider-specific live-eval targets are deterministic. They ignore generic `
 - `make evaluations-live-openai`: `OPENAI_API_KEY`, optional `CLNKR_EVALUATION_OPENAI_BASE_URL`, optional `CLNKR_EVALUATION_OPENAI_MODEL`
 - `make evaluations-live-anthropic`: `ANTHROPIC_API_KEY`, optional `CLNKR_EVALUATION_ANTHROPIC_BASE_URL`, optional `CLNKR_EVALUATION_ANTHROPIC_MODEL`
 
-Install the pinned runner with `./scripts/install-clankerval.sh`.
+Install `clankerval` separately from the packages published by the
+`clankerval` project. `make evaluations` checks that `clankerval` is on
+`PATH` and meets this repo's minimum supported version.
 
 For example:
 

@@ -2,6 +2,56 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LATEST_TAG ?= $(shell git tag -l 'v[0-9]*' --sort=-v:refname | head -1)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hugo)
+CLANKERVAL_MIN_VERSION := 0.4.0
+CLANKERVAL_PREFLIGHT = \
+	compare_versions() { \
+		have_raw="$$1"; \
+		need_raw="$$2"; \
+		have_core="$${have_raw%%[-+]*}"; \
+		need_core="$${need_raw%%[-+]*}"; \
+		old_ifs="$$IFS"; \
+		IFS=.; \
+		set -- $$have_core; \
+		IFS="$$old_ifs"; \
+		have_major="$${1:-0}"; \
+		have_minor="$${2:-0}"; \
+		have_patch="$${3:-0}"; \
+		IFS=.; \
+		set -- $$need_core; \
+		IFS="$$old_ifs"; \
+		need_major="$${1:-0}"; \
+		need_minor="$${2:-0}"; \
+		need_patch="$${3:-0}"; \
+		if [ "$$have_major" -lt "$$need_major" ]; then return 1; fi; \
+		if [ "$$have_major" -gt "$$need_major" ]; then return 0; fi; \
+		if [ "$$have_minor" -lt "$$need_minor" ]; then return 1; fi; \
+		if [ "$$have_minor" -gt "$$need_minor" ]; then return 0; fi; \
+		if [ "$$have_patch" -lt "$$need_patch" ]; then return 1; fi; \
+		if [ "$$have_patch" -gt "$$need_patch" ]; then return 0; fi; \
+		case "$$have_raw" in \
+			*-*) return 1 ;; \
+		esac; \
+		return 0; \
+	}; \
+	clankerval_path="$$(command -v clankerval 2>/dev/null || true)"; \
+	if [ -z "$$clankerval_path" ]; then \
+		echo "error: clankerval >= $(CLANKERVAL_MIN_VERSION) is required." >&2; \
+		exit 1; \
+	fi; \
+	if ! version_output="$$("$$clankerval_path" --version 2>&1)"; then \
+		echo "error: clankerval --version failed: $$version_output" >&2; \
+		exit 1; \
+	fi; \
+	version="$$(printf '%s\n' "$$version_output" | awk 'match($$0, /v?[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?/) { version = substr($$0, RSTART, RLENGTH) } END { sub(/^v/, "", version); print version }')"; \
+	if [ -z "$$version" ]; then \
+		echo "error: failed to parse clankerval version from: $$version_output" >&2; \
+		exit 1; \
+	fi; \
+	if ! compare_versions "$$version" "$(CLANKERVAL_MIN_VERSION)"; then \
+		echo "error: clankerval >= $(CLANKERVAL_MIN_VERSION) is required." >&2; \
+		echo "found clankerval $$version at $$clankerval_path" >&2; \
+		exit 1; \
+	fi;
 
 .DEFAULT_GOAL := build
 .PHONY: \
@@ -42,17 +92,17 @@ _build-clnkr:
 check: _fmt-check _vet _lint _arch _sloc _workflow-make-targets _check-man test evaluations ## Run formatting, vet, lint, architecture, SLOC, workflow, manpage, test, and evaluation checks
 
 test: ## Run all tests
-	python3 -m unittest scripts/test_require_clankerval.py -v
+	./scripts/test_make_evaluations.sh
 	go test ./... -v
 	cd cmd/clnkr && go test ./... -v
 
 evaluations: ## Run the mock-provider evaluation suite
-	@runner="$$(python3 ./scripts/require-clankerval.py)" && \
-	"$$runner" run --suite default
+	@$(CLANKERVAL_PREFLIGHT) \
+	"$$clankerval_path" run --suite default
 
 evaluations-live: ## Run the live-provider evaluation suite
-	@runner="$$(python3 ./scripts/require-clankerval.py)" && \
-	CLNKR_EVALUATION_MODE=live-provider "$$runner" run --suite default
+	@$(CLANKERVAL_PREFLIGHT) \
+	CLNKR_EVALUATION_MODE=live-provider "$$clankerval_path" run --suite default
 
 evaluations-live-openai: ## Run the live-provider evaluation suite against OpenAI defaults
 	@CLNKR_EVALUATION_API_KEY="$${CLNKR_EVALUATION_OPENAI_API_KEY:-$${OPENAI_API_KEY}}" \

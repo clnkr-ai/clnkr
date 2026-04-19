@@ -25,8 +25,8 @@ jobs:
           "$(go env GOPATH)/bin/actionlint"
           python3 ./scripts/check-workflow-make-targets.py
 
-      - name: Test clankerval resolver
-        run: python3 -m unittest scripts.test_require_clankerval -v
+      - name: Test evaluations Makefile gate
+        run: ./scripts/test_make_evaluations.sh
 
       - name: Lint core
         uses: golangci/golangci-lint-action@v7
@@ -67,8 +67,18 @@ jobs:
       - name: Add local user bin to PATH
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Install clankerval
-        run: ./scripts/install-clankerval.sh
+      - name: Install clankerval release package
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(sed -n 's/^CLANKERVAL_MIN_VERSION := //p' Makefile)"
+          arch="$(dpkg --print-architecture)"
+          pattern="clankerval_${version}-*_${arch}.deb"
+          gh release download "v${version}" --repo clnkr-ai/clankerval --pattern "$pattern"
+          deb="$(find . -maxdepth 1 -name "$pattern" -print -quit)"
+          sudo apt-get update
+          sudo apt-get install -y "$deb"
 
       - name: Run mock-provider evaluations
         run: make evaluations

@@ -242,12 +242,6 @@ jobs:
             fi
             echo "" >> CHANGELOG.md
           done
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("CHANGELOG.md")
-          path.write_text(path.read_text(encoding="utf-8").replace("clnkeval", "clankerval"), encoding="utf-8")
-          PY
           git add CHANGELOG.md
           git diff --cached --quiet || {
             git commit -m "Update CHANGELOG.md for ${GITHUB_REF_NAME#v}"
