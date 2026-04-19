@@ -15,11 +15,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
 	clnkr "github.com/clnkr-ai/clnkr"
-	"github.com/clnkr-ai/clnkr/anthropic"
+	"github.com/clnkr-ai/clnkr/cmd/internal/session"
 	"github.com/clnkr-ai/clnkr/compaction"
-	"github.com/clnkr-ai/clnkr/delegate"
-	"github.com/clnkr-ai/clnkr/openai"
-	"github.com/clnkr-ai/clnkr/session"
+	"github.com/clnkr-ai/clnkr/internal/providers/anthropic"
+	"github.com/clnkr-ai/clnkr/internal/providers/openai"
 )
 
 // version is set at build time via -ldflags.
@@ -269,7 +268,7 @@ func formatActProposal(commands []clnkr.BashAction) string {
 }
 
 func makeCompactorFactory(baseURL, apiKey, modelName string) compaction.Factory {
-	return compaction.NewFactory(func(instructions string) clnkr.Model {
+	return compaction.NewFactory(func(instructions string) compaction.FreeformModel {
 		systemPrompt := compaction.LoadCompactionPrompt(instructions)
 		if strings.Contains(baseURL, "anthropic.com") {
 			return anthropic.NewModel(baseURL, apiKey, modelName, systemPrompt)
@@ -483,11 +482,11 @@ func main() {
 		showDebug,
 		*fullSend,
 		makeCompactorFactory(*baseURL, apiKey, *modelFlag),
-		delegate.Runner{},
+		delegateProcessRunner{},
 	)
 }
 
-func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, eventLog *os.File, verbose bool, fullSend bool, compactorFactory compaction.Factory, delegateRunner delegate.Runner) {
+func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, eventLog *os.File, verbose bool, fullSend bool, compactorFactory compaction.Factory, delegateRunner delegateTaskRunner) {
 	s := defaultStyles(true) // TODO: detect actual background
 
 	if taskPrompt != "" {
@@ -676,7 +675,9 @@ func runPlain(agent *clnkr.Agent, taskPrompt, trajectory string, eventLog *os.Fi
 		}
 		switch ev := e.(type) {
 		case clnkr.EventResponse:
-			fmt.Fprintln(os.Stdout, ev.Message.Content) //nolint:errcheck
+			if text, err := clnkr.CanonicalTurnJSON(ev.Turn); err == nil {
+				fmt.Fprintln(os.Stdout, text) //nolint:errcheck
+			}
 		case clnkr.EventCommandStart:
 			fmt.Fprintf(os.Stdout, "--- running: %s ---\n", summarizeCommand(ev.Command)) //nolint:errcheck
 		case clnkr.EventCommandDone:

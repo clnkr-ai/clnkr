@@ -3,7 +3,7 @@ package clnkr
 import (
 	"context"
 
-	"github.com/clnkr-ai/clnkr/transcript"
+	"github.com/clnkr-ai/clnkr/internal/core/transcript"
 )
 
 // Message is one message in the conversation.
@@ -12,9 +12,12 @@ type Message = transcript.Message
 // Usage tracks token consumption for a single LLM call.
 type Usage struct{ InputTokens, OutputTokens int }
 
-// Response pairs an LLM reply with its token usage.
+// Response captures one model reply.
+// On success Turn is non-nil and ProtocolErr is nil.
+// On protocol failure Raw preserves the provider's original assistant text.
 type Response struct {
-	Message     Message
+	Turn        Turn
+	Raw         string
 	Usage       Usage
 	ProtocolErr error
 }

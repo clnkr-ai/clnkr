@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/clnkr-ai/clnkr/turnjson"
 )
 
 func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
@@ -15,24 +13,17 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 		prompt := LoadPromptWithOptions(dir, PromptOptions{})
-		expectedActExample := turnjson.MustWireActJSON(
-			[]turnjson.WireCommand{
-				{Command: "ls -la /tmp", Workdir: nil},
-				{Command: "sed -n '1,40p' README.md", Workdir: nil},
-			},
-			stringPtr("Inspect the directory and the file before deciding."),
-		)
 		if !strings.Contains(prompt, `"type":"act"`) {
 			t.Error("prompt should teach the json protocol")
 		}
-		if !strings.Contains(prompt, `"turn":{`) {
-			t.Error("prompt should teach the wrapped provider wire protocol")
+		if strings.Contains(prompt, `"turn":{`) {
+			t.Error("prompt should not teach provider wire wrappers")
 		}
-		if !strings.Contains(prompt, `top-level "turn" field`) {
-			t.Error("prompt should require a single top-level turn field")
+		if strings.Contains(prompt, `top-level "turn" field`) {
+			t.Error("prompt should not require a provider-specific top-level turn field")
 		}
-		if !strings.Contains(prompt, `turn.type`) {
-			t.Error("prompt should describe turn.type explicitly")
+		if !strings.Contains(prompt, `Set type to exactly one of "act", "clarify", or "done".`) {
+			t.Error("prompt should describe type explicitly")
 		}
 		if strings.Contains(prompt, "```bash") {
 			t.Error("prompt should not instruct fenced bash blocks")
@@ -43,20 +34,20 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, `grep 'A\\\\|B' file.txt`) {
 			t.Error("prompt should teach shell escaping inside JSON")
 		}
-		if !strings.Contains(prompt, "Each turn.bash.commands item is an object whose command value is a JSON string") {
+		if !strings.Contains(prompt, "Each bash.commands item is an object whose command value is a JSON string") {
 			t.Error("prompt should describe commands[] items as objects with command strings")
 		}
-		if !strings.Contains(prompt, expectedActExample) {
-			t.Error("prompt should teach the wrapped commands[] act wire shape")
+		if !strings.Contains(prompt, canonicalPromptActExample) {
+			t.Error("prompt should teach the canonical commands[] act shape")
 		}
-		if !strings.Contains(prompt, `Include turn.reasoning in every response; use a string when it helps and null when you have nothing to add.`) {
+		if !strings.Contains(prompt, `Include reasoning in every response; use a string when it helps and null when you have nothing to add.`) {
 			t.Error("prompt should require the reasoning field even when it is null")
 		}
-		if strings.Contains(prompt, `"turn":{"type":"clarify"`) {
-			t.Error("prompt should not condition the model with a separate wrapped clarify object example")
+		if strings.Contains(prompt, `{"type":"clarify"`) {
+			t.Error("prompt should not condition the model with a separate clarify object example")
 		}
-		if strings.Contains(prompt, `"turn":{"type":"done"`) {
-			t.Error("prompt should not condition the model with a separate wrapped done object example")
+		if strings.Contains(prompt, `{"type":"done","summary"`) {
+			t.Error("prompt should not condition the model with a separate done object example")
 		}
 		if !strings.Contains(prompt, "Exported environment changes and environment updates from source or . also persist between commands.") {
 			t.Error("prompt should explain shell env persistence")
@@ -115,14 +106,14 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, "<protocol-error-recovery>") {
 			t.Error("prompt should isolate protocol_error guidance in a dedicated recovery section")
 		}
-		if !strings.Contains(prompt, "If you receive a [protocol_error] block, fix your format and respond with exactly one valid wrapped turn object.") {
+		if !strings.Contains(prompt, "If you receive a [protocol_error] block, fix your format and respond with exactly one valid turn object.") {
 			t.Error("prompt should keep the base protocol_error formatting guidance in the protocol section")
 		}
 		if !strings.Contains(prompt, "If you receive a [protocol_error] block, your previous response was rejected and no command ran.") {
 			t.Error("prompt should explain protocol_error blocks in general runtime terms")
 		}
-		if !strings.Contains(prompt, "If you receive a [protocol_error] block, your previous response was rejected and no command ran. Fix the format and respond with exactly one valid wrapped turn object.") {
-			t.Error("prompt should keep the recovery section aligned with the wrapped-turn requirement")
+		if !strings.Contains(prompt, "If you receive a [protocol_error] block, your previous response was rejected and no command ran. Fix the format and respond with exactly one valid turn object.") {
+			t.Error("prompt should keep the recovery section aligned with the canonical-turn requirement")
 		}
 		if strings.Contains(prompt, "legacy parser path") {
 			t.Error("prompt should not scope protocol_error guidance to legacy parser paths")
@@ -155,49 +146,30 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 	})
 }
 
-// extractAllJSONObjects finds all top-level JSON objects in text.
-func extractAllJSONObjects(text string) []string {
-	var objects []string
-	remaining := text
-	for {
-		jsonStr, err := extractJSON(remaining)
-		if err != nil {
-			break
-		}
-		objects = append(objects, jsonStr)
-		idx := strings.Index(remaining, jsonStr)
-		remaining = remaining[idx+len(jsonStr):]
-	}
-	return objects
-}
-
 func TestPromptExamplesParseSuccessfully(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	prompt := LoadPromptWithOptions(dir, PromptOptions{})
 
-	examples := extractAllJSONObjects(prompt)
-	if len(examples) != 1 {
-		t.Fatalf("prompt should contain exactly 1 wrapped turn example, found %d", len(examples))
+	if count := strings.Count(prompt, canonicalPromptActExample); count != 1 {
+		t.Fatalf("prompt should contain exactly 1 canonical turn example, found %d", count)
 	}
-	for i, ex := range examples {
-		inner, ok, err := turnjson.ExtractTurnEnvelope(ex)
-		if err != nil {
-			t.Errorf("example %d failed envelope validation: %v\n  input: %s", i, err, ex)
-			continue
-		}
-		if !ok {
-			t.Errorf("example %d should use the wrapped provider wire shape\n  input: %s", i, ex)
-			continue
-		}
-		_, err = ParseTurn(inner)
-		if err != nil {
-			t.Errorf("example %d failed ParseTurn: %v\n  input: %s", i, err, ex)
-		}
+	got, err := CanonicalTurnJSON(&ActTurn{
+		Bash: BashBatch{Commands: []BashAction{
+			{Command: "ls -la /tmp"},
+			{Command: "sed -n '1,40p' README.md"},
+		}},
+		Reasoning: "Inspect the directory and the file before deciding.",
+	})
+	if err != nil {
+		t.Fatalf("CanonicalTurnJSON(example): %v", err)
+	}
+	if got != canonicalPromptActExample {
+		t.Fatalf("canonical prompt example drifted: got %q want %q", got, canonicalPromptActExample)
 	}
 	if strings.Contains(prompt, `{"turn":{"type":"act","bash":{"command":"grep 'A\\\\|B' file.txt","workdir":null}`) {
-		t.Error("prompt should teach shell escaping with a JSON string example, not a second wrapped turn object")
+		t.Error("prompt should teach shell escaping with a JSON string example, not a wrapped turn object")
 	}
 }
 

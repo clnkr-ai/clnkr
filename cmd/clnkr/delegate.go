@@ -1,4 +1,4 @@
-package delegate
+package main
 
 import (
 	"context"
@@ -12,34 +12,34 @@ import (
 	clnkr "github.com/clnkr-ai/clnkr"
 )
 
-type Request struct {
+type delegateRequest struct {
 	Task       string
 	WorkingDir string
 	Parent     []clnkr.Message
 	MaxSteps   int
 }
 
-type Result struct {
+type delegateResult struct {
 	Summary        string
 	Messages       []clnkr.Message
 	TrajectoryPath string
 }
 
-type Runner struct {
+type delegateProcessRunner struct {
 	Binary string
 }
 
-func (r Runner) Run(ctx context.Context, req Request) (Result, error) {
+func (r delegateProcessRunner) Run(ctx context.Context, req delegateRequest) (delegateResult, error) {
 	if strings.TrimSpace(req.Task) == "" {
-		return Result{}, fmt.Errorf("delegate run: empty task")
+		return delegateResult{}, fmt.Errorf("delegate run: empty task")
 	}
 	if strings.TrimSpace(req.WorkingDir) == "" {
-		return Result{}, fmt.Errorf("delegate run: empty working dir")
+		return delegateResult{}, fmt.Errorf("delegate run: empty working dir")
 	}
 
 	seedFile, err := os.CreateTemp("", "clnkr-delegate-seed-*.json")
 	if err != nil {
-		return Result{}, fmt.Errorf("delegate run: create seed file: %w", err)
+		return delegateResult{}, fmt.Errorf("delegate run: create seed file: %w", err)
 	}
 	seedPath := seedFile.Name()
 	defer func() { _ = os.Remove(seedPath) }()
@@ -47,19 +47,19 @@ func (r Runner) Run(ctx context.Context, req Request) (Result, error) {
 	enc := json.NewEncoder(seedFile)
 	if err := enc.Encode(req.Parent); err != nil {
 		_ = seedFile.Close()
-		return Result{}, fmt.Errorf("delegate run: write seed file: %w", err)
+		return delegateResult{}, fmt.Errorf("delegate run: write seed file: %w", err)
 	}
 	if err := seedFile.Close(); err != nil {
-		return Result{}, fmt.Errorf("delegate run: close seed file: %w", err)
+		return delegateResult{}, fmt.Errorf("delegate run: close seed file: %w", err)
 	}
 
 	outFile, err := os.CreateTemp("", "clnkr-delegate-trajectory-*.json")
 	if err != nil {
-		return Result{}, fmt.Errorf("delegate run: create trajectory file: %w", err)
+		return delegateResult{}, fmt.Errorf("delegate run: create trajectory file: %w", err)
 	}
 	outPath := outFile.Name()
 	if err := outFile.Close(); err != nil {
-		return Result{}, fmt.Errorf("delegate run: close trajectory file: %w", err)
+		return delegateResult{}, fmt.Errorf("delegate run: close trajectory file: %w", err)
 	}
 
 	binary := r.Binary
@@ -76,28 +76,28 @@ func (r Runner) Run(ctx context.Context, req Request) (Result, error) {
 	cmd.Dir = req.WorkingDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return Result{}, fmt.Errorf("delegate run: %s %s in %s: %w\n%s", binary, strings.Join(args, " "), req.WorkingDir, err, strings.TrimSpace(string(output)))
+		return delegateResult{}, fmt.Errorf("delegate run: %s %s in %s: %w\n%s", binary, strings.Join(args, " "), req.WorkingDir, err, strings.TrimSpace(string(output)))
 	}
 
 	data, err := os.ReadFile(outPath)
 	if err != nil {
-		return Result{}, fmt.Errorf("delegate run: read trajectory %s: %w", filepath.Base(outPath), err)
+		return delegateResult{}, fmt.Errorf("delegate run: read trajectory %s: %w", filepath.Base(outPath), err)
 	}
 
 	var messages []clnkr.Message
 	if err := json.Unmarshal(data, &messages); err != nil {
-		return Result{}, fmt.Errorf("delegate run: parse trajectory %s: %w", filepath.Base(outPath), err)
+		return delegateResult{}, fmt.Errorf("delegate run: parse trajectory %s: %w", filepath.Base(outPath), err)
 	}
 
-	summary := extractSummary(messages)
+	summary := extractDelegateSummary(messages)
 	if summary == "" {
-		return Result{}, fmt.Errorf("delegate run: empty child summary")
+		return delegateResult{}, fmt.Errorf("delegate run: empty child summary")
 	}
 
-	return Result{Summary: summary, Messages: messages, TrajectoryPath: outPath}, nil
+	return delegateResult{Summary: summary, Messages: messages, TrajectoryPath: outPath}, nil
 }
 
-func extractSummary(messages []clnkr.Message) string {
+func extractDelegateSummary(messages []clnkr.Message) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
 		if msg.Role != "assistant" {
@@ -117,7 +117,7 @@ func extractSummary(messages []clnkr.Message) string {
 	return ""
 }
 
-func FormatArtifact(task, summary string) string {
+func formatDelegateArtifact(task, summary string) string {
 	payload := struct {
 		Source  string `json:"source"`
 		Kind    string `json:"kind"`

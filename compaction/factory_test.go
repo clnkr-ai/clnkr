@@ -10,24 +10,24 @@ import (
 )
 
 type stubModel struct {
-	response clnkr.Response
-	err      error
-	got      [][]clnkr.Message
+	summary string
+	err     error
+	got     [][]clnkr.Message
 }
 
-func (m *stubModel) Query(_ context.Context, messages []clnkr.Message) (clnkr.Response, error) {
+func (m *stubModel) QueryText(_ context.Context, messages []clnkr.Message) (string, error) {
 	cp := append([]clnkr.Message{}, messages...)
 	m.got = append(m.got, cp)
 	if m.err != nil {
-		return clnkr.Response{}, m.err
+		return "", m.err
 	}
-	return m.response, nil
+	return m.summary, nil
 }
 
-func TestNewFactoryBuildsFreshCompactorPerInstructionSet(t *testing.T) {
+func TestCompactionUsesFreeformModelInterface(t *testing.T) {
 	var gotInstructions []string
-	var models []*stubModel
-	factory := NewFactory(func(instructions string) clnkr.Model {
+	var models []FreeformModel
+	factory := NewFactory(func(instructions string) FreeformModel {
 		gotInstructions = append(gotInstructions, instructions)
 		model := &stubModel{}
 		models = append(models, model)
@@ -63,10 +63,8 @@ func TestNewFactoryBuildsFreshCompactorPerInstructionSet(t *testing.T) {
 	}
 }
 
-func TestModelCompactorTrimsSummaryText(t *testing.T) {
-	model := &stubModel{response: clnkr.Response{
-		Message: clnkr.Message{Role: "assistant", Content: "  summarized transcript  \n"},
-	}}
+func TestCompactionDoesNotRequireRuntimeTurnModel(t *testing.T) {
+	model := &stubModel{summary: "  summarized transcript  \n"}
 	compactor := modelCompactor{model: model}
 	messages := []clnkr.Message{{Role: "user", Content: "first task"}}
 
@@ -97,10 +95,16 @@ func TestModelCompactorTrimsSummaryText(t *testing.T) {
 	}
 }
 
+func TestNewFactoryBuildsFreshCompactorPerInstructionSet(t *testing.T) {
+	TestCompactionUsesFreeformModelInterface(t)
+}
+
+func TestModelCompactorTrimsSummaryText(t *testing.T) {
+	TestCompactionDoesNotRequireRuntimeTurnModel(t)
+}
+
 func TestModelCompactorAppendsSummarizeRequestAfterAssistantTail(t *testing.T) {
-	model := &stubModel{response: clnkr.Response{
-		Message: clnkr.Message{Role: "assistant", Content: "summary"},
-	}}
+	model := &stubModel{summary: "summary"}
 	compactor := modelCompactor{model: model}
 	messages := []clnkr.Message{
 		{Role: "user", Content: "first task"},
@@ -132,9 +136,7 @@ func TestModelCompactorAppendsSummarizeRequestAfterAssistantTail(t *testing.T) {
 }
 
 func TestModelCompactorTruncatesOversizedPrefixBeforeQuery(t *testing.T) {
-	model := &stubModel{response: clnkr.Response{
-		Message: clnkr.Message{Role: "assistant", Content: "summary"},
-	}}
+	model := &stubModel{summary: "summary"}
 	compactor := modelCompactor{model: model}
 	oversized := strings.Repeat("x", summarizeInputCharBudget+1)
 	messages := []clnkr.Message{

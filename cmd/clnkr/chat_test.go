@@ -1,16 +1,30 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
 	clnkr "github.com/clnkr-ai/clnkr"
-	"github.com/clnkr-ai/clnkr/transcript"
 )
 
-func chatActJSON(command string) string {
-	return fmt.Sprintf(`{"type":"act","bash":{"commands":[{"command":%q,"workdir":null}]}}`, command)
+var commandTranscriptEscaper = strings.NewReplacer("[", "&#91;", "]", "&#93;")
+
+func formatCommandTranscriptForTest(command string, exitCode int, stdout, stderr string, feedback clnkr.CommandFeedback) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[command]\n%s\n[/command]\n", commandTranscriptEscaper.Replace(command))
+	fmt.Fprintf(&b, "[exit_code]\n%d\n[/exit_code]\n", exitCode)
+	fmt.Fprintf(&b, "[stdout]\n%s\n[/stdout]\n", commandTranscriptEscaper.Replace(stdout))
+	fmt.Fprintf(&b, "[stderr]\n%s\n[/stderr]", commandTranscriptEscaper.Replace(stderr))
+	if len(feedback.ChangedFiles) > 0 || feedback.Diff != "" {
+		body, err := json.Marshal(feedback)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Fprintf(&b, "\n[command_feedback]\n%s\n[/command_feedback]", commandTranscriptEscaper.Replace(string(body)))
+	}
+	return b.String()
 }
 
 func TestChatAppendEventResponse(t *testing.T) {
@@ -18,7 +32,7 @@ func TestChatAppendEventResponse(t *testing.T) {
 	c := newChatModel(80, 24, s, false)
 
 	c.appendEvent(clnkr.EventResponse{
-		Message: clnkr.Message{Role: "assistant", Content: "hello world"},
+		Turn: &clnkr.DoneTurn{Summary: "hello world"},
 	})
 
 	content := c.content.String()
@@ -32,7 +46,7 @@ func TestChatSuppressesStructuredActResponse(t *testing.T) {
 	c := newChatModel(80, 24, s, false)
 
 	c.appendEvent(clnkr.EventResponse{
-		Message: clnkr.Message{Role: "assistant", Content: chatActJSON("ls -la")},
+		Turn: &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: []clnkr.BashAction{{Command: "ls -la"}}}},
 	})
 
 	content := c.content.String()
@@ -49,7 +63,7 @@ func TestChatSuppressesStructuredClarifyResponseInLiveStream(t *testing.T) {
 	c := newChatModel(80, 24, s, false)
 
 	c.appendEvent(clnkr.EventResponse{
-		Message: clnkr.Message{Role: "assistant", Content: `{"type":"clarify","question":"Which interface?"}`},
+		Turn: &clnkr.ClarifyTurn{Question: "Which interface?"},
 	})
 
 	content := c.content.String()
@@ -66,7 +80,7 @@ func TestChatRendersDoneSummaryFromStructuredResponse(t *testing.T) {
 	c := newChatModel(80, 24, s, false)
 
 	c.appendEvent(clnkr.EventResponse{
-		Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"All set."}`},
+		Turn: &clnkr.DoneTurn{Summary: "All set."},
 	})
 
 	content := c.content.String()
@@ -75,6 +89,54 @@ func TestChatRendersDoneSummaryFromStructuredResponse(t *testing.T) {
 	}
 	if !strings.Contains(content, "All set.") {
 		t.Fatalf("content should render done summary, got: %q", content)
+	}
+}
+
+func TestReplayIgnoresDebugRawText(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.hydrateHistory([]clnkr.Message{
+		{Role: "assistant", Content: `{"type":"done","summary":"Saved transcript"}`},
+	})
+	c.appendEvent(clnkr.EventResponse{
+		Turn: &clnkr.DoneTurn{Summary: "Latest summary"},
+		Raw:  `{"turn":{"type":"done","summary":"debug raw"}}`,
+	})
+
+	content := c.content.String()
+	if !strings.Contains(content, "Saved transcript") {
+		t.Fatalf("content should include replayed transcript, got %q", content)
+	}
+	if !strings.Contains(content, "Latest summary") {
+		t.Fatalf("content should include typed event summary, got %q", content)
+	}
+	if strings.Contains(content, "debug raw") {
+		t.Fatalf("content should ignore debug raw text, got %q", content)
+	}
+}
+
+func TestReplayHydratesCanonicalTranscript(t *testing.T) {
+	s := defaultStyles(true)
+	c := newChatModel(80, 24, s, false)
+
+	c.hydrateHistory([]clnkr.Message{
+		{Role: "assistant", Content: `{"type":"done","summary":"Saved transcript"}`},
+		{Role: "assistant", Content: `{"type":"clarify","question":"Which repo?"}`},
+	})
+
+	content := c.content.String()
+	if !strings.Contains(content, "Saved transcript") {
+		t.Fatalf("content should include done summary, got %q", content)
+	}
+	if !strings.Contains(content, "Which repo?") {
+		t.Fatalf("content should include clarify question, got %q", content)
+	}
+	if strings.Contains(content, `"type":"done"`) {
+		t.Fatalf("content should not render raw done JSON, got %q", content)
+	}
+	if strings.Contains(content, `"type":"clarify"`) {
+		t.Fatalf("content should not render raw clarify JSON, got %q", content)
 	}
 }
 
@@ -174,12 +236,13 @@ func TestChatViewportWrapsLongLines(t *testing.T) {
 }
 
 func TestParseCommandTranscriptPreservesLiteralBodyText(t *testing.T) {
-	content := transcript.FormatCommandResult(transcript.CommandResult{
-		Command:  "printf 'a&b <c> [d]'",
-		ExitCode: 7,
-		Stdout:   "one [stdout]\ntwo & < >\n[/stdout]\n",
-		Stderr:   "[stderr]\nerr & < >\n[/stderr]\n",
-	})
+	content := formatCommandTranscriptForTest(
+		"printf 'a&b <c> [d]'",
+		7,
+		"one [stdout]\ntwo & < >\n[/stdout]\n",
+		"[stderr]\nerr & < >\n[/stderr]\n",
+		clnkr.CommandFeedback{},
+	)
 
 	got, ok := parseCommandTranscript(content)
 	if !ok {
@@ -200,13 +263,9 @@ func TestParseCommandTranscriptPreservesLiteralBodyText(t *testing.T) {
 }
 
 func TestParseCommandTranscriptParsesFeedback(t *testing.T) {
-	content := transcript.FormatCommandResult(transcript.CommandResult{
-		Command:  "printf hi",
-		ExitCode: 0,
-		Feedback: transcript.CommandFeedback{
-			ChangedFiles: []string{"note.txt"},
-			Diff:         "@@ -1 +1 @@\n+[/command_feedback]\n",
-		},
+	content := formatCommandTranscriptForTest("printf hi", 0, "", "", clnkr.CommandFeedback{
+		ChangedFiles: []string{"note.txt"},
+		Diff:         "@@ -1 +1 @@\n+[/command_feedback]\n",
 	})
 
 	got, ok := parseCommandTranscript(content)
@@ -439,7 +498,7 @@ func TestChatAppendEventResponseAddsReasoningBreadcrumbWhenEnabled(t *testing.T)
 	c.reasoningKeyHint = "Ctrl+Y"
 
 	c.appendEvent(clnkr.EventResponse{
-		Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"Finished.","reasoning":"checked the parser path first"}`},
+		Turn: &clnkr.DoneTurn{Summary: "Finished.", Reasoning: "checked the parser path first"},
 	})
 
 	content := c.content.String()
@@ -458,7 +517,7 @@ func TestChatAppendEventResponseOmitsReasoningBreadcrumbWhenReasoningEmpty(t *te
 	c.reasoningKeyHint = "Ctrl+Y"
 
 	c.appendEvent(clnkr.EventResponse{
-		Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"Finished.","reasoning":""}`},
+		Turn: &clnkr.DoneTurn{Summary: "Finished."},
 	})
 
 	content := c.content.String()
@@ -474,7 +533,7 @@ func TestChatAppendEventResponseDoesNotAddReasoningBreadcrumbWhenDisabled(t *tes
 	c.reasoningKeyHint = "Ctrl+Y"
 
 	c.appendEvent(clnkr.EventResponse{
-		Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"Finished.","reasoning":"checked the parser path first"}`},
+		Turn: &clnkr.DoneTurn{Summary: "Finished.", Reasoning: "checked the parser path first"},
 	})
 
 	content := c.content.String()

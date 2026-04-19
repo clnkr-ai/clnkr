@@ -9,7 +9,11 @@ import (
 
 type Factory func(instructions string) clnkr.Compactor
 
-type ModelFactory func(instructions string) clnkr.Model
+type FreeformModel interface {
+	QueryText(ctx context.Context, messages []clnkr.Message) (string, error)
+}
+
+type ModelFactory func(instructions string) FreeformModel
 
 func NewFactory(makeModel ModelFactory) Factory {
 	return func(instructions string) clnkr.Compactor {
@@ -18,7 +22,7 @@ func NewFactory(makeModel ModelFactory) Factory {
 }
 
 type modelCompactor struct {
-	model clnkr.Model
+	model FreeformModel
 }
 
 const (
@@ -30,11 +34,11 @@ const (
 func (m modelCompactor) Summarize(ctx context.Context, messages []clnkr.Message) (string, error) {
 	queryMessages := buildSummarizeMessages(messages)
 
-	resp, err := m.model.Query(ctx, queryMessages)
+	summary, err := m.model.QueryText(ctx, queryMessages)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(resp.Message.Content), nil
+	return strings.TrimSpace(summary), nil
 }
 
 func buildSummarizeMessages(messages []clnkr.Message) []clnkr.Message {

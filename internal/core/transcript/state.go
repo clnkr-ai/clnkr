@@ -3,7 +3,6 @@ package transcript
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 type state struct {
@@ -40,13 +39,8 @@ func ExtractLatestCwd(messages []Message) (string, bool) {
 
 // ExtractStateCwd parses a single transcript state block.
 func ExtractStateCwd(content string) (string, bool) {
-	content = strings.TrimSpace(content)
-	if !strings.HasPrefix(content, "[state]") || !strings.HasSuffix(content, "[/state]") {
-		return "", false
-	}
-	body := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(content, "[state]"), "[/state]"))
 	var parsed state
-	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+	if !extractTaggedJSONObject(content, "[state]", "[/state]", &parsed) {
 		return "", false
 	}
 	if parsed.Source != "clnkr" || parsed.Kind != "state" || parsed.Cwd == "" {

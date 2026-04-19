@@ -54,7 +54,11 @@ func writeEventLog(f *os.File, e clnkr.Event) {
 	var je jsonEvent
 	switch ev := e.(type) {
 	case clnkr.EventResponse:
-		je = jsonEvent{Type: "response", Payload: ev}
+		payload, ok := responseEventPayload(ev)
+		if !ok {
+			return
+		}
+		je = jsonEvent{Type: "response", Payload: payload}
 	case clnkr.EventCommandStart:
 		je = jsonEvent{Type: "command_start", Payload: ev}
 	case clnkr.EventCommandDone:
@@ -81,6 +85,22 @@ func writeEventLog(f *os.File, e clnkr.Event) {
 		return
 	}
 	_, _ = fmt.Fprintf(f, "%s\n", data)
+}
+
+func responseEventPayload(ev clnkr.EventResponse) (any, bool) {
+	canonical, err := clnkr.CanonicalTurnJSON(ev.Turn)
+	if err != nil {
+		return nil, false
+	}
+	return struct {
+		Turn  json.RawMessage `json:"turn"`
+		Usage clnkr.Usage     `json:"usage"`
+		Raw   string          `json:"raw,omitempty"`
+	}{
+		Turn:  json.RawMessage(canonical),
+		Usage: ev.Usage,
+		Raw:   ev.Raw,
+	}, true
 }
 
 func errString(err error) string {

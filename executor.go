@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/clnkr-ai/clnkr/feedback"
-	"github.com/clnkr-ai/clnkr/shellstate"
+	"github.com/clnkr-ai/clnkr/internal/core/shellstate"
 	"os"
 	"os/exec"
 	"syscall"

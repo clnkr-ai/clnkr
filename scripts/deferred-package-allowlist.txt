@@ -1,0 +1,5 @@
+# Transitional import allowlist for explicitly deferred top-level helper packages.
+# Format: <target package> <allowed importer package>
+github.com/clnkr-ai/clnkr/compaction github.com/clnkr-ai/clnkr/cmd/clnku
+github.com/clnkr-ai/clnkr/compaction github.com/clnkr-ai/clnkr/cmd/clnkr
+github.com/clnkr-ai/clnkr/feedback github.com/clnkr-ai/clnkr

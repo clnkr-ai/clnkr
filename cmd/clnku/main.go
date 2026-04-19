@@ -14,10 +14,10 @@ import (
 	"unicode"
 
 	"github.com/clnkr-ai/clnkr"
-	"github.com/clnkr-ai/clnkr/anthropic"
+	"github.com/clnkr-ai/clnkr/cmd/internal/session"
 	"github.com/clnkr-ai/clnkr/compaction"
-	"github.com/clnkr-ai/clnkr/openai"
-	"github.com/clnkr-ai/clnkr/session"
+	"github.com/clnkr-ai/clnkr/internal/providers/anthropic"
+	"github.com/clnkr-ai/clnkr/internal/providers/openai"
 )
 
 // version is set at build time via -ldflags.
@@ -225,7 +225,7 @@ func parseCompactCommand(input string) (instructions string, ok bool) {
 }
 
 func makeCompactorFactory(baseURL, apiKey, modelName string) compaction.Factory {
-	return compaction.NewFactory(func(instructions string) clnkr.Model {
+	return compaction.NewFactory(func(instructions string) compaction.FreeformModel {
 		systemPrompt := compaction.LoadCompactionPrompt(instructions)
 		if strings.Contains(baseURL, "anthropic.com") {
 			return anthropic.NewModel(baseURL, apiKey, modelName, systemPrompt)
@@ -525,7 +525,9 @@ func main() {
 	agent.Notify = func(e clnkr.Event) {
 		switch e := e.(type) {
 		case clnkr.EventResponse:
-			fmt.Fprintln(os.Stdout, e.Message.Content) //nolint:errcheck
+			if text, err := clnkr.CanonicalTurnJSON(e.Turn); err == nil {
+				fmt.Fprintln(os.Stdout, text) //nolint:errcheck
+			}
 		case clnkr.EventCommandStart:
 			fmt.Fprintf(os.Stdout, "--- running: %s ---\n", summarizeCommand(e.Command)) //nolint:errcheck
 		case clnkr.EventCommandDone:
@@ -693,7 +695,11 @@ func writeEventLog(f *os.File, e clnkr.Event) {
 	var je jsonEvent
 	switch e := e.(type) {
 	case clnkr.EventResponse:
-		je = jsonEvent{Type: "response", Payload: e}
+		payload, ok := responseEventPayload(e)
+		if !ok {
+			return
+		}
+		je = jsonEvent{Type: "response", Payload: payload}
 	case clnkr.EventCommandStart:
 		je = jsonEvent{Type: "command_start", Payload: e}
 	case clnkr.EventCommandDone:
@@ -721,6 +727,22 @@ func writeEventLog(f *os.File, e clnkr.Event) {
 	}
 	data = append(data, '\n')
 	f.Write(data) //nolint:errcheck
+}
+
+func responseEventPayload(ev clnkr.EventResponse) (any, bool) {
+	canonical, err := clnkr.CanonicalTurnJSON(ev.Turn)
+	if err != nil {
+		return nil, false
+	}
+	return struct {
+		Turn  json.RawMessage `json:"turn"`
+		Usage clnkr.Usage     `json:"usage"`
+		Raw   string          `json:"raw,omitempty"`
+	}{
+		Turn:  json.RawMessage(canonical),
+		Usage: ev.Usage,
+		Raw:   ev.Raw,
+	}, true
 }
 
 func errString(err error) string {

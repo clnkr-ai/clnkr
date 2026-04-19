@@ -13,7 +13,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	clnkr "github.com/clnkr-ai/clnkr"
-	"github.com/clnkr-ai/clnkr/delegate"
 )
 
 func setupModel() model {
@@ -51,8 +50,8 @@ func TestModelHandlesEventResponse(t *testing.T) {
 	m = updateModel(t, m, eventMsg{event: clnkr.EventDebug{Message: "querying model..."}})
 
 	msg := eventMsg{event: clnkr.EventResponse{
-		Message: clnkr.Message{Role: "assistant", Content: "full response"},
-		Usage:   clnkr.Usage{InputTokens: 100, OutputTokens: 50},
+		Turn:  &clnkr.DoneTurn{Summary: "full response"},
+		Usage: clnkr.Usage{InputTokens: 100, OutputTokens: 50},
 	}}
 	um := updateModel(t, m, msg)
 
@@ -374,8 +373,8 @@ func TestModelTerminalBlurDoesNotChangeAppFocusMode(t *testing.T) {
 func TestModelEventResponseUpdatesStatus(t *testing.T) {
 	m := setupModel()
 	m = updateModel(t, m, eventMsg{event: clnkr.EventResponse{
-		Message: clnkr.Message{Role: "assistant", Content: "hi"},
-		Usage:   clnkr.Usage{InputTokens: 500, OutputTokens: 200},
+		Turn:  &clnkr.DoneTurn{Summary: "hi"},
+		Usage: clnkr.Usage{InputTokens: 500, OutputTokens: 200},
 	}})
 
 	if m.status.inputTokens != 500 {
@@ -707,7 +706,7 @@ func TestModelExecuteDoneCountsBatchCommands(t *testing.T) {
 	m.pendingAct = actTurn("echo hi")
 	m.runCtx = context.Background()
 	m.shared.agent = clnkr.NewAgent(&fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"step limit summary"}`}},
+		mustResponse(`{"type":"done","summary":"step limit summary"}`),
 	}}, &fakeExecutor{}, "/tmp")
 	m.shared.agent.MaxSteps = 2
 
@@ -832,7 +831,7 @@ func TestModelSingleTaskDoneKeepsBridgeAliveForBufferedResponse(t *testing.T) {
 	}
 
 	updated, cmd = um.Update(eventMsg{event: clnkr.EventResponse{
-		Message: clnkr.Message{Role: "assistant", Content: "done"},
+		Turn: &clnkr.DoneTurn{Summary: "done"},
 	}})
 	if cmd == nil {
 		t.Fatal("buffered response should resubscribe to the bridge")
@@ -1266,14 +1265,14 @@ func countCompactMessages(msgs []clnkr.Message) int {
 }
 
 type stubDelegateRunner struct {
-	result  delegate.Result
+	result  delegateResult
 	err     error
-	got     []delegate.Request
+	got     []delegateRequest
 	start   chan struct{}
 	release chan struct{}
 }
 
-func (r *stubDelegateRunner) Run(_ context.Context, req delegate.Request) (delegate.Result, error) {
+func (r *stubDelegateRunner) Run(_ context.Context, req delegateRequest) (delegateResult, error) {
 	r.got = append(r.got, req)
 	if r.start != nil {
 		close(r.start)
@@ -1282,7 +1281,7 @@ func (r *stubDelegateRunner) Run(_ context.Context, req delegate.Request) (deleg
 		<-r.release
 	}
 	if r.err != nil {
-		return delegate.Result{}, r.err
+		return delegateResult{}, r.err
 	}
 	return r.result, nil
 }
@@ -1315,7 +1314,7 @@ func TestDelegateCommandInterceptsIdleInput(t *testing.T) {
 	}
 	m.shared.agent = agent
 
-	runner := &stubDelegateRunner{result: delegate.Result{Summary: "Found test patterns."}}
+	runner := &stubDelegateRunner{result: delegateResult{Summary: "Found test patterns."}}
 	m.shared.delegateRunner = runner
 	m.input.textarea.SetValue("/delegate inspect compaction tests")
 
@@ -1351,7 +1350,7 @@ func TestDelegateCommandAppendsHostFeedbackAndArtifact(t *testing.T) {
 		t.Fatalf("seed messages: %v", err)
 	}
 	m.shared.agent = agent
-	m.shared.delegateRunner = &stubDelegateRunner{result: delegate.Result{Summary: "Found test patterns."}}
+	m.shared.delegateRunner = &stubDelegateRunner{result: delegateResult{Summary: "Found test patterns."}}
 	m.input.textarea.SetValue("/delegate inspect compaction tests")
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -1396,7 +1395,7 @@ func TestDelegateCommandRunsThroughAsyncCmd(t *testing.T) {
 	}
 	m.shared.agent = agent
 	runner := &stubDelegateRunner{
-		result:  delegate.Result{Summary: "Found test patterns."},
+		result:  delegateResult{Summary: "Found test patterns."},
 		start:   make(chan struct{}),
 		release: make(chan struct{}),
 	}
@@ -1451,7 +1450,7 @@ func TestDelegateCommandNotInterceptedDuringApproval(t *testing.T) {
 
 	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
 	m.shared.agent = agent
-	m.shared.delegateRunner = &stubDelegateRunner{result: delegate.Result{Summary: "should not run"}}
+	m.shared.delegateRunner = &stubDelegateRunner{result: delegateResult{Summary: "should not run"}}
 	m.input.textarea.SetValue("/delegate inspect compaction tests")
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -1479,7 +1478,7 @@ func TestDelegateCommandNotInterceptedDuringClarification(t *testing.T) {
 
 	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
 	m.shared.agent = agent
-	m.shared.delegateRunner = &stubDelegateRunner{result: delegate.Result{Summary: "should not run"}}
+	m.shared.delegateRunner = &stubDelegateRunner{result: delegateResult{Summary: "should not run"}}
 	m.input.textarea.SetValue("/delegate inspect compaction tests")
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})

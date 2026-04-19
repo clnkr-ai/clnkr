@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/clnkr-ai/clnkr"
-	"github.com/clnkr-ai/clnkr/turnschema"
 )
 
 // Model talks to the Anthropic Messages API.
@@ -44,6 +43,13 @@ type request struct {
 	OutputConfig outputConfig    `json:"output_config"`
 }
 
+type textRequest struct {
+	Model     string          `json:"model"`
+	MaxTokens int             `json:"max_tokens"`
+	System    string          `json:"system,omitempty"`
+	Messages  []clnkr.Message `json:"messages"`
+}
+
 type outputConfig struct {
 	Format outputFormat `json:"format"`
 }
@@ -54,37 +60,19 @@ type outputFormat struct {
 }
 
 type response struct {
-	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"content"`
-	Usage struct {
+	Content []contentBlock `json:"content"`
+	Usage   struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage"`
 }
 
+type contentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
 const maxResponseBytes = 1 << 20 // 1MB
-
-func requestSchema() map[string]any {
-	schema := turnschema.Schema()
-	stripSchemaKeyword(schema, "maxItems")
-	return schema
-}
-
-func stripSchemaKeyword(node any, key string) {
-	switch v := node.(type) {
-	case map[string]any:
-		delete(v, key)
-		for _, child := range v {
-			stripSchemaKeyword(child, key)
-		}
-	case []any:
-		for _, child := range v {
-			stripSchemaKeyword(child, key)
-		}
-	}
-}
 
 // extractErrorMessage pulls the message from an API error response body.
 // Handles both {"error":{"message":"..."}} and [{...}] array-wrapped forms.
@@ -110,7 +98,7 @@ func extractErrorMessage(body []byte) string {
 }
 
 func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
-	messages = turnschema.NormalizeMessagesForProvider(messages)
+	messages = normalizeMessagesForProvider(messages)
 	body, err := json.Marshal(request{
 		Model:     m.model,
 		MaxTokens: m.maxTokens,
@@ -127,26 +115,9 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 		return clnkr.Response{}, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", m.baseURL+"/v1/messages", bytes.NewReader(body))
+	respBody, err := m.doRequest(ctx, body)
 	if err != nil {
-		return clnkr.Response{}, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", m.apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-
-	resp, err := m.client.Do(req)
-	if err != nil {
-		return clnkr.Response{}, fmt.Errorf("send request: %w", err)
-	}
-	defer resp.Body.Close() //nolint:errcheck // best-effort cleanup
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return clnkr.Response{}, fmt.Errorf("read response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return clnkr.Response{}, fmt.Errorf("api error (status %d): %s", resp.StatusCode, extractErrorMessage(respBody))
+		return clnkr.Response{}, err
 	}
 
 	var apiResp response
@@ -154,34 +125,94 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 		return clnkr.Response{}, fmt.Errorf("unmarshal response: %w", err)
 	}
 
-	var text string
-	textBlocks := 0
-	for _, block := range apiResp.Content {
-		if block.Type == "text" {
-			textBlocks++
-			text += block.Text
-		}
-	}
+	text, textBlocks := extractTextBlocks(apiResp.Content)
 	if textBlocks != 1 {
 		return clnkr.Response{}, fmt.Errorf("structured output response: expected exactly one text block, got %d", textBlocks)
 	}
 	if strings.TrimSpace(text) == "" {
 		return clnkr.Response{}, fmt.Errorf("structured output response: empty text payload")
 	}
-	turn, err := turnschema.ParseProvider(text)
+	turn, err := parseProviderTurn(text)
 	if err != nil {
 		return clnkr.Response{
-			Message:     clnkr.Message{Role: "assistant", Content: text},
+			Raw:         text,
 			Usage:       clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens},
 			ProtocolErr: err,
 		}, nil
 	}
-	canonicalText, err := turnschema.CanonicalJSON(turn)
-	if err != nil {
+	if _, err := clnkr.CanonicalTurnJSON(turn); err != nil {
 		return clnkr.Response{}, fmt.Errorf("structured output response: canonicalize turn payload: %w", err)
 	}
 	return clnkr.Response{
-		Message: clnkr.Message{Role: "assistant", Content: canonicalText},
-		Usage:   clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens},
+		Turn:  turn,
+		Raw:   text,
+		Usage: clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens},
 	}, nil
+}
+
+func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string, error) {
+	body, err := json.Marshal(textRequest{
+		Model:     m.model,
+		MaxTokens: m.maxTokens,
+		System:    m.systemPrompt,
+		Messages:  messages,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	respBody, err := m.doRequest(ctx, body)
+	if err != nil {
+		return "", err
+	}
+
+	var apiResp response
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return "", fmt.Errorf("unmarshal response: %w", err)
+	}
+	text, textBlocks := extractTextBlocks(apiResp.Content)
+	if textBlocks == 0 {
+		return "", fmt.Errorf("free-form response: missing text block")
+	}
+	if strings.TrimSpace(text) == "" {
+		return "", fmt.Errorf("free-form response: empty text payload")
+	}
+	return text, nil
+}
+
+func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", m.baseURL+"/v1/messages", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", m.apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // best-effort cleanup
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("api error (status %d): %s", resp.StatusCode, extractErrorMessage(respBody))
+	}
+	return respBody, nil
+}
+
+func extractTextBlocks(blocks []contentBlock) (string, int) {
+	var text string
+	textBlocks := 0
+	for _, block := range blocks {
+		if block.Type == "text" {
+			textBlocks++
+			text += block.Text
+		}
+	}
+	return text, textBlocks
 }

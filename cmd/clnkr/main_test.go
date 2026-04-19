@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -15,6 +18,18 @@ import (
 
 func actJSON(command string) string {
 	return fmt.Sprintf(`{"type":"act","bash":{"commands":[{"command":%q,"workdir":null}]}}`, command)
+}
+
+func mustTurn(raw string) clnkr.Turn {
+	turn, err := clnkr.ParseTurn(raw)
+	if err != nil {
+		panic(err)
+	}
+	return turn
+}
+
+func mustResponse(raw string) clnkr.Response {
+	return clnkr.Response{Turn: mustTurn(raw), Raw: raw}
 }
 
 type fakeModel struct {
@@ -105,8 +120,8 @@ func (p *scriptPrompter) Clarify(context.Context, string) (string, error) {
 
 func TestRunPlainApprovalNonApprovalReplyBecomesGuidance(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: actJSON("rm important.txt")}},
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"okay"}`}},
+		mustResponse(actJSON("rm important.txt")),
+		mustResponse(`{"type":"done","summary":"okay"}`),
 	}}
 	executor := &fakeExecutor{}
 	agent := clnkr.NewAgent(model, executor, "/tmp")
@@ -162,7 +177,7 @@ func TestResolveModelValue(t *testing.T) {
 
 func TestRunPlainApprovalEmptyActReplyIsNoOp(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: actJSON("rm important.txt")}},
+		mustResponse(actJSON("rm important.txt")),
 	}}
 	executor := &fakeExecutor{}
 	agent := clnkr.NewAgent(model, executor, "/tmp")
@@ -179,6 +194,33 @@ func TestRunPlainApprovalEmptyActReplyIsNoOp(t *testing.T) {
 	}
 	if executor.calls != 0 {
 		t.Fatalf("empty act reply should not execute")
+	}
+}
+
+func TestMakeCompactorFactoryUsesFreeformProviderText(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"role": "assistant", "content": "Older work summarized."}},
+			},
+			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
+		})
+	}))
+	defer server.Close()
+
+	compactor := makeCompactorFactory(server.URL, "test-key", "gpt-test")("")
+	summary, err := compactor.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if summary != "Older work summarized." {
+		t.Fatalf("summary = %q, want %q", summary, "Older work summarized.")
+	}
+	if _, ok := gotBody["response_format"]; ok {
+		t.Fatalf("response_format should be omitted for compaction, got %#v", gotBody["response_format"])
 	}
 }
 

@@ -2,6 +2,7 @@ package clnkr
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -9,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/clnkr-ai/clnkr/transcript"
+	"github.com/clnkr-ai/clnkr/internal/core/transcript"
 )
 
 type fakeModel struct {
@@ -132,6 +133,51 @@ func actJSONWithReasoning(reasoning string, commands ...string) string {
 	return fmt.Sprintf(`{"type":"act","bash":{"commands":[%s]},"reasoning":%q}`, strings.Join(items, ","), reasoning)
 }
 
+func mustTurn(raw string) Turn {
+	var env struct {
+		Type string `json:"type"`
+		Bash struct {
+			Commands []struct {
+				Command string  `json:"command"`
+				Workdir *string `json:"workdir"`
+			} `json:"commands"`
+		} `json:"bash"`
+		Question  string `json:"question"`
+		Summary   string `json:"summary"`
+		Reasoning string `json:"reasoning"`
+	}
+	err := json.Unmarshal([]byte(raw), &env)
+	if err != nil {
+		panic(err)
+	}
+	switch env.Type {
+	case "act":
+		commands := make([]BashAction, 0, len(env.Bash.Commands))
+		for _, command := range env.Bash.Commands {
+			action := BashAction{Command: command.Command}
+			if command.Workdir != nil {
+				action.Workdir = *command.Workdir
+			}
+			commands = append(commands, action)
+		}
+		return &ActTurn{Bash: BashBatch{Commands: commands}, Reasoning: env.Reasoning}
+	case "clarify":
+		return &ClarifyTurn{Question: env.Question, Reasoning: env.Reasoning}
+	case "done":
+		return &DoneTurn{Summary: env.Summary, Reasoning: env.Reasoning}
+	default:
+		panic(fmt.Sprintf("unsupported test turn type %q", env.Type))
+	}
+}
+
+func mustResponse(raw string) Response {
+	return Response{Turn: mustTurn(raw), Raw: raw}
+}
+
+func mustResponseWithUsage(raw string, usage Usage) Response {
+	return Response{Turn: mustTurn(raw), Raw: raw, Usage: usage}
+}
+
 // collectEvents returns a Notify function and a pointer to the collected events slice.
 func collectEvents() (func(Event), *[]Event) {
 	var events []Event
@@ -141,7 +187,7 @@ func collectEvents() (func(Event), *[]Event) {
 func TestStep(t *testing.T) {
 	t.Run("returns act turn without executing command", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSON("ls")}},
+			mustResponse(actJSON("ls")),
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{Stdout: "file1.go\n", ExitCode: 0}}}
 
@@ -175,7 +221,7 @@ func TestStep(t *testing.T) {
 
 	t.Run("returns done turn", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Listed all files."}`}},
+			mustResponse(`{"type":"done","summary":"Listed all files."}`),
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -199,7 +245,7 @@ func TestStep(t *testing.T) {
 
 	t.Run("returns clarify turn", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"clarify","question":"Which directory should I inspect?"}`}},
+			mustResponse(`{"type":"clarify","question":"Which directory should I inspect?"}`),
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -220,7 +266,7 @@ func TestStep(t *testing.T) {
 
 	t.Run("protocol failure on non-JSON response", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: "I'm not sure what to do here."}},
+			{Raw: "I'm not sure what to do here.", ProtocolErr: fmt.Errorf("%w: no JSON object found in response", ErrInvalidJSON)},
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -244,8 +290,9 @@ func TestStep(t *testing.T) {
 	})
 
 	t.Run("protocol failure on missing command", func(t *testing.T) {
+		raw := `{"type":"act","bash":{"commands":[{"workdir":null}]}}`
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"workdir":null}]}}`}},
+			{Raw: raw, ProtocolErr: ErrMissingCommand},
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -270,7 +317,7 @@ func TestStep(t *testing.T) {
 		raw := `{"type":"done","summary":"ignored schema"}`
 		model := &fakeModel{responses: []Response{
 			{
-				Message:     Message{Role: "assistant", Content: raw},
+				Raw:         raw,
 				ProtocolErr: fmt.Errorf("%w: missing required structured output field %q", ErrInvalidJSON, "turn"),
 			},
 		}}
@@ -316,7 +363,7 @@ func TestStep(t *testing.T) {
 
 	t.Run("emits response events via Notify without command events", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSON("echo hi")}, Usage: Usage{InputTokens: 10, OutputTokens: 5}},
+			mustResponseWithUsage(actJSON("echo hi"), Usage{InputTokens: 10, OutputTokens: 5}),
 		}}
 		notify, events := collectEvents()
 
@@ -373,7 +420,7 @@ func TestStep(t *testing.T) {
 
 	t.Run("nil Notify is safe", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"All done."}`}},
+			mustResponse(`{"type":"done","summary":"All done."}`),
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -391,7 +438,7 @@ func TestStep(t *testing.T) {
 
 	t.Run("act with reasoning preserved", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSONWithReasoning("checking files", "ls")}},
+			mustResponse(actJSONWithReasoning("checking files", "ls")),
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -415,6 +462,90 @@ func TestStep(t *testing.T) {
 			t.Errorf("got reasoning %q, want %q", act.Reasoning, "checking files")
 		}
 	})
+}
+
+func TestStepStoresCanonicalAssistantSuccess(t *testing.T) {
+	raw := `{"turn":{"type":"done","summary":"wrapped summary"}}`
+	model := &fakeModel{responses: []Response{
+		{Turn: &DoneTurn{Summary: "wrapped summary"}, Raw: raw},
+	}}
+	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+	agent.AppendUserMessage("finish it")
+
+	result, err := agent.Step(context.Background())
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if got := agent.messages[len(agent.messages)-1]; got != (Message{Role: "assistant", Content: `{"type":"done","summary":"wrapped summary"}`}) {
+		t.Fatalf("assistant message = %#v", got)
+	}
+	if result.Turn == nil {
+		t.Fatal("expected typed turn")
+	}
+	if result.Response.Raw != raw {
+		t.Fatalf("response raw = %q, want %q", result.Response.Raw, raw)
+	}
+}
+
+func TestStepStoresRawInvalidProviderResponse(t *testing.T) {
+	raw := `{"turn":{"type":"done","summary":"wrapped summary"}}`
+	model := &fakeModel{responses: []Response{
+		{Raw: raw, ProtocolErr: fmt.Errorf("%w: missing required structured output field %q", ErrInvalidJSON, "turn")},
+	}}
+	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+	agent.AppendUserMessage("finish it")
+
+	result, err := agent.Step(context.Background())
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if result.Turn != nil {
+		t.Fatalf("expected nil turn, got %T", result.Turn)
+	}
+	if got := agent.messages[len(agent.messages)-2]; got != (Message{Role: "assistant", Content: raw}) {
+		t.Fatalf("assistant message = %#v, want raw provider text", got)
+	}
+	if last := agent.messages[len(agent.messages)-1]; !strings.Contains(last.Content, "[protocol_error]") {
+		t.Fatalf("last message = %q, want protocol correction", last.Content)
+	}
+}
+
+func TestEventResponseCarriesTypedTurn(t *testing.T) {
+	raw := `{"turn":{"type":"done","summary":"wrapped summary"}}`
+	model := &fakeModel{responses: []Response{
+		{Turn: &DoneTurn{Summary: "wrapped summary"}, Raw: raw, Usage: Usage{InputTokens: 9, OutputTokens: 4}},
+	}}
+	notify, events := collectEvents()
+	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+	agent.Notify = notify
+	agent.AppendUserMessage("finish it")
+
+	if _, err := agent.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	for _, e := range *events {
+		ev, ok := e.(EventResponse)
+		if !ok {
+			continue
+		}
+		done, ok := ev.Turn.(*DoneTurn)
+		if !ok {
+			t.Fatalf("EventResponse turn = %T, want *DoneTurn", ev.Turn)
+		}
+		if done.Summary != "wrapped summary" {
+			t.Fatalf("done summary = %q, want %q", done.Summary, "wrapped summary")
+		}
+		if ev.Raw != raw {
+			t.Fatalf("event raw = %q, want %q", ev.Raw, raw)
+		}
+		if ev.Usage.InputTokens != 9 || ev.Usage.OutputTokens != 4 {
+			t.Fatalf("usage = %+v, want 9/4", ev.Usage)
+		}
+		return
+	}
+
+	t.Fatal("missing EventResponse")
 }
 
 func TestExecuteTurn(t *testing.T) {
@@ -678,7 +809,7 @@ func TestFormatCommandOutputEscapesCommandMarkers(t *testing.T) {
 func TestStateMessages(t *testing.T) {
 	t.Run("Step appends cwd state before the first query", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
+			mustResponse(`{"type":"done","summary":"done"}`),
 		}}
 		agent := NewAgent(model, &fakeExecutor{}, "/repo")
 		agent.AppendUserMessage("inspect this repo")
@@ -760,8 +891,8 @@ func TestMessages(t *testing.T) {
 func TestAgentPersistsShellStateBetweenCommands(t *testing.T) {
 	t.Run("persists export to future commands", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSON(`export NANOCHAT_BASE_DIR=/tmp/runtime && echo ok`)}},
-			{Message: Message{Role: "assistant", Content: actJSON(`printf %s "$NANOCHAT_BASE_DIR"`)}},
+			mustResponse(actJSON(`export NANOCHAT_BASE_DIR=/tmp/runtime && echo ok`)),
+			mustResponse(actJSON(`printf %s "$NANOCHAT_BASE_DIR"`)),
 		}}
 		executor := &fakeExecutor{results: []CommandResult{
 			{Stdout: "ok\n", ExitCode: 0, PostEnv: map[string]string{"NANOCHAT_BASE_DIR": "/tmp/runtime"}},
@@ -783,10 +914,10 @@ func TestAgentPersistsShellStateBetweenCommands(t *testing.T) {
 
 	t.Run("preserves env snapshots across stateful commands and unsets", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSON("export CLNKR_CHAIN_ONE=one")}},
-			{Message: Message{Role: "assistant", Content: actJSON("export CLNKR_CHAIN_TWO=two")}},
-			{Message: Message{Role: "assistant", Content: actJSON("unset CLNKR_CHAIN_ONE")}},
-			{Message: Message{Role: "assistant", Content: actJSON(`printf %s "$CLNKR_CHAIN_TWO"`)}},
+			mustResponse(actJSON("export CLNKR_CHAIN_ONE=one")),
+			mustResponse(actJSON("export CLNKR_CHAIN_TWO=two")),
+			mustResponse(actJSON("unset CLNKR_CHAIN_ONE")),
+			mustResponse(actJSON(`printf %s "$CLNKR_CHAIN_TWO"`)),
 		}}
 		executor := &fakeExecutor{results: []CommandResult{
 			{Stdout: "ok\n", ExitCode: 0, PostEnv: map[string]string{"CLNKR_CHAIN_ONE": "one"}},
@@ -826,8 +957,8 @@ func TestAgentPersistsShellStateBetweenCommands(t *testing.T) {
 			t.Fatalf("mkdir: %v", err)
 		}
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSON(fmt.Sprintf("cd %s && pwd", next))}},
-			{Message: Message{Role: "assistant", Content: actJSON("pwd")}},
+			mustResponse(actJSON(fmt.Sprintf("cd %s && pwd", next))),
+			mustResponse(actJSON("pwd")),
 		}}
 		executor := &fakeExecutor{results: []CommandResult{
 			{Stdout: next + "\n", ExitCode: 0, PostCwd: next},
@@ -928,7 +1059,7 @@ func TestAddMessages(t *testing.T) {
 
 	t.Run("restores cwd from the latest state block", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSON("pwd")}},
+			mustResponse(actJSON("pwd")),
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{Stdout: "/restored\n", ExitCode: 0}}}
 		agent := NewAgent(model, executor, "/wrong")
@@ -954,7 +1085,7 @@ func TestAddMessages(t *testing.T) {
 
 	t.Run("ignores non-clnkr state blocks", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSON("pwd")}},
+			mustResponse(actJSON("pwd")),
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{Stdout: "/wrong\n", ExitCode: 0}}}
 		agent := NewAgent(model, executor, "/original")
@@ -978,7 +1109,7 @@ func TestAddMessages(t *testing.T) {
 
 	t.Run("returns error after Step", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"All done."}`}},
+			mustResponse(`{"type":"done","summary":"All done."}`),
 		}}
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
 		agent.AppendUserMessage("hi")
@@ -1297,7 +1428,7 @@ func TestRequestStepLimitSummary(t *testing.T) {
 		raw := `{"type":"done","summary":"ignored schema"}`
 		model := &fakeModel{responses: []Response{
 			{
-				Message:     Message{Role: "assistant", Content: raw},
+				Raw:         raw,
 				ProtocolErr: fmt.Errorf("%w: missing required structured output field %q", ErrInvalidJSON, "turn"),
 			},
 		}}
@@ -1341,11 +1472,45 @@ func TestRequestStepLimitSummary(t *testing.T) {
 	})
 }
 
+func TestFinalSummaryUsesCanonicalTranscript(t *testing.T) {
+	raw := `{"turn":{"type":"done","summary":"wrapped summary"}}`
+	model := &fakeModel{responses: []Response{
+		{Turn: &DoneTurn{Summary: "wrapped summary"}, Raw: raw},
+	}}
+
+	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+	agent.messages = append(agent.messages, Message{Role: "user", Content: "do it"})
+
+	if err := agent.RequestStepLimitSummary(context.Background()); err != nil {
+		t.Fatalf("RequestStepLimitSummary: %v", err)
+	}
+
+	want, err := CanonicalTurnJSON(&DoneTurn{Summary: "wrapped summary"})
+	if err != nil {
+		t.Fatalf("CanonicalTurnJSON: %v", err)
+	}
+	got := agent.messages[len(agent.messages)-1].Content
+	if got != want {
+		t.Fatalf("final assistant message = %q, want %q", got, want)
+	}
+	if got == raw {
+		t.Fatalf("final assistant message should not preserve provider wrapper: %q", got)
+	}
+	turn := mustTurn(got)
+	done, ok := turn.(*DoneTurn)
+	if !ok {
+		t.Fatalf("final turn = %T, want *DoneTurn", turn)
+	}
+	if done.Summary != "wrapped summary" {
+		t.Fatalf("done summary = %q, want %q", done.Summary, "wrapped summary")
+	}
+}
+
 func TestAgent(t *testing.T) {
 	t.Run("single step then exit", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSON("ls")}},
-			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Listed files."}`}},
+			mustResponse(actJSON("ls")),
+			mustResponse(`{"type":"done","summary":"Listed files."}`),
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{Stdout: "file1.go\n", ExitCode: 0}}}
 
@@ -1364,7 +1529,7 @@ func TestAgent(t *testing.T) {
 
 	t.Run("returns after clarification request", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"clarify","question":"Which repo should I inspect?"}`}},
+			mustResponse(`{"type":"clarify","question":"Which repo should I inspect?"}`),
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -1390,9 +1555,9 @@ func TestAgent(t *testing.T) {
 	t.Run("respects max steps", func(t *testing.T) {
 		responses := make([]Response, 12)
 		for i := 0; i < 10; i++ {
-			responses[i] = Response{Message: Message{Role: "assistant", Content: actJSON("echo step")}}
+			responses[i] = mustResponse(actJSON("echo step"))
 		}
-		responses[10] = Response{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Step limit reached."}`}}
+		responses[10] = mustResponse(`{"type":"done","summary":"Step limit reached."}`)
 
 		model := &fakeModel{responses: responses}
 		results := make([]CommandResult, 10)
@@ -1414,7 +1579,7 @@ func TestAgent(t *testing.T) {
 
 	t.Run("default max steps is 100", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
+			mustResponse(`{"type":"done","summary":"Done."}`),
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -1431,9 +1596,9 @@ func TestAgent(t *testing.T) {
 		}
 
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSON(fmt.Sprintf("cd %s", subDir))}},
-			{Message: Message{Role: "assistant", Content: actJSON("ls")}},
-			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
+			mustResponse(actJSON(fmt.Sprintf("cd %s", subDir))),
+			mustResponse(actJSON("ls")),
+			mustResponse(`{"type":"done","summary":"Done."}`),
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{ExitCode: 0, PostCwd: subDir}, {Stdout: "files", ExitCode: 0}}}
 
@@ -1451,9 +1616,9 @@ func TestAgent(t *testing.T) {
 		startDir := t.TempDir()
 		nonexistent := filepath.Join(t.TempDir(), "does-not-exist")
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSON(fmt.Sprintf("cd %s", nonexistent))}},
-			{Message: Message{Role: "assistant", Content: actJSON("ls")}},
-			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
+			mustResponse(actJSON(fmt.Sprintf("cd %s", nonexistent))),
+			mustResponse(actJSON("ls")),
+			mustResponse(`{"type":"done","summary":"Done."}`),
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{ExitCode: 0}, {Stdout: "files", ExitCode: 0}}}
 
@@ -1469,8 +1634,8 @@ func TestAgent(t *testing.T) {
 
 	t.Run("protocol error then recovery", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: "I'll just explain what to do..."}},
-			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
+			{Raw: "I'll just explain what to do...", ProtocolErr: fmt.Errorf("%w: no JSON object found in response", ErrInvalidJSON)},
+			mustResponse(`{"type":"done","summary":"Done."}`),
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -1496,10 +1661,10 @@ func TestAgent(t *testing.T) {
 		raw := `{"type":"done","summary":"ignored schema"}`
 		model := &fakeModel{responses: []Response{
 			{
-				Message:     Message{Role: "assistant", Content: raw},
+				Raw:         raw,
 				ProtocolErr: fmt.Errorf("%w: missing required structured output field %q", ErrInvalidJSON, "turn"),
 			},
-			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
+			mustResponse(`{"type":"done","summary":"Done."}`),
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -1525,10 +1690,10 @@ func TestAgent(t *testing.T) {
 			`{"turn":{"type":"done","bash":null,"question":null,"summary":"Done.","reasoning":null}}`
 		model := &fakeModel{responses: []Response{
 			{
-				Message:     Message{Role: "assistant", Content: raw},
+				Raw:         raw,
 				ProtocolErr: fmt.Errorf("%w: unexpected trailing JSON value", ErrInvalidJSON),
 			},
-			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
+			mustResponse(`{"type":"done","summary":"Done."}`),
 		}}
 		executor := &fakeExecutor{}
 
@@ -1570,9 +1735,9 @@ func TestAgent(t *testing.T) {
 
 	t.Run("exits on consecutive protocol errors", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: "no json 1"}},
-			{Message: Message{Role: "assistant", Content: "no json 2"}},
-			{Message: Message{Role: "assistant", Content: "no json 3"}},
+			{Raw: "no json 1", ProtocolErr: fmt.Errorf("%w: no JSON object found in response", ErrInvalidJSON)},
+			{Raw: "no json 2", ProtocolErr: fmt.Errorf("%w: no JSON object found in response", ErrInvalidJSON)},
+			{Raw: "no json 3", ProtocolErr: fmt.Errorf("%w: no JSON object found in response", ErrInvalidJSON)},
 		}}
 
 		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -1589,15 +1754,15 @@ func TestAgent(t *testing.T) {
 		raw := `{"type":"done","summary":"ignored schema"}`
 		model := &fakeModel{responses: []Response{
 			{
-				Message:     Message{Role: "assistant", Content: raw},
+				Raw:         raw,
 				ProtocolErr: fmt.Errorf("%w: missing required structured output field %q", ErrInvalidJSON, "turn"),
 			},
 			{
-				Message:     Message{Role: "assistant", Content: raw},
+				Raw:         raw,
 				ProtocolErr: fmt.Errorf("%w: missing required structured output field %q", ErrInvalidJSON, "turn"),
 			},
 			{
-				Message:     Message{Role: "assistant", Content: raw},
+				Raw:         raw,
 				ProtocolErr: fmt.Errorf("%w: missing required structured output field %q", ErrInvalidJSON, "turn"),
 			},
 		}}
@@ -1614,8 +1779,8 @@ func TestAgent(t *testing.T) {
 
 	t.Run("emits events for output", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSON("echo hi")}, Usage: Usage{InputTokens: 10, OutputTokens: 5}},
-			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
+			mustResponseWithUsage(actJSON("echo hi"), Usage{InputTokens: 10, OutputTokens: 5}),
+			mustResponse(`{"type":"done","summary":"Done."}`),
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
 		notify, events := collectEvents()
@@ -1667,8 +1832,8 @@ func TestAgent(t *testing.T) {
 	t.Run("compound cd does not update cwd", func(t *testing.T) {
 		startDir := t.TempDir()
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSON("cd /tmp && ls")}},
-			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
+			mustResponse(actJSON("cd /tmp && ls")),
+			mustResponse(`{"type":"done","summary":"Done."}`),
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{Stdout: "stuff", ExitCode: 0}}}
 
@@ -1688,9 +1853,9 @@ func TestAgent(t *testing.T) {
 			t.Skip("cannot get home dir")
 		}
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSON("cd ~")}},
-			{Message: Message{Role: "assistant", Content: actJSON("ls")}},
-			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
+			mustResponse(actJSON("cd ~")),
+			mustResponse(actJSON("ls")),
+			mustResponse(`{"type":"done","summary":"Done."}`),
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{ExitCode: 0, PostCwd: home}, {Stdout: "files", ExitCode: 0}}}
 
@@ -1706,8 +1871,8 @@ func TestAgent(t *testing.T) {
 
 	t.Run("execution error is preserved in command payload", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSON("false")}},
-			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Done."}`}},
+			mustResponse(actJSON("false")),
+			mustResponse(`{"type":"done","summary":"Done."}`),
 		}}
 		failExecutor := &fakeExecutor{
 			results: []CommandResult{{Stderr: "nope\n", ExitCode: 1}},
@@ -1751,8 +1916,8 @@ func TestAgent(t *testing.T) {
 func TestRun(t *testing.T) {
 	t.Run("counts executed commands toward max steps", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
-			{Message: Message{Role: "assistant", Content: actJSON("echo one", "echo two")}},
-			{Message: Message{Role: "assistant", Content: `{"type":"done","summary":"Step limit reached."}`}},
+			mustResponse(actJSON("echo one", "echo two")),
+			mustResponse(`{"type":"done","summary":"Step limit reached."}`),
 		}}
 		executor := &fakeExecutor{results: []CommandResult{
 			{Stdout: "one\n", ExitCode: 0},

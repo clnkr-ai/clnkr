@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -91,8 +92,8 @@ func TestWriteEventLogAllTypes(t *testing.T) {
 		wantType string
 	}{
 		{"response", clnkr.EventResponse{
-			Message: clnkr.Message{Role: "assistant", Content: "hello"},
-			Usage:   clnkr.Usage{InputTokens: 10, OutputTokens: 5},
+			Turn:  &clnkr.DoneTurn{Summary: "hello"},
+			Usage: clnkr.Usage{InputTokens: 10, OutputTokens: 5},
 		}, `"type":"response"`},
 		{"command_start", clnkr.EventCommandStart{Command: "ls", Dir: "/tmp"}, `"type":"command_start"`},
 		{"command_done_ok", clnkr.EventCommandDone{Command: "ls", Stdout: "file.txt", ExitCode: 0, Err: nil}, `"type":"command_done"`},
@@ -127,5 +128,55 @@ func TestWriteEventLogAllTypes(t *testing.T) {
 				t.Errorf("expected JSON line ending with }, got: %s", got)
 			}
 		})
+	}
+}
+
+func TestBridgeEventLogRoundTripTypedResponse(t *testing.T) {
+	f, err := os.CreateTemp("", "eventlog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name()) //nolint:errcheck
+	defer f.Close()           //nolint:errcheck
+
+	writeEventLog(f, clnkr.EventResponse{
+		Turn:  &clnkr.DoneTurn{Summary: "typed summary"},
+		Usage: clnkr.Usage{InputTokens: 12, OutputTokens: 7},
+		Raw:   `{"turn":{"type":"done","summary":"provider raw"}}`,
+	})
+
+	if _, err := f.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	var line struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Turn  json.RawMessage `json:"turn"`
+			Usage clnkr.Usage     `json:"usage"`
+			Raw   string          `json:"raw"`
+		} `json:"payload"`
+	}
+	if err := json.NewDecoder(f).Decode(&line); err != nil {
+		t.Fatalf("decode event log: %v", err)
+	}
+	if line.Type != "response" {
+		t.Fatalf("type = %q, want response", line.Type)
+	}
+	turn, err := clnkr.ParseTurn(string(line.Payload.Turn))
+	if err != nil {
+		t.Fatalf("ParseTurn(payload.turn): %v", err)
+	}
+	done, ok := turn.(*clnkr.DoneTurn)
+	if !ok {
+		t.Fatalf("payload turn = %T, want *DoneTurn", turn)
+	}
+	if done.Summary != "typed summary" {
+		t.Fatalf("summary = %q, want %q", done.Summary, "typed summary")
+	}
+	if line.Payload.Usage.InputTokens != 12 || line.Payload.Usage.OutputTokens != 7 {
+		t.Fatalf("usage = %+v, want 12/7", line.Payload.Usage)
+	}
+	if line.Payload.Raw != `{"turn":{"type":"done","summary":"provider raw"}}` {
+		t.Fatalf("raw = %q", line.Payload.Raw)
 	}
 }

@@ -10,8 +10,7 @@ import (
 	"testing"
 
 	"github.com/clnkr-ai/clnkr"
-	"github.com/clnkr-ai/clnkr/openai"
-	"github.com/clnkr-ai/clnkr/turnschema"
+	"github.com/clnkr-ai/clnkr/internal/providers/openai"
 )
 
 func TestModel(t *testing.T) {
@@ -54,16 +53,59 @@ func TestModel(t *testing.T) {
 		if jsonSchema["strict"] != true {
 			t.Fatalf("response_format.json_schema.strict = %v, want true", jsonSchema["strict"])
 		}
-		gotSchemaJSON, err := json.Marshal(jsonSchema["schema"])
-		if err != nil {
-			t.Fatalf("marshal got schema: %v", err)
+		schema, ok := jsonSchema["schema"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("response_format.json_schema.schema = %T, want map[string]interface{}", jsonSchema["schema"])
 		}
-		wantSchemaJSON, err := json.Marshal(turnschema.Schema())
-		if err != nil {
-			t.Fatalf("marshal want schema: %v", err)
+		if schemaContainsKey(schema, "maxItems") != true {
+			t.Fatal("response_format.json_schema.schema should include maxItems")
 		}
-		if string(gotSchemaJSON) != string(wantSchemaJSON) {
-			t.Fatalf("schema mismatch\n got: %s\nwant: %s", gotSchemaJSON, wantSchemaJSON)
+		if !schemaContainsKey(schema, "minItems") {
+			t.Fatal("response_format.json_schema.schema unexpectedly omits minItems")
+		}
+		assertSchemaShape(t, schema)
+	})
+
+	t.Run("QueryText returns plain text without response format", func(t *testing.T) {
+		var gotBody map[string]any
+		history := []clnkr.Message{
+			{Role: "user", Content: "first task"},
+			{Role: "assistant", Content: `{"type":"done","summary":"canonical transcript"}`},
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &gotBody)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"message": map[string]string{"role": "assistant", "content": "Older work summarized."}},
+				},
+				"usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 20},
+			})
+		}))
+		defer server.Close()
+
+		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys prompt")
+		summary, err := m.QueryText(context.Background(), history)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if summary != "Older work summarized." {
+			t.Fatalf("summary = %q, want %q", summary, "Older work summarized.")
+		}
+		if _, ok := gotBody["response_format"]; ok {
+			t.Fatalf("response_format should be omitted for QueryText, got %#v", gotBody["response_format"])
+		}
+		msgs, ok := gotBody["messages"].([]any)
+		if !ok || len(msgs) != len(history)+1 {
+			t.Fatalf("messages = %#v, want system plus %d transcript messages", gotBody["messages"], len(history))
+		}
+		last, ok := msgs[len(msgs)-1].(map[string]any)
+		if !ok {
+			t.Fatalf("last message = %#v, want map", msgs[len(msgs)-1])
+		}
+		if got, want := last["content"], `{"type":"done","summary":"canonical transcript"}`; got != want {
+			t.Fatalf("last assistant content = %#v, want %q", got, want)
 		}
 	})
 
@@ -86,8 +128,8 @@ func TestModel(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if resp.Message.Content != `{"type":"done","summary":"hello back"}` {
-			t.Errorf("got %q, want %q", resp.Message.Content, `{"type":"done","summary":"hello back"}`)
+		if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"hello back"}` {
+			t.Errorf("got %q, want %q", got, `{"type":"done","summary":"hello back"}`)
 		}
 		if resp.ProtocolErr != nil {
 			t.Fatalf("got protocol error %v, want nil", resp.ProtocolErr)
@@ -213,8 +255,8 @@ func TestModel(t *testing.T) {
 		if attempts != 2 {
 			t.Fatalf("attempt count = %d, want 2", attempts)
 		}
-		if resp.Message.Content != `{"type":"done","summary":"ok after retry"}` {
-			t.Fatalf("content = %q, want %q", resp.Message.Content, `{"type":"done","summary":"ok after retry"}`)
+		if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok after retry"}` {
+			t.Fatalf("content = %q, want %q", got, `{"type":"done","summary":"ok after retry"}`)
 		}
 	})
 
@@ -416,8 +458,8 @@ func TestModel(t *testing.T) {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
-				if resp.Message.Content != tt.content {
-					t.Fatalf("content = %q, want %q", resp.Message.Content, tt.content)
+				if resp.Raw != tt.content {
+					t.Fatalf("raw = %q, want %q", resp.Raw, tt.content)
 				}
 				if !errors.Is(resp.ProtocolErr, tt.wantErr) {
 					t.Fatalf("protocol error = %v, want %v", resp.ProtocolErr, tt.wantErr)
@@ -453,8 +495,8 @@ func TestModel(t *testing.T) {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
-				if resp.Message.Content != tt.want {
-					t.Fatalf("content = %q, want %q", resp.Message.Content, tt.want)
+				if got := mustCanonicalTurn(t, resp.Turn); got != tt.want {
+					t.Fatalf("content = %q, want %q", got, tt.want)
 				}
 				if resp.ProtocolErr != nil {
 					t.Fatalf("protocol error = %v, want nil", resp.ProtocolErr)
@@ -480,8 +522,8 @@ func TestModel(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if resp.Message.Content != raw {
-			t.Fatalf("content = %q, want %q", resp.Message.Content, raw)
+		if resp.Raw != raw {
+			t.Fatalf("raw = %q, want %q", resp.Raw, raw)
 		}
 		if !errors.Is(resp.ProtocolErr, clnkr.ErrInvalidJSON) {
 			t.Fatalf("protocol error = %v, want ErrInvalidJSON", resp.ProtocolErr)
@@ -512,4 +554,164 @@ func TestModel(t *testing.T) {
 
 func openAIWrappedDone(summary string) string {
 	return `{"turn":{"type":"done","bash":null,"question":null,"summary":"` + summary + `","reasoning":null}}`
+}
+
+func schemaContainsKey(node any, key string) bool {
+	switch v := node.(type) {
+	case map[string]interface{}:
+		if _, ok := v[key]; ok {
+			return true
+		}
+		for _, child := range v {
+			if schemaContainsKey(child, key) {
+				return true
+			}
+		}
+	case []interface{}:
+		for _, child := range v {
+			if schemaContainsKey(child, key) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func assertSchemaShape(t *testing.T, schema map[string]interface{}) {
+	t.Helper()
+
+	if got := schema["type"]; got != "object" {
+		t.Fatalf("schema type = %v, want object", got)
+	}
+	if got := schema["additionalProperties"]; got != false {
+		t.Fatalf("schema additionalProperties = %v, want false", got)
+	}
+	if got, want := schema["required"], []string{"turn"}; !sameStringSlice(got, want) {
+		t.Fatalf("schema required = %#v, want %#v", got, want)
+	}
+
+	properties, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("schema properties = %T, want map[string]interface{}", schema["properties"])
+	}
+	turnProp, ok := properties["turn"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("schema properties[turn] = %T, want map[string]interface{}", properties["turn"])
+	}
+	branches, ok := turnProp["anyOf"].([]interface{})
+	if !ok {
+		t.Fatalf("schema properties[turn].anyOf = %T, want []interface{}", turnProp["anyOf"])
+	}
+	if len(branches) != 3 {
+		t.Fatalf("len(schema properties[turn].anyOf) = %d, want 3", len(branches))
+	}
+
+	for _, turnType := range []string{"act", "clarify", "done"} {
+		branch := schemaBranchForType(t, branches, turnType)
+		if got := branch["additionalProperties"]; got != false {
+			t.Fatalf("%s branch additionalProperties = %v, want false", turnType, got)
+		}
+		if got, want := branch["required"], []string{"type", "bash", "question", "summary", "reasoning"}; !sameStringSlice(got, want) {
+			t.Fatalf("%s branch required = %#v, want %#v", turnType, got, want)
+		}
+		branchProperties, ok := branch["properties"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("%s branch properties = %T, want map[string]interface{}", turnType, branch["properties"])
+		}
+		typeProp, ok := branchProperties["type"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("%s branch properties[type] = %T, want map[string]interface{}", turnType, branchProperties["type"])
+		}
+		if got := typeProp["type"]; got != "string" {
+			t.Fatalf("%s branch properties[type].type = %v, want string", turnType, got)
+		}
+		if got := typeProp["const"]; got != turnType {
+			t.Fatalf("%s branch properties[type].const = %v, want %q", turnType, got, turnType)
+		}
+		assertNullableStringUnion(t, branchProperties["reasoning"])
+	}
+}
+
+func schemaBranchForType(t *testing.T, branches []interface{}, turnType string) map[string]interface{} {
+	t.Helper()
+
+	for _, branch := range branches {
+		branchMap, ok := branch.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		properties, ok := branchMap["properties"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		typeProp, ok := properties["type"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if typeProp["const"] == turnType {
+			return branchMap
+		}
+	}
+
+	t.Fatalf("no schema branch found for type %q", turnType)
+	return nil
+}
+
+func assertNullableStringUnion(t *testing.T, raw any) {
+	t.Helper()
+
+	prop, ok := raw.(map[string]interface{})
+	if !ok {
+		t.Fatalf("nullable property = %T, want map[string]interface{}", raw)
+	}
+	branches, ok := prop["anyOf"].([]interface{})
+	if !ok {
+		t.Fatalf("nullable property anyOf = %T, want []interface{}", prop["anyOf"])
+	}
+	if len(branches) != 2 {
+		t.Fatalf("len(nullable property anyOf) = %d, want 2", len(branches))
+	}
+
+	assertSchemaTypeBranch(t, branches, "string")
+	assertSchemaTypeBranch(t, branches, "null")
+}
+
+func assertSchemaTypeBranch(t *testing.T, branches []interface{}, wantType string) {
+	t.Helper()
+
+	for _, branch := range branches {
+		branchMap, ok := branch.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if branchMap["type"] == wantType {
+			return
+		}
+	}
+
+	t.Fatalf("missing anyOf branch with type %q", wantType)
+}
+
+func sameStringSlice(got any, want []string) bool {
+	gotSlice, ok := got.([]interface{})
+	if !ok || len(gotSlice) != len(want) {
+		return false
+	}
+	for i := range gotSlice {
+		gotString, ok := gotSlice[i].(string)
+		if !ok || gotString != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func mustCanonicalTurn(t *testing.T, turn clnkr.Turn) string {
+	t.Helper()
+	raw, err := clnkr.CanonicalTurnJSON(turn)
+	if err != nil {
+		t.Fatalf("CanonicalTurnJSON: %v", err)
+	}
+	return raw
 }

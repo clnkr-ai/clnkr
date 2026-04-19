@@ -3,11 +3,12 @@ package session_test
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/clnkr-ai/clnkr"
-	"github.com/clnkr-ai/clnkr/session"
+	"github.com/clnkr-ai/clnkr/cmd/internal/session"
 )
 
 type fakeCompactor struct {
@@ -140,6 +141,57 @@ func TestSessionIsolationBetweenProjects(t *testing.T) {
 	}
 	if m2[0].Content != "beta" {
 		t.Errorf("proj2 loaded wrong content: %q", m2[0].Content)
+	}
+}
+
+func TestContinueRestoresCanonicalAssistantTurn(t *testing.T) {
+	tmpdir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", tmpdir)
+
+	projdir := filepath.Join(tmpdir, "continue-proj")
+	doneText, err := clnkr.CanonicalTurnJSON(&clnkr.DoneTurn{Summary: "saved summary"})
+	if err != nil {
+		t.Fatalf("CanonicalTurnJSON: %v", err)
+	}
+	want := []clnkr.Message{
+		{Role: "user", Content: "first task"},
+		{Role: "assistant", Content: doneText},
+		{Role: "user", Content: stateBlock("clnkr", "/restored")},
+	}
+
+	if err := session.SaveSession(projdir, want); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	loaded, err := session.LoadLatestSession(projdir)
+	if err != nil {
+		t.Fatalf("LoadLatestSession: %v", err)
+	}
+	if !reflect.DeepEqual(loaded, want) {
+		t.Fatalf("loaded = %#v, want %#v", loaded, want)
+	}
+
+	agent := clnkr.NewAgent(nil, nil, "/wrong")
+	if err := agent.AddMessages(loaded); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+	got := agent.Messages()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("messages = %#v, want %#v", got, want)
+	}
+	turn, err := clnkr.ParseTurn(got[1].Content)
+	if err != nil {
+		t.Fatalf("ParseTurn(assistant): %v", err)
+	}
+	done, ok := turn.(*clnkr.DoneTurn)
+	if !ok {
+		t.Fatalf("assistant turn = %T, want *clnkr.DoneTurn", turn)
+	}
+	if done.Summary != "saved summary" {
+		t.Fatalf("done summary = %q, want %q", done.Summary, "saved summary")
+	}
+	if agent.Cwd() != "/restored" {
+		t.Fatalf("agent cwd = %q, want %q", agent.Cwd(), "/restored")
 	}
 }
 
