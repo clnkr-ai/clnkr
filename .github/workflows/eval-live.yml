@@ -40,7 +40,7 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
           GH_TOKEN: ${{ github.token }}
         run: |
-          version="$(sed -n 's/^CLANKERVAL_MIN_VERSION := //p' Makefile)"
+          version="$(sed -n 's/^CLANKERVAL_PINNED_VERSION := //p' Makefile)"
           arch="$(dpkg --print-architecture)"
           pattern="clankerval_${version}-*_${arch}.deb"
           gh release download "v${version}" --repo clnkr-ai/clankerval --pattern "$pattern"
@@ -132,7 +132,7 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
           GH_TOKEN: ${{ github.token }}
         run: |
-          version="$(sed -n 's/^CLANKERVAL_MIN_VERSION := //p' Makefile)"
+          version="$(sed -n 's/^CLANKERVAL_PINNED_VERSION := //p' Makefile)"
           arch="$(dpkg --print-architecture)"
           pattern="clankerval_${version}-*_${arch}.deb"
           gh release download "v${version}" --repo clnkr-ai/clankerval --pattern "$pattern"
