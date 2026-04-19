@@ -2,9 +2,9 @@
 
 This directory holds the checked-in evaluation suites for `clnku`.
 
-Execution is owned by the external `clankerval` runner. Install it separately from the packages published by the `clankerval` project.
+Execution is owned by the external `clankerval` runner. Install it from [GitHub Releases](https://github.com/clnkr-ai/clankerval/releases).
 
-The minimum supported runner version is enforced in [`Makefile`](../Makefile). Tasks now run from the repo root (`"working_directory": "."`) and verify outcomes with diff- and command-based graders instead of checked-in workspace snapshots.
+The pinned runner version is enforced in [`Makefile`](../Makefile). Tasks now run from the repo root (`"working_directory": "."`) and verify outcomes with diff- and command-based graders instead of checked-in workspace snapshots.
 
 ## Layout
 
@@ -105,7 +105,7 @@ make evaluations-live-openai
 make evaluations-live-anthropic
 ```
 
-Both make targets call `clankerval` directly after a `Makefile` preflight that checks `PATH` and the minimum supported version.
+Both make targets call `clankerval` directly after a `Makefile` preflight that requires `clankerval --version` to match the pinned version exactly.
 
 Canonical CLI examples use `clankerval` directly:
 
