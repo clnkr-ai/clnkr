@@ -5,6 +5,21 @@ HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hug
 PANDOC ?= pandoc
 CLANKERVAL_PINNED_VERSION := 0.4.3
 CLANKERVAL_DOCS_REPO_URL ?= https://github.com/clnkr-ai/clankerval.git
+CLANKERVAL_PREFLIGHT = \
+	clankerval_path="$$(command -v clankerval 2>/dev/null || true)"; \
+	if [ -z "$$clankerval_path" ]; then \
+		echo "error: expected clankerval $(CLANKERVAL_PINNED_VERSION) in PATH." >&2; \
+		exit 1; \
+	fi; \
+	if ! version_output="$$("$$clankerval_path" --version 2>&1)"; then \
+		echo "error: clankerval --version failed: $$version_output" >&2; \
+		exit 1; \
+	fi; \
+	if [ "$$version_output" != "clankerval $(CLANKERVAL_PINNED_VERSION)" ]; then \
+		echo "error: expected 'clankerval $(CLANKERVAL_PINNED_VERSION)' from 'clankerval --version', got '$$version_output'" >&2; \
+		echo "download it from https://github.com/clnkr-ai/clankerval/releases" >&2; \
+		exit 1; \
+	fi; \
 
 .DEFAULT_GOAL := build
 .PHONY: \
@@ -53,26 +68,17 @@ _build-clnkr:
 check: _fmt-check _vet _lint _arch sloc _workflow-make-targets _check-docs test evaluations ## Run formatting, vet, lint, architecture, SLOC, workflow, docs, test, and evaluation checks
 
 test: ## Run all tests
+	./scripts/test_make_evaluations.sh
 	go test ./... -v
 	cd cmd/clnkr && go test ./... -v
 
 evaluations: ## Run the mock-provider evaluation suite
-	@version_output="$$(clankerval --version 2>&1 || true)"; \
-	[ "$$version_output" = "clankerval $(CLANKERVAL_PINNED_VERSION)" ] || { \
-		echo "error: expected 'clankerval $(CLANKERVAL_PINNED_VERSION)' from 'clankerval --version', got '$$version_output'" >&2; \
-		echo "download it from https://github.com/clnkr-ai/clankerval/releases" >&2; \
-		exit 1; \
-	}; \
-	clankerval run --suite default
+	@$(CLANKERVAL_PREFLIGHT) \
+	"$$clankerval_path" run --suite default
 
 evaluations-live: ## Run the live-provider evaluation suite
-	@version_output="$$(clankerval --version 2>&1 || true)"; \
-	[ "$$version_output" = "clankerval $(CLANKERVAL_PINNED_VERSION)" ] || { \
-		echo "error: expected 'clankerval $(CLANKERVAL_PINNED_VERSION)' from 'clankerval --version', got '$$version_output'" >&2; \
-		echo "download it from https://github.com/clnkr-ai/clankerval/releases" >&2; \
-		exit 1; \
-	}; \
-	CLNKR_EVALUATION_MODE=live-provider clankerval run --suite default
+	@$(CLANKERVAL_PREFLIGHT) \
+	CLNKR_EVALUATION_MODE=live-provider "$$clankerval_path" run --suite default
 
 evaluations-live-openai: ## Run the live-provider evaluation suite against OpenAI defaults
 	@CLNKR_EVALUATION_API_KEY="$${CLNKR_EVALUATION_OPENAI_API_KEY:-$${OPENAI_API_KEY}}" \
