@@ -3,6 +3,7 @@
 ## 1.8.7 (2026-04-19)
 
 - Refactor core boundary around typed provider turns
+- Update CHANGELOG.md for 1.8.6
 
 ## 1.8.6 (2026-04-19)
 
