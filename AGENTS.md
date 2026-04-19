@@ -151,6 +151,6 @@ Workflow:
 
 GitHub Actions runs on push to `main` and PRs targeting `main`. The main `check` job runs lint, tests (with `-race`), build, and docs. A separate `evaluations` job installs the pinned external runner before running `make evaluations`.
 
-`make check` also enforces repo-local architecture edges via `_arch` and import-graph core SLOC accounting via `_sloc`. The runtime graph roots live in `scripts/core-runtime-packages.txt`; transitional deferred-package imports live in `scripts/deferred-package-allowlist.txt`.
+`make check` also enforces repo-local architecture edges via `_arch` and import-graph core SLOC accounting via `_sloc`. Transitional deferred-package imports live in `scripts/deferred-package-allowlist.txt`.
 
 **Local setup:** Run `make _hooks` to point Git at the repo-tracked `.githooks/` directory if you want the local pre-commit hook enabled. golangci-lint is required for `make check` — install with `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` or `brew install golangci-lint`.

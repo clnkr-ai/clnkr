@@ -1,2 +1,0 @@
-# Root runtime entry packages for honest core-loop SLOC accounting.
-github.com/clnkr-ai/clnkr

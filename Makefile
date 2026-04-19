@@ -15,7 +15,6 @@ CLANKERVAL_PINNED_VERSION := 0.4.3
 
 PREFIX ?= /usr/local
 CORE_SLOC_LIMIT := 1300
-CORE_RUNTIME_MANIFEST := scripts/core-runtime-packages.txt
 DEFERRED_PACKAGE_ALLOWLIST := scripts/deferred-package-allowlist.txt
 
 ##@ Build
@@ -101,7 +100,7 @@ _arch:
 	@./scripts/check-architecture-imports.py $(DEFERRED_PACKAGE_ALLOWLIST)
 
 _sloc:
-	@CORE_SLOC_LIMIT=$(CORE_SLOC_LIMIT) ./scripts/check-core-sloc.sh $(CORE_RUNTIME_MANIFEST)
+	@CORE_SLOC_LIMIT=$(CORE_SLOC_LIMIT) ./scripts/check-core-sloc.sh
 
 _workflow-make-targets:
 	python3 ./scripts/check-workflow-make-targets.py
