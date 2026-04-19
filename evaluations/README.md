@@ -114,7 +114,10 @@ clankerval run --suite default
 CLNKR_EVALUATION_MODE=live-provider clankerval run --suite default
 ```
 
-The provider-specific make targets set provider defaults and then call `make evaluations-live`.
+The provider-specific make targets are deterministic and then call `make evaluations-live`.
+
+- `make evaluations-live-openai` reads `OPENAI_API_KEY`, optional `CLNKR_EVALUATION_OPENAI_BASE_URL`, and optional `CLNKR_EVALUATION_OPENAI_MODEL`
+- `make evaluations-live-anthropic` reads `ANTHROPIC_API_KEY`, optional `CLNKR_EVALUATION_ANTHROPIC_BASE_URL`, and optional `CLNKR_EVALUATION_ANTHROPIC_MODEL`
 
 `make evaluations-live` reads the first-wave runtime configuration from:
 

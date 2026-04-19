@@ -66,6 +66,26 @@ type response struct {
 
 const maxResponseBytes = 1 << 20 // 1MB
 
+func requestSchema() map[string]any {
+	schema := turnschema.Schema()
+	stripSchemaKeyword(schema, "maxItems")
+	return schema
+}
+
+func stripSchemaKeyword(node any, key string) {
+	switch v := node.(type) {
+	case map[string]any:
+		delete(v, key)
+		for _, child := range v {
+			stripSchemaKeyword(child, key)
+		}
+	case []any:
+		for _, child := range v {
+			stripSchemaKeyword(child, key)
+		}
+	}
+}
+
 // extractErrorMessage pulls the message from an API error response body.
 // Handles both {"error":{"message":"..."}} and [{...}] array-wrapped forms.
 // Falls back to the raw body if parsing fails.
@@ -99,7 +119,7 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 		OutputConfig: outputConfig{
 			Format: outputFormat{
 				Type:   "json_schema",
-				Schema: turnschema.Schema(),
+				Schema: requestSchema(),
 			},
 		},
 	})

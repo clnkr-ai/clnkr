@@ -11,7 +11,6 @@ import (
 
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/anthropic"
-	"github.com/clnkr-ai/clnkr/turnschema"
 )
 
 func TestModel(t *testing.T) {
@@ -55,16 +54,15 @@ func TestModel(t *testing.T) {
 		if format["type"] != "json_schema" {
 			t.Fatalf("output_config.format.type = %v, want json_schema", format["type"])
 		}
-		gotSchemaJSON, err := json.Marshal(format["schema"])
-		if err != nil {
-			t.Fatalf("marshal got schema: %v", err)
+		schema, ok := format["schema"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("output_config.format.schema = %T, want map[string]interface{}", format["schema"])
 		}
-		wantSchemaJSON, err := json.Marshal(turnschema.Schema())
-		if err != nil {
-			t.Fatalf("marshal want schema: %v", err)
+		if schemaContainsKey(schema, "maxItems") {
+			t.Fatal("output_config.format.schema unexpectedly contains maxItems")
 		}
-		if string(gotSchemaJSON) != string(wantSchemaJSON) {
-			t.Fatalf("schema mismatch\n got: %s\nwant: %s", gotSchemaJSON, wantSchemaJSON)
+		if !schemaContainsKey(schema, "minItems") {
+			t.Fatal("output_config.format.schema unexpectedly omits minItems")
 		}
 	})
 
@@ -306,4 +304,26 @@ func TestModel(t *testing.T) {
 
 func anthropicWrappedDone(summary string) string {
 	return `{"turn":{"type":"done","bash":null,"question":null,"summary":"` + summary + `","reasoning":null}}`
+}
+
+func schemaContainsKey(node any, key string) bool {
+	switch v := node.(type) {
+	case map[string]any:
+		if _, ok := v[key]; ok {
+			return true
+		}
+		for _, child := range v {
+			if schemaContainsKey(child, key) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if schemaContainsKey(child, key) {
+				return true
+			}
+		}
+	}
+
+	return false
 }

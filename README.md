@@ -232,6 +232,11 @@ make evaluations-live-anthropic # Run the live-provider suite against Anthropic 
 make docs       # Build documentation site
 ```
 
+The provider-specific live-eval targets are deterministic. They ignore generic `CLNKR_EVALUATION_*` shell state and use provider-specific inputs instead:
+
+- `make evaluations-live-openai`: `OPENAI_API_KEY`, optional `CLNKR_EVALUATION_OPENAI_BASE_URL`, optional `CLNKR_EVALUATION_OPENAI_MODEL`
+- `make evaluations-live-anthropic`: `ANTHROPIC_API_KEY`, optional `CLNKR_EVALUATION_ANTHROPIC_BASE_URL`, optional `CLNKR_EVALUATION_ANTHROPIC_MODEL`
+
 Install the pinned runner with `./scripts/install-clankerval.sh`.
 
 For example:

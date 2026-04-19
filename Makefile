@@ -54,15 +54,15 @@ evaluations-live: ## Run the live-provider evaluation suite
 	CLNKR_EVALUATION_MODE=live-provider "$$runner" run --suite default
 
 evaluations-live-openai: ## Run the live-provider evaluation suite against OpenAI defaults
-	@CLNKR_EVALUATION_API_KEY="$${CLNKR_EVALUATION_API_KEY:-$${OPENAI_API_KEY}}" \
-	CLNKR_EVALUATION_BASE_URL="$${CLNKR_EVALUATION_BASE_URL:-https://api.openai.com/v1}" \
-	CLNKR_EVALUATION_MODEL="$${CLNKR_EVALUATION_MODEL:-gpt-5.4-nano}" \
+	@CLNKR_EVALUATION_API_KEY="$${CLNKR_EVALUATION_OPENAI_API_KEY:-$${OPENAI_API_KEY}}" \
+	CLNKR_EVALUATION_BASE_URL="$${CLNKR_EVALUATION_OPENAI_BASE_URL:-https://api.openai.com/v1}" \
+	CLNKR_EVALUATION_MODEL="$${CLNKR_EVALUATION_OPENAI_MODEL:-gpt-5.4-nano}" \
 	$(MAKE) evaluations-live
 
 evaluations-live-anthropic: ## Run the live-provider evaluation suite against Anthropic defaults
-	@CLNKR_EVALUATION_API_KEY="$${CLNKR_EVALUATION_API_KEY:-$${ANTHROPIC_API_KEY}}" \
-	CLNKR_EVALUATION_BASE_URL="$${CLNKR_EVALUATION_BASE_URL:-https://api.anthropic.com}" \
-	CLNKR_EVALUATION_MODEL="$${CLNKR_EVALUATION_MODEL:-claude-haiku-4-5}" \
+	@CLNKR_EVALUATION_API_KEY="$${CLNKR_EVALUATION_ANTHROPIC_API_KEY:-$${ANTHROPIC_API_KEY}}" \
+	CLNKR_EVALUATION_BASE_URL="$${CLNKR_EVALUATION_ANTHROPIC_BASE_URL:-https://api.anthropic.com}" \
+	CLNKR_EVALUATION_MODEL="$${CLNKR_EVALUATION_ANTHROPIC_MODEL:-claude-haiku-4-5}" \
 	$(MAKE) evaluations-live
 
 _fmt:

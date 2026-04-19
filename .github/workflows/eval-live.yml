@@ -43,8 +43,8 @@ jobs:
         run: make evaluations-live-openai
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          CLNKR_EVALUATION_BASE_URL: ${{ vars.CLNKR_EVALUATION_BASE_URL }}
-          CLNKR_EVALUATION_MODEL: ${{ vars.CLNKR_EVALUATION_MODEL }}
+          CLNKR_EVALUATION_OPENAI_BASE_URL: ${{ vars.CLNKR_EVALUATION_BASE_URL }}
+          CLNKR_EVALUATION_OPENAI_MODEL: ${{ vars.CLNKR_EVALUATION_MODEL }}
 
       - name: Show live evaluation bundles on failure
         if: failure() && steps.config.outputs.configured == 'true'
@@ -125,8 +125,8 @@ jobs:
         run: make evaluations-live-anthropic
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CLNKR_EVALUATION_BASE_URL: ${{ vars.CLNKR_EVALUATION_ANTHROPIC_BASE_URL }}
-          CLNKR_EVALUATION_MODEL: ${{ vars.CLNKR_EVALUATION_ANTHROPIC_MODEL }}
+          CLNKR_EVALUATION_ANTHROPIC_BASE_URL: ${{ vars.CLNKR_EVALUATION_ANTHROPIC_BASE_URL }}
+          CLNKR_EVALUATION_ANTHROPIC_MODEL: ${{ vars.CLNKR_EVALUATION_ANTHROPIC_MODEL }}
 
       - name: Show live evaluation bundles on failure
         if: failure() && steps.config.outputs.configured == 'true'
