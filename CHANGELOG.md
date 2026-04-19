@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.8.6 (2026-04-19)
+
+- Fix Anthropic structured output and live eval targets
+- tmp
+- Updgrade eval suites to clankerval v0.4.0
+- Update CHANGELOG.md for 1.8.5
+
 ## 1.8.5 (2026-04-10)
 
 - Render reasoning modal with width-aware wrapping
