@@ -226,8 +226,9 @@ make help       # Show all targets
 make build      # Build shipped binaries
 make check      # Full quality suite
 make test       # Tests only
-make evaluations      # Run the mock-provider evaluation suite (requires clankerval)
-make evaluations-live # Run the live-provider evaluation suite (requires clankerval)
+make evaluations                # Run the mock-provider evaluation suite (requires clankerval)
+make evaluations-live-openai    # Run the live-provider suite against OpenAI defaults
+make evaluations-live-anthropic # Run the live-provider suite against Anthropic defaults
 make docs       # Build documentation site
 ```
 

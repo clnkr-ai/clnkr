@@ -6,14 +6,14 @@ on:
     branches: [main]
 
 jobs:
-  evaluations-live:
+  evaluations-live-openai:
     runs-on: ubuntu-latest
     steps:
       - name: Check live evaluation configuration
         id: config
         run: |
           if [ -z "${CLNKR_EVALUATION_API_KEY}" ]; then
-            echo "Live evaluation skipped: CLNKR_EVALUATION_API_KEY secret is not set."
+            echo "Live evaluation skipped: OPENAI_API_KEY secret is not set."
             echo "configured=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -40,16 +40,9 @@ jobs:
 
       - name: Run live evaluations
         if: steps.config.outputs.configured == 'true'
-        run: |
-          : "${CLNKR_EVALUATION_BASE_URL:=https://api.openai.com/v1}"
-          : "${CLNKR_EVALUATION_MODEL:=gpt-5.4-nano}"
-          export CLNKR_EVALUATION_MODE=live-provider
-          export CLNKR_EVALUATION_API_KEY
-          export CLNKR_EVALUATION_BASE_URL
-          export CLNKR_EVALUATION_MODEL
-          make evaluations-live
+        run: make evaluations-live-openai
         env:
-          CLNKR_EVALUATION_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           CLNKR_EVALUATION_BASE_URL: ${{ vars.CLNKR_EVALUATION_BASE_URL }}
           CLNKR_EVALUATION_MODEL: ${{ vars.CLNKR_EVALUATION_MODEL }}
 
@@ -88,7 +81,89 @@ jobs:
         if: always() && steps.config.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: live-evaluations-${{ github.run_id }}
+          name: live-evaluations-openai-${{ github.run_id }}
+          path: |
+            evaluations/trials/
+            evaluations/reports/
+          if-no-files-found: warn
+          retention-days: 14
+
+  evaluations-live-anthropic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check live evaluation configuration
+        id: config
+        run: |
+          if [ -z "${CLNKR_EVALUATION_API_KEY}" ]; then
+            echo "Live evaluation skipped: ANTHROPIC_API_KEY secret is not set."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+        env:
+          CLNKR_EVALUATION_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - uses: actions/checkout@v5
+        if: steps.config.outputs.configured == 'true'
+
+      - uses: actions/setup-go@v6
+        if: steps.config.outputs.configured == 'true'
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: cmd/clnkr/go.sum
+
+      - name: Add local user bin to PATH
+        if: steps.config.outputs.configured == 'true'
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install clankerval
+        if: steps.config.outputs.configured == 'true'
+        run: ./scripts/install-clankerval.sh
+
+      - name: Run live evaluations
+        if: steps.config.outputs.configured == 'true'
+        run: make evaluations-live-anthropic
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLNKR_EVALUATION_BASE_URL: ${{ vars.CLNKR_EVALUATION_ANTHROPIC_BASE_URL }}
+          CLNKR_EVALUATION_MODEL: ${{ vars.CLNKR_EVALUATION_ANTHROPIC_MODEL }}
+
+      - name: Show live evaluation bundles on failure
+        if: failure() && steps.config.outputs.configured == 'true'
+        run: |
+          find evaluations/trials -maxdepth 5 -type f | sort || true
+          echo
+          find evaluations/reports -maxdepth 1 -type f | sort || true
+          for trial_dir in $(find evaluations/trials -mindepth 1 -maxdepth 1 -type d | sort); do
+            echo
+            echo "== $(basename "$trial_dir") bundle =="
+            sed -n '1,200p' "$trial_dir/bundle.json" || true
+            echo
+            echo "== $(basename "$trial_dir") normalized graders =="
+            sed -n '1,200p' "$trial_dir/normalized/graders.jsonl" || true
+            echo
+            echo "== $(basename "$trial_dir") outcome diff =="
+            sed -n '1,200p' "$trial_dir/outcome/diff.patch" || true
+            echo
+            echo "== $(basename "$trial_dir") raw commands =="
+            sed -n '1,200p' "$trial_dir/raw/commands.jsonl" || true
+            if [ -f "$trial_dir/raw/agent/events.jsonl" ]; then
+              echo
+              echo "== $(basename "$trial_dir") raw agent events =="
+              sed -n '1,200p' "$trial_dir/raw/agent/events.jsonl" || true
+            fi
+            if [ -f "$trial_dir/raw/provider-responses.jsonl" ]; then
+              echo
+              echo "== $(basename "$trial_dir") raw provider responses =="
+              sed -n '1,200p' "$trial_dir/raw/provider-responses.jsonl" || true
+            fi
+          done
+
+      - name: Upload live evaluation artifacts
+        if: always() && steps.config.outputs.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-evaluations-anthropic-${{ github.run_id }}
           path: |
             evaluations/trials/
             evaluations/reports/

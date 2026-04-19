@@ -6,7 +6,7 @@ HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hug
 .DEFAULT_GOAL := build
 .PHONY: \
 	build clean install run \
-	check test evaluations evaluations-live \
+	check test evaluations evaluations-live evaluations-live-openai evaluations-live-anthropic \
 	help man docs docs-serve \
 	_build-clnku _build-clnkr \
 	_fmt _fmt-check _vet _lint _sloc _workflow-make-targets \
@@ -52,6 +52,18 @@ evaluations: ## Run the mock-provider evaluation suite
 evaluations-live: ## Run the live-provider evaluation suite
 	@runner="$$(python3 ./scripts/require-clankerval.py)" && \
 	CLNKR_EVALUATION_MODE=live-provider "$$runner" run --suite default
+
+evaluations-live-openai: ## Run the live-provider evaluation suite against OpenAI defaults
+	@CLNKR_EVALUATION_API_KEY="$${CLNKR_EVALUATION_API_KEY:-$${OPENAI_API_KEY}}" \
+	CLNKR_EVALUATION_BASE_URL="$${CLNKR_EVALUATION_BASE_URL:-https://api.openai.com/v1}" \
+	CLNKR_EVALUATION_MODEL="$${CLNKR_EVALUATION_MODEL:-gpt-5.4-nano}" \
+	$(MAKE) evaluations-live
+
+evaluations-live-anthropic: ## Run the live-provider evaluation suite against Anthropic defaults
+	@CLNKR_EVALUATION_API_KEY="$${CLNKR_EVALUATION_API_KEY:-$${ANTHROPIC_API_KEY}}" \
+	CLNKR_EVALUATION_BASE_URL="$${CLNKR_EVALUATION_BASE_URL:-https://api.anthropic.com}" \
+	CLNKR_EVALUATION_MODEL="$${CLNKR_EVALUATION_MODEL:-claude-haiku-4-5}" \
+	$(MAKE) evaluations-live
 
 _fmt:
 	go fmt ./...
