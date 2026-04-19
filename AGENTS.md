@@ -33,7 +33,7 @@ Repo-maintenance helpers live under `scripts/`. Read [`scripts/README.md`](scrip
 - Before committing, run `make _fmt` then `make check`. Do not commit if either fails.
 - Do not add external dependencies to root go.mod. Core library is stdlib only. Charm deps live only in `cmd/clnkr/go.mod`.
 - Windows is unsupported. Assume a Unix-like environment (`bash`, process groups, `/usr/bin/env`) unless the task explicitly asks for portability work.
-- Do not move packages to `internal/`. The core is a public library.
+- Root `clnkr` is the only supported public import surface. Repo-root `internal/` is allowed when it clarifies ownership; shared core-loop code under `internal/` still counts against the core SLOC budget.
 - Do not add `io.Writer` parameters for output. Output goes through typed events.
 - Do not put policy logic in `Step()`. Keep it in `Run()`. New shared logic goes in `Step()`.
 - Do not add provider-detection logic outside `main.go`.
@@ -53,11 +53,12 @@ The core is an importable library at module root (`github.com/clnkr-ai/clnkr`). 
 **Key package structure:**
 ```
 clnkr/                  # core: types, interfaces, Agent, events (root go.mod, stdlib only)
-├── anthropic/          # Anthropic Messages API adapter
-├── openai/             # OpenAI-compatible adapter
-├── session/            # Session persistence (XDG state, save/load/list)
 ├── evaluations/        # Checked-in evaluation suites consumed by clankerval
+├── internal/
+│   ├── core/           # private core helpers that still count when root imports them
+│   └── providers/      # Anthropic/OpenAI provider adapters and wire logic
 ├── cmd/clnku/          # Plain CLI (under root go.mod, no external deps)
+├── cmd/internal/       # frontend-shared code, including session persistence
 └── cmd/clnkr/          # TUI frontend (own go.mod with charm deps)
 ```
 
@@ -70,16 +71,16 @@ clnkr/                  # core: types, interfaces, Agent, events (root go.mod, s
 **Multi-module:** `cmd/clnkr/` has its own `go.mod`. Root `go test ./...` does not descend into it. Use `make test` to test both modules. `go install github.com/clnkr-ai/clnkr/cmd/clnkr@latest` does NOT work due to replace directive — use `make build` or install from releases.
 
 **Two-tier agent API:**
-- `Step(ctx) (StepResult, error)` — one query-parse cycle, no policy. It appends the model response, parses the protocol turn, and returns a typed `Turn` or `ParseErr` without executing commands.
+- `Step(ctx) (StepResult, error)` — one typed-turn query cycle, no policy. Provider adapters return a typed `Turn` on success or a raw response plus `ProtocolErr` on failure. `Step()` stores canonical assistant transcript on success without executing commands.
 - `ExecuteTurn(ctx, act) (StepResult, error)` — runs an `act` turn, updates cwd/env state, emits command events, and appends the structured command-result payload as a user message.
 - `Run(ctx, task) error` — full-send policy loop over `Step()` + `ExecuteTurn()`. Counts protocol failures (exits on 3 consecutive) and enforces step limits.
 
-**Structured turn protocol** (`protocol.go`): Models respond with one JSON object per turn. Three turn types: `act` (execute a command), `clarify` (ask for user input), `done` (task complete). `ParseTurn` extracts JSON from model output (handling prose wrapping and code fences), repairs common invalid JSON escapes (`\|`, `` \` ``, malformed `\uXXXX`) via `sanitizeJSONEscapes`, validates required fields, and returns a typed `Turn`. Each `act` turn carries a single command.
+**Structured turn protocol** (`protocol.go`, `turnschema.go`): The shared protocol has three turn types: `act`, `clarify`, and `done`. Providers own provider-facing schema generation, wire wrappers, response extraction, and the single happy-path translation into typed turns. Root `ParseTurn` validates exact canonical internal turn JSON for replay, transcript consumers, and tests; it does not extract prose or provider wire wrappers from live provider output.
 
 **Events:** `Notify func(Event)` callback on Agent. Sealed interface (unexported marker method) with five types: `EventResponse`, `EventCommandStart`, `EventCommandDone`, `EventProtocolFailure`, `EventDebug`. Nil Notify = silent.
 
 **Interfaces:**
-- `Model` — `Query(ctx, []Message) (Response, error)` — implemented by `anthropic.Model` and `openai.Model`
+- `Model` — `Query(ctx, []Message) (Response, error)` — implemented by `internal/providers/anthropic.Model` and `internal/providers/openai.Model`
 - `Executor` — `Execute(ctx, command, dir) (CommandResult, error)` — implemented by `CommandExecutor`
 - `ExecutorStateSetter` (optional) — `SetEnv` — the agent type-asserts the executor to this before each command. Custom executors that skip it must populate `CommandResult.PostCwd`/`PostEnv` themselves
 
@@ -122,7 +123,7 @@ Workflow:
 
 - Provider adapters use `httptest.NewServer` in external test packages (`package anthropic_test`) — black-box, no real API calls
 - Agent loop uses `fakeModel` and `fakeExecutor` (in `agent_test.go`) — deterministic inputs for state machine testing
-- In `cmd/clnkr`, store injectable helpers in model/shared state behind the narrowest local interface needed by the TUI, not a concrete helper struct. Good: `type delegateRunner interface { Run(context.Context, delegate.Request) (delegate.Result, error) }`. Bad: storing `delegate.Runner` directly when tests need stub injection.
+- In `cmd/clnkr`, store injectable helpers in model/shared state behind the narrowest local interface needed by the TUI, not a concrete helper struct. Good: `type delegateRunner interface { Run(context.Context, delegateRequest) (delegateResult, error) }`. Bad: storing the concrete delegate process runner directly when tests need stub injection.
 - Executor tests shell out to bash (real integration tests)
 - macOS `/private/tmp` symlink is handled in executor tests
 
@@ -148,5 +149,7 @@ Workflow:
 ## CI
 
 GitHub Actions runs on push to `main` and PRs targeting `main`. The main `check` job runs lint, tests (with `-race`), build, and docs. A separate `evaluations` job installs the pinned external runner before running `make evaluations`.
+
+`make check` also enforces repo-local architecture edges via `_arch` and import-graph core SLOC accounting via `_sloc`. The runtime graph roots live in `scripts/core-runtime-packages.txt`; transitional deferred-package imports live in `scripts/deferred-package-allowlist.txt`.
 
 **Local setup:** Run `make _hooks` to point Git at the repo-tracked `.githooks/` directory if you want the local pre-commit hook enabled. golangci-lint is required for `make check` — install with `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` or `brew install golangci-lint`.

@@ -8,7 +8,6 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	clnkr "github.com/clnkr-ai/clnkr"
-	"github.com/clnkr-ai/clnkr/transcript"
 )
 
 type chatModel struct {
@@ -79,7 +78,7 @@ func (c *chatModel) appendEvent(e clnkr.Event) {
 	switch ev := e.(type) {
 	case clnkr.EventResponse:
 		c.pendingQuery = ""
-		rendered := c.renderAssistantTurn(ev.Message.Content, false)
+		rendered := c.renderTurn(ev.Turn, false)
 		if c.streaming {
 			c.commitStream(rendered.body)
 		} else if rendered.body != "" {
@@ -232,7 +231,10 @@ func (c *chatModel) renderAssistantTurn(content string, includeClarify bool) ass
 	if err != nil {
 		return assistantRender{body: content}
 	}
+	return c.renderTurn(turn, includeClarify)
+}
 
+func (c *chatModel) renderTurn(turn clnkr.Turn, includeClarify bool) assistantRender {
 	switch t := turn.(type) {
 	case *clnkr.ActTurn:
 		// Act turns are rendered by command proposal/execution UI.
@@ -246,7 +248,7 @@ func (c *chatModel) renderAssistantTurn(content string, includeClarify bool) ass
 	case *clnkr.DoneTurn:
 		return assistantRender{body: t.Summary, reasoning: t.Reasoning}
 	default:
-		return assistantRender{body: content}
+		return assistantRender{}
 	}
 }
 
@@ -320,7 +322,7 @@ type transcriptCommand struct {
 	stdout   string
 	stderr   string
 	exitCode int
-	feedback transcript.CommandFeedback
+	feedback clnkr.CommandFeedback
 }
 
 func parseCommandTranscript(content string) (transcriptCommand, bool) {
@@ -400,7 +402,18 @@ func isStateTranscript(content string) bool {
 }
 
 func isCompactTranscript(content string) bool {
-	return transcript.IsCompactMessage(transcript.Message{Role: "user", Content: content})
+	body, ok := extractTaggedSection(content, "compact")
+	if !ok {
+		return false
+	}
+	var payload struct {
+		Source string `json:"source"`
+		Kind   string `json:"kind"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		return false
+	}
+	return payload.Source == "clnkr" && payload.Kind == "compact"
 }
 
 func parseDelegateTranscript(content string) (string, bool) {

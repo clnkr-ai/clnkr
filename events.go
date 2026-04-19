@@ -3,10 +3,11 @@ package clnkr
 // Event is a sealed interface for agent events.
 type Event interface{ event() }
 
-// EventResponse fires when the model returns a response.
+// EventResponse fires when the model returns a valid structured turn.
 type EventResponse struct {
-	Message Message
-	Usage   Usage
+	Turn  Turn
+	Usage Usage
+	Raw   string // original provider text for debugging only
 }
 
 // EventCommandStart fires before running a command.

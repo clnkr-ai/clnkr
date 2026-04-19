@@ -1,4 +1,4 @@
-package delegate
+package main
 
 import (
 	"context"
@@ -27,7 +27,7 @@ printf '%s\n' '[{"role":"assistant","content":"{\"type\":\"done\",\"summary\":\"
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	result, err := Runner{Binary: bin}.Run(context.Background(), Request{
+	result, err := delegateProcessRunner{Binary: bin}.Run(context.Background(), delegateRequest{
 		Task:       "inspect tests",
 		WorkingDir: dir,
 		Parent:     []clnkr.Message{{Role: "user", Content: "parent task"}},
@@ -60,7 +60,7 @@ printf '%s\n' '[{"role":"assistant","content":"plain final content"}]' > "$out"
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	result, err := Runner{Binary: bin}.Run(context.Background(), Request{Task: "inspect", WorkingDir: dir})
+	result, err := delegateProcessRunner{Binary: bin}.Run(context.Background(), delegateRequest{Task: "inspect", WorkingDir: dir})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -80,14 +80,14 @@ exit 7
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	_, err := Runner{Binary: bin}.Run(context.Background(), Request{Task: "inspect", WorkingDir: dir})
+	_, err := delegateProcessRunner{Binary: bin}.Run(context.Background(), delegateRequest{Task: "inspect", WorkingDir: dir})
 	if err == nil || !strings.Contains(err.Error(), "child failed") {
 		t.Fatalf("err = %v, want child failure output", err)
 	}
 }
 
 func TestFormatArtifact(t *testing.T) {
-	got := FormatArtifact("inspect tests", "delegated ok")
+	got := formatDelegateArtifact("inspect tests", "delegated ok")
 	if !strings.HasPrefix(got, "[delegate]\n") {
 		t.Fatalf("artifact = %q, want delegate prefix", got)
 	}

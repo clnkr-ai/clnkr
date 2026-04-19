@@ -64,28 +64,24 @@ func (b Baseline) Collect(finalCwd string) (Summary, bool) {
 }
 
 func gitTopLevel(dir string) (string, bool) {
-	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
-	if err != nil {
+	out, ok := gitOutput(dir, "rev-parse", "--show-toplevel")
+	if !ok {
 		return "", false
 	}
 	return strings.TrimSpace(string(out)), true
 }
 
 func gitStatusPorcelain(dir string) ([]byte, bool) {
-	out, err := exec.Command("git", "-C", dir, "status", "--porcelain", "-z", "--untracked-files=all").Output()
-	if err != nil {
-		return nil, false
-	}
-	return out, true
+	return gitOutput(dir, "status", "--porcelain", "-z", "--untracked-files=all")
 }
 
 func gitCombinedDiff(dir string) (string, bool) {
-	unstaged, err := exec.Command("git", "-C", dir, "diff", "--no-ext-diff", "--unified=3").Output()
-	if err != nil {
+	unstaged, ok := gitOutput(dir, "diff", "--no-ext-diff", "--unified=3")
+	if !ok {
 		return "", false
 	}
-	cached, err := exec.Command("git", "-C", dir, "diff", "--cached", "--no-ext-diff", "--unified=3").Output()
-	if err != nil {
+	cached, ok := gitOutput(dir, "diff", "--cached", "--no-ext-diff", "--unified=3")
+	if !ok {
 		return "", false
 	}
 
@@ -97,6 +93,11 @@ func gitCombinedDiff(dir string) (string, bool) {
 		parts = append(parts, string(cached))
 	}
 	return strings.Join(parts, "\n"), true
+}
+
+func gitOutput(dir string, args ...string) ([]byte, bool) {
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	return out, err == nil
 }
 
 func parseStatusChangedFiles(status []byte, repoRoot, finalCwd string) []string {

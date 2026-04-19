@@ -13,52 +13,37 @@ type compactState struct {
 	Summary      string `json:"summary"`
 }
 
-func isStateMessage(msg Message) bool {
+func messageKind(msg Message) string {
 	if msg.Role != "user" {
-		return false
-	}
-	_, ok := ExtractStateCwd(msg.Content)
-	return ok
-}
-
-func isCommandResultMessage(msg Message) bool {
-	if msg.Role != "user" {
-		return false
+		return ""
 	}
 	content := strings.TrimSpace(msg.Content)
-	return strings.HasPrefix(content, "[command]\n") &&
+	switch {
+	case compactMessage(content):
+		return "compact"
+	case stateMessage(content):
+		return "state"
+	case strings.HasPrefix(content, "[command]\n") &&
 		strings.Contains(content, "\n[/command]\n[exit_code]\n") &&
 		strings.Contains(content, "\n[/exit_code]\n[stdout]\n") &&
 		strings.Contains(content, "\n[/stdout]\n[stderr]\n") &&
-		strings.HasSuffix(content, "\n[/stderr]")
-}
-
-func isProtocolErrorMessage(msg Message) bool {
-	if msg.Role != "user" {
-		return false
+		strings.HasSuffix(content, "\n[/stderr]"):
+		return "command"
+	case strings.HasPrefix(content, "[protocol_error]") &&
+		strings.HasSuffix(content, "[/protocol_error]"):
+		return "protocol"
+	default:
+		return "authored"
 	}
-	content := strings.TrimSpace(msg.Content)
-	return strings.HasPrefix(content, "[protocol_error]") &&
-		strings.HasSuffix(content, "[/protocol_error]")
 }
 
 // IsCompactMessage reports whether the message is a clnkr compact block.
 func IsCompactMessage(msg Message) bool {
-	if msg.Role != "user" {
-		return false
-	}
-	_, ok := extractCompactState(msg.Content)
-	return ok
+	return messageKind(msg) == "compact"
 }
 
 func isUserAuthoredMessage(msg Message) bool {
-	if msg.Role != "user" {
-		return false
-	}
-	return !isStateMessage(msg) &&
-		!isCommandResultMessage(msg) &&
-		!isProtocolErrorMessage(msg) &&
-		!IsCompactMessage(msg)
+	return messageKind(msg) == "authored"
 }
 
 // FormatCompactMessage renders the compact-summary transcript block.
@@ -87,25 +72,16 @@ func FindCompactBoundary(messages []Message, keepRecentTurns int) (int, bool) {
 			continue
 		}
 		authoredSeen++
-		if authoredSeen != keepRecentTurns {
-			continue
+		if authoredSeen == keepRecentTurns {
+			for _, earlier := range messages[:i] {
+				if isUserAuthoredMessage(earlier) {
+					return i, true
+				}
+			}
+			return 0, false
 		}
-		if hasEarlierUserAuthoredMessage(messages[:i]) {
-			return i, true
-		}
-		return 0, false
 	}
-
 	return 0, false
-}
-
-func latestStateMessage(messages []Message) (Message, bool) {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if isStateMessage(messages[i]) {
-			return messages[i], true
-		}
-	}
-	return Message{}, false
 }
 
 // RewriteForCompaction replaces the older transcript prefix with a compact block.
@@ -131,9 +107,22 @@ func RewriteForCompaction(messages []Message, summary, instructions string, keep
 	rewritten = append(rewritten, Message{Role: "user", Content: FormatCompactMessage(summary, instructions)})
 
 	keptMessages := len(keptTail)
-	if stateMsg, ok := latestStateMessage(messages); ok && !containsMessage(keptTail, stateMsg) {
-		rewritten = append(rewritten, stateMsg)
-		keptMessages++
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messageKind(messages[i]) != "state" {
+			continue
+		}
+		stateMsg, present := messages[i], false
+		for _, msg := range keptTail {
+			if msg == stateMsg {
+				present = true
+				break
+			}
+		}
+		if !present {
+			rewritten = append(rewritten, stateMsg)
+			keptMessages++
+		}
+		break
 	}
 
 	rewritten = append(rewritten, keptTail...)
@@ -144,15 +133,17 @@ func RewriteForCompaction(messages []Message, summary, instructions string, keep
 	}, nil
 }
 
-func extractCompactState(content string) (compactState, bool) {
+func compactMessage(content string) bool {
 	var parsed compactState
 	if !extractTaggedJSONObject(content, "[compact]", "[/compact]", &parsed) {
-		return compactState{}, false
+		return false
 	}
-	if parsed.Source != "clnkr" || parsed.Kind != "compact" {
-		return compactState{}, false
-	}
-	return parsed, true
+	return parsed.Source == "clnkr" && parsed.Kind == "compact"
+}
+
+func stateMessage(content string) bool {
+	_, ok := ExtractStateCwd(content)
+	return ok
 }
 
 func extractTaggedJSONObject(content, openTag, closeTag string, dst any) bool {
@@ -165,22 +156,4 @@ func extractTaggedJSONObject(content, openTag, closeTag string, dst any) bool {
 		return false
 	}
 	return true
-}
-
-func hasEarlierUserAuthoredMessage(messages []Message) bool {
-	for _, msg := range messages {
-		if isUserAuthoredMessage(msg) {
-			return true
-		}
-	}
-	return false
-}
-
-func containsMessage(messages []Message, want Message) bool {
-	for _, msg := range messages {
-		if msg == want {
-			return true
-		}
-	}
-	return false
 }

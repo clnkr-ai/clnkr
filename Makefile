@@ -9,12 +9,13 @@ HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hug
 	check test evaluations evaluations-live evaluations-live-openai evaluations-live-anthropic \
 	help man docs docs-serve \
 	_build-clnku _build-clnkr \
-	_fmt _fmt-check _vet _lint _sloc _workflow-make-targets \
+	_fmt _fmt-check _vet _lint _arch _sloc _workflow-make-targets \
 	_hooks _check-man _site-sync _site-build
 
 PREFIX ?= /usr/local
-CORE_SLOC_LIMIT := 800
-CORE_FILES := $(filter-out %_test.go,$(wildcard *.go))
+CORE_SLOC_LIMIT := 1300
+CORE_RUNTIME_MANIFEST := scripts/core-runtime-packages.txt
+DEFERRED_PACKAGE_ALLOWLIST := scripts/deferred-package-allowlist.txt
 
 ##@ Build
 build: _build-clnku _build-clnkr ## Build shipped binaries
@@ -38,7 +39,7 @@ _build-clnkr:
 	cd cmd/clnkr && go build -trimpath -ldflags '$(LDFLAGS)' -o ../../clnkr .
 
 ##@ Quality
-check: _fmt-check _vet _lint _sloc _workflow-make-targets _check-man test evaluations ## Run formatting, vet, lint, SLOC, workflow, manpage, test, and evaluation checks
+check: _fmt-check _vet _lint _arch _sloc _workflow-make-targets _check-man test evaluations ## Run formatting, vet, lint, architecture, SLOC, workflow, manpage, test, and evaluation checks
 
 test: ## Run all tests
 	python3 -m unittest scripts/test_require_clankerval.py -v
@@ -86,12 +87,11 @@ _lint:
 	golangci-lint run ./...
 	cd cmd/clnkr && golangci-lint run ./...
 
+_arch:
+	@./scripts/check-architecture-imports.py $(DEFERRED_PACKAGE_ALLOWLIST)
+
 _sloc:
-	@sloc=$$(cloc --quiet --csv $(CORE_FILES) | tail -1 | cut -d, -f5); \
-	echo "core library: $$sloc / $(CORE_SLOC_LIMIT) SLOC"; \
-	if [ "$$sloc" -gt $(CORE_SLOC_LIMIT) ]; then \
-		echo "error: core exceeds $(CORE_SLOC_LIMIT) SLOC limit" >&2; exit 1; \
-	fi
+	@CORE_SLOC_LIMIT=$(CORE_SLOC_LIMIT) ./scripts/check-core-sloc.sh $(CORE_RUNTIME_MANIFEST)
 
 _workflow-make-targets:
 	python3 ./scripts/check-workflow-make-targets.py

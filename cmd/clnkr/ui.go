@@ -13,7 +13,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	clnkr "github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/compaction"
-	"github.com/clnkr-ai/clnkr/delegate"
 )
 
 // Compile-time assertion that model implements tea.Model.
@@ -48,7 +47,7 @@ type compactDoneMsg struct {
 }
 type delegateDoneMsg struct {
 	task   string
-	result delegate.Result
+	result delegateResult
 	err    error
 }
 
@@ -59,8 +58,8 @@ type tickMsg time.Time
 // Bubbletea copies the model on NewProgram, so pointers stored directly in
 // model fields are stale after that copy. This struct is allocated once and
 // shared via pointer.
-type delegateRunner interface {
-	Run(context.Context, delegate.Request) (delegate.Result, error)
+type delegateTaskRunner interface {
+	Run(context.Context, delegateRequest) (delegateResult, error)
 }
 
 type shared struct {
@@ -68,7 +67,7 @@ type shared struct {
 	program          *tea.Program
 	eventLog         *os.File
 	compactorFactory compaction.Factory
-	delegateRunner   delegateRunner
+	delegateRunner   delegateTaskRunner
 	cwd              string
 	stateMu          sync.RWMutex
 	// awaitingApproval is mirrored here so tests can observe the live program
@@ -139,7 +138,7 @@ type modelOpts struct {
 	fullSend         bool
 	exitOnRunFinish  bool
 	compactorFactory compaction.Factory
-	delegateRunner   delegateRunner
+	delegateRunner   delegateTaskRunner
 }
 
 func newModel(opts modelOpts) model {
@@ -363,7 +362,7 @@ func compactCmd(agent *clnkr.Agent, compactor clnkr.Compactor, ctx context.Conte
 	}
 }
 
-func delegateCmd(runner delegateRunner, ctx context.Context, req delegate.Request) tea.Cmd {
+func delegateCmd(runner delegateTaskRunner, ctx context.Context, req delegateRequest) tea.Cmd {
 	return func() tea.Msg {
 		result, err := runner.Run(ctx, req)
 		return delegateDoneMsg{task: req.Task, result: result, err: err}
@@ -487,7 +486,7 @@ func (m model) handleDelegateDone(msg delegateDoneMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case msg.err == nil:
-		m.shared.agent.AppendUserMessage(delegate.FormatArtifact(msg.task, msg.result.Summary))
+		m.shared.agent.AppendUserMessage(formatDelegateArtifact(msg.task, msg.result.Summary))
 		m.chat.appendHostNote(fmt.Sprintf("Delegation complete: %s", msg.result.Summary))
 	case errors.Is(msg.err, context.Canceled):
 		m.chat.appendHostNote("Delegation canceled.")
@@ -507,7 +506,7 @@ func (m *model) routeEvent(e clnkr.Event) {
 	switch ev := e.(type) {
 	case clnkr.EventResponse:
 		m.status.updateFromResponse(ev.Usage)
-		m.reasoningInfo.latest = m.chat.renderAssistantTurn(ev.Message.Content, false).reasoning
+		m.reasoningInfo.latest = m.chat.renderTurn(ev.Turn, false).reasoning
 	case clnkr.EventCommandDone:
 		m.status.incrementStep()
 		if len(ev.Feedback.ChangedFiles) > 0 {
@@ -823,7 +822,7 @@ func (m model) startDelegate(task string) (tea.Model, tea.Cmd) {
 	m.runCtx = ctx
 
 	return m, tea.Batch(
-		delegateCmd(m.shared.delegateRunner, ctx, delegate.Request{
+		delegateCmd(m.shared.delegateRunner, ctx, delegateRequest{
 			Task:       task,
 			WorkingDir: m.shared.cwd,
 			Parent:     m.shared.agent.Messages(),

@@ -7,8 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/clnkr-ai/clnkr/transcript"
-	"github.com/clnkr-ai/clnkr/turnjson"
+	"github.com/clnkr-ai/clnkr/internal/core/transcript"
 )
 
 const DefaultMaxSteps = 100
@@ -81,6 +80,27 @@ func (a *Agent) appendStateMessageIfNeeded() {
 	a.messages = append(a.messages, Message{Role: "user", Content: transcript.FormatStateMessage(a.cwd)})
 }
 
+func (a *Agent) appendSuccessfulResponse(resp Response) error {
+	if resp.Turn == nil {
+		return fmt.Errorf("query model: missing turn")
+	}
+	canonicalText, err := CanonicalTurnJSON(resp.Turn)
+	if err != nil {
+		return fmt.Errorf("canonicalize model turn: %w", err)
+	}
+	a.messages = append(a.messages, Message{Role: "assistant", Content: canonicalText})
+	a.notify(EventResponse{Turn: resp.Turn, Usage: resp.Usage, Raw: resp.Raw})
+	return nil
+}
+
+func (a *Agent) appendProtocolFailure(resp Response, addCorrection bool) {
+	a.messages = append(a.messages, Message{Role: "assistant", Content: resp.Raw})
+	a.notify(EventProtocolFailure{Reason: errorToReason(resp.ProtocolErr), Raw: resp.Raw})
+	if addCorrection {
+		a.messages = append(a.messages, Message{Role: "user", Content: protocolCorrectionMessage(resp.ProtocolErr)})
+	}
+}
+
 // Compact rewrites the transcript by summarizing an older prefix and keeping a
 // recent tail of user-authored turns intact.
 func (a *Agent) Compact(ctx context.Context, compactor Compactor, opts CompactOptions) (CompactStats, error) {
@@ -138,24 +158,17 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 		return StepResult{}, fmt.Errorf("query model: %w", err)
 	}
 	a.notify(EventDebug{Message: fmt.Sprintf("usage: %d input, %d output tokens", resp.Usage.InputTokens, resp.Usage.OutputTokens)})
-	a.messages = append(a.messages, resp.Message)
 
 	if resp.ProtocolErr != nil {
-		a.notify(EventProtocolFailure{Reason: errorToReason(resp.ProtocolErr), Raw: resp.Message.Content})
-		a.messages = append(a.messages, Message{Role: "user", Content: protocolCorrectionMessage(resp.ProtocolErr)})
+		a.appendProtocolFailure(resp, true)
 		return StepResult{Response: resp, ParseErr: resp.ProtocolErr}, nil
 	}
 
-	a.notify(EventResponse{Message: resp.Message, Usage: resp.Usage})
-	turn, parseErr := ParseTurn(resp.Message.Content)
-	if parseErr != nil {
-		a.notify(EventProtocolFailure{Reason: errorToReason(parseErr), Raw: resp.Message.Content})
-		a.messages = append(a.messages, Message{Role: "user", Content: protocolCorrectionMessage(parseErr)})
-		return StepResult{Response: resp, ParseErr: parseErr}, nil
+	if err := a.appendSuccessfulResponse(resp); err != nil {
+		return StepResult{}, err
 	}
-
-	a.notify(EventDebug{Message: fmt.Sprintf("parsed turn: %T", turn)})
-	return StepResult{Response: resp, Turn: turn}, nil
+	a.notify(EventDebug{Message: fmt.Sprintf("parsed turn: %T", resp.Turn)})
+	return StepResult{Response: resp, Turn: resp.Turn}, nil
 }
 
 // ExecuteTurn runs an act turn and appends the command result payload.
@@ -226,25 +239,21 @@ func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, erro
 // caller decides the step budget is exhausted.
 func (a *Agent) RequestStepLimitSummary(ctx context.Context) error {
 	a.notify(EventDebug{Message: "step limit reached, requesting summary"})
-	a.AppendUserMessage("Step limit reached. Respond with " + turnjson.MustWireDoneJSON("...", nil) + " summarizing your progress.")
+	a.AppendUserMessage("Step limit reached. Respond with " + mustCanonicalDoneJSON("...") + " summarizing your progress.")
 
 	resp, err := a.model.Query(ctx, a.messages)
 	if err != nil {
 		return fmt.Errorf("query model (final): %w", err)
 	}
-	a.messages = append(a.messages, resp.Message)
 	if resp.ProtocolErr != nil {
-		a.notify(EventProtocolFailure{Reason: errorToReason(resp.ProtocolErr), Raw: resp.Message.Content})
+		a.appendProtocolFailure(resp, false)
 		a.notify(EventDebug{Message: fmt.Sprintf("final response not a valid turn: %v", resp.ProtocolErr)})
 		return nil
 	}
-	a.notify(EventResponse{Message: resp.Message, Usage: resp.Usage})
-	if turn, parseErr := ParseTurn(resp.Message.Content); parseErr != nil {
-		a.notify(EventProtocolFailure{Reason: errorToReason(parseErr), Raw: resp.Message.Content})
-		a.notify(EventDebug{Message: fmt.Sprintf("final response not a valid turn: %v", parseErr)})
-	} else {
-		a.notify(EventDebug{Message: fmt.Sprintf("final response turn: %T", turn)})
+	if err := a.appendSuccessfulResponse(resp); err != nil {
+		return fmt.Errorf("query model (final): %w", err)
 	}
+	a.notify(EventDebug{Message: fmt.Sprintf("final response turn: %T", resp.Turn)})
 	return nil
 }
 

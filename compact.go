@@ -3,7 +3,7 @@ package clnkr
 import (
 	"context"
 
-	"github.com/clnkr-ai/clnkr/transcript"
+	"github.com/clnkr-ai/clnkr/internal/core/transcript"
 )
 
 type Compactor interface {

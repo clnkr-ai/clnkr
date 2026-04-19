@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,6 +20,38 @@ import (
 
 func actJSON(command string) string {
 	return fmt.Sprintf(`{"type":"act","bash":{"commands":[{"command":%q,"workdir":null}]}}`, command)
+}
+
+func mustTurn(raw string) clnkr.Turn {
+	turn, err := clnkr.ParseTurn(raw)
+	if err != nil {
+		panic(err)
+	}
+	return turn
+}
+
+func mustResponse(raw string) clnkr.Response {
+	return clnkr.Response{Turn: mustTurn(raw), Raw: raw}
+}
+
+func mustCanonicalDoneText(summary string) string {
+	text, err := clnkr.CanonicalTurnJSON(&clnkr.DoneTurn{Summary: summary})
+	if err != nil {
+		panic(err)
+	}
+	return text
+}
+
+func runDoneTranscript(t *testing.T, summary string) []clnkr.Message {
+	t.Helper()
+
+	agent := clnkr.NewAgent(&fakeModel{responses: []clnkr.Response{
+		mustResponse(mustCanonicalDoneText(summary)),
+	}}, &fakeExecutor{}, "/tmp")
+	if err := agent.Run(context.Background(), "finish"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return agent.Messages()
 }
 
 type fakeModel struct {
@@ -251,7 +286,7 @@ func TestCompactCommandFailureLeavesMessagesUnchanged(t *testing.T) {
 
 func TestCompactCommandKeepsSessionUsable(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
+		mustResponse(`{"type":"done","summary":"done"}`),
 	}}
 	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
 	if err := agent.AddMessages(compactableMessages()); err != nil {
@@ -287,6 +322,129 @@ func TestCompactCommandKeepsSessionUsable(t *testing.T) {
 	}
 }
 
+func TestMakeCompactorFactoryUsesFreeformProviderText(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"role": "assistant", "content": "Older work summarized."}},
+			},
+			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
+		})
+	}))
+	defer server.Close()
+
+	compactor := makeCompactorFactory(server.URL, "test-key", "gpt-test")("")
+	summary, err := compactor.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if summary != "Older work summarized." {
+		t.Fatalf("summary = %q, want %q", summary, "Older work summarized.")
+	}
+	if _, ok := gotBody["response_format"]; ok {
+		t.Fatalf("response_format should be omitted for compaction, got %#v", gotBody["response_format"])
+	}
+}
+
+func TestTrajectoryRoundTripCanonicalAssistantTurn(t *testing.T) {
+	want := runDoneTranscript(t, "Saved transcript")
+
+	trajectoryPath := filepath.Join(t.TempDir(), "trajectory.json")
+	data, err := json.MarshalIndent(want, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent: %v", err)
+	}
+	if err := os.WriteFile(trajectoryPath, data, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	loadedData, err := os.ReadFile(trajectoryPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var loaded []clnkr.Message
+	if err := json.Unmarshal(loadedData, &loaded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	replayed := clnkr.NewAgent(nil, nil, "/tmp")
+	if err := replayed.AddMessages(loaded); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+	got := replayed.Messages()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("messages = %#v, want %#v", got, want)
+	}
+
+	last := got[len(got)-1].Content
+	wantCanonical := mustCanonicalDoneText("Saved transcript")
+	if last != wantCanonical {
+		t.Fatalf("last assistant message = %q, want %q", last, wantCanonical)
+	}
+	turn, err := clnkr.ParseTurn(last)
+	if err != nil {
+		t.Fatalf("ParseTurn(last): %v", err)
+	}
+	done, ok := turn.(*clnkr.DoneTurn)
+	if !ok {
+		t.Fatalf("last turn = %T, want *clnkr.DoneTurn", turn)
+	}
+	if done.Summary != "Saved transcript" {
+		t.Fatalf("done summary = %q, want %q", done.Summary, "Saved transcript")
+	}
+}
+
+func TestLoadMessagesRoundTripCanonicalAssistantTurn(t *testing.T) {
+	want := runDoneTranscript(t, "Loaded transcript")
+
+	loadPath := filepath.Join(t.TempDir(), "messages.json")
+	data, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if err := os.WriteFile(loadPath, data, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	loadedData, err := os.ReadFile(loadPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var loaded []clnkr.Message
+	if err := json.Unmarshal(loadedData, &loaded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	agent := clnkr.NewAgent(nil, nil, "/tmp")
+	if err := agent.AddMessages(loaded); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+	got := agent.Messages()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("messages = %#v, want %#v", got, want)
+	}
+
+	last := got[len(got)-1].Content
+	wantCanonical := mustCanonicalDoneText("Loaded transcript")
+	if last != wantCanonical {
+		t.Fatalf("last assistant message = %q, want %q", last, wantCanonical)
+	}
+	turn, err := clnkr.ParseTurn(last)
+	if err != nil {
+		t.Fatalf("ParseTurn(last): %v", err)
+	}
+	done, ok := turn.(*clnkr.DoneTurn)
+	if !ok {
+		t.Fatalf("last turn = %T, want *clnkr.DoneTurn", turn)
+	}
+	if done.Summary != "Loaded transcript" {
+		t.Fatalf("done summary = %q, want %q", done.Summary, "Loaded transcript")
+	}
+}
+
 func TestRunSingleTaskRejectsCompactCommand(t *testing.T) {
 	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
 
@@ -315,8 +473,8 @@ func TestRunSingleTaskRejectsCompactCommandBeforeApprovalCheck(t *testing.T) {
 
 func TestRunApprovalTaskRejectsCompactApprovalReply(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: actJSON("echo hi")}},
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
+		mustResponse(actJSON("echo hi")),
+		mustResponse(`{"type":"done","summary":"done"}`),
 	}}
 	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
 	agent := clnkr.NewAgent(model, executor, "/tmp")
@@ -349,8 +507,8 @@ func TestRunApprovalTaskRejectsCompactApprovalReply(t *testing.T) {
 
 func TestRunApprovalTaskRejectsCompactClarificationReply(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"clarify","question":"Which repo?"}`}},
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
+		mustResponse(`{"type":"clarify","question":"Which repo?"}`),
+		mustResponse(`{"type":"done","summary":"done"}`),
 	}}
 	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
 	prompter := &scriptPrompter{
@@ -382,8 +540,8 @@ func TestRunApprovalTaskRejectsCompactClarificationReply(t *testing.T) {
 
 func TestRunTaskFullSendUsesRun(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: actJSON("echo hi")}},
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
+		mustResponse(actJSON("echo hi")),
+		mustResponse(`{"type":"done","summary":"done"}`),
 	}}
 	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
 	agent := clnkr.NewAgent(model, executor, "/tmp")
@@ -399,8 +557,8 @@ func TestRunTaskFullSendUsesRun(t *testing.T) {
 
 func TestRunApprovalTaskApproveExecutesCommand(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: actJSON("echo hi")}},
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
+		mustResponse(actJSON("echo hi")),
+		mustResponse(`{"type":"done","summary":"done"}`),
 	}}
 	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
 	agent := clnkr.NewAgent(model, executor, "/tmp")
@@ -417,8 +575,8 @@ func TestRunApprovalTaskApproveExecutesCommand(t *testing.T) {
 
 func TestRunApprovalTaskNonApprovalReplyBecomesGuidance(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: actJSON("rm important.txt")}},
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"okay"}`}},
+		mustResponse(actJSON("rm important.txt")),
+		mustResponse(`{"type":"done","summary":"okay"}`),
 	}}
 	executor := &fakeExecutor{}
 	agent := clnkr.NewAgent(model, executor, "/tmp")
@@ -441,8 +599,8 @@ func TestRunApprovalTaskNonApprovalReplyBecomesGuidance(t *testing.T) {
 
 func TestRunApprovalTaskCountsBatchCommandsTowardStepLimit(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null},{"command":"go test ./...","workdir":"subdir"}]}}`}},
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"step limit summary"}`}},
+		mustResponse(`{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null},{"command":"go test ./...","workdir":"subdir"}]}}`),
+		mustResponse(`{"type":"done","summary":"step limit summary"}`),
 	}}
 	executor := &fakeExecutor{results: []clnkr.CommandResult{
 		{Stdout: "/tmp\n", ExitCode: 0},
@@ -474,8 +632,8 @@ func TestRunApprovalTaskCountsBatchCommandsTowardStepLimit(t *testing.T) {
 
 func TestRunApprovalTaskClarifyTurnAppendsReply(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"clarify","question":"Which repo?"}`}},
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"okay"}`}},
+		mustResponse(`{"type":"clarify","question":"Which repo?"}`),
+		mustResponse(`{"type":"done","summary":"okay"}`),
 	}}
 	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
 	prompter := &scriptPrompter{
@@ -494,7 +652,7 @@ func TestRunApprovalTaskClarifyTurnAppendsReply(t *testing.T) {
 
 func TestRunApprovalTaskEmptyActReplyIsNoOp(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: actJSON("rm important.txt")}},
+		mustResponse(actJSON("rm important.txt")),
 	}}
 	executor := &fakeExecutor{}
 	agent := clnkr.NewAgent(model, executor, "/tmp")

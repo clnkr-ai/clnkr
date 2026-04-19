@@ -14,8 +14,8 @@ import (
 
 func TestProgramApprovalFlowExecutesProposedCommand(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"command":"printf 'hello from test\\n'","workdir":null}]},"reasoning":"emit test output"}`}},
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
+		mustResponse(`{"type":"act","bash":{"commands":[{"command":"printf 'hello from test\\n'","workdir":null}]},"reasoning":"emit test output"}`),
+		mustResponse(`{"type":"done","summary":"done"}`),
 	}}
 	executor := &fakeExecutor{results: []clnkr.CommandResult{
 		{Stdout: "hello from test\n", ExitCode: 0},
@@ -45,8 +45,8 @@ func TestProgramApprovalFlowExecutesProposedCommand(t *testing.T) {
 
 func TestProgramGuidanceReplyBecomesNextUserTurn(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"command":"rm important.txt","workdir":null}]},"reasoning":"bad idea"}`}},
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done"}`}},
+		mustResponse(`{"type":"act","bash":{"commands":[{"command":"rm important.txt","workdir":null}]},"reasoning":"bad idea"}`),
+		mustResponse(`{"type":"done","summary":"done"}`),
 	}}
 	executor := &fakeExecutor{}
 	agent := clnkr.NewAgent(model, executor, t.TempDir())
@@ -134,7 +134,7 @@ func TestSeedModelHistoryRendersResumedHistory(t *testing.T) {
 
 func TestProgramResponseCachesLatestReasoningWhenEnabled(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		{Message: clnkr.Message{Role: "assistant", Content: `{"type":"done","summary":"done","reasoning":"checked parser -> protocol -> ui"}`}},
+		mustResponse(`{"type":"done","summary":"done","reasoning":"checked parser -> protocol -> ui"}`),
 	}}
 	executor := &fakeExecutor{}
 	agent := clnkr.NewAgent(model, executor, t.TempDir())

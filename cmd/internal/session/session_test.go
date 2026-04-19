@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/clnkr-ai/clnkr"
-	"github.com/clnkr-ai/clnkr/session"
+	"github.com/clnkr-ai/clnkr/cmd/internal/session"
 )
 
 func TestNormalizeProjectPath(t *testing.T) {

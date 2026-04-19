@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/clnkr-ai/clnkr"
-	"github.com/clnkr-ai/clnkr/anthropic"
+	"github.com/clnkr-ai/clnkr/internal/providers/anthropic"
 )
 
 func TestModel(t *testing.T) {
@@ -66,6 +66,47 @@ func TestModel(t *testing.T) {
 		}
 	})
 
+	t.Run("QueryText returns plain text without output config", func(t *testing.T) {
+		var gotBody map[string]any
+		history := []clnkr.Message{
+			{Role: "user", Content: "first task"},
+			{Role: "assistant", Content: `{"type":"done","summary":"canonical transcript"}`},
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &gotBody)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"content": []map[string]string{{"type": "text", "text": "Older work summarized."}},
+				"usage":   map[string]int{"input_tokens": 10, "output_tokens": 20},
+			})
+		}))
+		defer server.Close()
+
+		m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys prompt")
+		summary, err := m.QueryText(context.Background(), history)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if summary != "Older work summarized." {
+			t.Fatalf("summary = %q, want %q", summary, "Older work summarized.")
+		}
+		if _, ok := gotBody["output_config"]; ok {
+			t.Fatalf("output_config should be omitted for QueryText, got %#v", gotBody["output_config"])
+		}
+		msgs, ok := gotBody["messages"].([]any)
+		if !ok || len(msgs) != len(history) {
+			t.Fatalf("messages = %#v, want %d transcript messages", gotBody["messages"], len(history))
+		}
+		last, ok := msgs[len(msgs)-1].(map[string]any)
+		if !ok {
+			t.Fatalf("last message = %#v, want map", msgs[len(msgs)-1])
+		}
+		if got, want := last["content"], `{"type":"done","summary":"canonical transcript"}`; got != want {
+			t.Fatalf("last assistant content = %#v, want %q", got, want)
+		}
+	})
+
 	t.Run("returns canonical json text", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -83,11 +124,8 @@ func TestModel(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if resp.Message.Role != "assistant" {
-			t.Errorf("got role %q, want assistant", resp.Message.Role)
-		}
-		if resp.Message.Content != `{"type":"done","summary":"hello back"}` {
-			t.Errorf("got content %q, want %q", resp.Message.Content, `{"type":"done","summary":"hello back"}`)
+		if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"hello back"}` {
+			t.Errorf("got content %q, want %q", got, `{"type":"done","summary":"hello back"}`)
 		}
 		if resp.ProtocolErr != nil {
 			t.Fatalf("got protocol error %v, want nil", resp.ProtocolErr)
@@ -191,8 +229,8 @@ func TestModel(t *testing.T) {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
-				if resp.Message.Content != tt.text {
-					t.Fatalf("content = %q, want %q", resp.Message.Content, tt.text)
+				if resp.Raw != tt.text {
+					t.Fatalf("raw = %q, want %q", resp.Raw, tt.text)
 				}
 				if !errors.Is(resp.ProtocolErr, tt.wantErr) {
 					t.Fatalf("protocol error = %v, want %v", resp.ProtocolErr, tt.wantErr)
@@ -226,8 +264,8 @@ func TestModel(t *testing.T) {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
-				if resp.Message.Content != tt.want {
-					t.Fatalf("content = %q, want %q", resp.Message.Content, tt.want)
+				if got := mustCanonicalTurn(t, resp.Turn); got != tt.want {
+					t.Fatalf("content = %q, want %q", got, tt.want)
 				}
 				if resp.ProtocolErr != nil {
 					t.Fatalf("protocol error = %v, want nil", resp.ProtocolErr)
@@ -251,8 +289,8 @@ func TestModel(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if resp.Message.Content != raw {
-			t.Fatalf("content = %q, want %q", resp.Message.Content, raw)
+		if resp.Raw != raw {
+			t.Fatalf("raw = %q, want %q", resp.Raw, raw)
 		}
 		if !errors.Is(resp.ProtocolErr, clnkr.ErrInvalidJSON) {
 			t.Fatalf("protocol error = %v, want ErrInvalidJSON", resp.ProtocolErr)
@@ -304,6 +342,15 @@ func TestModel(t *testing.T) {
 
 func anthropicWrappedDone(summary string) string {
 	return `{"turn":{"type":"done","bash":null,"question":null,"summary":"` + summary + `","reasoning":null}}`
+}
+
+func mustCanonicalTurn(t *testing.T, turn clnkr.Turn) string {
+	t.Helper()
+	raw, err := clnkr.CanonicalTurnJSON(turn)
+	if err != nil {
+		t.Fatalf("CanonicalTurnJSON: %v", err)
+	}
+	return raw
 }
 
 func schemaContainsKey(node any, key string) bool {

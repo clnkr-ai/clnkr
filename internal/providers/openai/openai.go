@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/clnkr-ai/clnkr"
-	"github.com/clnkr-ai/clnkr/turnschema"
 )
 
 // Model talks to any OpenAI-compatible chat completions API.
@@ -40,6 +39,11 @@ type request struct {
 	Model          string          `json:"model"`
 	Messages       []clnkr.Message `json:"messages"`
 	ResponseFormat responseFormat  `json:"response_format"`
+}
+
+type textRequest struct {
+	Model    string          `json:"model"`
+	Messages []clnkr.Message `json:"messages"`
 }
 
 type responseFormat struct {
@@ -97,7 +101,7 @@ func extractErrorMessage(body []byte) string {
 }
 
 func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
-	messages = turnschema.NormalizeMessagesForProvider(messages)
+	messages = normalizeMessagesForProvider(messages)
 	allMessages := make([]clnkr.Message, 0, len(messages)+1)
 	allMessages = append(allMessages, clnkr.Message{Role: "system", Content: m.systemPrompt})
 	allMessages = append(allMessages, messages...)
@@ -110,7 +114,7 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 			JSONSchema: responseJSONSchema{
 				Name:   "agent_turn",
 				Strict: true,
-				Schema: turnschema.Schema(),
+				Schema: requestSchema(),
 			},
 		},
 	})
@@ -137,6 +141,40 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 	}
 
 	return clnkr.Response{}, fmt.Errorf("retry loop exhausted")
+}
+
+func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string, error) {
+	allMessages := make([]clnkr.Message, 0, len(messages)+1)
+	allMessages = append(allMessages, clnkr.Message{Role: "system", Content: m.systemPrompt})
+	allMessages = append(allMessages, messages...)
+
+	body, err := json.Marshal(textRequest{
+		Model:    m.model,
+		Messages: allMessages,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		respBody, statusCode, retryAfter, err := m.doRequest(ctx, body)
+		if err != nil {
+			return "", err
+		}
+		if statusCode == http.StatusOK {
+			return parseTextResponse(respBody)
+		}
+
+		apiErr := fmt.Errorf("api error (status %d): %s", statusCode, extractErrorMessage(respBody))
+		if statusCode != http.StatusTooManyRequests || attempt == maxAttempts {
+			return "", apiErr
+		}
+		if err := waitForRetry(ctx, retryDelay(retryAfter, attempt)); err != nil {
+			return "", fmt.Errorf("wait before retry: %w", err)
+		}
+	}
+
+	return "", fmt.Errorf("retry loop exhausted")
 }
 
 func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, int, string, error) {
@@ -176,22 +214,41 @@ func parseResponse(respBody []byte) (clnkr.Response, error) {
 	if strings.TrimSpace(choice.Message.Content) == "" {
 		return clnkr.Response{}, fmt.Errorf("empty choice content")
 	}
-	turn, err := turnschema.ParseProvider(choice.Message.Content)
+	turn, err := parseProviderTurn(choice.Message.Content)
 	if err != nil {
 		return clnkr.Response{
-			Message:     clnkr.Message{Role: choice.Message.Role, Content: choice.Message.Content},
+			Raw:         choice.Message.Content,
 			Usage:       clnkr.Usage{InputTokens: apiResp.Usage.PromptTokens, OutputTokens: apiResp.Usage.CompletionTokens},
 			ProtocolErr: err,
 		}, nil
 	}
-	canonicalContent, err := turnschema.CanonicalJSON(turn)
-	if err != nil {
+	if _, err := clnkr.CanonicalTurnJSON(turn); err != nil {
 		return clnkr.Response{}, fmt.Errorf("canonicalize structured output payload: %w", err)
 	}
 	return clnkr.Response{
-		Message: clnkr.Message{Role: choice.Message.Role, Content: canonicalContent},
-		Usage:   clnkr.Usage{InputTokens: apiResp.Usage.PromptTokens, OutputTokens: apiResp.Usage.CompletionTokens},
+		Turn:  turn,
+		Raw:   choice.Message.Content,
+		Usage: clnkr.Usage{InputTokens: apiResp.Usage.PromptTokens, OutputTokens: apiResp.Usage.CompletionTokens},
 	}, nil
+}
+
+func parseTextResponse(respBody []byte) (string, error) {
+	var apiResp response
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return "", fmt.Errorf("unmarshal response: %w", err)
+	}
+	if len(apiResp.Choices) == 0 {
+		return "", fmt.Errorf("no choices in response")
+	}
+
+	choice := apiResp.Choices[0]
+	if strings.TrimSpace(choice.Message.Refusal) != "" {
+		return "", fmt.Errorf("free-form refusal: %s", choice.Message.Refusal)
+	}
+	if strings.TrimSpace(choice.Message.Content) == "" {
+		return "", fmt.Errorf("empty choice content")
+	}
+	return choice.Message.Content, nil
 }
 
 func retryDelay(retryAfter string, attempt int) time.Duration {
