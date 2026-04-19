@@ -10,7 +10,7 @@ CLANKERVAL_PINNED_VERSION := 0.4.3
 	check test evaluations evaluations-live evaluations-live-openai evaluations-live-anthropic \
 	help man docs docs-serve \
 	_build-clnku _build-clnkr \
-	_fmt _fmt-check _vet _lint _arch _sloc _workflow-make-targets \
+	_fmt _fmt-check _vet _lint _arch sloc _workflow-make-targets \
 	_hooks _check-man _site-sync _site-build
 
 PREFIX ?= /usr/local
@@ -39,7 +39,7 @@ _build-clnkr:
 	cd cmd/clnkr && go build -trimpath -ldflags '$(LDFLAGS)' -o ../../clnkr .
 
 ##@ Quality
-check: _fmt-check _vet _lint _arch _sloc _workflow-make-targets _check-man test evaluations ## Run formatting, vet, lint, architecture, SLOC, workflow, manpage, test, and evaluation checks
+check: _fmt-check _vet _lint _arch sloc _workflow-make-targets _check-man test evaluations ## Run formatting, vet, lint, architecture, SLOC, workflow, manpage, test, and evaluation checks
 
 test: ## Run all tests
 	go test ./... -v
@@ -99,8 +99,11 @@ _lint:
 _arch:
 	@./scripts/check-architecture-imports.py $(DEFERRED_PACKAGE_ALLOWLIST)
 
-_sloc:
-	@CORE_SLOC_LIMIT=$(CORE_SLOC_LIMIT) ./scripts/check-core-sloc.sh
+# Repo-root only: counts repo-local Go files in the main-module dependency closure of `.`.
+sloc: ## Report core runtime graph SLOC and fail if it exceeds CORE_SLOC_LIMIT
+	@sloc="$$(cloc --quiet --csv $$(go list -deps -f '{{if .Module}}{{if .Module.Main}}{{range .GoFiles}}{{$$.Dir}}/{{.}}{{"\n"}}{{end}}{{end}}{{end}}' . | sort -u) | awk -F, 'END { print $$5 }')"; \
+	echo "core runtime graph: $$sloc / $(CORE_SLOC_LIMIT) SLOC"; \
+	test "$$sloc" -le "$(CORE_SLOC_LIMIT)" || { echo "error: core runtime graph exceeds $(CORE_SLOC_LIMIT) SLOC limit" >&2; exit 1; }
 
 _workflow-make-targets:
 	python3 ./scripts/check-workflow-make-targets.py
