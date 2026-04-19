@@ -101,7 +101,8 @@ make evaluations
 Live-provider evaluation suite:
 
 ```bash
-make evaluations-live
+make evaluations-live-openai
+make evaluations-live-anthropic
 ```
 
 Both make targets resolve `clankerval` from `PATH` with `python3 ./scripts/require-clankerval.py`.
@@ -112,6 +113,8 @@ Canonical CLI examples use `clankerval` directly:
 clankerval run --suite default
 CLNKR_EVALUATION_MODE=live-provider clankerval run --suite default
 ```
+
+The provider-specific make targets set provider defaults and then call `make evaluations-live`.
 
 `make evaluations-live` reads the first-wave runtime configuration from:
 
