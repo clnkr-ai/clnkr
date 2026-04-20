@@ -1,5 +1,4 @@
-clnku 1 "clnku" "User Commands"
-==========================
+% clnku(1) User Commands
 
 # NAME
 

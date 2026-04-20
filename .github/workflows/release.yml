@@ -30,7 +30,7 @@ jobs:
       - name: Install Debian tooling
         env:
           DEBIAN_FRONTEND: noninteractive
-        run: sudo apt-get update && sudo apt-get install -y debhelper dpkg-dev git-buildpackage lintian bash-completion
+        run: sudo apt-get update && sudo apt-get install -y debhelper dpkg-dev git-buildpackage lintian bash-completion pandoc
 
       - name: Configure git and dch environment
         run: |
@@ -102,7 +102,7 @@ jobs:
       - name: Install Debian tooling
         env:
           DEBIAN_FRONTEND: noninteractive
-        run: sudo apt-get update && sudo apt-get install -y debhelper dpkg-dev git-buildpackage lintian bash-completion
+        run: sudo apt-get update && sudo apt-get install -y debhelper dpkg-dev git-buildpackage lintian bash-completion pandoc
 
       - name: Configure git and dch environment
         run: |
