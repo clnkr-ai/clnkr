@@ -76,6 +76,7 @@ jobs:
           deb="$(find . -maxdepth 1 -name "$pattern" -print -quit)"
           sudo apt-get update
           sudo apt-get install -y "$deb"
+          rm -f "$deb"
 
       - name: Run mock-provider evaluations
         run: make evaluations
