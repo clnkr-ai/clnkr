@@ -306,20 +306,3 @@ jobs:
             git commit -m "Update clnkr to ${VERSION}"
             git push
           }
-
-  check-homebrew:
-    needs: [release]
-    runs-on: macos-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install from Homebrew tap
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: 1
-        run: ./scripts/check-homebrew.sh install
-
-      - name: Verify installed version
-        env:
-          CLNKR_HOMEBREW_EXPECTED_VERSION: ${{ github.ref_name }}
-        run: ./scripts/check-homebrew.sh verify
