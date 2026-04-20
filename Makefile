@@ -2,7 +2,9 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LATEST_TAG ?= $(shell git tag -l 'v[0-9]*' --sort=-v:refname | head -1)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hugo)
+PANDOC ?= pandoc
 CLANKERVAL_PINNED_VERSION := 0.4.3
+CLANKERVAL_DOCS_REPO_URL ?= https://github.com/clnkr-ai/clankerval.git
 
 .DEFAULT_GOAL := build
 .PHONY: \
@@ -11,17 +13,26 @@ CLANKERVAL_PINNED_VERSION := 0.4.3
 	help man docs docs-serve \
 	_build-clnku _build-clnkr \
 	_fmt _fmt-check _vet _lint _arch sloc _workflow-make-targets \
-	_hooks _check-man _site-sync _site-build
+	_hooks _check-docs _require-pandoc _site-sync _site-build
 
 PREFIX ?= /usr/local
 CORE_SLOC_LIMIT := 1300
 DEFERRED_PACKAGE_ALLOWLIST := scripts/deferred-package-allowlist.txt
+DOC_MAN_DIR := build/docs/man
+DOC_MAN_OUTPUTS := $(DOC_MAN_DIR)/clnkr.1 $(DOC_MAN_DIR)/clnku.1
+DOC_CONTENT_DIR := site/content/docs
+GENERATED_SITE_DOCS := \
+	$(DOC_CONTENT_DIR)/clnkr.md \
+	$(DOC_CONTENT_DIR)/clnku.md \
+	$(DOC_CONTENT_DIR)/clankerval.md
 
 ##@ Build
 build: _build-clnku _build-clnkr ## Build shipped binaries
 
 clean: ## Remove build artifacts
 	rm -f clnku clnkr
+	rm -rf build/docs
+	rm -f $(GENERATED_SITE_DOCS)
 
 install: build ## Install shipped binaries and clnk symlink
 	install -d $(DESTDIR)$(PREFIX)/bin
@@ -39,7 +50,7 @@ _build-clnkr:
 	cd cmd/clnkr && go build -trimpath -ldflags '$(LDFLAGS)' -o ../../clnkr .
 
 ##@ Quality
-check: _fmt-check _vet _lint _arch sloc _workflow-make-targets _check-man test evaluations ## Run formatting, vet, lint, architecture, SLOC, workflow, manpage, test, and evaluation checks
+check: _fmt-check _vet _lint _arch sloc _workflow-make-targets _check-docs test evaluations ## Run formatting, vet, lint, architecture, SLOC, workflow, docs, test, and evaluation checks
 
 test: ## Run all tests
 	go test ./... -v
@@ -118,28 +129,69 @@ _hooks:
 	git config core.hooksPath .githooks
 
 ##@ Docs
-man: ## Generate man pages from markdown
-	go-md2man -in doc/clnkr.1.md -out doc/clnkr.1
-	go-md2man -in doc/clnku.1.md -out doc/clnku.1
+man: $(DOC_MAN_OUTPUTS) ## Generate man pages from markdown
 
 docs: _site-build ## Build documentation site
 
 docs-serve: _site-sync ## Run documentation site locally
 	HUGO_CLNKR_LATEST_TAG='$(LATEST_TAG)' $(HUGO) server --source site
 
-_check-man:
-	@cp doc/clnkr.1 doc/clnkr.1.bak
-	@go-md2man -in doc/clnkr.1.md -out doc/clnkr.1
-	@diff -q doc/clnkr.1 doc/clnkr.1.bak >/dev/null 2>&1 || (echo "error: doc/clnkr.1 is out of date; run 'make man'" && mv doc/clnkr.1.bak doc/clnkr.1 && exit 1)
-	@mv doc/clnkr.1.bak doc/clnkr.1
-	@cp doc/clnku.1 doc/clnku.1.bak
-	@go-md2man -in doc/clnku.1.md -out doc/clnku.1
-	@diff -q doc/clnku.1 doc/clnku.1.bak >/dev/null 2>&1 || (echo "error: doc/clnku.1 is out of date; run 'make man'" && mv doc/clnku.1.bak doc/clnku.1 && exit 1)
-	@mv doc/clnku.1.bak doc/clnku.1
-	@echo "man pages are up-to-date"
+_check-docs: man _site-build
+
+_require-pandoc:
+	@command -v "$(PANDOC)" >/dev/null 2>&1 || { \
+		echo "error: pandoc is required for docs generation" >&2; \
+		exit 1; \
+	}
 
 _site-sync:
-	./scripts/sync-site-docs.sh
+	rm -f $(GENERATED_SITE_DOCS)
+	$(MAKE) --no-print-directory $(GENERATED_SITE_DOCS)
 
 _site-build: _site-sync
 	HUGO_CLNKR_LATEST_TAG='$(LATEST_TAG)' $(HUGO) --source site
+
+$(DOC_MAN_DIR)/%.1: doc/%.1.md | _require-pandoc
+	mkdir -p "$(DOC_MAN_DIR)"
+	"$(PANDOC)" --from=markdown-smart --to=man --standalone "$<" -o "$@"
+
+$(DOC_CONTENT_DIR)/clnkr.md: DOC_TITLE = clnkr
+$(DOC_CONTENT_DIR)/clnkr.md: DOC_DESCRIPTION = Terminal UI manual page
+$(DOC_CONTENT_DIR)/clnkr.md: DOC_WEIGHT = 10
+$(DOC_CONTENT_DIR)/clnku.md: DOC_TITLE = clnku
+$(DOC_CONTENT_DIR)/clnku.md: DOC_DESCRIPTION = Plain CLI manual page
+$(DOC_CONTENT_DIR)/clnku.md: DOC_WEIGHT = 10
+
+$(DOC_CONTENT_DIR)/clnkr.md $(DOC_CONTENT_DIR)/clnku.md: $(DOC_CONTENT_DIR)/%.md: doc/%.1.md | _require-pandoc
+	mkdir -p "$(DOC_CONTENT_DIR)"
+	{ \
+		printf '+++\n'; \
+		printf 'title = "%s"\n' "$(DOC_TITLE)"; \
+		printf 'description = "%s"\n' "$(DOC_DESCRIPTION)"; \
+		printf 'slug = "%s"\n' "$*"; \
+		printf 'weight = %s\n' "$(DOC_WEIGHT)"; \
+		printf '+++\n\n'; \
+		"$(PANDOC)" --from=markdown-smart --to=gfm "$<"; \
+	} > "$@"
+
+$(DOC_CONTENT_DIR)/clankerval.md: | _require-pandoc
+	tmpdir="$$(mktemp -d)"; \
+	trap 'rm -rf "$$tmpdir"' EXIT; \
+	git clone --depth 1 "$(CLANKERVAL_DOCS_REPO_URL)" "$$tmpdir"; \
+	src="$$tmpdir/doc/clankerval.1.md"; \
+	[ -f "$$src" ] || { echo "error: missing clankerval manpage at $$src" >&2; exit 1; }; \
+	normalized="$$tmpdir/clankerval.pandoc.md"; \
+	{ \
+		printf '%% clankerval(1) User Commands\n\n'; \
+		tail -n +4 "$$src"; \
+	} > "$$normalized"; \
+	mkdir -p "$(DOC_CONTENT_DIR)"; \
+	{ \
+		printf '+++\n'; \
+		printf 'title = "clankerval"\n'; \
+		printf 'description = "Evaluation runner manual page"\n'; \
+		printf 'slug = "clankerval"\n'; \
+		printf 'weight = 20\n'; \
+		printf '+++\n\n'; \
+		"$(PANDOC)" --from=markdown-smart --to=gfm "$$normalized"; \
+	} > "$@"

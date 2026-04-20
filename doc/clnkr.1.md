@@ -1,5 +1,4 @@
-clnkr 1 "clnkr" "User Commands"
-==========================
+% clnkr(1) User Commands
 
 # NAME
 

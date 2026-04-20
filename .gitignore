@@ -3,6 +3,7 @@
 /clnkr
 /cmd/clnku/clnku
 /cmd/clnkr/clnkr
+/build/
 
 # Test binary
 *.test
@@ -29,6 +30,9 @@ Thumbs.db
 /site/public/
 /site/resources/
 /site/.hugo_build.lock
+/site/content/docs/clankerval.md
+/site/content/docs/clnkr.md
+/site/content/docs/clnku.md
 
 # Evaluations
 /evaluations/trials/*
