@@ -17,7 +17,6 @@ CLANKERVAL_DOCS_REPO_URL ?= https://github.com/clnkr-ai/clankerval.git
 
 PREFIX ?= /usr/local
 CORE_SLOC_LIMIT := 1300
-DEFERRED_PACKAGE_ALLOWLIST := scripts/deferred-package-allowlist.txt
 DOC_MAN_DIR := build/docs/man
 DOC_MAN_OUTPUTS := $(DOC_MAN_DIR)/clnkr.1 $(DOC_MAN_DIR)/clnku.1
 DOC_CONTENT_DIR := site/content/docs
@@ -109,7 +108,7 @@ _lint:
 	cd cmd/clnkr && golangci-lint run ./...
 
 _arch:
-	@./scripts/check-architecture-imports.py $(DEFERRED_PACKAGE_ALLOWLIST)
+	@./scripts/check-architecture-imports.sh
 
 # Repo-root only: counts repo-local Go files in the main-module dependency closure of `.`.
 sloc: ## Report core runtime graph SLOC and fail if it exceeds CORE_SLOC_LIMIT
