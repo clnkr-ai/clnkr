@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.0 (2026-04-21)
+
+- Add explicit provider selection flags
+- Move git feedback under internal/core
+- Reframe compaction as a handoff summary
+- Move compaction under cmd/internal
+- Move Hugo frontmatter into pandoc template
+- Replace doc scripts with pandoc targets
+- Remove Homebrew verification workflow
+- Remove clankerval package after CI install
+- Inline core SLOC check in Makefile
+- Remove core runtime manifest
+- Pin clankerval to 0.4.3 after cleanup cherry-pick
+- Collapse clankerval setup into Makefile
+- Update CHANGELOG.md for 1.8.7
+- Update CHANGELOG.md for 1.8.7
+
 ## 1.8.7 (2026-04-19)
 
 - Refactor core boundary around typed provider turns
@@ -69,7 +86,7 @@
 
 ## 1.5.3 (2026-04-06)
 
-- Remove clankerval references from clnkr
+- Remove clnkeval references from clnkr
 - Add clankerval section to homepage
 - Update CHANGELOG.md for 1.5.2
 
@@ -89,19 +106,19 @@
 - docs: align evaluations docs with clankerval
 - Validate clankerval install paths and CI tests
 - Handle clankerval resolver failure cleanly
-- Remove bundled clankerval source ownership
+- Remove bundled clnkeval source ownership
 - Update CHANGELOG.md for 1.4.5
 - Update CHANGELOG.md for 1.4.5
 
 ## 1.4.5 (2026-04-04)
 
-- Add interactive progress output to clankerval
+- Add interactive progress output to clnkeval
 - Update CHANGELOG.md for 1.4.4
 - Update CHANGELOG.md for 1.4.4
 
 ## 1.4.4 (2026-04-04)
 
-- Improve clankerval CLI UX: add --help, --version, and usage text
+- Improve clnkeval CLI UX: add --help, --version, and usage text
 - Update CHANGELOG.md for 1.4.3
 
 ## 1.4.3 (2026-04-04)
@@ -115,7 +132,7 @@
 ## 1.4.1 (2026-04-04)
 
 - Use fmt.Fprintf in ExportJUnit
-- Ship clankerval as a first-class binary alongside clnkr and clnku
+- Ship clnkeval as a first-class binary alongside clnkr and clnku
 - Add evaluations runtime and mock-provider mode
 - Update CHANGELOG.md for 1.4.0
 - Update CHANGELOG.md for 1.4.0
