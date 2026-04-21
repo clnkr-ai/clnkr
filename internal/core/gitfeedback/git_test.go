@@ -1,4 +1,4 @@
-package feedback
+package gitfeedback
 
 import (
 	"fmt"
