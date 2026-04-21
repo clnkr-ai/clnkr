@@ -117,7 +117,7 @@ sloc: ## Report core runtime graph SLOC and fail if it exceeds CORE_SLOC_LIMIT
 	test "$$sloc" -le "$(CORE_SLOC_LIMIT)" || { echo "error: core runtime graph exceeds $(CORE_SLOC_LIMIT) SLOC limit" >&2; exit 1; }
 
 _workflow-make-targets:
-	python3 ./scripts/check-workflow-make-targets.py
+	./scripts/check-workflow-make-targets.sh
 
 ##@ Contributing
 help: ## Show available targets
