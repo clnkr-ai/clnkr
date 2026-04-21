@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -24,11 +25,20 @@ import (
 var version = "dev"
 
 const defaultAnthropicModel = "claude-sonnet-4-6"
+const defaultBaseURL = "https://api.anthropic.com"
 
 const exitClarificationNeeded = 2
 
 var errApprovalPending = errors.New("approval pending")
 var errCompactCommandOutsideConversation = errors.New("/compact is only available at the conversational prompt")
+
+type providerMode string
+
+const (
+	providerAuto      providerMode = "auto"
+	providerAnthropic providerMode = "anthropic"
+	providerOpenAI    providerMode = "openai"
+)
 
 type approvalPrompter interface {
 	ActReply(ctx context.Context, command string) (string, error)
@@ -49,7 +59,8 @@ Usage:
 Core:
   -p, --prompt string       Task to run (exits after completion)
   -m, --model string        Model identifier (env: $CLNKR_MODEL, default: ` + defaultAnthropicModel + `)
-  -u, --base-url string     LLM endpoint (env: $CLNKR_BASE_URL, default: https://api.anthropic.com)
+  -u, --base-url string     LLM endpoint transport URL (env: $CLNKR_BASE_URL, default: ` + defaultBaseURL + `)
+      --provider string     Provider adapter semantics: auto|anthropic|openai (default: auto)
       --max-steps int       Maximum agent steps (default: 100)
       --full-send           Execute every Act turn without approval
   -v, --verbose             Show internal decisions
@@ -72,6 +83,7 @@ Debugging:
 
 Environment:
   CLNKR_API_KEY     API key for the LLM provider (required)
+  ANTHROPIC_API_KEY Fallback API key when provider resolves to Anthropic
   CLNKR_MODEL       Model identifier override
   CLNKR_BASE_URL    LLM endpoint override
 `
@@ -85,6 +97,89 @@ func resolveModelValue(flagValue, envValue string) string {
 		return envValue
 	}
 	return defaultAnthropicModel
+}
+
+func parseProviderMode(raw string) (providerMode, error) {
+	if raw == "" {
+		return providerAuto, nil
+	}
+
+	mode := providerMode(strings.ToLower(strings.TrimSpace(raw)))
+	switch mode {
+	case providerAuto, providerAnthropic, providerOpenAI:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("invalid provider %q (allowed: auto, anthropic, openai)", raw)
+	}
+}
+
+func parseBaseURL(baseURL, source string) (*url.URL, error) {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base URL %q (from %s): %w", baseURL, source, err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("invalid base URL %q (from %s): must start with http:// or https://", baseURL, source)
+	}
+	if parsed.Hostname() == "" {
+		return nil, fmt.Errorf("invalid base URL %q (from %s): missing host", baseURL, source)
+	}
+	return parsed, nil
+}
+
+func inferProviderMode(parsed *url.URL) providerMode {
+	host := strings.ToLower(parsed.Hostname())
+	if host == "anthropic.com" || strings.HasSuffix(host, ".anthropic.com") {
+		return providerAnthropic
+	}
+	return providerOpenAI
+}
+
+func resolveProviderSelection(mode providerMode, baseURL, baseURLSource string) (providerMode, error) {
+	parsed, err := parseBaseURL(baseURL, baseURLSource)
+	if err != nil {
+		return "", err
+	}
+
+	if mode == providerOpenAI && baseURLSource == "default" && baseURL == defaultBaseURL {
+		return "", fmt.Errorf(`provider "openai" requires --base-url or CLNKR_BASE_URL; refusing built-in default %s`, defaultBaseURL)
+	}
+	if mode == providerAuto {
+		return inferProviderMode(parsed), nil
+	}
+	return mode, nil
+}
+
+func resolveAPIKey(mode providerMode, clnkrKey, anthropicKey string) string {
+	if clnkrKey != "" {
+		return clnkrKey
+	}
+	if mode == providerAnthropic {
+		return anthropicKey
+	}
+	return ""
+}
+
+func missingAPIKeyMessage(mode providerMode) string {
+	msg := "Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key"
+	if mode == providerAnthropic {
+		msg += "\nOr set ANTHROPIC_API_KEY when provider semantics are Anthropic."
+	}
+	return msg
+}
+
+func newModelForProvider(mode providerMode, baseURL, apiKey, modelName, systemPrompt string) clnkr.Model {
+	if mode == providerAnthropic {
+		return anthropic.NewModel(baseURL, apiKey, modelName, systemPrompt)
+	}
+	return openai.NewModel(baseURL, apiKey, modelName, systemPrompt)
+}
+
+func newFreeformModelForProvider(mode providerMode, baseURL, apiKey, modelName, systemPrompt string) compaction.FreeformModel {
+	if mode == providerAnthropic {
+		return anthropic.NewModel(baseURL, apiKey, modelName, systemPrompt)
+	}
+	return openai.NewModel(baseURL, apiKey, modelName, systemPrompt)
 }
 
 type lineResult struct {
@@ -224,13 +319,10 @@ func parseCompactCommand(input string) (instructions string, ok bool) {
 	return strings.TrimSpace(input[len(command):]), true
 }
 
-func makeCompactorFactory(baseURL, apiKey, modelName string) compaction.Factory {
+func makeCompactorFactory(mode providerMode, baseURL, apiKey, modelName string) compaction.Factory {
 	return compaction.NewFactory(func(instructions string) compaction.FreeformModel {
 		systemPrompt := compaction.LoadCompactionPrompt(instructions)
-		if strings.Contains(baseURL, "anthropic.com") {
-			return anthropic.NewModel(baseURL, apiKey, modelName, systemPrompt)
-		}
-		return openai.NewModel(baseURL, apiKey, modelName, systemPrompt)
+		return newFreeformModelForProvider(mode, baseURL, apiKey, modelName, systemPrompt)
 	})
 }
 
@@ -383,6 +475,7 @@ func main() {
 	modelShort := flags.String("m", "", "")
 	baseURL := flags.String("base-url", "", "")
 	baseURLShort := flags.String("u", "", "")
+	providerFlag := flags.String("provider", string(providerAuto), "")
 	maxSteps := flags.Int("max-steps", 0, "")
 	fullSend := flags.Bool("full-send", false, "")
 	verbose := flags.Bool("verbose", false, "")
@@ -458,27 +551,30 @@ func main() {
 			*baseURL = env
 			baseURLSource = "CLNKR_BASE_URL env var"
 		} else {
-			*baseURL = "https://api.anthropic.com"
+			*baseURL = defaultBaseURL
 		}
 	} else {
 		baseURLSource = "--base-url flag"
 	}
-	if !strings.HasPrefix(*baseURL, "http://") && !strings.HasPrefix(*baseURL, "https://") {
-		fmt.Fprintf(os.Stderr, "Error: invalid base URL %q (from %s): must start with http:// or https://\n", *baseURL, baseURLSource)
+	if _, err := parseBaseURL(*baseURL, baseURLSource); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Resolve API key: CLNKR_API_KEY > ANTHROPIC_API_KEY (Anthropic only)
-	apiKey := os.Getenv("CLNKR_API_KEY")
-	if apiKey == "" && strings.Contains(*baseURL, "anthropic.com") {
-		apiKey = os.Getenv("ANTHROPIC_API_KEY")
+	provider, err := parseProviderMode(*providerFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\nRun 'clnku --help' for available options.\n", err)
+		os.Exit(1)
 	}
+	selectedProvider, err := resolveProviderSelection(provider, *baseURL, baseURLSource)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	apiKey := resolveAPIKey(selectedProvider, os.Getenv("CLNKR_API_KEY"), os.Getenv("ANTHROPIC_API_KEY"))
 	if apiKey == "" {
-		msg := "Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key"
-		if strings.Contains(*baseURL, "anthropic.com") {
-			msg += "\nOr set ANTHROPIC_API_KEY when using the default Anthropic endpoint."
-		}
-		fmt.Fprintln(os.Stderr, msg)
+		fmt.Fprintln(os.Stderr, missingAPIKeyMessage(selectedProvider))
 		os.Exit(1)
 	}
 
@@ -509,13 +605,8 @@ func main() {
 		os.Exit(0)
 	}
 
-	var model clnkr.Model
-	if strings.Contains(*baseURL, "anthropic.com") {
-		model = anthropic.NewModel(*baseURL, apiKey, *modelFlag, systemPrompt)
-	} else {
-		model = openai.NewModel(*baseURL, apiKey, *modelFlag, systemPrompt)
-	}
-	compactorFactory := makeCompactorFactory(*baseURL, apiKey, *modelFlag)
+	model := newModelForProvider(selectedProvider, *baseURL, apiKey, *modelFlag, systemPrompt)
+	compactorFactory := makeCompactorFactory(selectedProvider, *baseURL, apiKey, *modelFlag)
 
 	executor := &clnkr.CommandExecutor{}
 

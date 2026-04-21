@@ -55,7 +55,7 @@ clnkr --full-send -p "fix the failing test"
 
 ### OpenAI-compatible providers
 
-Point `--base-url` at an OpenAI-compatible endpoint that supports structured outputs for the model you select:
+Point `--base-url` at an OpenAI-compatible endpoint that supports structured outputs for the model you select. `--provider` controls adapter semantics; `--base-url` is only the transport endpoint. The default is `--provider=auto`, which infers from the parsed base URL host.
 
 ```bash
 # vLLM
@@ -69,18 +69,27 @@ clnkr --base-url http://proxy:4000/v1 --model gpt-4o
 
 # Gemini (free tier)
 clnkr --base-url https://generativelanguage.googleapis.com/v1beta/openai --model gemini-2.0-flash
+
+# Anthropic via a proxy or gateway that does not use an anthropic.com host
+clnkr --provider anthropic --base-url https://proxy.example.com/anthropic --model claude-sonnet-4-6
+
+# Force OpenAI-compatible semantics against an anthropic-looking transport URL
+clnkr --provider openai --base-url https://gateway.example.com/v1 --model gpt-4o
 ```
 
 If the backend rejects structured outputs, clnkr now returns that provider error instead of falling back to unconstrained text responses.
 
 With the default Anthropic endpoint, clnkr requests Anthropic's native structured output format on every turn. Keep Anthropic runs on a model Anthropic documents as supporting structured output; the default `claude-sonnet-4-6` is chosen on that basis.
 
+`--provider=openai` refuses the built-in default `https://api.anthropic.com`. Set `--base-url` or `CLNKR_BASE_URL` explicitly when forcing OpenAI-compatible semantics.
+
 ### Common flags
 
 ```
 -p, --prompt string            Task to run (exits after completion)
 -m, --model string             Model identifier (default: claude-sonnet-4-6)
--u, --base-url string          LLM API endpoint (default: https://api.anthropic.com)
+-u, --base-url string          LLM endpoint transport URL (default: https://api.anthropic.com)
+--provider string              Provider adapter semantics: auto|anthropic|openai (default: auto)
 --max-steps int                Maximum agent steps (default: 100)
 --full-send                    Execute every Act turn without approval
 -c, --continue                 Resume the most recent session for this project
@@ -100,7 +109,7 @@ With the default Anthropic endpoint, clnkr requests Anthropic's native structure
 | Variable | Description |
 |----------|-------------|
 | `CLNKR_API_KEY` | API key for the LLM provider (required) |
-| `ANTHROPIC_API_KEY` | Fallback when using the default Anthropic endpoint |
+| `ANTHROPIC_API_KEY` | Fallback when provider semantics resolve to Anthropic |
 | `CLNKR_MODEL` | Model identifier (overridden by `--model`) |
 | `CLNKR_BASE_URL` | LLM endpoint (overridden by `--base-url`) |
 

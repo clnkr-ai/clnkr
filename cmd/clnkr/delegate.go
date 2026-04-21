@@ -26,7 +26,10 @@ type delegateResult struct {
 }
 
 type delegateProcessRunner struct {
-	Binary string
+	Binary   string
+	Provider string
+	BaseURL  string
+	Model    string
 }
 
 func (r delegateProcessRunner) Run(ctx context.Context, req delegateRequest) (delegateResult, error) {
@@ -68,6 +71,15 @@ func (r delegateProcessRunner) Run(ctx context.Context, req delegateRequest) (de
 	}
 
 	args := []string{"--load-messages", seedPath, "-p", req.Task, "--trajectory", outPath, "--full-send"}
+	if strings.TrimSpace(r.Provider) != "" {
+		args = append(args, "--provider", r.Provider)
+	}
+	if strings.TrimSpace(r.BaseURL) != "" {
+		args = append(args, "--base-url", r.BaseURL)
+	}
+	if strings.TrimSpace(r.Model) != "" {
+		args = append(args, "--model", r.Model)
+	}
 	if req.MaxSteps > 0 {
 		args = append(args, "--max-steps", fmt.Sprintf("%d", req.MaxSteps))
 	}

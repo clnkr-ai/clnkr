@@ -175,6 +175,138 @@ func TestResolveModelValue(t *testing.T) {
 	}
 }
 
+func TestParseProviderMode(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    providerMode
+		wantErr string
+	}{
+		{name: "default auto", input: "", want: providerAuto},
+		{name: "auto", input: "auto", want: providerAuto},
+		{name: "anthropic", input: "anthropic", want: providerAnthropic},
+		{name: "openai", input: "openai", want: providerOpenAI},
+		{name: "invalid", input: "other", wantErr: `invalid provider "other" (allowed: auto, anthropic, openai)`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseProviderMode(tt.input)
+			if tt.wantErr != "" {
+				if err == nil || err.Error() != tt.wantErr {
+					t.Fatalf("parseProviderMode(%q) err = %v, want %q", tt.input, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseProviderMode(%q): %v", tt.input, err)
+			}
+			if got != tt.want {
+				t.Fatalf("parseProviderMode(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveProviderSelection(t *testing.T) {
+	tests := []struct {
+		name          string
+		mode          providerMode
+		baseURL       string
+		baseURLSource string
+		want          providerMode
+		wantErr       string
+	}{
+		{
+			name:          "auto uses parsed host not raw substring",
+			mode:          providerAuto,
+			baseURL:       "https://proxy.example.com/anthropic.com/messages",
+			baseURLSource: "--base-url flag",
+			want:          providerOpenAI,
+		},
+		{
+			name:          "auto picks anthropic host",
+			mode:          providerAuto,
+			baseURL:       "https://api.anthropic.com/v1/messages",
+			baseURLSource: "--base-url flag",
+			want:          providerAnthropic,
+		},
+		{
+			name:          "explicit anthropic overrides host",
+			mode:          providerAnthropic,
+			baseURL:       "https://proxy.example.com/v1",
+			baseURLSource: "--base-url flag",
+			want:          providerAnthropic,
+		},
+		{
+			name:          "explicit openai overrides anthropic host",
+			mode:          providerOpenAI,
+			baseURL:       "https://api.anthropic.com/v1/messages",
+			baseURLSource: "--base-url flag",
+			want:          providerOpenAI,
+		},
+		{
+			name:          "explicit openai rejects built in anthropic default",
+			mode:          providerOpenAI,
+			baseURL:       defaultBaseURL,
+			baseURLSource: "default",
+			wantErr:       `provider "openai" requires --base-url or CLNKR_BASE_URL; refusing built-in default https://api.anthropic.com`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveProviderSelection(tt.mode, tt.baseURL, tt.baseURLSource)
+			if tt.wantErr != "" {
+				if err == nil || err.Error() != tt.wantErr {
+					t.Fatalf("resolveProviderSelection(%q, %q, %q) err = %v, want %q", tt.mode, tt.baseURL, tt.baseURLSource, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveProviderSelection(%q, %q, %q): %v", tt.mode, tt.baseURL, tt.baseURLSource, err)
+			}
+			if got != tt.want {
+				t.Fatalf("resolveProviderSelection(%q, %q, %q) = %q, want %q", tt.mode, tt.baseURL, tt.baseURLSource, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveAPIKeyByProvider(t *testing.T) {
+	tests := []struct {
+		name       string
+		mode       providerMode
+		clnkrKey   string
+		anthroKey  string
+		wantAPIKey string
+	}{
+		{name: "clnkr key wins", mode: providerAnthropic, clnkrKey: "clnkr-key", anthroKey: "anthropic-key", wantAPIKey: "clnkr-key"},
+		{name: "anthropic fallback allowed", mode: providerAnthropic, anthroKey: "anthropic-key", wantAPIKey: "anthropic-key"},
+		{name: "openai ignores anthropic fallback", mode: providerOpenAI, anthroKey: "anthropic-key", wantAPIKey: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveAPIKey(tt.mode, tt.clnkrKey, tt.anthroKey); got != tt.wantAPIKey {
+				t.Fatalf("resolveAPIKey(%q, %q, %q) = %q, want %q", tt.mode, tt.clnkrKey, tt.anthroKey, got, tt.wantAPIKey)
+			}
+		})
+	}
+}
+
+func TestMissingAPIKeyMessageByProvider(t *testing.T) {
+	anthropicMessage := missingAPIKeyMessage(providerAnthropic)
+	if !strings.Contains(anthropicMessage, "ANTHROPIC_API_KEY") {
+		t.Fatalf("anthropic missing key message should mention ANTHROPIC_API_KEY, got %q", anthropicMessage)
+	}
+
+	openAIMessage := missingAPIKeyMessage(providerOpenAI)
+	if strings.Contains(openAIMessage, "ANTHROPIC_API_KEY") {
+		t.Fatalf("openai missing key message should not mention ANTHROPIC_API_KEY, got %q", openAIMessage)
+	}
+}
+
 func TestRunPlainApprovalEmptyActReplyIsNoOp(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
 		mustResponse(actJSON("rm important.txt")),
@@ -197,7 +329,7 @@ func TestRunPlainApprovalEmptyActReplyIsNoOp(t *testing.T) {
 	}
 }
 
-func TestMakeCompactorFactoryUsesFreeformProviderText(t *testing.T) {
+func TestMakeCompactorFactoryUsesOpenAIWhenProviderSelected(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -211,7 +343,7 @@ func TestMakeCompactorFactoryUsesFreeformProviderText(t *testing.T) {
 	}))
 	defer server.Close()
 
-	compactor := makeCompactorFactory(server.URL, "test-key", "gpt-test")("")
+	compactor := makeCompactorFactory(providerOpenAI, server.URL, "test-key", "gpt-test")("")
 	summary, err := compactor.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
@@ -221,6 +353,41 @@ func TestMakeCompactorFactoryUsesFreeformProviderText(t *testing.T) {
 	}
 	if _, ok := gotBody["response_format"]; ok {
 		t.Fatalf("response_format should be omitted for compaction, got %#v", gotBody["response_format"])
+	}
+}
+
+func TestMakeCompactorFactoryUsesAnthropicWhenProviderSelected(t *testing.T) {
+	var requestPath string
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPath = r.URL.Path
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]string{
+				{"type": "text", "text": "Older work summarized."},
+			},
+			"usage": map[string]int{"input_tokens": 1, "output_tokens": 1},
+		})
+	}))
+	defer server.Close()
+
+	compactor := makeCompactorFactory(providerAnthropic, server.URL, "test-key", "claude-test")("")
+	summary, err := compactor.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if summary != "Older work summarized." {
+		t.Fatalf("summary = %q, want %q", summary, "Older work summarized.")
+	}
+	if requestPath != "/v1/messages" {
+		t.Fatalf("request path = %q, want %q", requestPath, "/v1/messages")
+	}
+	if _, ok := gotBody["response_format"]; ok {
+		t.Fatalf("response_format should be omitted for compaction, got %#v", gotBody["response_format"])
+	}
+	if _, ok := gotBody["max_tokens"]; !ok {
+		t.Fatalf("anthropic request missing max_tokens: %#v", gotBody)
 	}
 }
 
