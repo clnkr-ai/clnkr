@@ -21,6 +21,7 @@ DEFERRED_PACKAGE_ALLOWLIST := scripts/deferred-package-allowlist.txt
 DOC_MAN_DIR := build/docs/man
 DOC_MAN_OUTPUTS := $(DOC_MAN_DIR)/clnkr.1 $(DOC_MAN_DIR)/clnku.1
 DOC_CONTENT_DIR := site/content/docs
+DOC_PAGE_TEMPLATE := site/pandoc/doc-page.md
 GENERATED_SITE_DOCS := \
 	$(DOC_CONTENT_DIR)/clnkr.md \
 	$(DOC_CONTENT_DIR)/clnku.md \
@@ -162,17 +163,18 @@ $(DOC_CONTENT_DIR)/clnku.md: DOC_TITLE = clnku
 $(DOC_CONTENT_DIR)/clnku.md: DOC_DESCRIPTION = Plain CLI manual page
 $(DOC_CONTENT_DIR)/clnku.md: DOC_WEIGHT = 10
 
-$(DOC_CONTENT_DIR)/clnkr.md $(DOC_CONTENT_DIR)/clnku.md: $(DOC_CONTENT_DIR)/%.md: doc/%.1.md | _require-pandoc
+$(DOC_CONTENT_DIR)/clnkr.md $(DOC_CONTENT_DIR)/clnku.md: $(DOC_CONTENT_DIR)/%.md: doc/%.1.md $(DOC_PAGE_TEMPLATE) | _require-pandoc
 	mkdir -p "$(DOC_CONTENT_DIR)"
-	{ \
-		printf '+++\n'; \
-		printf 'title = "%s"\n' "$(DOC_TITLE)"; \
-		printf 'description = "%s"\n' "$(DOC_DESCRIPTION)"; \
-		printf 'slug = "%s"\n' "$*"; \
-		printf 'weight = %s\n' "$(DOC_WEIGHT)"; \
-		printf '+++\n\n'; \
-		"$(PANDOC)" --from=markdown-smart --to=gfm "$<"; \
-	} > "$@"
+	"$(PANDOC)" \
+		--from=markdown-smart \
+		--to=gfm \
+		--standalone \
+		--template="$(DOC_PAGE_TEMPLATE)" \
+		--metadata title="$(DOC_TITLE)" \
+		--metadata description="$(DOC_DESCRIPTION)" \
+		--metadata slug="$*" \
+		--metadata weight="$(DOC_WEIGHT)" \
+		"$<" -o "$@"
 
 $(DOC_CONTENT_DIR)/clankerval.md: | _require-pandoc
 	tmpdir="$$(mktemp -d)"; \
