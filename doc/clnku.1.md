@@ -6,7 +6,7 @@ clnku - a minimal coding agent (plain CLI)
 
 # SYNOPSIS
 
-**clnku** [**-p**|**--prompt** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
+**clnku** [**-p**|**--prompt** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--provider** *mode*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
 
 # DESCRIPTION
 
@@ -37,7 +37,10 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : LLM model identifier (default: claude-sonnet-4-6). If omitted, **CLNKR_MODEL** is used when set.
 
 **-u**, **--base-url** *url*
-: LLM API endpoint (default: https://api.anthropic.com). If omitted, **CLNKR_BASE_URL** is used when set. If the URL contains "anthropic.com", the Anthropic adapter is used; otherwise, the OpenAI-compatible adapter is used.
+: LLM endpoint transport URL (default: https://api.anthropic.com). If omitted, **CLNKR_BASE_URL** is used when set.
+
+**--provider** *mode*
+: Provider adapter semantics: **auto**, **anthropic**, or **openai** (default: **auto**). **auto** infers from the parsed base URL host: Anthropic hosts select the Anthropic adapter, everything else selects the OpenAI-compatible adapter. **anthropic** and **openai** override host-based inference everywhere in the process, including transcript compaction. **--provider=openai** refuses the built-in default Anthropic URL; set **--base-url** or **CLNKR_BASE_URL** explicitly when forcing OpenAI-compatible semantics.
 
 **--max-steps** *n*
 : Maximum agent iterations. 0 uses the default of 100.
@@ -88,7 +91,7 @@ This command is only available at the top-level conversational prompt. In single
 : API key for the LLM provider (required).
 
 **ANTHROPIC_API_KEY**
-: Fallback API key when using the Anthropic endpoint.
+: Fallback API key when provider semantics resolve to Anthropic.
 
 **CLNKR_MODEL**
 : Default model identifier when **--model** is not provided.
