@@ -53,8 +53,8 @@
 <p>clnku - a minimal coding agent (plain CLI)</p>
 <h1 id="synopsis">SYNOPSIS</h1>
 <p><strong>clnku</strong> [<strong>-p</strong>|<strong>&ndash;prompt</strong> <em>task</em>] [<strong>-m</strong>|<strong>&ndash;model</strong> <em>name</em>]
-[<strong>-u</strong>|<strong>&ndash;base-url</strong> <em>url</em>] [<strong>&ndash;max-steps</strong> <em>n</em>]
-[<strong>&ndash;full-send</strong>] [<strong>-c</strong>|<strong>&ndash;continue</strong>]
+[<strong>-u</strong>|<strong>&ndash;base-url</strong> <em>url</em>] [<strong>&ndash;provider</strong> <em>mode</em>]
+[<strong>&ndash;max-steps</strong> <em>n</em>] [<strong>&ndash;full-send</strong>] [<strong>-c</strong>|<strong>&ndash;continue</strong>]
 [<strong>-l</strong>|<strong>&ndash;list-sessions</strong>] [<strong>-S</strong>|<strong>&ndash;no-system-prompt</strong>]
 [<strong>&ndash;system-prompt-append</strong> <em>text</em>] [<strong>&ndash;dump-system-prompt</strong>]
 [<strong>&ndash;load-messages</strong> <em>file</em>] [<strong>&ndash;event-log</strong> <em>file</em>]
@@ -98,10 +98,17 @@ conversational REPL mode.</p>
 LLM model identifier (default: claude-sonnet-4-6). If omitted,
 <strong>CLNKR_MODEL</strong> is used when set.</p>
 <p><strong>-u</strong>, <strong>&ndash;base-url</strong> <em>url</em><br>
-LLM API endpoint (default: <a href="https://api.anthropic.com">https://api.anthropic.com</a>). If omitted,
-<strong>CLNKR_BASE_URL</strong> is used when set. If the URL contains
-&ldquo;anthropic.com&rdquo;, the Anthropic adapter is used; otherwise, the
-OpenAI-compatible adapter is used.</p>
+LLM endpoint transport URL (default: <a href="https://api.anthropic.com">https://api.anthropic.com</a>). If
+omitted, <strong>CLNKR_BASE_URL</strong> is used when set.</p>
+<p><strong>&ndash;provider</strong> <em>mode</em><br>
+Provider adapter semantics: <strong>auto</strong>, <strong>anthropic</strong>, or <strong>openai</strong>
+(default: <strong>auto</strong>). <strong>auto</strong> infers from the parsed base URL host:
+Anthropic hosts select the Anthropic adapter, everything else selects
+the OpenAI-compatible adapter. <strong>anthropic</strong> and <strong>openai</strong> override
+host-based inference everywhere in the process, including transcript
+compaction. <strong>&ndash;provider=openai</strong> refuses the built-in default Anthropic
+URL; set <strong>&ndash;base-url</strong> or <strong>CLNKR_BASE_URL</strong> explicitly when forcing
+OpenAI-compatible semantics.</p>
 <p><strong>&ndash;max-steps</strong> <em>n</em><br>
 Maximum agent iterations. 0 uses the default of 100.</p>
 <p><strong>&ndash;full-send</strong><br>
@@ -152,7 +159,7 @@ than triggering compaction.</p>
 <p><strong>CLNKR_API_KEY</strong><br>
 API key for the LLM provider (required).</p>
 <p><strong>ANTHROPIC_API_KEY</strong><br>
-Fallback API key when using the Anthropic endpoint.</p>
+Fallback API key when provider semantics resolve to Anthropic.</p>
 <p><strong>CLNKR_MODEL</strong><br>
 Default model identifier when <strong>&ndash;model</strong> is not provided.</p>
 <p><strong>CLNKR_BASE_URL</strong><br>
