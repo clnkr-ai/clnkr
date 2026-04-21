@@ -12,7 +12,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	clnkr "github.com/clnkr-ai/clnkr"
-	"github.com/clnkr-ai/clnkr/compaction"
+	"github.com/clnkr-ai/clnkr/cmd/internal/compaction"
 )
 
 // Compile-time assertion that model implements tea.Model.
