@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/clnkr-ai/clnkr/feedback"
+	"github.com/clnkr-ai/clnkr/internal/core/gitfeedback"
 	"github.com/clnkr-ai/clnkr/internal/core/shellstate"
 	"os"
 	"os/exec"
@@ -33,7 +33,7 @@ func (e *CommandExecutor) SetEnv(env map[string]string) {
 
 // Execute runs a command in dir and returns separated stdout/stderr plus exit code.
 func (e *CommandExecutor) Execute(ctx context.Context, command string, dir string) (CommandResult, error) {
-	baseline := feedback.Detect(dir)
+	baseline := gitfeedback.Detect(dir)
 
 	wrapped, stateFile, cleanup, err := shellstate.Wrap(command)
 	if err != nil {
@@ -109,7 +109,7 @@ func (e *CommandExecutor) applyPostState(result CommandResult, stateFile string)
 	return result, nil
 }
 
-func applyCommandFeedback(result CommandResult, baseline feedback.Baseline, dir string) CommandResult {
+func applyCommandFeedback(result CommandResult, baseline gitfeedback.Baseline, dir string) CommandResult {
 	finalCwd := dir
 	if result.PostCwd != "" {
 		finalCwd = result.PostCwd
