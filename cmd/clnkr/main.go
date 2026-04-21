@@ -15,8 +15,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
 	clnkr "github.com/clnkr-ai/clnkr"
+	"github.com/clnkr-ai/clnkr/cmd/internal/compaction"
 	"github.com/clnkr-ai/clnkr/cmd/internal/session"
-	"github.com/clnkr-ai/clnkr/compaction"
 	"github.com/clnkr-ai/clnkr/internal/providers/anthropic"
 	"github.com/clnkr-ai/clnkr/internal/providers/openai"
 )

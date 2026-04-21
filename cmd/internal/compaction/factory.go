@@ -3,18 +3,23 @@ package compaction
 import (
 	"context"
 	"strings"
+	"unicode/utf8"
 
 	clnkr "github.com/clnkr-ai/clnkr"
 )
 
+// Factory builds a compactor for the given instruction set.
 type Factory func(instructions string) clnkr.Compactor
 
+// FreeformModel summarizes transcript messages as plain text.
 type FreeformModel interface {
 	QueryText(ctx context.Context, messages []clnkr.Message) (string, error)
 }
 
+// ModelFactory builds a summarizer model for the given instruction set.
 type ModelFactory func(instructions string) FreeformModel
 
+// NewFactory wraps a model factory as a clnkr compactor factory.
 func NewFactory(makeModel ModelFactory) Factory {
 	return func(instructions string) clnkr.Compactor {
 		return modelCompactor{model: makeModel(instructions)}
@@ -88,7 +93,7 @@ func tailWithinBudget(messages []clnkr.Message, budget int) string {
 		if remaining <= 0 {
 			continue
 		}
-		content = content[len(content)-remaining:]
+		content = tailStringWithinByteBudget(content, remaining)
 		used = budget
 		parts = append(parts, content)
 	}
@@ -97,4 +102,28 @@ func tailWithinBudget(messages []clnkr.Message, budget int) string {
 		parts[i], parts[j] = parts[j], parts[i]
 	}
 	return strings.Join(parts, "\n")
+}
+
+func tailStringWithinByteBudget(content string, budget int) string {
+	if budget <= 0 {
+		return ""
+	}
+	if len(content) <= budget {
+		return content
+	}
+
+	start := len(content)
+	for start > 0 {
+		prevStart := start
+		prev, size := utf8.DecodeLastRuneInString(content[:start])
+		if prev == utf8.RuneError && size == 0 {
+			break
+		}
+		start -= size
+		if len(content)-start > budget {
+			return content[prevStart:]
+		}
+	}
+
+	return content
 }

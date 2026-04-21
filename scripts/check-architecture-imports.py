@@ -63,9 +63,9 @@ def main() -> int:
     providers_prefix = f"{module_path}/internal/providers/"
     cmd_prefix = f"{module_path}/cmd/"
     cmd_internal_prefix = f"{module_path}/cmd/internal/"
-    compaction_pkg = f"{module_path}/compaction"
+    compaction_pkg = f"{module_path}/cmd/internal/compaction"
     feedback_pkg = f"{module_path}/feedback"
-    deferred = {compaction_pkg, feedback_pkg}
+    deferred = {feedback_pkg}
 
     allowlist_path = Path(sys.argv[1]) if len(sys.argv) > 1 else REPO_ROOT / "scripts" / "deferred-package-allowlist.txt"
     if not allowlist_path.is_absolute():
@@ -130,14 +130,14 @@ def main() -> int:
                     errors.append(f"{importer} -> {target}: internal/providers/... may import only root clnkr or internal/core/...")
                 continue
 
+            if kind == "compaction":
+                if target != root_pkg:
+                    errors.append(f"{importer} -> {target}: cmd/internal/compaction should keep repo-local imports to root clnkr only")
+                continue
+
             if kind == "cmd":
                 if target != root_pkg and not target.startswith(cmd_internal_prefix) and not target.startswith(providers_prefix):
                     errors.append(f"{importer} -> {target}: cmd/... may import only root clnkr, cmd/internal/..., internal/providers/..., or allowlisted deferred packages")
-                continue
-
-            if kind == "compaction":
-                if target != root_pkg:
-                    errors.append(f"{importer} -> {target}: deferred compaction package should keep repo-local imports to root clnkr only")
                 continue
 
             if kind == "feedback":

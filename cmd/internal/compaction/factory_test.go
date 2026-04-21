@@ -177,3 +177,10 @@ func TestModelCompactorReturnsModelError(t *testing.T) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
 	}
 }
+
+func TestTailWithinBudgetPreservesUTF8(t *testing.T) {
+	got := tailWithinBudget([]clnkr.Message{{Role: "assistant", Content: "ab界"}}, len("b界"))
+	if got != "b界" {
+		t.Fatalf("tailWithinBudget = %q, want %q", got, "b界")
+	}
+}
