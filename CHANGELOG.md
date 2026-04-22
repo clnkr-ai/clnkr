@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.0 (2026-04-22)
+
+- Allow approved Codex models on Responses
+- Update CHANGELOG.md for 2.0.0
+
 ## 2.0.0 (2026-04-22)
 
 - Redesign provider API selection
