@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.0 (2026-04-22)
+
+- Redesign provider API selection
+- Remove the eval Makefile glue test
+- Collapse clankerval setup into Makefile
+- Replace the workflow target check with shell
+- Replace the architecture checker with shell
+- Update CHANGELOG.md for 1.9.0
+
 ## 1.9.0 (2026-04-21)
 
 - Add explicit provider selection flags
