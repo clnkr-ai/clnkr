@@ -110,9 +110,14 @@ set, clnku infers the provider from that URL.</p>
 <p><strong>&ndash;provider-api</strong> <em>surface</em><br>
 OpenAI-only API surface override: <strong>auto</strong>, <strong>openai-chat-completions</strong>,
 or <strong>openai-responses</strong>. With <strong>provider=openai</strong>, <strong>auto</strong> prefers
-<strong>openai-responses</strong> for a conservative allowlist of first-party OpenAI
-model names and otherwise stays on <strong>openai-chat-completions</strong>. This
-flag is rejected for <strong>provider=anthropic</strong>.</p>
+<strong>openai-responses</strong> for a conservative allowlist of approved model
+names under that provider, including current Codex names such as
+<strong>gpt-5-codex</strong>, <strong>gpt-5.1-codex</strong>, <strong>gpt-5.1-codex-mini</strong>,
+<strong>gpt-5.1-codex-max</strong>, <strong>gpt-5.2-codex</strong>, and <strong>gpt-5.3-codex</strong>, and
+otherwise stays on <strong>openai-chat-completions</strong>. This flag is rejected
+for <strong>provider=anthropic</strong>. For those approved Codex names, forcing
+<strong>openai-chat-completions</strong> is a manual proxy-compatibility escape hatch
+and may still fail provider-side.</p>
 <p><strong>&ndash;max-steps</strong> <em>n</em><br>
 Maximum agent iterations. 0 uses the default of 100.</p>
 <p><strong>&ndash;full-send</strong><br>
