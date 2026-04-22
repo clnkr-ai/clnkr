@@ -226,11 +226,42 @@ func TestResolveConfigAllowlistedResponsesModels(t *testing.T) {
 	}
 }
 
-func TestResolveConfigNegativeExamplesStayOnChatCompletions(t *testing.T) {
+func TestResolveConfigOpenAILookingModelsUseResponses(t *testing.T) {
 	tests := []string{
-		"codex-mini-latest",
 		"gpt-5.2-chat-latest",
 		"gpt-4o-latest",
+		"codex-mini-latest",
+		"o4-mini",
+		"GPT-5.9-preview",
+		"  gpt-6  ",
+	}
+
+	for _, model := range tests {
+		t.Run(model, func(t *testing.T) {
+			cfg, err := ResolveConfig(Inputs{
+				Provider: "openai",
+				Model:    model,
+			}, envMap(map[string]string{
+				"CLNKR_API_KEY": "test-key",
+			}))
+			if err != nil {
+				t.Fatalf("ResolveConfig(): %v", err)
+			}
+			if cfg.ProviderAPI != ProviderAPIOpenAIResponses {
+				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIOpenAIResponses)
+			}
+		})
+	}
+}
+
+func TestResolveConfigNegativeExamplesStayOnChatCompletions(t *testing.T) {
+	tests := []string{
+		"chatgpt-4o-latest",
+		"orca-mini",
+		"olmo-2",
+		"openhermes-2.5",
+		"llama3",
+		"gemini-2.0-flash",
 	}
 
 	for _, model := range tests {
@@ -271,6 +302,21 @@ func TestResolveConfigRejectsUnsupportedProModels(t *testing.T) {
 				Model:       "gpt-5.4-pro",
 			},
 		},
+		{
+			name: "dated snapshot rejects gpt-5.4-pro",
+			inputs: Inputs{
+				Provider: "openai",
+				Model:    "gpt-5.4-pro-2026-03-05",
+			},
+		},
+		{
+			name: "forced chat completions still rejects gpt-5.2-pro",
+			inputs: Inputs{
+				Provider:    "openai",
+				ProviderAPI: "openai-chat-completions",
+				Model:       "gpt-5.2-pro",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -285,11 +331,13 @@ func TestResolveConfigRejectsUnsupportedProModels(t *testing.T) {
 	}
 }
 
-func TestResolveConfigAcceptsExplicitApprovedCodexResponsesSelections(t *testing.T) {
+func TestResolveConfigAcceptsExplicitCodexResponsesSelections(t *testing.T) {
 	tests := []string{
 		"gpt-5-codex",
 		"gpt-5.1-codex-mini",
 		"gpt-5.3-codex",
+		"future-codex-model",
+		"codex-mini-latest",
 	}
 
 	for _, model := range tests {
@@ -311,32 +359,11 @@ func TestResolveConfigAcceptsExplicitApprovedCodexResponsesSelections(t *testing
 	}
 }
 
-func TestResolveConfigRejectsExplicitUnapprovedCodexResponsesSelections(t *testing.T) {
-	tests := []string{
-		"codex-mini-latest",
-		"future-codex-model",
-	}
-
-	for _, model := range tests {
-		t.Run(model, func(t *testing.T) {
-			_, err := ResolveConfig(Inputs{
-				Provider:    "openai",
-				ProviderAPI: "openai-responses",
-				Model:       model,
-			}, envMap(map[string]string{
-				"CLNKR_API_KEY": "test-key",
-			}))
-			if err == nil || !strings.Contains(err.Error(), "does not support that contract in this pass") {
-				t.Fatalf("ResolveConfig() err = %v, want Codex responses scope error", err)
-			}
-		})
-	}
-}
-
-func TestResolveConfigAcceptsExplicitApprovedCodexChatCompletionsSelections(t *testing.T) {
+func TestResolveConfigAcceptsExplicitCodexChatCompletionsSelections(t *testing.T) {
 	tests := []string{
 		"gpt-5-codex",
 		"gpt-5.1-codex-max",
+		"future-codex-model",
 	}
 
 	for _, model := range tests {
@@ -370,13 +397,18 @@ func TestResolveConfigMatchesDatedSnapshotsOnly(t *testing.T) {
 			wantAPI: ProviderAPIOpenAIResponses,
 		},
 		{
-			name:    "non snapshot suffix does not match",
+			name:    "non snapshot suffix still reaches responses via heuristic",
 			model:   "gpt-5.4-preview",
-			wantAPI: ProviderAPIOpenAIChatCompletions,
+			wantAPI: ProviderAPIOpenAIResponses,
 		},
 		{
-			name:    "chat latest suffix does not match",
+			name:    "chat latest suffix still reaches responses via heuristic",
 			model:   "gpt-5.2-chat-latest",
+			wantAPI: ProviderAPIOpenAIResponses,
+		},
+		{
+			name:    "non openai looking suffix stays on chat completions",
+			model:   "llama3-2026-03-05",
 			wantAPI: ProviderAPIOpenAIChatCompletions,
 		},
 	}

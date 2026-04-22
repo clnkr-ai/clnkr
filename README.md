@@ -55,7 +55,7 @@ clnkr --provider anthropic --model claude-sonnet-4-6 --full-send -p "fix the fai
 
 ### OpenAI-compatible providers
 
-Point `--base-url` at an OpenAI-compatible endpoint that supports structured outputs for the model you select. `--provider` controls adapter semantics; `--base-url` is only the transport endpoint. In normal use, set both `--provider` and `--model`. Compatibility fallback: if `--provider` / `CLNKR_PROVIDER` is unset but `--base-url` / `CLNKR_BASE_URL` is explicitly set, clnkr infers the provider from that URL. For `--provider=openai`, `--provider-api` defaults to `auto`, which prefers `openai-responses` for a conservative allowlist of approved model names under that provider, including current Codex names such as `gpt-5-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-mini`, `gpt-5.1-codex-max`, `gpt-5.2-codex`, and `gpt-5.3-codex`, and otherwise stays on `openai-chat-completions`.
+Point `--base-url` at an OpenAI-compatible endpoint that supports structured outputs for the model you select. `--provider` controls adapter semantics; `--base-url` is only the transport endpoint. In normal use, set both `--provider` and `--model`. Compatibility fallback: if `--provider` / `CLNKR_PROVIDER` is unset but `--base-url` / `CLNKR_BASE_URL` is explicitly set, clnkr infers the provider from that URL. For `--provider=openai`, `--provider-api` defaults to `auto`, which prefers `openai-responses` for known supported names and other OpenAI-looking model names such as `gpt-*`, `o` plus a digit, and `codex*`. Names that do not look OpenAI-ish, such as `llama3`, `gemini-2.0-flash`, `orca-*`, `olmo-*`, `openhermes-*`, and `chatgpt-*`, stay on `openai-chat-completions`.
 
 ```bash
 # vLLM
@@ -77,11 +77,11 @@ clnkr --provider anthropic --base-url https://proxy.example.com/anthropic --mode
 clnkr --provider openai --provider-api openai-chat-completions --base-url https://gateway.example.com/v1 --model gpt-4o
 ```
 
-If the backend rejects the resolved OpenAI API surface, clnkr returns the provider error. When a proxy or gateway expects a different OpenAI surface, override with `--provider-api` or `CLNKR_PROVIDER_API`. For approved Codex names, forcing `openai-chat-completions` is a manual proxy-compatibility escape hatch, not a claim about first-party OpenAI compatibility on that surface.
+If the backend rejects the resolved OpenAI API surface, clnkr returns the provider error. When a proxy or gateway expects a different OpenAI surface, override with `--provider-api` or `CLNKR_PROVIDER_API`.
 
 For Anthropic runs, clnkr requests Anthropic's native structured output format on every turn. Keep Anthropic runs on a model Anthropic documents as supporting structured output.
 
-Structured outputs are a hard requirement for agent turns. `gpt-5.2-pro` and `gpt-5.4-pro` are still rejected in this pass.
+Structured outputs are a hard requirement for agent turns. `gpt-5.2-pro`, `gpt-5.4-pro`, and their dated snapshots still fail outright in this pass, even if you force `openai-chat-completions`.
 
 ### Common flags
 

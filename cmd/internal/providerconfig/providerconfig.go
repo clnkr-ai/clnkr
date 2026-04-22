@@ -126,14 +126,12 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 	}
 
 	if provider == ProviderOpenAI {
-		if _, unsupported := unsupportedStructuredOpenAIModels[model]; unsupported {
+		normalizedModel := normalizeModelName(model)
+		if isUnsupportedStructuredOpenAIModel(normalizedModel) {
 			return ResolvedProviderConfig{}, unsupportedStructuredOutputsError(model)
 		}
 
-		providerAPI = resolveOpenAIProviderAPI(model, providerAPI)
-		if providerAPI == ProviderAPIOpenAIResponses && isCodexFamilyModel(model) && !isAllowlistedResponsesModel(model) {
-			return ResolvedProviderConfig{}, unsupportedStructuredOutputsError(model)
-		}
+		providerAPI = resolveOpenAIProviderAPI(normalizedModel, providerAPI)
 	}
 
 	return ResolvedProviderConfig{
@@ -219,12 +217,14 @@ func resolveOpenAIProviderAPI(model string, providerAPI ProviderAPI) ProviderAPI
 	if isAllowlistedResponsesModel(model) {
 		return ProviderAPIOpenAIResponses
 	}
+	if isOpenAILookingModel(model) {
+		return ProviderAPIOpenAIResponses
+	}
 	return ProviderAPIOpenAIChatCompletions
 }
 
 // Keep this matcher intentionally conservative: exact names plus dated snapshots only.
 func isAllowlistedResponsesModel(model string) bool {
-	model = strings.TrimSpace(model)
 	if _, ok := openAIResponsesAllowlist[model]; ok {
 		return true
 	}
@@ -236,12 +236,33 @@ func isAllowlistedResponsesModel(model string) bool {
 	return ok
 }
 
-func isCodexFamilyModel(model string) bool {
-	model = strings.ToLower(strings.TrimSpace(model))
-	return model == "codex" ||
+func isUnsupportedStructuredOpenAIModel(model string) bool {
+	if _, ok := unsupportedStructuredOpenAIModels[model]; ok {
+		return true
+	}
+	if !datedSnapshotSuffix.MatchString(model) {
+		return false
+	}
+	baseModel := model[:len(model)-11]
+	_, ok := unsupportedStructuredOpenAIModels[baseModel]
+	return ok
+}
+
+func isOpenAILookingModel(model string) bool {
+	if strings.HasPrefix(model, "gpt-") {
+		return true
+	}
+	if model == "codex" ||
 		strings.HasPrefix(model, "codex-") ||
 		strings.HasSuffix(model, "-codex") ||
-		strings.Contains(model, "-codex-")
+		strings.Contains(model, "-codex-") {
+		return true
+	}
+	return len(model) > 1 && model[0] == 'o' && model[1] >= '0' && model[1] <= '9'
+}
+
+func normalizeModelName(model string) string {
+	return strings.ToLower(strings.TrimSpace(model))
 }
 
 func unsupportedStructuredOutputsError(model string) error {
