@@ -44,52 +44,53 @@ Set your API key and run:
 export CLNKR_API_KEY=your-api-key
 
 # Conversational mode
-clnkr
+clnkr --provider anthropic --model claude-sonnet-4-6
 
 # Single task
-clnkr -p "find all TODO comments in this project"
+clnkr --provider anthropic --model claude-sonnet-4-6 -p "find all TODO comments in this project"
 
 # Skip per-command approval
-clnkr --full-send -p "fix the failing test"
+clnkr --provider anthropic --model claude-sonnet-4-6 --full-send -p "fix the failing test"
 ```
 
 ### OpenAI-compatible providers
 
-Point `--base-url` at an OpenAI-compatible endpoint that supports structured outputs for the model you select. `--provider` controls adapter semantics; `--base-url` is only the transport endpoint. The default is `--provider=auto`, which infers from the parsed base URL host.
+Point `--base-url` at an OpenAI-compatible endpoint that supports structured outputs for the model you select. `--provider` controls adapter semantics; `--base-url` is only the transport endpoint. In normal use, set both `--provider` and `--model`. Compatibility fallback: if `--provider` / `CLNKR_PROVIDER` is unset but `--base-url` / `CLNKR_BASE_URL` is explicitly set, clnkr infers the provider from that URL. For `--provider=openai`, `--provider-api` defaults to `auto`, which prefers `openai-responses` for a conservative allowlist of first-party OpenAI model names and otherwise stays on `openai-chat-completions`.
 
 ```bash
 # vLLM
-clnkr --base-url http://gpu-host:8000/v1 --model my-model
+clnkr --provider openai --base-url http://gpu-host:8000/v1 --model my-model
 
 # Ollama
-clnkr --base-url http://localhost:11434/v1 --model llama3
+clnkr --provider openai --base-url http://localhost:11434/v1 --model llama3
 
 # LiteLLM
-clnkr --base-url http://proxy:4000/v1 --model gpt-4o
+clnkr --provider openai --base-url http://proxy:4000/v1 --model gpt-4o
 
 # Gemini (free tier)
-clnkr --base-url https://generativelanguage.googleapis.com/v1beta/openai --model gemini-2.0-flash
+clnkr --provider openai --base-url https://generativelanguage.googleapis.com/v1beta/openai --model gemini-2.0-flash
 
 # Anthropic via a proxy or gateway that does not use an anthropic.com host
 clnkr --provider anthropic --base-url https://proxy.example.com/anthropic --model claude-sonnet-4-6
 
-# Force OpenAI-compatible semantics against an anthropic-looking transport URL
-clnkr --provider openai --base-url https://gateway.example.com/v1 --model gpt-4o
+# Force the legacy OpenAI chat-completions path against a proxy that rejects Responses
+clnkr --provider openai --provider-api openai-chat-completions --base-url https://gateway.example.com/v1 --model gpt-4o
 ```
 
-If the backend rejects structured outputs, clnkr now returns that provider error instead of falling back to unconstrained text responses.
+If the backend rejects the resolved OpenAI API surface, clnkr returns the provider error. When a proxy or gateway expects a different OpenAI surface, override with `--provider-api` or `CLNKR_PROVIDER_API`.
 
-With the default Anthropic endpoint, clnkr requests Anthropic's native structured output format on every turn. Keep Anthropic runs on a model Anthropic documents as supporting structured output; the default `claude-sonnet-4-6` is chosen on that basis.
+For Anthropic runs, clnkr requests Anthropic's native structured output format on every turn. Keep Anthropic runs on a model Anthropic documents as supporting structured output.
 
-`--provider=openai` refuses the built-in default `https://api.anthropic.com`. Set `--base-url` or `CLNKR_BASE_URL` explicitly when forcing OpenAI-compatible semantics.
+Structured outputs are a hard requirement for agent turns. `gpt-5.2-pro` and `gpt-5.4-pro` are rejected in this pass, and Codex-family Responses support is intentionally deferred.
 
 ### Common flags
 
 ```
 -p, --prompt string            Task to run (exits after completion)
--m, --model string             Model identifier (default: claude-sonnet-4-6)
--u, --base-url string          LLM endpoint transport URL (default: https://api.anthropic.com)
---provider string              Provider adapter semantics: auto|anthropic|openai (default: auto)
+-m, --model string             Model identifier (required; env: CLNKR_MODEL)
+-u, --base-url string          LLM endpoint transport URL (env: CLNKR_BASE_URL)
+--provider string              Provider adapter semantics: anthropic|openai (required in normal use; env: CLNKR_PROVIDER)
+--provider-api string          OpenAI-only override: auto|openai-chat-completions|openai-responses
 --max-steps int                Maximum agent steps (default: 100)
 --full-send                    Execute every Act turn without approval
 -c, --continue                 Resume the most recent session for this project
@@ -109,9 +110,10 @@ With the default Anthropic endpoint, clnkr requests Anthropic's native structure
 | Variable | Description |
 |----------|-------------|
 | `CLNKR_API_KEY` | API key for the LLM provider (required) |
-| `ANTHROPIC_API_KEY` | Fallback when provider semantics resolve to Anthropic |
+| `CLNKR_PROVIDER` | Provider adapter semantics |
+| `CLNKR_PROVIDER_API` | OpenAI-only API surface override |
 | `CLNKR_MODEL` | Model identifier (overridden by `--model`) |
-| `CLNKR_BASE_URL` | LLM endpoint (overridden by `--base-url`) |
+| `CLNKR_BASE_URL` | LLM endpoint (overridden by `--base-url`); also drives the temporary provider-inference compatibility fallback when `CLNKR_PROVIDER` is unset |
 
 ### Agent orchestration
 
@@ -248,8 +250,10 @@ make docs       # Build documentation site
 
 The provider-specific live-eval targets are deterministic. They ignore generic `CLNKR_EVALUATION_*` shell state and use provider-specific inputs instead:
 
-- `make evaluations-live-openai`: `OPENAI_API_KEY`, optional `CLNKR_EVALUATION_OPENAI_BASE_URL`, optional `CLNKR_EVALUATION_OPENAI_MODEL`
-- `make evaluations-live-anthropic`: `ANTHROPIC_API_KEY`, optional `CLNKR_EVALUATION_ANTHROPIC_BASE_URL`, optional `CLNKR_EVALUATION_ANTHROPIC_MODEL`
+- `make evaluations-live-openai`: `CLNKR_EVALUATION_OPENAI_API_KEY`, optional `CLNKR_EVALUATION_OPENAI_BASE_URL`, optional `CLNKR_EVALUATION_OPENAI_MODEL`
+- `make evaluations-live-anthropic`: `CLNKR_EVALUATION_ANTHROPIC_API_KEY`, optional `CLNKR_EVALUATION_ANTHROPIC_BASE_URL`, optional `CLNKR_EVALUATION_ANTHROPIC_MODEL`
+
+For compatibility, the Make targets still fall back to `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` when the provider-specific `CLNKR_EVALUATION_*_API_KEY` vars are unset.
 
 Install `clankerval` separately from the packages published by the
 `clankerval` project. `make evaluations` checks that `clankerval` is on

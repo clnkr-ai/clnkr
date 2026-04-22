@@ -26,10 +26,11 @@ type delegateResult struct {
 }
 
 type delegateProcessRunner struct {
-	Binary   string
-	Provider string
-	BaseURL  string
-	Model    string
+	Binary      string
+	Provider    string
+	ProviderAPI string
+	BaseURL     string
+	Model       string
 }
 
 func (r delegateProcessRunner) Run(ctx context.Context, req delegateRequest) (delegateResult, error) {
@@ -73,6 +74,9 @@ func (r delegateProcessRunner) Run(ctx context.Context, req delegateRequest) (de
 	args := []string{"--load-messages", seedPath, "-p", req.Task, "--trajectory", outPath, "--full-send"}
 	if strings.TrimSpace(r.Provider) != "" {
 		args = append(args, "--provider", r.Provider)
+	}
+	if strings.TrimSpace(r.Provider) == "openai" && strings.TrimSpace(r.ProviderAPI) != "" {
+		args = append(args, "--provider-api", r.ProviderAPI)
 	}
 	if strings.TrimSpace(r.BaseURL) != "" {
 		args = append(args, "--base-url", r.BaseURL)

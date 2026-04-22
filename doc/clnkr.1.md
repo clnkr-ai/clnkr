@@ -6,7 +6,7 @@ clnkr - a minimal coding agent (TUI)
 
 # SYNOPSIS
 
-**clnkr** [**-p**|**--prompt** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--provider** *mode*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
+**clnkr** [**-p**|**--prompt** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--provider** *mode*] [**--provider-api** *surface*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
 
 # DESCRIPTION
 
@@ -22,9 +22,9 @@ The agent communicates through JSON turns: **act** (execute a command through a 
 
 By default, **clnkr** asks for approval before each **act** turn. Approval and proposal UI show the requested command and any explicit workdir override. Pass **--full-send** to execute commands immediately without approval.
 
-With the default Anthropic endpoint, **clnkr** requests Anthropic's native structured output format on every turn. Keep **--model** on a model Anthropic documents as supporting structured output; the default **claude-sonnet-4-6** is chosen on that basis.
+For Anthropic runs, **clnkr** requests Anthropic's native structured output format on every turn. Keep **--model** on a model Anthropic documents as supporting structured output.
 
-On OpenAI-compatible backends, the selected model path must support structured outputs. If a backend rejects that capability, **clnkr** returns the provider error instead of falling back to unconstrained text responses.
+On OpenAI-compatible backends, the selected model path must support structured outputs. If a backend rejects the resolved OpenAI API surface, **clnkr** returns the provider error. When a proxy or gateway expects a different OpenAI surface, override with **--provider-api** or **CLNKR_PROVIDER_API**.
 
 A plain CLI variant is available as **clnku**(1).
 
@@ -36,13 +36,16 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : Run the given task and exit. Without this flag, clnkr starts the TUI.
 
 **-m**, **--model** *name*
-: LLM model identifier (default: claude-sonnet-4-6). If omitted, **CLNKR_MODEL** is used when set.
+: LLM model identifier. Required unless **CLNKR_MODEL** is set.
 
 **-u**, **--base-url** *url*
-: LLM endpoint transport URL (default: https://api.anthropic.com). If omitted, **CLNKR_BASE_URL** is used when set.
+: LLM endpoint transport URL. If omitted, clnkr uses the provider default: **https://api.anthropic.com** for **anthropic** or **https://api.openai.com/v1** for **openai**. **CLNKR_BASE_URL** overrides the default when set.
 
 **--provider** *mode*
-: Provider adapter semantics: **auto**, **anthropic**, or **openai** (default: **auto**). **auto** infers from the parsed base URL host: Anthropic hosts select the Anthropic adapter, everything else selects the OpenAI-compatible adapter. **anthropic** and **openai** override host-based inference everywhere in the process, including transcript compaction and delegated child runs. **--provider=openai** refuses the built-in default Anthropic URL; set **--base-url** or **CLNKR_BASE_URL** explicitly when forcing OpenAI-compatible semantics.
+: Provider adapter semantics: **anthropic** or **openai**. Required in normal use unless **CLNKR_PROVIDER** is set. Compatibility fallback: if provider is unset but **--base-url** or **CLNKR_BASE_URL** is explicitly set, clnkr infers the provider from that URL.
+
+**--provider-api** *surface*
+: OpenAI-only API surface override: **auto**, **openai-chat-completions**, or **openai-responses**. With **provider=openai**, **auto** prefers **openai-responses** for a conservative allowlist of first-party OpenAI model names and otherwise stays on **openai-chat-completions**. This flag is rejected for **provider=anthropic**. Delegated child runs propagate the resolved provider API only for OpenAI children.
 
 **--max-steps** *n*
 : Maximum agent iterations. 0 uses the default of 100.
@@ -95,8 +98,11 @@ In the interactive TUI, parsed assistant turns with non-empty `reasoning` expose
 **CLNKR_API_KEY**
 : API key for the LLM provider (required).
 
-**ANTHROPIC_API_KEY**
-: Fallback API key when provider semantics resolve to Anthropic.
+**CLNKR_PROVIDER**
+: Provider adapter semantics.
+
+**CLNKR_PROVIDER_API**
+: OpenAI-only API surface override.
 
 **CLNKR_MODEL**
 : Default model identifier when **--model** is not provided.

@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -16,29 +15,22 @@ import (
 
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/compaction"
+	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
 	"github.com/clnkr-ai/clnkr/cmd/internal/session"
 	"github.com/clnkr-ai/clnkr/internal/providers/anthropic"
 	"github.com/clnkr-ai/clnkr/internal/providers/openai"
+	"github.com/clnkr-ai/clnkr/internal/providers/openairesponses"
 )
 
 // version is set at build time via -ldflags.
 var version = "dev"
-
-const defaultAnthropicModel = "claude-sonnet-4-6"
-const defaultBaseURL = "https://api.anthropic.com"
 
 const exitClarificationNeeded = 2
 
 var errApprovalPending = errors.New("approval pending")
 var errCompactCommandOutsideConversation = errors.New("/compact is only available at the conversational prompt")
 
-type providerMode string
-
-const (
-	providerAuto      providerMode = "auto"
-	providerAnthropic providerMode = "anthropic"
-	providerOpenAI    providerMode = "openai"
-)
+type providerConfig = providerconfig.ResolvedProviderConfig
 
 type approvalPrompter interface {
 	ActReply(ctx context.Context, command string) (string, error)
@@ -58,9 +50,10 @@ Usage:
 
 Core:
   -p, --prompt string       Task to run (exits after completion)
-  -m, --model string        Model identifier (env: $CLNKR_MODEL, default: ` + defaultAnthropicModel + `)
-  -u, --base-url string     LLM endpoint transport URL (env: $CLNKR_BASE_URL, default: ` + defaultBaseURL + `)
-      --provider string     Provider adapter semantics: auto|anthropic|openai (default: auto)
+  -m, --model string        Model identifier (required; env: $CLNKR_MODEL)
+  -u, --base-url string     LLM endpoint transport URL (env: $CLNKR_BASE_URL; default: anthropic=https://api.anthropic.com, openai=https://api.openai.com/v1)
+      --provider string     Provider adapter semantics: anthropic|openai (required in normal use; env: $CLNKR_PROVIDER)
+      --provider-api string OpenAI-only override: auto|openai-chat-completions|openai-responses
       --max-steps int       Maximum agent steps (default: 100)
       --full-send           Execute every Act turn without approval
   -v, --verbose             Show internal decisions
@@ -82,104 +75,51 @@ Debugging:
   -V, --version             Print version and exit
 
 Environment:
-  CLNKR_API_KEY     API key for the LLM provider (required)
-  ANTHROPIC_API_KEY Fallback API key when provider resolves to Anthropic
-  CLNKR_MODEL       Model identifier override
-  CLNKR_BASE_URL    LLM endpoint override
+  CLNKR_API_KEY      API key for the LLM provider (required)
+  CLNKR_PROVIDER     Provider adapter semantics
+  CLNKR_PROVIDER_API OpenAI-only API surface override
+  CLNKR_MODEL        Model identifier override
+  CLNKR_BASE_URL     LLM endpoint override; also drives provider inference when CLNKR_PROVIDER is unset
 `
 }
 
-func resolveModelValue(flagValue, envValue string) string {
-	if flagValue != "" {
-		return flagValue
+func resolveProviderConfig(modelFlag, modelShort, baseURLFlag, baseURLShort, providerFlag, providerAPIFlag string, getenv func(string) string) (providerConfig, error) {
+	if strings.TrimSpace(modelShort) != "" {
+		modelFlag = modelShort
 	}
-	if envValue != "" {
-		return envValue
+	if strings.TrimSpace(baseURLShort) != "" {
+		baseURLFlag = baseURLShort
 	}
-	return defaultAnthropicModel
+	return providerconfig.ResolveConfig(providerconfig.Inputs{
+		Provider:    providerFlag,
+		ProviderAPI: providerAPIFlag,
+		Model:       modelFlag,
+		BaseURL:     baseURLFlag,
+	}, getenv)
 }
 
-func parseProviderMode(raw string) (providerMode, error) {
-	if raw == "" {
-		return providerAuto, nil
-	}
-
-	mode := providerMode(strings.ToLower(strings.TrimSpace(raw)))
-	switch mode {
-	case providerAuto, providerAnthropic, providerOpenAI:
-		return mode, nil
-	default:
-		return "", fmt.Errorf("invalid provider %q (allowed: auto, anthropic, openai)", raw)
-	}
+func missingAPIKeyMessage() string {
+	return "Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key"
 }
 
-func parseBaseURL(baseURL, source string) (*url.URL, error) {
-	parsed, err := url.Parse(baseURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid base URL %q (from %s): %w", baseURL, source, err)
+func newModelForConfig(cfg providerConfig, systemPrompt string) clnkr.Model {
+	if cfg.Provider == providerconfig.ProviderAnthropic {
+		return anthropic.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil, fmt.Errorf("invalid base URL %q (from %s): must start with http:// or https://", baseURL, source)
+	if cfg.ProviderAPI == providerconfig.ProviderAPIOpenAIResponses {
+		return openairesponses.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
 	}
-	if parsed.Hostname() == "" {
-		return nil, fmt.Errorf("invalid base URL %q (from %s): missing host", baseURL, source)
-	}
-	return parsed, nil
+	return openai.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
 }
 
-func inferProviderMode(parsed *url.URL) providerMode {
-	host := strings.ToLower(parsed.Hostname())
-	if host == "anthropic.com" || strings.HasSuffix(host, ".anthropic.com") {
-		return providerAnthropic
+func newFreeformModelForConfig(cfg providerConfig, systemPrompt string) compaction.FreeformModel {
+	if cfg.Provider == providerconfig.ProviderAnthropic {
+		return anthropic.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
 	}
-	return providerOpenAI
-}
-
-func resolveProviderSelection(mode providerMode, baseURL, baseURLSource string) (providerMode, error) {
-	parsed, err := parseBaseURL(baseURL, baseURLSource)
-	if err != nil {
-		return "", err
+	if cfg.ProviderAPI == providerconfig.ProviderAPIOpenAIResponses {
+		return openairesponses.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
 	}
-
-	if mode == providerOpenAI && baseURLSource == "default" && baseURL == defaultBaseURL {
-		return "", fmt.Errorf(`provider "openai" requires --base-url or CLNKR_BASE_URL; refusing built-in default %s`, defaultBaseURL)
-	}
-	if mode == providerAuto {
-		return inferProviderMode(parsed), nil
-	}
-	return mode, nil
-}
-
-func resolveAPIKey(mode providerMode, clnkrKey, anthropicKey string) string {
-	if clnkrKey != "" {
-		return clnkrKey
-	}
-	if mode == providerAnthropic {
-		return anthropicKey
-	}
-	return ""
-}
-
-func missingAPIKeyMessage(mode providerMode) string {
-	msg := "Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key"
-	if mode == providerAnthropic {
-		msg += "\nOr set ANTHROPIC_API_KEY when provider semantics are Anthropic."
-	}
-	return msg
-}
-
-func newModelForProvider(mode providerMode, baseURL, apiKey, modelName, systemPrompt string) clnkr.Model {
-	if mode == providerAnthropic {
-		return anthropic.NewModel(baseURL, apiKey, modelName, systemPrompt)
-	}
-	return openai.NewModel(baseURL, apiKey, modelName, systemPrompt)
-}
-
-func newFreeformModelForProvider(mode providerMode, baseURL, apiKey, modelName, systemPrompt string) compaction.FreeformModel {
-	if mode == providerAnthropic {
-		return anthropic.NewModel(baseURL, apiKey, modelName, systemPrompt)
-	}
-	return openai.NewModel(baseURL, apiKey, modelName, systemPrompt)
+	return openai.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
 }
 
 type lineResult struct {
@@ -319,10 +259,10 @@ func parseCompactCommand(input string) (instructions string, ok bool) {
 	return strings.TrimSpace(input[len(command):]), true
 }
 
-func makeCompactorFactory(mode providerMode, baseURL, apiKey, modelName string) compaction.Factory {
+func makeCompactorFactory(cfg providerConfig) compaction.Factory {
 	return compaction.NewFactory(func(instructions string) compaction.FreeformModel {
 		systemPrompt := compaction.LoadCompactionPrompt(instructions)
-		return newFreeformModelForProvider(mode, baseURL, apiKey, modelName, systemPrompt)
+		return newFreeformModelForConfig(cfg, systemPrompt)
 	})
 }
 
@@ -475,7 +415,8 @@ func main() {
 	modelShort := flags.String("m", "", "")
 	baseURL := flags.String("base-url", "", "")
 	baseURLShort := flags.String("u", "", "")
-	providerFlag := flags.String("provider", string(providerAuto), "")
+	providerFlag := flags.String("provider", "", "")
+	providerAPIFlag := flags.String("provider-api", "", "")
 	maxSteps := flags.Int("max-steps", 0, "")
 	fullSend := flags.Bool("full-send", false, "")
 	verbose := flags.Bool("verbose", false, "")
@@ -535,46 +476,13 @@ func main() {
 		taskPrompt = *promptLong
 	}
 
-	// Resolve model: flag > env > default
-	if *modelShort != "" {
-		*modelFlag = *modelShort
-	}
-	*modelFlag = resolveModelValue(*modelFlag, os.Getenv("CLNKR_MODEL"))
-
-	// Resolve base URL: flag > env > default
-	if *baseURLShort != "" {
-		*baseURL = *baseURLShort
-	}
-	baseURLSource := "default"
-	if *baseURL == "" {
-		if env := os.Getenv("CLNKR_BASE_URL"); env != "" {
-			*baseURL = env
-			baseURLSource = "CLNKR_BASE_URL env var"
-		} else {
-			*baseURL = defaultBaseURL
+	cfg, err := resolveProviderConfig(*modelFlag, *modelShort, *baseURL, *baseURLShort, *providerFlag, *providerAPIFlag, os.Getenv)
+	if err != nil {
+		if strings.Contains(err.Error(), "api key is required") {
+			fmt.Fprintln(os.Stderr, missingAPIKeyMessage())
+			os.Exit(1)
 		}
-	} else {
-		baseURLSource = "--base-url flag"
-	}
-	if _, err := parseBaseURL(*baseURL, baseURLSource); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	provider, err := parseProviderMode(*providerFlag)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\nRun 'clnku --help' for available options.\n", err)
-		os.Exit(1)
-	}
-	selectedProvider, err := resolveProviderSelection(provider, *baseURL, baseURLSource)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	apiKey := resolveAPIKey(selectedProvider, os.Getenv("CLNKR_API_KEY"), os.Getenv("ANTHROPIC_API_KEY"))
-	if apiKey == "" {
-		fmt.Fprintln(os.Stderr, missingAPIKeyMessage(selectedProvider))
 		os.Exit(1)
 	}
 
@@ -605,8 +513,8 @@ func main() {
 		os.Exit(0)
 	}
 
-	model := newModelForProvider(selectedProvider, *baseURL, apiKey, *modelFlag, systemPrompt)
-	compactorFactory := makeCompactorFactory(selectedProvider, *baseURL, apiKey, *modelFlag)
+	model := newModelForConfig(cfg, systemPrompt)
+	compactorFactory := makeCompactorFactory(cfg)
 
 	executor := &clnkr.CommandExecutor{}
 
