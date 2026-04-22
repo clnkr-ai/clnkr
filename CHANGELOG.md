@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.0 (2026-04-22)
+
+- Tighten public docs and release notes
+- Default OpenAI-like names to Responses
+- Update CHANGELOG.md for 2.1.0
+
 ## 2.1.0 (2026-04-22)
 
 - Allow approved Codex models on Responses
