@@ -8,7 +8,7 @@ Platform note: today `clnkr` is Unix-only. The executor assumes `bash`, process 
 
 A minimal coding agent. Query an LLM, execute bash commands, repeat. Supports the Anthropic Messages API and OpenAI-compatible endpoints that implement structured outputs on the selected model path.
 
-Ships two binaries: **clnkr** (TUI) and **clnku** (plain CLI). The evaluation runner lives in the separate **clankerval** project and is installed independently. A **clnk** symlink points to clnkr for convenience.
+Ships two binaries: **clnkr** (TUI) and **clnku** (plain CLI). The evaluation runner lives in the separate **clankerval** project and is installed independently. `make install` also creates a **clnk** symlink to `clnkr` for convenience.
 
 <img width="512" height="512" alt="Isildur cut the Ring (the ring here is bash -jokeexplainer)from his hand with the hilt-shard of his father's sword, and took it for his own." src="https://github.com/user-attachments/assets/7c9d648c-f5b9-4610-a311-04f5af37b364" />
 
@@ -81,7 +81,7 @@ If the backend rejects the resolved OpenAI API surface, clnkr returns the provid
 
 For Anthropic runs, clnkr requests Anthropic's native structured output format on every turn. Keep Anthropic runs on a model Anthropic documents as supporting structured output.
 
-Structured outputs are a hard requirement for agent turns. `gpt-5.2-pro`, `gpt-5.4-pro`, and their dated snapshots still fail outright in this pass, even if you force `openai-chat-completions`.
+Structured outputs are a hard requirement for agent turns. clnkr rejects `gpt-5.2-pro`, `gpt-5.4-pro`, and their dated snapshots even if you force `openai-chat-completions`.
 
 ### Common flags
 
@@ -172,7 +172,7 @@ A few important details:
 
 ### Prompt customization
 
-Place an `AGENTS.md` file in your working directory. Its contents are appended to the system prompt, giving the LLM project-specific context.
+clnkr composes its system prompt from the built-in prompt plus any `AGENTS.md` files found in the user home directory, the XDG config directory, and the current working directory.
 
 You can also customize the composed prompt directly:
 
@@ -183,7 +183,7 @@ clnkr --dump-system-prompt
 # Append extra one-off instructions
 clnkr --system-prompt-append "Prefer targeted tests first"
 
-# Disable the built-in prompt entirely
+# Disable the entire composed prompt, including all AGENTS.md layers
 clnkr --no-system-prompt
 ```
 

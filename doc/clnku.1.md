@@ -26,7 +26,7 @@ For Anthropic runs, **clnku** requests Anthropic's native structured output form
 
 On OpenAI-compatible backends, the selected model path must support structured outputs. If a backend rejects the resolved OpenAI API surface, **clnku** returns the provider error. When a proxy or gateway expects a different OpenAI surface, override with **--provider-api** or **CLNKR_PROVIDER_API**.
 
-`gpt-5.2-pro`, `gpt-5.4-pro`, and their dated snapshots still fail outright for the main structured loop in this pass, even if you force **openai-chat-completions**.
+**clnku** rejects `gpt-5.2-pro`, `gpt-5.4-pro`, and their dated snapshots even if you force **openai-chat-completions**, because agent turns require structured outputs.
 
 Project-specific instructions are loaded from an **AGENTS.md** file in the current working directory, if present.
 
