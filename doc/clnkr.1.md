@@ -26,6 +26,8 @@ For Anthropic runs, **clnkr** requests Anthropic's native structured output form
 
 On OpenAI-compatible backends, the selected model path must support structured outputs. If a backend rejects the resolved OpenAI API surface, **clnkr** returns the provider error. When a proxy or gateway expects a different OpenAI surface, override with **--provider-api** or **CLNKR_PROVIDER_API**.
 
+`gpt-5.2-pro`, `gpt-5.4-pro`, and their dated snapshots still fail outright for the main structured loop in this pass, even if you force **openai-chat-completions**.
+
 A plain CLI variant is available as **clnku**(1).
 
 Project-specific instructions are loaded from an **AGENTS.md** file in the current working directory, if present.
@@ -45,7 +47,7 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : Provider adapter semantics: **anthropic** or **openai**. Required in normal use unless **CLNKR_PROVIDER** is set. Compatibility fallback: if provider is unset but **--base-url** or **CLNKR_BASE_URL** is explicitly set, clnkr infers the provider from that URL.
 
 **--provider-api** *surface*
-: OpenAI-only API surface override: **auto**, **openai-chat-completions**, or **openai-responses**. With **provider=openai**, **auto** prefers **openai-responses** for a conservative allowlist of approved model names under that provider, including current Codex names such as **gpt-5-codex**, **gpt-5.1-codex**, **gpt-5.1-codex-mini**, **gpt-5.1-codex-max**, **gpt-5.2-codex**, and **gpt-5.3-codex**, and otherwise stays on **openai-chat-completions**. This flag is rejected for **provider=anthropic**. For those approved Codex names, forcing **openai-chat-completions** is a manual proxy-compatibility escape hatch and may still fail provider-side. Delegated child runs propagate the resolved provider API only for OpenAI children.
+: OpenAI-only API surface override: **auto**, **openai-chat-completions**, or **openai-responses**. With **provider=openai**, **auto** prefers **openai-responses** for known supported names and other OpenAI-looking model names such as **gpt-***, **o** followed by a digit, and **codex***. Names that do not look OpenAI-ish, such as **llama3**, **gemini-2.0-flash**, **orca-***, **olmo-***, **openhermes-***, and **chatgpt-***, stay on **openai-chat-completions**. This flag is rejected for **provider=anthropic**. Delegated child runs propagate the resolved provider API only for OpenAI children.
 
 **--max-steps** *n*
 : Maximum agent iterations. 0 uses the default of 100.
