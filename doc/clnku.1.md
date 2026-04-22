@@ -43,7 +43,7 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : Provider adapter semantics: **anthropic** or **openai**. Required in normal use unless **CLNKR_PROVIDER** is set. Compatibility fallback: if provider is unset but **--base-url** or **CLNKR_BASE_URL** is explicitly set, clnku infers the provider from that URL.
 
 **--provider-api** *surface*
-: OpenAI-only API surface override: **auto**, **openai-chat-completions**, or **openai-responses**. With **provider=openai**, **auto** prefers **openai-responses** for a conservative allowlist of first-party OpenAI model names and otherwise stays on **openai-chat-completions**. This flag is rejected for **provider=anthropic**.
+: OpenAI-only API surface override: **auto**, **openai-chat-completions**, or **openai-responses**. With **provider=openai**, **auto** prefers **openai-responses** for a conservative allowlist of approved model names under that provider, including current Codex names such as **gpt-5-codex**, **gpt-5.1-codex**, **gpt-5.1-codex-mini**, **gpt-5.1-codex-max**, **gpt-5.2-codex**, and **gpt-5.3-codex**, and otherwise stays on **openai-chat-completions**. This flag is rejected for **provider=anthropic**. For those approved Codex names, forcing **openai-chat-completions** is a manual proxy-compatibility escape hatch and may still fail provider-side.
 
 **--max-steps** *n*
 : Maximum agent iterations. 0 uses the default of 100.
