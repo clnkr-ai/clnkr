@@ -34,6 +34,7 @@ func TestPTYSingleTaskShowsApprovalPrompt(t *testing.T) {
 		binary: bin,
 		args: []string{
 			"-p", "say hello",
+			"--provider", "openai",
 			"--model", "test-model",
 			"--base-url", server.URL,
 			"-S",
@@ -54,6 +55,7 @@ func TestPTYRequestsTerminalFocusReports(t *testing.T) {
 	app := startPTYSession(t, ptyStartOptions{
 		binary: bin,
 		args: []string{
+			"--provider", "anthropic",
 			"--model", "test-model",
 			"-S",
 		},

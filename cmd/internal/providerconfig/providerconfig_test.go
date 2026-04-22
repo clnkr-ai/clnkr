@@ -1,0 +1,355 @@
+package providerconfig
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestResolveConfigRequiresProviderModelAndAPIKey(t *testing.T) {
+	t.Run("provider required", func(t *testing.T) {
+		_, err := ResolveConfig(Inputs{}, func(string) string { return "" })
+		if err == nil || err.Error() != "provider is required; set --provider or CLNKR_PROVIDER" {
+			t.Fatalf("ResolveConfig() err = %v, want provider required error", err)
+		}
+	})
+
+	t.Run("model required", func(t *testing.T) {
+		_, err := ResolveConfig(Inputs{Provider: "anthropic"}, func(string) string {
+			return ""
+		})
+		if err == nil || err.Error() != "model is required; set --model or CLNKR_MODEL" {
+			t.Fatalf("ResolveConfig() err = %v, want model required error", err)
+		}
+	})
+
+	t.Run("api key required", func(t *testing.T) {
+		_, err := ResolveConfig(Inputs{
+			Provider: "openai",
+			Model:    "gpt-4.1",
+		}, func(string) string { return "" })
+		if err == nil || err.Error() != "api key is required; set CLNKR_API_KEY" {
+			t.Fatalf("ResolveConfig() err = %v, want api key required error", err)
+		}
+	})
+
+	t.Run("provider inferred from explicit base url", func(t *testing.T) {
+		cfg, err := ResolveConfig(Inputs{
+			Model:   "test-model",
+			BaseURL: "https://mock-provider.example/v1",
+		}, func(key string) string {
+			if key == "CLNKR_API_KEY" {
+				return "test-key"
+			}
+			return ""
+		})
+		if err != nil {
+			t.Fatalf("ResolveConfig(): %v", err)
+		}
+		if cfg.Provider != ProviderOpenAI {
+			t.Fatalf("Provider = %q, want %q", cfg.Provider, ProviderOpenAI)
+		}
+	})
+}
+
+func TestResolveConfigPrefersFlagsOverEnv(t *testing.T) {
+	cfg, err := ResolveConfig(Inputs{
+		Provider:    "openai",
+		ProviderAPI: "openai-chat-completions",
+		Model:       "flag-model",
+		BaseURL:     "https://flags.example.com/v1",
+	}, envMap(map[string]string{
+		"CLNKR_PROVIDER":     "anthropic",
+		"CLNKR_PROVIDER_API": "openai-responses",
+		"CLNKR_MODEL":        "env-model",
+		"CLNKR_BASE_URL":     "https://env.example.com/v1",
+		"CLNKR_API_KEY":      "env-key",
+	}))
+	if err != nil {
+		t.Fatalf("ResolveConfig(): %v", err)
+	}
+	if cfg.Provider != ProviderOpenAI {
+		t.Fatalf("Provider = %q, want %q", cfg.Provider, ProviderOpenAI)
+	}
+	if cfg.ProviderAPI != ProviderAPIOpenAIChatCompletions {
+		t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIOpenAIChatCompletions)
+	}
+	if cfg.Model != "flag-model" {
+		t.Fatalf("Model = %q, want %q", cfg.Model, "flag-model")
+	}
+	if cfg.BaseURL != "https://flags.example.com/v1" {
+		t.Fatalf("BaseURL = %q, want %q", cfg.BaseURL, "https://flags.example.com/v1")
+	}
+	if cfg.APIKey != "env-key" {
+		t.Fatalf("APIKey = %q, want %q", cfg.APIKey, "env-key")
+	}
+}
+
+func TestResolveConfigUsesOnlyCLNKREnvSurface(t *testing.T) {
+	lookups := make(map[string]int)
+	cfg, err := ResolveConfig(Inputs{}, func(key string) string {
+		lookups[key]++
+		switch key {
+		case "CLNKR_PROVIDER":
+			return "anthropic"
+		case "CLNKR_MODEL":
+			return "claude-sonnet-4-6"
+		case "CLNKR_API_KEY":
+			return "clnkr-key"
+		case "ANTHROPIC_API_KEY":
+			return "anthropic-key"
+		default:
+			return ""
+		}
+	})
+	if err != nil {
+		t.Fatalf("ResolveConfig(): %v", err)
+	}
+	if cfg.APIKey != "clnkr-key" {
+		t.Fatalf("APIKey = %q, want %q", cfg.APIKey, "clnkr-key")
+	}
+	if lookups["ANTHROPIC_API_KEY"] != 0 {
+		t.Fatalf("ANTHROPIC_API_KEY lookups = %d, want 0", lookups["ANTHROPIC_API_KEY"])
+	}
+}
+
+func TestResolveConfigRejectsProviderAPIForAnthropic(t *testing.T) {
+	_, err := ResolveConfig(Inputs{
+		Provider:    "anthropic",
+		ProviderAPI: "auto",
+		Model:       "claude-sonnet-4-6",
+	}, envMap(map[string]string{
+		"CLNKR_API_KEY": "test-key",
+	}))
+	if err == nil || err.Error() != `provider-api is only valid for provider "openai"` {
+		t.Fatalf("ResolveConfig() err = %v, want anthropic provider-api rejection", err)
+	}
+}
+
+func TestResolveConfigAppliesProviderSpecificBaseURLDefaults(t *testing.T) {
+	tests := []struct {
+		name            string
+		inputs          Inputs
+		env             map[string]string
+		wantProvider    Provider
+		wantProviderAPI ProviderAPI
+		wantBaseURL     string
+	}{
+		{
+			name: "anthropic default",
+			inputs: Inputs{
+				Provider: "anthropic",
+				Model:    "claude-sonnet-4-6",
+			},
+			env: map[string]string{
+				"CLNKR_API_KEY": "anthropic-key",
+			},
+			wantProvider:    ProviderAnthropic,
+			wantProviderAPI: ProviderAPIAuto,
+			wantBaseURL:     DefaultAnthropicBaseURL,
+		},
+		{
+			name: "openai default",
+			inputs: Inputs{
+				Provider: "openai",
+				Model:    "proxy-model",
+			},
+			env: map[string]string{
+				"CLNKR_API_KEY": "openai-key",
+			},
+			wantProvider:    ProviderOpenAI,
+			wantProviderAPI: ProviderAPIOpenAIChatCompletions,
+			wantBaseURL:     DefaultOpenAIBaseURL,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := ResolveConfig(tt.inputs, envMap(tt.env))
+			if err != nil {
+				t.Fatalf("ResolveConfig(): %v", err)
+			}
+			if cfg.Provider != tt.wantProvider {
+				t.Fatalf("Provider = %q, want %q", cfg.Provider, tt.wantProvider)
+			}
+			if cfg.ProviderAPI != tt.wantProviderAPI {
+				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, tt.wantProviderAPI)
+			}
+			if cfg.BaseURL != tt.wantBaseURL {
+				t.Fatalf("BaseURL = %q, want %q", cfg.BaseURL, tt.wantBaseURL)
+			}
+		})
+	}
+}
+
+func TestResolveConfigInfersAnthropicFromExplicitBaseURL(t *testing.T) {
+	cfg, err := ResolveConfig(Inputs{
+		Model:   "claude-sonnet-4-6",
+		BaseURL: "https://api.anthropic.com",
+	}, envMap(map[string]string{
+		"CLNKR_API_KEY": "anthropic-key",
+	}))
+	if err != nil {
+		t.Fatalf("ResolveConfig(): %v", err)
+	}
+	if cfg.Provider != ProviderAnthropic {
+		t.Fatalf("Provider = %q, want %q", cfg.Provider, ProviderAnthropic)
+	}
+	if cfg.ProviderAPI != ProviderAPIAuto {
+		t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIAuto)
+	}
+}
+
+func TestResolveConfigAllowlistedResponsesModels(t *testing.T) {
+	tests := []string{
+		"gpt-5",
+		"gpt-5.4-mini-2026-03-05",
+		"o3-pro",
+	}
+
+	for _, model := range tests {
+		t.Run(model, func(t *testing.T) {
+			cfg, err := ResolveConfig(Inputs{
+				Provider: "openai",
+				Model:    model,
+			}, envMap(map[string]string{
+				"CLNKR_API_KEY": "test-key",
+			}))
+			if err != nil {
+				t.Fatalf("ResolveConfig(): %v", err)
+			}
+			if cfg.ProviderAPI != ProviderAPIOpenAIResponses {
+				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIOpenAIResponses)
+			}
+		})
+	}
+}
+
+func TestResolveConfigNegativeExamplesStayOnChatCompletions(t *testing.T) {
+	tests := []string{
+		"codex-mini-latest",
+		"gpt-5-codex",
+		"gpt-5.2-chat-latest",
+		"gpt-4o-latest",
+	}
+
+	for _, model := range tests {
+		t.Run(model, func(t *testing.T) {
+			cfg, err := ResolveConfig(Inputs{
+				Provider: "openai",
+				Model:    model,
+			}, envMap(map[string]string{
+				"CLNKR_API_KEY": "test-key",
+			}))
+			if err != nil {
+				t.Fatalf("ResolveConfig(): %v", err)
+			}
+			if cfg.ProviderAPI != ProviderAPIOpenAIChatCompletions {
+				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIOpenAIChatCompletions)
+			}
+		})
+	}
+}
+
+func TestResolveConfigRejectsUnsupportedProModels(t *testing.T) {
+	tests := []struct {
+		name   string
+		inputs Inputs
+	}{
+		{
+			name: "auto rejects gpt-5.2-pro",
+			inputs: Inputs{
+				Provider: "openai",
+				Model:    "gpt-5.2-pro",
+			},
+		},
+		{
+			name: "explicit responses rejects gpt-5.4-pro",
+			inputs: Inputs{
+				Provider:    "openai",
+				ProviderAPI: "openai-responses",
+				Model:       "gpt-5.4-pro",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ResolveConfig(tt.inputs, envMap(map[string]string{
+				"CLNKR_API_KEY": "test-key",
+			}))
+			if err == nil || !strings.Contains(err.Error(), "structured outputs") {
+				t.Fatalf("ResolveConfig() err = %v, want structured outputs error", err)
+			}
+		})
+	}
+}
+
+func TestResolveConfigRejectsExplicitCodexResponsesSelections(t *testing.T) {
+	tests := []string{
+		"codex-mini-latest",
+		"gpt-5-codex",
+		"gpt-5.1-codex-mini",
+	}
+
+	for _, model := range tests {
+		t.Run(model, func(t *testing.T) {
+			_, err := ResolveConfig(Inputs{
+				Provider:    "openai",
+				ProviderAPI: "openai-responses",
+				Model:       model,
+			}, envMap(map[string]string{
+				"CLNKR_API_KEY": "test-key",
+			}))
+			if err == nil || !strings.Contains(err.Error(), "does not support that contract in this pass") {
+				t.Fatalf("ResolveConfig() err = %v, want Codex responses scope error", err)
+			}
+		})
+	}
+}
+
+func TestResolveConfigMatchesDatedSnapshotsOnly(t *testing.T) {
+	tests := []struct {
+		name    string
+		model   string
+		wantAPI ProviderAPI
+	}{
+		{
+			name:    "dated snapshot matches",
+			model:   "gpt-5.4-2026-03-05",
+			wantAPI: ProviderAPIOpenAIResponses,
+		},
+		{
+			name:    "non snapshot suffix does not match",
+			model:   "gpt-5.4-preview",
+			wantAPI: ProviderAPIOpenAIChatCompletions,
+		},
+		{
+			name:    "chat latest suffix does not match",
+			model:   "gpt-5.2-chat-latest",
+			wantAPI: ProviderAPIOpenAIChatCompletions,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := ResolveConfig(Inputs{
+				Provider: "openai",
+				Model:    tt.model,
+			}, envMap(map[string]string{
+				"CLNKR_API_KEY": "test-key",
+			}))
+			if err != nil {
+				t.Fatalf("ResolveConfig(): %v", err)
+			}
+			if cfg.ProviderAPI != tt.wantAPI {
+				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, tt.wantAPI)
+			}
+		})
+	}
+}
+
+func envMap(values map[string]string) func(string) string {
+	return func(key string) string {
+		return values[key]
+	}
+}

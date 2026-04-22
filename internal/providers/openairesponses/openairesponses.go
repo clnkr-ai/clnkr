@@ -1,4 +1,4 @@
-package openai
+package openairesponses
 
 import (
 	"bytes"
@@ -16,7 +16,7 @@ import (
 	"github.com/clnkr-ai/clnkr/internal/providers/openaiwire"
 )
 
-// Model talks to any OpenAI-compatible chat completions API.
+// Model talks to the OpenAI Responses API.
 type Model struct {
 	baseURL      string
 	apiKey       string
@@ -25,7 +25,7 @@ type Model struct {
 	client       *http.Client
 }
 
-// NewModel sets up an OpenAI-compatible adapter.
+// NewModel sets up an OpenAI Responses adapter.
 func NewModel(baseURL, apiKey, model, systemPrompt string) *Model {
 	return &Model{
 		baseURL:      baseURL,
@@ -37,39 +37,51 @@ func NewModel(baseURL, apiKey, model, systemPrompt string) *Model {
 }
 
 type request struct {
-	Model          string          `json:"model"`
-	Messages       []clnkr.Message `json:"messages"`
-	ResponseFormat responseFormat  `json:"response_format"`
+	Model        string         `json:"model"`
+	Instructions string         `json:"instructions,omitempty"`
+	Input        []inputMessage `json:"input"`
+	Text         *textOptions   `json:"text,omitempty"`
 }
 
-type textRequest struct {
-	Model    string          `json:"model"`
-	Messages []clnkr.Message `json:"messages"`
+type textOptions struct {
+	Format *responseFormat `json:"format,omitempty"`
 }
 
 type responseFormat struct {
-	Type       string             `json:"type"`
-	JSONSchema responseJSONSchema `json:"json_schema"`
-}
-
-type responseJSONSchema struct {
-	Name   string         `json:"name,omitempty"`
+	Type   string         `json:"type"`
+	Name   string         `json:"name"`
 	Strict bool           `json:"strict"`
 	Schema map[string]any `json:"schema"`
 }
 
+type inputMessage struct {
+	Role    string          `json:"role"`
+	Content []inputTextItem `json:"content"`
+}
+
+type inputTextItem struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
 type response struct {
-	Choices []struct {
-		Message struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-			Refusal string `json:"refusal"`
-		} `json:"message"`
-	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
+	Output []outputItem `json:"output"`
+	Usage  struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
 	} `json:"usage"`
+}
+
+type outputItem struct {
+	Type    string         `json:"type"`
+	Role    string         `json:"role"`
+	Content []responseItem `json:"content"`
+}
+
+type responseItem struct {
+	Type    string `json:"type"`
+	Text    string `json:"text"`
+	Refusal string `json:"refusal"`
 }
 
 const (
@@ -78,41 +90,14 @@ const (
 	baseRetryDelay   = time.Second
 )
 
-// extractErrorMessage pulls the message from an API error response body.
-// Handles both {"error":{"message":"..."}} and [{...}] array-wrapped forms.
-// Falls back to the raw body if parsing fails.
-func extractErrorMessage(body []byte) string {
-	type errorBody struct {
-		Error struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-
-	var single errorBody
-	if err := json.Unmarshal(body, &single); err == nil && single.Error.Message != "" {
-		return single.Error.Message
-	}
-
-	var arr []errorBody
-	if err := json.Unmarshal(body, &arr); err == nil && len(arr) > 0 && arr[0].Error.Message != "" {
-		return arr[0].Error.Message
-	}
-
-	return string(body)
-}
-
 func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
-	messages = openaiwire.NormalizeMessagesForProvider(messages)
-	allMessages := make([]clnkr.Message, 0, len(messages)+1)
-	allMessages = append(allMessages, clnkr.Message{Role: "system", Content: m.systemPrompt})
-	allMessages = append(allMessages, messages...)
-
 	body, err := json.Marshal(request{
-		Model:    m.model,
-		Messages: allMessages,
-		ResponseFormat: responseFormat{
-			Type: "json_schema",
-			JSONSchema: responseJSONSchema{
+		Model:        m.model,
+		Instructions: m.systemPrompt,
+		Input:        mapMessages(messages),
+		Text: &textOptions{
+			Format: &responseFormat{
+				Type:   "json_schema",
 				Name:   "agent_turn",
 				Strict: true,
 				Schema: openaiwire.RequestSchema(),
@@ -129,7 +114,7 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 			return clnkr.Response{}, err
 		}
 		if statusCode == http.StatusOK {
-			return parseResponse(respBody)
+			return parseStructuredResponse(respBody)
 		}
 
 		apiErr := fmt.Errorf("api error (status %d): %s", statusCode, extractErrorMessage(respBody))
@@ -145,13 +130,10 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 }
 
 func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string, error) {
-	allMessages := make([]clnkr.Message, 0, len(messages)+1)
-	allMessages = append(allMessages, clnkr.Message{Role: "system", Content: m.systemPrompt})
-	allMessages = append(allMessages, messages...)
-
-	body, err := json.Marshal(textRequest{
-		Model:    m.model,
-		Messages: allMessages,
+	body, err := json.Marshal(request{
+		Model:        m.model,
+		Instructions: m.systemPrompt,
+		Input:        mapMessages(messages),
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
@@ -178,8 +160,23 @@ func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string
 	return "", fmt.Errorf("retry loop exhausted")
 }
 
+func mapMessages(messages []clnkr.Message) []inputMessage {
+	normalized := openaiwire.NormalizeMessagesForProvider(messages)
+	input := make([]inputMessage, 0, len(normalized))
+	for _, msg := range normalized {
+		input = append(input, inputMessage{
+			Role: msg.Role,
+			Content: []inputTextItem{{
+				Type: "input_text",
+				Text: msg.Content,
+			}},
+		})
+	}
+	return input
+}
+
 func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, int, string, error) {
-	req, err := http.NewRequestWithContext(ctx, "POST", m.baseURL+"/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", m.baseURL+"/responses", bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("create request: %w", err)
 	}
@@ -190,7 +187,7 @@ func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, int, string
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck // best-effort cleanup
+	defer resp.Body.Close() //nolint:errcheck
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
@@ -199,27 +196,17 @@ func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, int, string
 	return respBody, resp.StatusCode, resp.Header.Get("Retry-After"), nil
 }
 
-func parseResponse(respBody []byte) (clnkr.Response, error) {
-	var apiResp response
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return clnkr.Response{}, fmt.Errorf("unmarshal response: %w", err)
-	}
-	if len(apiResp.Choices) == 0 {
-		return clnkr.Response{}, fmt.Errorf("no choices in response")
+func parseStructuredResponse(respBody []byte) (clnkr.Response, error) {
+	text, usage, err := extractOutputText(respBody, "structured output")
+	if err != nil {
+		return clnkr.Response{}, err
 	}
 
-	choice := apiResp.Choices[0]
-	if strings.TrimSpace(choice.Message.Refusal) != "" {
-		return clnkr.Response{}, fmt.Errorf("structured output refusal: %s", choice.Message.Refusal)
-	}
-	if strings.TrimSpace(choice.Message.Content) == "" {
-		return clnkr.Response{}, fmt.Errorf("empty choice content")
-	}
-	turn, err := openaiwire.ParseProviderTurn(choice.Message.Content)
+	turn, err := openaiwire.ParseProviderTurn(text)
 	if err != nil {
 		return clnkr.Response{
-			Raw:         choice.Message.Content,
-			Usage:       clnkr.Usage{InputTokens: apiResp.Usage.PromptTokens, OutputTokens: apiResp.Usage.CompletionTokens},
+			Raw:         text,
+			Usage:       usage,
 			ProtocolErr: err,
 		}, nil
 	}
@@ -228,28 +215,71 @@ func parseResponse(respBody []byte) (clnkr.Response, error) {
 	}
 	return clnkr.Response{
 		Turn:  turn,
-		Raw:   choice.Message.Content,
-		Usage: clnkr.Usage{InputTokens: apiResp.Usage.PromptTokens, OutputTokens: apiResp.Usage.CompletionTokens},
+		Raw:   text,
+		Usage: usage,
 	}, nil
 }
 
 func parseTextResponse(respBody []byte) (string, error) {
+	text, _, err := extractOutputText(respBody, "free-form")
+	if err != nil {
+		return "", err
+	}
+	return text, nil
+}
+
+func extractOutputText(respBody []byte, mode string) (string, clnkr.Usage, error) {
 	var apiResp response
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return "", fmt.Errorf("unmarshal response: %w", err)
-	}
-	if len(apiResp.Choices) == 0 {
-		return "", fmt.Errorf("no choices in response")
+		return "", clnkr.Usage{}, fmt.Errorf("unmarshal response: %w", err)
 	}
 
-	choice := apiResp.Choices[0]
-	if strings.TrimSpace(choice.Message.Refusal) != "" {
-		return "", fmt.Errorf("free-form refusal: %s", choice.Message.Refusal)
+	var b strings.Builder
+	for _, item := range apiResp.Output {
+		if item.Type != "message" || item.Role != "assistant" {
+			continue
+		}
+		for _, content := range item.Content {
+			switch content.Type {
+			case "output_text":
+				b.WriteString(content.Text)
+			case "refusal":
+				if strings.TrimSpace(content.Refusal) != "" {
+					return "", clnkr.Usage{}, fmt.Errorf("%s refusal: %s", mode, content.Refusal)
+				}
+			}
+		}
 	}
-	if strings.TrimSpace(choice.Message.Content) == "" {
-		return "", fmt.Errorf("empty choice content")
+
+	text := b.String()
+	if strings.TrimSpace(text) == "" {
+		return "", clnkr.Usage{}, fmt.Errorf("no usable output_text in response")
 	}
-	return choice.Message.Content, nil
+	return text, clnkr.Usage{
+		InputTokens:  apiResp.Usage.InputTokens,
+		OutputTokens: apiResp.Usage.OutputTokens,
+	}, nil
+}
+
+// extractErrorMessage pulls the message from an API error response body.
+func extractErrorMessage(body []byte) string {
+	type errorBody struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	var single errorBody
+	if err := json.Unmarshal(body, &single); err == nil && single.Error.Message != "" {
+		return single.Error.Message
+	}
+
+	var arr []errorBody
+	if err := json.Unmarshal(body, &arr); err == nil && len(arr) > 0 && arr[0].Error.Message != "" {
+		return arr[0].Error.Message
+	}
+
+	return string(body)
 }
 
 func retryDelay(retryAfter string, attempt int) time.Duration {

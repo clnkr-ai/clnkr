@@ -1,4 +1,4 @@
-package openai
+package openaiwire
 
 import (
 	"encoding/json"
@@ -33,7 +33,7 @@ type wireCommand struct {
 	Workdir *string `json:"workdir"`
 }
 
-func requestSchema() map[string]any {
+func RequestSchema() map[string]any {
 	return structuredOutputSchema(true)
 }
 
@@ -141,14 +141,14 @@ func nullableStringSchema() map[string]any {
 	}
 }
 
-func normalizeMessagesForProvider(messages []clnkr.Message) []clnkr.Message {
+func NormalizeMessagesForProvider(messages []clnkr.Message) []clnkr.Message {
 	normalized := make([]clnkr.Message, len(messages))
 	for i, msg := range messages {
 		normalized[i] = msg
 		if msg.Role != "assistant" {
 			continue
 		}
-		if turn, err := parseProviderTurn(msg.Content); err == nil {
+		if turn, err := ParseProviderTurn(msg.Content); err == nil {
 			if wrapped, err := providerJSON(turn); err == nil {
 				normalized[i].Content = wrapped
 			}
@@ -163,7 +163,7 @@ func normalizeMessagesForProvider(messages []clnkr.Message) []clnkr.Message {
 	return normalized
 }
 
-func parseProviderTurn(raw string) (clnkr.Turn, error) {
+func ParseProviderTurn(raw string) (clnkr.Turn, error) {
 	innerRaw, err := extractWrappedTurn(raw)
 	if err != nil {
 		return nil, err
