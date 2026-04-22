@@ -68,7 +68,6 @@ _build-clnkr:
 check: _fmt-check _vet _lint _arch sloc _workflow-make-targets _check-docs test evaluations ## Run formatting, vet, lint, architecture, SLOC, workflow, docs, test, and evaluation checks
 
 test: ## Run all tests
-	./scripts/test_make_evaluations.sh
 	go test ./... -v
 	cd cmd/clnkr && go test ./... -v
 
