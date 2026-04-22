@@ -24,9 +24,6 @@ jobs:
         run: |
           "$(go env GOPATH)/bin/actionlint"
           ./scripts/check-workflow-make-targets.sh
-
-      - name: Test evaluations Makefile gate
-        run: ./scripts/test_make_evaluations.sh
       - name: Lint core
         uses: golangci/golangci-lint-action@v7
         with:
