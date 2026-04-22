@@ -45,19 +45,25 @@ type ResolvedProviderConfig struct {
 var datedSnapshotSuffix = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`)
 
 var openAIResponsesAllowlist = map[string]struct{}{
-	"gpt-5":        {},
-	"gpt-5-mini":   {},
-	"gpt-5.1":      {},
-	"gpt-5.2":      {},
-	"gpt-5.4":      {},
-	"gpt-5.4-mini": {},
-	"gpt-5.4-nano": {},
-	"gpt-5-nano":   {},
-	"gpt-5-pro":    {},
-	"gpt-4.1":      {},
-	"gpt-4.1-mini": {},
-	"gpt-4.1-nano": {},
-	"o3-pro":       {},
+	"gpt-5":              {},
+	"gpt-5-mini":         {},
+	"gpt-5.1":            {},
+	"gpt-5.2":            {},
+	"gpt-5.4":            {},
+	"gpt-5.4-mini":       {},
+	"gpt-5.4-nano":       {},
+	"gpt-5-nano":         {},
+	"gpt-5-pro":          {},
+	"gpt-5-codex":        {},
+	"gpt-5.1-codex":      {},
+	"gpt-5.1-codex-mini": {},
+	"gpt-5.1-codex-max":  {},
+	"gpt-5.2-codex":      {},
+	"gpt-5.3-codex":      {},
+	"gpt-4.1":            {},
+	"gpt-4.1-mini":       {},
+	"gpt-4.1-nano":       {},
+	"o3-pro":             {},
 }
 
 var unsupportedStructuredOpenAIModels = map[string]struct{}{
@@ -125,7 +131,7 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 		}
 
 		providerAPI = resolveOpenAIProviderAPI(model, providerAPI)
-		if providerAPI == ProviderAPIOpenAIResponses && isCodexFamilyModel(model) {
+		if providerAPI == ProviderAPIOpenAIResponses && isCodexFamilyModel(model) && !isAllowlistedResponsesModel(model) {
 			return ResolvedProviderConfig{}, unsupportedStructuredOutputsError(model)
 		}
 	}

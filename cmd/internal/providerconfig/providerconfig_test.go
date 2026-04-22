@@ -203,6 +203,8 @@ func TestResolveConfigAllowlistedResponsesModels(t *testing.T) {
 	tests := []string{
 		"gpt-5",
 		"gpt-5.4-mini-2026-03-05",
+		"gpt-5-codex",
+		"gpt-5.1-codex-mini",
 		"o3-pro",
 	}
 
@@ -227,7 +229,6 @@ func TestResolveConfigAllowlistedResponsesModels(t *testing.T) {
 func TestResolveConfigNegativeExamplesStayOnChatCompletions(t *testing.T) {
 	tests := []string{
 		"codex-mini-latest",
-		"gpt-5-codex",
 		"gpt-5.2-chat-latest",
 		"gpt-4o-latest",
 	}
@@ -284,11 +285,36 @@ func TestResolveConfigRejectsUnsupportedProModels(t *testing.T) {
 	}
 }
 
-func TestResolveConfigRejectsExplicitCodexResponsesSelections(t *testing.T) {
+func TestResolveConfigAcceptsExplicitApprovedCodexResponsesSelections(t *testing.T) {
 	tests := []string{
-		"codex-mini-latest",
 		"gpt-5-codex",
 		"gpt-5.1-codex-mini",
+		"gpt-5.3-codex",
+	}
+
+	for _, model := range tests {
+		t.Run(model, func(t *testing.T) {
+			cfg, err := ResolveConfig(Inputs{
+				Provider:    "openai",
+				ProviderAPI: "openai-responses",
+				Model:       model,
+			}, envMap(map[string]string{
+				"CLNKR_API_KEY": "test-key",
+			}))
+			if err != nil {
+				t.Fatalf("ResolveConfig(): %v", err)
+			}
+			if cfg.ProviderAPI != ProviderAPIOpenAIResponses {
+				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIOpenAIResponses)
+			}
+		})
+	}
+}
+
+func TestResolveConfigRejectsExplicitUnapprovedCodexResponsesSelections(t *testing.T) {
+	tests := []string{
+		"codex-mini-latest",
+		"future-codex-model",
 	}
 
 	for _, model := range tests {
@@ -302,6 +328,31 @@ func TestResolveConfigRejectsExplicitCodexResponsesSelections(t *testing.T) {
 			}))
 			if err == nil || !strings.Contains(err.Error(), "does not support that contract in this pass") {
 				t.Fatalf("ResolveConfig() err = %v, want Codex responses scope error", err)
+			}
+		})
+	}
+}
+
+func TestResolveConfigAcceptsExplicitApprovedCodexChatCompletionsSelections(t *testing.T) {
+	tests := []string{
+		"gpt-5-codex",
+		"gpt-5.1-codex-max",
+	}
+
+	for _, model := range tests {
+		t.Run(model, func(t *testing.T) {
+			cfg, err := ResolveConfig(Inputs{
+				Provider:    "openai",
+				ProviderAPI: "openai-chat-completions",
+				Model:       model,
+			}, envMap(map[string]string{
+				"CLNKR_API_KEY": "test-key",
+			}))
+			if err != nil {
+				t.Fatalf("ResolveConfig(): %v", err)
+			}
+			if cfg.ProviderAPI != ProviderAPIOpenAIChatCompletions {
+				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIOpenAIChatCompletions)
 			}
 		})
 	}
