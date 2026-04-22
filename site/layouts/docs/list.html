@@ -1,0 +1,40 @@
+{{ define "main" }}
+  {{ $docs := .Pages.ByWeight }}
+  <div class="docs-grid docs-grid-single">
+    <aside class="pane">
+      <div class="pane-bar">
+        <span>docs.nav</span>
+        <span>{{ .Section }}</span>
+      </div>
+      <div class="pane-body">
+        <p class="line-label">PAGE</p>
+        <h1>{{ .Title }}</h1>
+        {{ with .Description }}<p class="page-summary">{{ . }}</p>{{ end }}
+        <nav class="docs-nav" aria-label="Documentation">
+          <a class="is-active" href="{{ .RelPermalink }}">Overview</a>
+          {{ range $docs }}
+            <a href="{{ .RelPermalink }}">{{ .Title }}</a>
+          {{ end }}
+        </nav>
+      </div>
+    </aside>
+
+    <article class="pane pane-wide">
+      <div class="pane-bar">
+        <span>{{ .Title }}</span>
+        <span>overview</span>
+      </div>
+      <div class="pane-body doc-body">
+        <p>Reference manuals for the shipped binaries and the evaluation runner.</p>
+        <ul class="docs-overview-list">
+          {{ range $docs }}
+            <li>
+              <a href="{{ .RelPermalink }}">{{ .Title }}</a>
+              {{ with .Description }}<span>{{ . }}</span>{{ end }}
+            </li>
+          {{ end }}
+        </ul>
+      </div>
+    </article>
+  </div>
+{{ end }}
