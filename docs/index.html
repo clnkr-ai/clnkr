@@ -19,40 +19,58 @@
 
         <main id="main-content" class="screen-main">
           
-  <main class="page">
-    <header class="page-header">
-      <p class="eyebrow">Section</p>
-      <h1>Docs</h1>
-      <div class="page-intro"><p>The reference section is generated at build time from the markdown manpages in <code>doc/</code>.</p>
-<ul>
-<li><a href="/docs/clnkr/">clnkr</a></li>
-<li><a href="/docs/clnku/">clnku</a></li>
-<li><a href="/docs/clankerval/">clankerval</a></li>
-</ul>
-</div>
-    </header>
-
-    <section class="doc-list">
-      <ul>
-        
-          <li>
+  
+  <div class="docs-grid docs-grid-single">
+    <aside class="pane">
+      <div class="pane-bar">
+        <span>docs.nav</span>
+        <span>docs</span>
+      </div>
+      <div class="pane-body">
+        <p class="line-label">PAGE</p>
+        <h1>Docs</h1>
+        <p class="page-summary">Manual pages and reference docs</p>
+        <nav class="docs-nav" aria-label="Documentation">
+          <a class="is-active" href="/docs/">Overview</a>
+          
             <a href="/docs/clnkr/">clnkr</a>
-            <span>Terminal UI manual page</span>
-          </li>
-        
-          <li>
+          
             <a href="/docs/clnku/">clnku</a>
-            <span>Plain CLI manual page</span>
-          </li>
-        
-          <li>
+          
             <a href="/docs/clankerval/">clankerval</a>
-            <span>Evaluation runner manual page</span>
-          </li>
-        
-      </ul>
-    </section>
-  </main>
+          
+        </nav>
+      </div>
+    </aside>
+
+    <article class="pane pane-wide">
+      <div class="pane-bar">
+        <span>Docs</span>
+        <span>overview</span>
+      </div>
+      <div class="pane-body doc-body">
+        <p>Reference manuals for the shipped binaries and the evaluation runner.</p>
+        <ul class="docs-overview-list">
+          
+            <li>
+              <a href="/docs/clnkr/">clnkr</a>
+              <span>Terminal UI manual page</span>
+            </li>
+          
+            <li>
+              <a href="/docs/clnku/">clnku</a>
+              <span>Plain CLI manual page</span>
+            </li>
+          
+            <li>
+              <a href="/docs/clankerval/">clankerval</a>
+              <span>Evaluation runner manual page</span>
+            </li>
+          
+        </ul>
+      </div>
+    </article>
+  </div>
 
         </main>
 

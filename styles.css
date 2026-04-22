@@ -316,6 +316,34 @@ pre {
   margin-bottom: 1rem;
 }
 
+.docs-overview-list {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 0;
+}
+
+.docs-overview-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.docs-overview-list li:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.docs-overview-list a {
+  text-decoration: none;
+}
+
+.docs-overview-list span {
+  color: var(--ink-soft);
+  text-align: right;
+}
+
 .install-list li {
   justify-content: flex-start;
 }
@@ -450,8 +478,13 @@ pre {
   .status-bar,
   .pane-bar,
   .index-list li,
-  .key-value li {
+  .key-value li,
+  .docs-overview-list li {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .docs-overview-list span {
+    text-align: left;
   }
 }
