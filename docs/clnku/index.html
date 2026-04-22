@@ -89,6 +89,9 @@ structured outputs. If a backend rejects the resolved OpenAI API
 surface, <strong>clnku</strong> returns the provider error. When a proxy or gateway
 expects a different OpenAI surface, override with <strong>&ndash;provider-api</strong> or
 <strong>CLNKR_PROVIDER_API</strong>.</p>
+<p><strong>clnku</strong> rejects <code>gpt-5.2-pro</code>, <code>gpt-5.4-pro</code>, and their dated
+snapshots even if you force <strong>openai-chat-completions</strong>, because agent
+turns require structured outputs.</p>
 <p>Project-specific instructions are loaded from an <strong>AGENTS.md</strong> file in
 the current working directory, if present.</p>
 <h1 id="options">OPTIONS</h1>
@@ -110,14 +113,12 @@ set, clnku infers the provider from that URL.</p>
 <p><strong>&ndash;provider-api</strong> <em>surface</em><br>
 OpenAI-only API surface override: <strong>auto</strong>, <strong>openai-chat-completions</strong>,
 or <strong>openai-responses</strong>. With <strong>provider=openai</strong>, <strong>auto</strong> prefers
-<strong>openai-responses</strong> for a conservative allowlist of approved model
-names under that provider, including current Codex names such as
-<strong>gpt-5-codex</strong>, <strong>gpt-5.1-codex</strong>, <strong>gpt-5.1-codex-mini</strong>,
-<strong>gpt-5.1-codex-max</strong>, <strong>gpt-5.2-codex</strong>, and <strong>gpt-5.3-codex</strong>, and
-otherwise stays on <strong>openai-chat-completions</strong>. This flag is rejected
-for <strong>provider=anthropic</strong>. For those approved Codex names, forcing
-<strong>openai-chat-completions</strong> is a manual proxy-compatibility escape hatch
-and may still fail provider-side.</p>
+<strong>openai-responses</strong> for known supported names and other OpenAI-looking
+model names such as <strong>gpt-</strong><em>, <strong>o</strong> followed by a digit, and
+<strong>codex</strong></em>. Names that do not look OpenAI-ish, such as <strong>llama3</strong>,
+<strong>gemini-2.0-flash</strong>, <strong>orca-</strong><em>, <strong>olmo-</strong></em>, <strong>openhermes-</strong><em>, and
+<strong>chatgpt-</strong></em>, stay on <strong>openai-chat-completions</strong>. This flag is
+rejected for <strong>provider=anthropic</strong>.</p>
 <p><strong>&ndash;max-steps</strong> <em>n</em><br>
 Maximum agent iterations. 0 uses the default of 100.</p>
 <p><strong>&ndash;full-send</strong><br>
