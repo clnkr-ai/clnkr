@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,6 +42,64 @@ printf '%s\n' '[{"role":"assistant","content":"{\"type\":\"done\",\"summary\":\"
 	}
 	if len(result.Messages) != 1 {
 		t.Fatalf("messages len = %d, want 1", len(result.Messages))
+	}
+}
+
+func TestDefaultDelegateBinaryPrefersSiblingClnku(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "clnkr")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile clnkr: %v", err)
+	}
+	child := filepath.Join(dir, "clnku")
+	if err := os.WriteFile(child, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile clnku: %v", err)
+	}
+
+	got, err := defaultDelegateBinary(exe, func(string) (string, error) {
+		return "/usr/bin/clnku", nil
+	})
+	if err != nil {
+		t.Fatalf("defaultDelegateBinary: %v", err)
+	}
+	if got != child {
+		t.Fatalf("binary = %q, want sibling %q", got, child)
+	}
+}
+
+func TestDefaultDelegateBinaryFallsBackToPath(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "clnkr")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile clnkr: %v", err)
+	}
+
+	got, err := defaultDelegateBinary(exe, func(name string) (string, error) {
+		if name != "clnku" {
+			t.Fatalf("lookup name = %q, want clnku", name)
+		}
+		return "/usr/bin/clnku", nil
+	})
+	if err != nil {
+		t.Fatalf("defaultDelegateBinary: %v", err)
+	}
+	if got != "/usr/bin/clnku" {
+		t.Fatalf("binary = %q, want PATH clnku", got)
+	}
+}
+
+func TestDefaultDelegateBinaryReturnsLookupError(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "clnkr")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile clnkr: %v", err)
+	}
+
+	_, err := defaultDelegateBinary(exe, func(string) (string, error) {
+		return "", exec.ErrNotFound
+	})
+	if err == nil {
+		t.Fatal("expected lookup error")
 	}
 }
 
