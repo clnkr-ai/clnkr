@@ -1,0 +1,13 @@
+{
+  "id": "responses-history-live",
+  "description": "Live-provider OpenAI Responses seeded assistant history suite",
+  "mode": "live-provider",
+  "trials_per_task": 1,
+  "failure_policy": {
+    "stop_on_first_failure": true,
+    "max_failed_tasks": 1
+  },
+  "tasks": [
+    "001-seeded-assistant-history"
+  ]
+}
