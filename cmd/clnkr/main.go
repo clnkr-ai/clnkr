@@ -102,6 +102,17 @@ func missingAPIKeyMessage() string {
 	return "Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key"
 }
 
+func noColorEnabled(getenv func(string) string) bool {
+	return getenv("NO_COLOR") != ""
+}
+
+func startupStyles(hasDark, noColor bool) *styles {
+	if noColor {
+		return monochromeStyles(hasDark)
+	}
+	return defaultStyles(hasDark)
+}
+
 func newModelForConfig(cfg providerConfig, systemPrompt string) clnkr.Model {
 	if cfg.Provider == providerconfig.ProviderAnthropic {
 		return anthropic.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
@@ -494,7 +505,7 @@ func main() {
 }
 
 func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, eventLog *os.File, verbose bool, fullSend bool, compactorFactory compaction.Factory, delegateRunner delegateTaskRunner) {
-	s := defaultStyles(true) // TODO: detect actual background
+	s := startupStyles(true, noColorEnabled(os.Getenv)) // TODO: detect actual background
 
 	if taskPrompt != "" {
 		if !fullSend {

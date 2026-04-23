@@ -376,6 +376,23 @@ func TestChatProtocolFailure(t *testing.T) {
 	}
 }
 
+func TestChatProtocolFailureNoColorKeepsWarningWithoutANSIColor(t *testing.T) {
+	s := startupStyles(true, true)
+	c := newChatModel(80, 24, s, false)
+
+	c.appendEvent(clnkr.EventProtocolFailure{Reason: "parse_error", Raw: "not json"})
+	content := c.content.String()
+	if ansiColorPattern.MatchString(content) {
+		t.Fatalf("no-color protocol failure should not emit ANSI color codes, got: %q", content)
+	}
+	plain := stripANSI(content)
+	for _, want := range []string{iconWarning, "Protocol error:", "parse_error"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("protocol failure should contain %q, got: %q", want, plain)
+		}
+	}
+}
+
 func TestChatDebugVerbose(t *testing.T) {
 	s := defaultStyles(true)
 	c := newChatModel(80, 24, s, true) // verbose=true
