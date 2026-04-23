@@ -55,21 +55,28 @@ func (s *statusModel) setFocus(f focusTarget) {
 	s.focus = f
 }
 
-func (s *statusModel) view(width int) string {
-	sep := s.styles.Separator.Render(" │ ")
-
-	segments := []string{
-		s.styles.ModelName.Render(s.modelName),
-		s.styles.Tokens.Render(fmt.Sprintf("%s in / %s out", formatTokens(s.inputTokens), formatTokens(s.outputTokens))),
-		s.styles.StepCount.Render(fmt.Sprintf("step %d/%d", s.stepCount, s.maxSteps)),
-		s.styles.Elapsed.Render(s.elapsedString()),
-		s.focusString(),
+func (s *statusModel) view(width int, mode, hints string) string {
+	if mode == "" {
+		mode = focusMode(s.focus)
 	}
-
-	content := strings.Join(segments, sep)
-	// Pad or truncate to fill the full width
-	bar := s.styles.Bar.Width(width).Render(content)
-	return bar
+	segments := []string{mode}
+	if width >= 40 && hints != "" {
+		segments = append(segments, truncateStatusText(hints, 28))
+	}
+	if width >= 56 {
+		segments = append(segments,
+			truncateStatusText(s.modelName, 24),
+			fmt.Sprintf("%s in / %s out", formatTokens(s.inputTokens), formatTokens(s.outputTokens)),
+		)
+	}
+	if width >= 72 {
+		segments = append(segments,
+			fmt.Sprintf("step %d/%d", s.stepCount, s.maxSteps),
+			s.elapsedString(),
+		)
+	}
+	content := truncateStatusText(strings.Join(segments, " | "), width)
+	return s.styles.Bar.Width(width).Render(content)
 }
 
 func (s *statusModel) elapsedString() string {
@@ -82,15 +89,28 @@ func (s *statusModel) elapsedString() string {
 	return formatDuration(d)
 }
 
-func (s *statusModel) focusString() string {
-	var label string
-	switch s.focus {
+func focusMode(f focusTarget) string {
+	switch f {
 	case focusInput:
-		label = "INPUT"
+		return "INPUT"
 	case focusViewport:
-		label = "SCROLL"
+		return "SCROLL"
 	}
-	return s.styles.FocusIndicator.Render(label)
+	return "INPUT"
+}
+
+func truncateStatusText(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	if max <= 3 {
+		return string(runes[:max])
+	}
+	return string(runes[:max-3]) + "..."
 }
 
 // formatTokens returns a human-readable token count (e.g., "1.2k", "15.3k", "800").

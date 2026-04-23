@@ -175,6 +175,9 @@ func TestModelQueryTextOmitsStructuredOutputConfigAndNormalizesAssistantHistory(
 	if !ok {
 		t.Fatalf("input[1].content[0] = %#v, want map", content[0])
 	}
+	if got, want := item["type"], "output_text"; got != want {
+		t.Fatalf("assistant content type = %#v, want %q", got, want)
+	}
 	if got, want := item["text"], `{"turn":{"type":"done","bash":null,"question":null,"summary":"canonical transcript","reasoning":null}}`; got != want {
 		t.Fatalf("assistant text = %#v, want %q", got, want)
 	}

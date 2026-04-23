@@ -68,7 +68,11 @@ func (r delegateProcessRunner) Run(ctx context.Context, req delegateRequest) (de
 
 	binary := r.Binary
 	if binary == "" {
-		binary = "clnku"
+		resolved, err := defaultDelegateBinary(os.Args[0], exec.LookPath)
+		if err != nil {
+			return delegateResult{}, fmt.Errorf("delegate run: resolve clnku: %w", err)
+		}
+		binary = resolved
 	}
 
 	args := []string{"--load-messages", seedPath, "-p", req.Task, "--trajectory", outPath, "--full-send"}
@@ -92,17 +96,21 @@ func (r delegateProcessRunner) Run(ctx context.Context, req delegateRequest) (de
 	cmd.Dir = req.WorkingDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == exitClarificationNeeded {
+			messages, readErr := readDelegateMessages(outPath)
+			if readErr != nil {
+				return delegateResult{}, readErr
+			}
+			if question := extractDelegateClarification(messages); question != "" {
+				return delegateResult{Summary: "Delegate asked: " + question, Messages: messages, TrajectoryPath: outPath}, nil
+			}
+		}
 		return delegateResult{}, fmt.Errorf("delegate run: %s %s in %s: %w\n%s", binary, strings.Join(args, " "), req.WorkingDir, err, strings.TrimSpace(string(output)))
 	}
 
-	data, err := os.ReadFile(outPath)
+	messages, err := readDelegateMessages(outPath)
 	if err != nil {
-		return delegateResult{}, fmt.Errorf("delegate run: read trajectory %s: %w", filepath.Base(outPath), err)
-	}
-
-	var messages []clnkr.Message
-	if err := json.Unmarshal(data, &messages); err != nil {
-		return delegateResult{}, fmt.Errorf("delegate run: parse trajectory %s: %w", filepath.Base(outPath), err)
+		return delegateResult{}, err
 	}
 
 	summary := extractDelegateSummary(messages)
@@ -111,6 +119,48 @@ func (r delegateProcessRunner) Run(ctx context.Context, req delegateRequest) (de
 	}
 
 	return delegateResult{Summary: summary, Messages: messages, TrajectoryPath: outPath}, nil
+}
+
+func readDelegateMessages(path string) ([]clnkr.Message, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("delegate run: read trajectory %s: %w", filepath.Base(path), err)
+	}
+
+	var messages []clnkr.Message
+	if err := json.Unmarshal(data, &messages); err != nil {
+		return nil, fmt.Errorf("delegate run: parse trajectory %s: %w", filepath.Base(path), err)
+	}
+	return messages, nil
+}
+
+func defaultDelegateBinary(executable string, lookPath func(string) (string, error)) (string, error) {
+	if executable != "" {
+		if exePath, err := filepath.Abs(executable); err == nil {
+			sibling := filepath.Join(filepath.Dir(exePath), "clnku")
+			if info, err := os.Stat(sibling); err == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0 {
+				return sibling, nil
+			}
+		}
+	}
+	return lookPath("clnku")
+}
+
+func extractDelegateClarification(messages []clnkr.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != "assistant" {
+			continue
+		}
+		turn, err := clnkr.ParseTurn(msg.Content)
+		if err != nil {
+			continue
+		}
+		if clarify, ok := turn.(*clnkr.ClarifyTurn); ok {
+			return strings.TrimSpace(clarify.Question)
+		}
+	}
+	return ""
 }
 
 func extractDelegateSummary(messages []clnkr.Message) string {

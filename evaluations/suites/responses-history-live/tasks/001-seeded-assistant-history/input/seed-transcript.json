@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "Previous task: say hello."
+  },
+  {
+    "role": "assistant",
+    "content": "{\"type\":\"clarify\",\"question\":\"hello\",\"reasoning\":null}"
+  }
+]
