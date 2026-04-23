@@ -48,7 +48,5 @@ func (r *reasoningModel) view() string {
 }
 
 func (r *reasoningModel) rendered(width int) string {
-	// Reset the shared glamour renderer so reasoning re-wraps to the modal width.
-	renderer = nil
-	return renderMarkdown(r.content, width)
+	return renderMarkdown(r.content, width, r.styles.NoColor)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,6 +42,97 @@ printf '%s\n' '[{"role":"assistant","content":"{\"type\":\"done\",\"summary\":\"
 	}
 	if len(result.Messages) != 1 {
 		t.Fatalf("messages len = %d, want 1", len(result.Messages))
+	}
+}
+
+func TestRunnerRunReturnsClarificationSummary(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "fake-clnku")
+	script := `#!/bin/sh
+out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --trajectory) out="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s\n' '[{"role":"assistant","content":"{\"type\":\"clarify\",\"question\":\"Which module?\"}"}]' > "$out"
+printf '%s\n' '{"type":"clarify","question":"Which module?"}'
+printf '%s\n' 'Clarification needed.' >&2
+exit 2
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	result, err := delegateProcessRunner{Binary: bin}.Run(context.Background(), delegateRequest{
+		Task:       "describe one module",
+		WorkingDir: dir,
+		Parent:     []clnkr.Message{{Role: "user", Content: "parent task"}},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Summary != "Delegate asked: Which module?" {
+		t.Fatalf("Summary = %q, want clarification summary", result.Summary)
+	}
+}
+
+func TestDefaultDelegateBinaryPrefersSiblingClnku(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "clnkr")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile clnkr: %v", err)
+	}
+	child := filepath.Join(dir, "clnku")
+	if err := os.WriteFile(child, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile clnku: %v", err)
+	}
+
+	got, err := defaultDelegateBinary(exe, func(string) (string, error) {
+		return "/usr/bin/clnku", nil
+	})
+	if err != nil {
+		t.Fatalf("defaultDelegateBinary: %v", err)
+	}
+	if got != child {
+		t.Fatalf("binary = %q, want sibling %q", got, child)
+	}
+}
+
+func TestDefaultDelegateBinaryFallsBackToPath(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "clnkr")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile clnkr: %v", err)
+	}
+
+	got, err := defaultDelegateBinary(exe, func(name string) (string, error) {
+		if name != "clnku" {
+			t.Fatalf("lookup name = %q, want clnku", name)
+		}
+		return "/usr/bin/clnku", nil
+	})
+	if err != nil {
+		t.Fatalf("defaultDelegateBinary: %v", err)
+	}
+	if got != "/usr/bin/clnku" {
+		t.Fatalf("binary = %q, want PATH clnku", got)
+	}
+}
+
+func TestDefaultDelegateBinaryReturnsLookupError(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "clnkr")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile clnkr: %v", err)
+	}
+
+	_, err := defaultDelegateBinary(exe, func(string) (string, error) {
+		return "", exec.ErrNotFound
+	})
+	if err == nil {
+		t.Fatal("expected lookup error")
 	}
 }
 

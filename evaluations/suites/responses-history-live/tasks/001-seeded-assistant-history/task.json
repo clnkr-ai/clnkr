@@ -1,0 +1,36 @@
+{
+  "id": "001-seeded-assistant-history",
+  "instruction_file": "input/instruction.txt",
+  "seed_transcript_file": "input/seed-transcript.json",
+  "working_directory": ".",
+  "full_send": true,
+  "step_limit": 5,
+  "mode": "live-provider",
+  "graders": {
+    "outcome_diff": {
+      "enabled": true,
+      "required": true
+    },
+    "outcome_command_output": {
+      "enabled": true,
+      "required": true,
+      "command": [
+        "bash",
+        "-lc",
+        "actual=$(cat responses-history-note.txt); [ \"$actual\" = \"responses-history-ok\" ] && printf '%s\\n' \"$actual\""
+      ],
+      "expected_exit_code": 0,
+      "stdout_contains": [
+        "responses-history-ok"
+      ]
+    },
+    "transcript_command_trace": {
+      "enabled": true,
+      "required": false,
+      "expected_exit_codes": [
+        0
+      ],
+      "max_command_count": 3
+    }
+  }
+}

@@ -286,15 +286,13 @@ func (c *chatModel) updateViewport() {
 
 // writeRendered renders markdown content through glamour and appends to committed content.
 func (c *chatModel) writeRendered(content string) {
-	rendered := renderMarkdown(content, c.viewport.Width())
+	rendered := renderMarkdown(content, c.viewport.Width(), c.styles.NoColor)
 	c.content.WriteString(rendered)
 }
 
 func (c *chatModel) resize(width, height int) {
 	c.viewport.SetWidth(width)
 	c.viewport.SetHeight(height)
-	// Reset renderer on width change so glamour re-wraps
-	renderer = nil
 }
 
 // summarizeCommand returns a short display form of a command.
