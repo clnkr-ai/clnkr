@@ -766,6 +766,218 @@ func TestModelAgentDoneStopsStatusTimer(t *testing.T) {
 	}
 }
 
+func TestModelCtrlFInScrollModeOpensSearch(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.chat.appendUserMessage("alpha beta alpha")
+	m.chat.updateViewport()
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+
+	if !m.search.visible {
+		t.Fatal("search should be visible after Ctrl+F in scroll mode")
+	}
+	if m.diff.visible {
+		t.Fatal("diff should remain hidden when Ctrl+F opens search")
+	}
+	if m.statusMode() != "SEARCH" {
+		t.Fatalf("status mode = %q, want SEARCH", m.statusMode())
+	}
+}
+
+func TestModelCtrlFDoesNotOpenSearchFromInput(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	m.input.textarea.SetValue("draft")
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	if m.search.visible {
+		t.Fatal("search should not open from input mode")
+	}
+}
+
+func TestModelCtrlFDoesNotOpenSearchDuringPromptStates(t *testing.T) {
+	cases := []struct {
+		name                  string
+		running               bool
+		awaitingApproval      bool
+		awaitingClarification bool
+	}{
+		{name: "running", running: true},
+		{name: "approval", running: true, awaitingApproval: true},
+		{name: "clarification", running: true, awaitingClarification: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := setupModel()
+			m.running = tc.running
+			m.awaitingApproval = tc.awaitingApproval
+			m.awaitingClarification = tc.awaitingClarification
+			m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+			m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+			if m.search.visible {
+				t.Fatal("search should not open during prompt or running states")
+			}
+		})
+	}
+}
+
+func TestModelSearchShowsQueryAndNavigatesMatches(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.chat.appendUserMessage("alpha beta alpha")
+	m.chat.updateViewport()
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	for _, r := range "alpha" {
+		m = updateModel(t, m, tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+
+	if got := m.search.query(); got != "alpha" {
+		t.Fatalf("query = %q, want alpha", got)
+	}
+	if m.search.total != 2 || m.search.current != 1 {
+		t.Fatalf("counts = %d/%d, want 1/2", m.search.current, m.search.total)
+	}
+	if !strings.Contains(m.View().Content, "alpha") {
+		t.Fatalf("view should show active query, got %q", m.View().Content)
+	}
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.search.current != 2 {
+		t.Fatalf("current after Enter = %d, want 2", m.search.current)
+	}
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	if m.search.current != 1 {
+		t.Fatalf("current after Shift+Enter = %d, want 1", m.search.current)
+	}
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	if m.search.current != 2 {
+		t.Fatalf("current after repeated Ctrl+F = %d, want 2", m.search.current)
+	}
+}
+
+func TestModelSearchEscapeClosesCleanly(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.chat.appendUserMessage("alpha beta alpha")
+	m.chat.updateViewport()
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	if m.search.visible {
+		t.Fatal("search should be hidden after Esc")
+	}
+	if got := m.search.query(); got != "" {
+		t.Fatalf("query after Esc = %q, want empty", got)
+	}
+	if m.statusMode() != "SCROLL" {
+		t.Fatalf("status mode after closing search = %q, want SCROLL", m.statusMode())
+	}
+}
+
+func TestModelSearchUsesActiveBottomHeight(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.input.textarea.SetValue("one\ntwo\nthree")
+	m.recalcLayout()
+	if m.inputHeight() <= 2 {
+		t.Fatalf("inputHeight = %d, want multiline input height > 2", m.inputHeight())
+	}
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+
+	if got := m.bottomHeight(); got != 2 {
+		t.Fatalf("bottomHeight while search active = %d, want 2", got)
+	}
+	if got, want := m.chat.viewport.Height(), m.height-statusHeight-m.bottomHeight(); got != want {
+		t.Fatalf("chat height = %d, want %d", got, want)
+	}
+}
+
+func TestModelSearchPreservesCurrentMatchOnResize(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.chat.appendUserMessage("alpha beta alpha")
+	m.chat.updateViewport()
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	for _, r := range "alpha" {
+		m = updateModel(t, m, tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updateModel(t, m, tea.WindowSizeMsg{Width: 72, Height: 24})
+
+	if got := m.search.current; got != 2 {
+		t.Fatalf("current after resize = %d, want 2", got)
+	}
+}
+
+func TestModelSearchPreservesCurrentMatchOnEventRefresh(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.chat.appendUserMessage("alpha beta alpha")
+	m.chat.updateViewport()
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	for _, r := range "alpha" {
+		m = updateModel(t, m, tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updateModel(t, m, eventMsg{event: clnkr.EventDebug{Message: "ignored"}})
+
+	if got := m.search.current; got != 2 {
+		t.Fatalf("current after event refresh = %d, want 2", got)
+	}
+}
+
+func TestModelSearchTransitionsToOtherModes(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	m.reasoningInfo.latest = "reasoning trace"
+	m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.chat.appendUserMessage("alpha beta alpha")
+	m.chat.updateViewport()
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	m = updateModel(t, m, questionKey())
+	if !m.help.visible || m.search.visible {
+		t.Fatalf("help transition should close search, help=%v search=%v", m.help.visible, m.search.visible)
+	}
+
+	m.help.hide()
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'd'})
+	if !m.diff.visible || m.search.visible {
+		t.Fatalf("diff transition should close search, diff=%v search=%v", m.diff.visible, m.search.visible)
+	}
+
+	m.diff.visible = false
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+	if !m.reasoning.visible || m.search.visible {
+		t.Fatalf("reasoning transition should close search, reasoning=%v search=%v", m.reasoning.visible, m.search.visible)
+	}
+}
+
 func TestModelDiffOverlayToggle(t *testing.T) {
 	m := setupModel()
 	m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -774,10 +986,10 @@ func TestModelDiffOverlayToggle(t *testing.T) {
 	// Switch to viewport mode first
 	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
-	// Ctrl+F should toggle diff overlay
-	m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	// d should toggle diff overlay
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'd'})
 	if !m.diff.visible {
-		t.Error("diff overlay should be visible after Ctrl+F")
+		t.Error("diff overlay should be visible after d")
 	}
 
 	// Esc should dismiss
@@ -805,10 +1017,10 @@ func TestModelDiffOverlayUsesAgentCwd(t *testing.T) {
 	m.files.files = []string{"tracked.txt"}
 
 	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'd'})
 
 	if !m.diff.visible {
-		t.Fatal("diff overlay should be visible after Ctrl+F")
+		t.Fatal("diff overlay should be visible after d")
 	}
 	if strings.Contains(m.diff.content, "git diff error") {
 		t.Fatalf("diff should use agent cwd, got %q", m.diff.content)
@@ -860,9 +1072,9 @@ func TestModelDiffOverlayRebasesFeedbackPathsAcrossCwdChanges(t *testing.T) {
 	m.shared.agent = clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, dir2)
 
 	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	m = updateModel(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'd'})
 	if !m.diff.visible {
-		t.Fatal("diff overlay should be visible after Ctrl+F")
+		t.Fatal("diff overlay should be visible after d")
 	}
 	if strings.Contains(m.diff.content, "git diff error") {
 		t.Fatalf("diff should not fail after cwd change, got %q", m.diff.content)

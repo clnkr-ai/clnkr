@@ -95,6 +95,7 @@ type reasoningState struct {
 type model struct {
 	chat                  chatModel
 	input                 inputModel
+	search                searchModel
 	status                statusModel
 	diff                  diffModel
 	help                  helpModel
@@ -150,6 +151,7 @@ func newModel(opts modelOpts) model {
 	return model{
 		chat:            chat,
 		input:           newInputModel(0, &opts.styles.Input),
+		search:          newSearchModel(0, &opts.styles.Input),
 		status:          newStatusModel(opts.modelName, opts.maxSteps, &opts.styles.Status),
 		diff:            newDiffModel(opts.styles),
 		help:            newHelpModel(),
@@ -173,6 +175,13 @@ func (m model) inputHeight() int {
 		h = 5
 	}
 	return h
+}
+
+func (m model) bottomHeight() int {
+	if m.search.visible {
+		return m.search.lineCount() + 1
+	}
+	return m.inputHeight()
 }
 
 func (m model) Init() tea.Cmd {
@@ -215,7 +224,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.recalcLayout()
-		chatH := m.height - statusHeight - m.inputHeight()
+		chatH := m.height - statusHeight - m.bottomHeight()
 		if chatH < 1 {
 			chatH = 1
 		}
@@ -246,6 +255,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case eventMsg:
 		m.routeEvent(msg.event)
 		m.chat.updateViewport()
+		if m.search.visible {
+			m.refreshSearch()
+		}
 		if m.eventCh != nil {
 			return m, eventBridge(m.eventCh)
 		}
@@ -261,8 +273,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 
 	default:
-		// Forward unrecognized messages (e.g. cursor blink) to the textarea
+		// Forward unrecognized messages (e.g. cursor blink) to the active editor
 		// so its internal commands keep working.
+		if m.search.visible {
+			newTA, cmd := m.search.textarea.Update(msg)
+			m.search.textarea = newTA
+			return m, cmd
+		}
 		newTA, cmd := m.input.textarea.Update(msg)
 		m.input.textarea = newTA
 		return m, cmd
@@ -275,7 +292,7 @@ const statusHeight = 1
 // methods on chatModel. Called from value-receiver methods on model —
 // Go takes &m on the local copy, mutations are preserved through return.
 func (m *model) recalcLayout() {
-	ih := m.inputHeight()
+	ih := m.bottomHeight()
 	chatHeight := m.height - statusHeight - ih
 	if chatHeight < 1 {
 		chatHeight = 1
@@ -284,6 +301,10 @@ func (m *model) recalcLayout() {
 	m.help.resize(m.width, chatHeight)
 	m.chat.updateViewport()
 	m.input.setWidth(m.width)
+	m.search.setWidth(m.width)
+	if m.search.visible {
+		m.refreshSearch()
+	}
 }
 
 func (m *model) finishRun(err error) {
@@ -546,7 +567,7 @@ func (m *model) openReasoningModal() {
 	if m.diff.visible {
 		m.diff.visible = false
 	}
-	chatH := m.height - statusHeight - m.inputHeight()
+	chatH := m.height - statusHeight - m.bottomHeight()
 	if chatH < 1 {
 		chatH = 1
 	}
@@ -577,6 +598,11 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.help.visible {
 		return m.handleHelpKey(msg)
 	}
+
+	if m.search.visible {
+		return m.handleSearchKey(msg)
+	}
+
 	if m.shouldOpenHelp(msg) {
 		m.openHelp()
 		return m, nil
@@ -638,6 +664,124 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m.handleInputKey(msg)
+}
+
+func (m *model) openSearch() tea.Cmd {
+	m.pendingG = false
+	m.diff.visible = false
+	m.reasoning.hide()
+	m.search.show(m.width)
+	m.recalcLayout()
+	m.input.textarea.Blur()
+	m.refreshSearch()
+	return m.search.textarea.Focus()
+}
+
+func (m *model) openDiffOverlay() {
+	chatH := m.height - statusHeight - m.bottomHeight()
+	if chatH < 1 {
+		chatH = 1
+	}
+	cwd := m.shared.cwd
+	if m.shared.agent != nil {
+		cwd = m.shared.agent.Cwd()
+	}
+	m.diff.toggle(m.files.pathsForCwd(cwd), cwd, m.width, chatH)
+}
+
+func (m *model) closeSearch() tea.Cmd {
+	m.search.hide()
+	m.chat.viewport.ClearHighlights()
+	m.search.textarea.Blur()
+	m.recalcLayout()
+	return nil
+}
+
+func (m *model) refreshSearch() {
+	if !m.search.visible {
+		return
+	}
+	query := m.search.query()
+	preserveIndex := query == m.search.lastQuery && m.search.current > 0
+	targetIndex := m.search.current
+	matches := strippedSearchMatches(m.chat.committedContent(), query)
+	m.search.lastQuery = query
+	m.chat.viewport.ClearHighlights()
+	if len(matches) == 0 {
+		m.search.setCounts(0, 0)
+		return
+	}
+	m.chat.viewport.SetHighlights(matches)
+	if !preserveIndex {
+		m.search.setCounts(1, len(matches))
+		return
+	}
+	if targetIndex > len(matches) {
+		targetIndex = len(matches)
+	}
+	for i := 1; i < targetIndex; i++ {
+		m.chat.viewport.HighlightNext()
+	}
+	m.search.setCounts(targetIndex, len(matches))
+}
+
+func (m model) handleSearchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Code == 'c' && msg.Mod == tea.ModCtrl:
+		return m.handleCtrlC()
+	case msg.Code == tea.KeyEscape:
+		return m, m.closeSearch()
+	case msg.String() == "?":
+		m.closeSearch()
+		m.openHelp()
+		return m, nil
+	case msg.Code == 'd':
+		m.closeSearch()
+		m.openDiffOverlay()
+		return m, nil
+	case !m.awaitingApproval && msg.Code == 'y' && msg.Mod == tea.ModCtrl:
+		m.closeSearch()
+		m.openReasoningModal()
+		return m, nil
+	case msg.Mod == tea.ModCtrl && msg.Code == 'f':
+		if m.search.total > 0 {
+			m.chat.viewport.HighlightNext()
+			next := m.search.current + 1
+			if next > m.search.total {
+				next = 1
+			}
+			m.search.setCounts(next, m.search.total)
+		}
+		return m, nil
+	case msg.Code == tea.KeyEnter && msg.Mod == 0:
+		if m.search.total > 0 {
+			m.chat.viewport.HighlightNext()
+			next := m.search.current + 1
+			if next > m.search.total {
+				next = 1
+			}
+			m.search.setCounts(next, m.search.total)
+		}
+		return m, nil
+	case msg.Code == tea.KeyEnter && msg.Mod == tea.ModShift:
+		if m.search.total > 0 {
+			m.chat.viewport.HighlightPrevious()
+			prev := m.search.current - 1
+			if prev < 1 {
+				prev = m.search.total
+			}
+			m.search.setCounts(prev, m.search.total)
+		}
+		return m, nil
+	}
+
+	before := m.search.query()
+	newTA, cmd := m.search.textarea.Update(msg)
+	m.search.textarea = newTA
+	if before != m.search.query() {
+		m.refreshSearch()
+	}
+	return m, cmd
 }
 
 func (m model) handleCtrlC() (tea.Model, tea.Cmd) {
@@ -950,7 +1094,8 @@ func (m *model) openHelp() {
 	m.pendingG = false
 	m.diff.visible = false
 	m.reasoning.hide()
-	chatH := m.height - statusHeight - m.inputHeight()
+	m.closeSearch()
+	chatH := m.height - statusHeight - m.bottomHeight()
 	if chatH < 1 {
 		chatH = 1
 	}
@@ -1013,16 +1158,12 @@ func (m model) handleViewportKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.chat.viewport.GotoBottom()
 		m.chat.hasNew = false
 	case msg.Code == 'f' && msg.Mod == tea.ModCtrl:
-		// Ctrl+F toggles diff overlay
-		chatH := m.height - statusHeight - m.inputHeight()
-		if chatH < 1 {
-			chatH = 1
+		if m.running || m.awaitingApproval || m.awaitingClarification {
+			return m, nil
 		}
-		cwd := m.shared.cwd
-		if m.shared.agent != nil {
-			cwd = m.shared.agent.Cwd()
-		}
-		m.diff.toggle(m.files.pathsForCwd(cwd), cwd, m.width, chatH)
+		return m, m.openSearch()
+	case msg.Code == 'd':
+		m.openDiffOverlay()
 		return m, nil
 	}
 
@@ -1040,7 +1181,7 @@ func (m model) View() tea.View {
 
 	var topPane string
 	if m.help.visible {
-		chatH := m.height - statusHeight - m.inputHeight()
+		chatH := m.height - statusHeight - m.bottomHeight()
 		if chatH < 1 {
 			chatH = 1
 		}
@@ -1063,6 +1204,9 @@ func (m model) View() tea.View {
 
 	statusView := m.status.view(m.width, m.statusMode(), m.statusHints())
 	inputView := m.input.view()
+	if m.search.visible {
+		inputView = m.search.view()
+	}
 
 	view := tea.NewView(topPane + "\n" + statusView + "\n" + inputView)
 	view.ReportFocus = true
@@ -1077,6 +1221,8 @@ func (m model) statusMode() string {
 		return "DIFF"
 	case m.reasoning.visible:
 		return "REASONING"
+	case m.search.visible:
+		return "SEARCH"
 	case m.awaitingApproval:
 		return "APPROVAL"
 	case m.awaitingClarification:
@@ -1098,6 +1244,8 @@ func (m model) statusHints() string {
 		return "j/k scroll | Esc close"
 	case "REASONING":
 		return "j/k scroll | Esc close"
+	case "SEARCH":
+		return "Enter next | Shift+Enter prev | Esc close"
 	case "APPROVAL":
 		return "y Enter approve | Ctrl+Y approve"
 	case "CLARIFY":
@@ -1105,7 +1253,7 @@ func (m model) statusHints() string {
 	case "RUNNING":
 		return "Ctrl+C cancel"
 	case "SCROLL":
-		return "i input | ? help | Ctrl+F diff"
+		return "i input | ? help | Ctrl+F search | d diff"
 	default:
 		return "Enter send | ? help"
 	}

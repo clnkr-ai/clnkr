@@ -284,6 +284,10 @@ func (c *chatModel) updateViewport() {
 	}
 }
 
+func (c *chatModel) committedContent() string {
+	return c.content.String()
+}
+
 // writeRendered renders markdown content through glamour and appends to committed content.
 func (c *chatModel) writeRendered(content string) {
 	rendered := renderMarkdown(content, c.viewport.Width(), c.styles.NoColor)
