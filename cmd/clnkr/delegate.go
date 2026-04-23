@@ -68,7 +68,11 @@ func (r delegateProcessRunner) Run(ctx context.Context, req delegateRequest) (de
 
 	binary := r.Binary
 	if binary == "" {
-		binary = "clnku"
+		resolved, err := defaultDelegateBinary(os.Args[0], exec.LookPath)
+		if err != nil {
+			return delegateResult{}, fmt.Errorf("delegate run: resolve clnku: %w", err)
+		}
+		binary = resolved
 	}
 
 	args := []string{"--load-messages", seedPath, "-p", req.Task, "--trajectory", outPath, "--full-send"}
@@ -111,6 +115,18 @@ func (r delegateProcessRunner) Run(ctx context.Context, req delegateRequest) (de
 	}
 
 	return delegateResult{Summary: summary, Messages: messages, TrajectoryPath: outPath}, nil
+}
+
+func defaultDelegateBinary(executable string, lookPath func(string) (string, error)) (string, error) {
+	if executable != "" {
+		if exePath, err := filepath.Abs(executable); err == nil {
+			sibling := filepath.Join(filepath.Dir(exePath), "clnku")
+			if info, err := os.Stat(sibling); err == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0 {
+				return sibling, nil
+			}
+		}
+	}
+	return lookPath("clnku")
 }
 
 func extractDelegateSummary(messages []clnkr.Message) string {
