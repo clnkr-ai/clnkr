@@ -55,11 +55,11 @@ type responseFormat struct {
 }
 
 type inputMessage struct {
-	Role    string          `json:"role"`
-	Content []inputTextItem `json:"content"`
+	Role    string      `json:"role"`
+	Content []inputItem `json:"content"`
 }
 
-type inputTextItem struct {
+type inputItem struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
 }
@@ -166,13 +166,20 @@ func mapMessages(messages []clnkr.Message) []inputMessage {
 	for _, msg := range normalized {
 		input = append(input, inputMessage{
 			Role: msg.Role,
-			Content: []inputTextItem{{
-				Type: "input_text",
+			Content: []inputItem{{
+				Type: responsesInputContentType(msg.Role),
 				Text: msg.Content,
 			}},
 		})
 	}
 	return input
+}
+
+func responsesInputContentType(role string) string {
+	if role == "assistant" {
+		return "output_text"
+	}
+	return "input_text"
 }
 
 func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, int, string, error) {
