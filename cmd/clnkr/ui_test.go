@@ -82,6 +82,315 @@ func TestModelFocusToggle(t *testing.T) {
 	}
 }
 
+func questionKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: '/', Mod: tea.ModShift, Text: "?"}
+}
+
+func TestModelQuestionMarkOpensHelpOverlay(t *testing.T) {
+	m := setupModel()
+
+	m = updateModel(t, m, questionKey())
+	if !m.help.visible {
+		t.Fatal("expected help overlay to be visible")
+	}
+	view := m.View()
+	for _, want := range []string{"clnkr help", "/compact [instructions]", "/delegate <task>", "Ctrl+Y"} {
+		if !strings.Contains(view.Content, want) {
+			t.Fatalf("help view missing %q: %q", want, view.Content)
+		}
+	}
+}
+
+func TestModelQuestionMarkDoesNotStealComposedInput(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	m.input.textarea.SetValue("what changed")
+
+	m = updateModel(t, m, questionKey())
+	if m.help.visible {
+		t.Fatal("? should not open help while composing non-empty input")
+	}
+	if got := m.input.textarea.Value(); got != "what changed?" {
+		t.Fatalf("input = %q, want question mark inserted", got)
+	}
+}
+
+func TestModelQuestionMarkDoesNotStealApprovalOrClarificationInput(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		approval      bool
+		clarification bool
+	}{
+		{name: "approval", approval: true},
+		{name: "clarification", clarification: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := setupModel()
+			m.running = true
+			m.awaitingApproval = tc.approval
+			m.awaitingClarification = tc.clarification
+			m.input.textarea.SetValue("why")
+
+			m = updateModel(t, m, questionKey())
+			if m.help.visible {
+				t.Fatal("? should not open help during active prompt text entry")
+			}
+			if got := m.input.textarea.Value(); got != "why?" {
+				t.Fatalf("input = %q, want question mark inserted", got)
+			}
+
+			m.input.textarea.Reset()
+			m = updateModel(t, m, questionKey())
+			if m.help.visible {
+				t.Fatal("? should not open help during empty active prompt text entry")
+			}
+			if got := m.input.textarea.Value(); got != "?" {
+				t.Fatalf("empty prompt input = %q, want question mark inserted", got)
+			}
+		})
+	}
+}
+
+func TestModelQuestionMarkOpensHelpInScrollModeDuringPrompts(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		approval      bool
+		clarification bool
+	}{
+		{name: "approval", approval: true},
+		{name: "clarification", clarification: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := setupModel()
+			m.running = true
+			m.awaitingApproval = tc.approval
+			m.awaitingClarification = tc.clarification
+			m.focus = focusViewport
+			m.input.textarea.Blur()
+
+			m = updateModel(t, m, questionKey())
+			if !m.help.visible {
+				t.Fatal("? should open help from scroll mode during prompts")
+			}
+		})
+	}
+}
+
+func TestModelHelpHidesOtherOverlays(t *testing.T) {
+	m := setupModel()
+	m.diff.visible = true
+	m.reasoning.show("trace", 80, 20)
+
+	m = updateModel(t, m, questionKey())
+	if !m.help.visible {
+		t.Fatal("expected help overlay to be visible")
+	}
+	if m.diff.visible || m.reasoning.visible {
+		t.Fatalf("help should hide other overlays, diff=%v reasoning=%v", m.diff.visible, m.reasoning.visible)
+	}
+}
+
+func TestModelEscapeDismissesHelpOverlay(t *testing.T) {
+	m := setupModel()
+	m.focus = focusInput
+	m.help.show(80, 20)
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.help.visible {
+		t.Fatal("expected help overlay to be hidden")
+	}
+	if m.focus != focusInput {
+		t.Fatalf("help dismissal should not change focus, got %v", m.focus)
+	}
+}
+
+func TestModelQuestionMarkDismissesHelpOverlay(t *testing.T) {
+	m := setupModel()
+	m.help.show(80, 20)
+
+	m = updateModel(t, m, questionKey())
+	if m.help.visible {
+		t.Fatal("expected ? to hide visible help overlay")
+	}
+}
+
+func TestModelHelpOverlayBlocksNormalKeys(t *testing.T) {
+	m := setupModel()
+	m.help.show(80, 20)
+	m.focus = focusViewport
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'i'})
+	if m.focus != focusViewport {
+		t.Fatal("help overlay should block normal focus-changing keys")
+	}
+	if !m.help.visible {
+		t.Fatal("help overlay should remain visible after unrelated key")
+	}
+}
+
+func TestModelHelpOverlayLetsCtrlCCancel(t *testing.T) {
+	cancelled := false
+	m := setupModel()
+	m.running = true
+	m.cancel = func() { cancelled = true }
+	m.help.show(80, 20)
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if !cancelled {
+		t.Fatal("Ctrl+C should cancel while help is visible")
+	}
+}
+
+func TestModelOpeningHelpClearsPendingGGChord(t *testing.T) {
+	m := setupModel()
+	m.focus = focusViewport
+	m.pendingG = true
+
+	m = updateModel(t, m, questionKey())
+	if !m.help.visible {
+		t.Fatal("expected help overlay to be visible")
+	}
+	if m.pendingG {
+		t.Fatal("opening help should clear pending gg chord")
+	}
+}
+
+func TestModelHelpOverlayHandlesDocumentedScrollKeys(t *testing.T) {
+	m := setupModel()
+	m.help.show(40, 6)
+	m.focus = focusViewport
+
+	for _, key := range []tea.KeyPressMsg{
+		{Code: 'j'},
+		{Code: 'k'},
+		{Code: 'd', Mod: tea.ModCtrl},
+		{Code: 'u', Mod: tea.ModCtrl},
+		{Code: tea.KeyPgDown},
+		{Code: tea.KeyPgUp},
+		{Code: tea.KeyEnd},
+		{Code: tea.KeyHome},
+		{Code: 'G'},
+		{Code: 'g'},
+	} {
+		m = updateModel(t, m, key)
+		if !m.help.visible {
+			t.Fatalf("help overlay should remain visible after %v", key)
+		}
+		if m.focus != focusViewport {
+			t.Fatalf("help scroll key %v should not change focus", key)
+		}
+	}
+}
+
+func TestModelHelpOverlayKeepsStatusModeAndInputVisibleOnSmallTerminal(t *testing.T) {
+	m := setupModel()
+	m = updateModel(t, m, tea.WindowSizeMsg{Width: 40, Height: 12})
+	m = updateModel(t, m, questionKey())
+
+	view := m.View()
+	if !strings.Contains(view.Content, "clnkr help") {
+		t.Fatalf("help content should render, got %q", view.Content)
+	}
+	lines := strings.Split(view.Content, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("view should include status and input lines, got %q", view.Content)
+	}
+	statusLine := lines[len(lines)-2]
+	if !strings.Contains(statusLine, "HELP") {
+		t.Fatalf("status mode should remain visible, status=%q view=%q", statusLine, view.Content)
+	}
+	if !strings.Contains(view.Content, iconPrompt) {
+		t.Fatalf("input should remain visible, got %q", view.Content)
+	}
+	if got, max := strings.Count(view.Content, "\n")+1, 12; got > max {
+		t.Fatalf("view line count = %d, want <= %d; view=%q", got, max, view.Content)
+	}
+}
+
+func TestModelStatusModeReflectsInput(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	m.focus = focusInput
+
+	view := m.View()
+	if !strings.Contains(view.Content, "INPUT") {
+		t.Fatalf("status should show INPUT mode, got %q", view.Content)
+	}
+}
+
+func TestModelStatusModeReflectsScroll(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	m.focus = focusViewport
+
+	view := m.View()
+	if !strings.Contains(view.Content, "SCROLL") {
+		t.Fatalf("status should show SCROLL mode, got %q", view.Content)
+	}
+}
+
+func TestModelStatusModeReflectsHelpOverlay(t *testing.T) {
+	m := setupModel()
+	m.help.show(80, 20)
+
+	view := m.View()
+	if !strings.Contains(view.Content, "HELP") {
+		t.Fatalf("status should show HELP mode, got %q", view.Content)
+	}
+}
+
+func TestModelStatusModeReflectsDiffOverlay(t *testing.T) {
+	m := setupModel()
+	m.diff.visible = true
+
+	view := m.View()
+	if !strings.Contains(view.Content, "DIFF") {
+		t.Fatalf("status should show DIFF mode, got %q", view.Content)
+	}
+}
+
+func TestModelStatusModeReflectsReasoningOverlay(t *testing.T) {
+	m := setupModel()
+	m.reasoning.visible = true
+
+	view := m.View()
+	if !strings.Contains(view.Content, "REASONING") {
+		t.Fatalf("status should show REASONING mode, got %q", view.Content)
+	}
+}
+
+func TestModelStatusModeReflectsApproval(t *testing.T) {
+	m := setupModel()
+	m.awaitingApproval = true
+
+	view := m.View()
+	if !strings.Contains(view.Content, "APPROVAL") {
+		t.Fatalf("status should show APPROVAL mode, got %q", view.Content)
+	}
+}
+
+func TestModelStatusModeReflectsClarification(t *testing.T) {
+	m := setupModel()
+	m.awaitingClarification = true
+
+	view := m.View()
+	if !strings.Contains(view.Content, "CLARIFY") {
+		t.Fatalf("status should show CLARIFY mode, got %q", view.Content)
+	}
+}
+
+func TestModelStatusModeReflectsRunningWithoutPrompt(t *testing.T) {
+	m := setupModel()
+	m.running = true
+	m.awaitingApproval = false
+	m.awaitingClarification = false
+
+	view := m.View()
+	if !strings.Contains(view.Content, "RUNNING") {
+		t.Fatalf("status should show RUNNING mode, got %q", view.Content)
+	}
+}
+
 func TestModelAgentDone(t *testing.T) {
 	m := setupModel()
 	um := updateModel(t, m, agentDoneMsg{err: nil})

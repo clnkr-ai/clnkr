@@ -97,6 +97,7 @@ type model struct {
 	input                 inputModel
 	status                statusModel
 	diff                  diffModel
+	help                  helpModel
 	reasoning             reasoningModel
 	files                 fileTracker
 	reasoningInfo         reasoningState
@@ -151,6 +152,7 @@ func newModel(opts modelOpts) model {
 		input:           newInputModel(0, &opts.styles.Input),
 		status:          newStatusModel(opts.modelName, opts.maxSteps, &opts.styles.Status),
 		diff:            newDiffModel(opts.styles),
+		help:            newHelpModel(),
 		reasoning:       newReasoningModel(opts.styles),
 		styles:          opts.styles,
 		shared:          &shared{compactorFactory: opts.compactorFactory, delegateRunner: opts.delegateRunner},
@@ -218,6 +220,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			chatH = 1
 		}
 		m.diff.resize(m.width, chatH)
+		m.help.resize(m.width, chatH)
 		m.reasoning.resize(m.width, chatH)
 		return m, nil
 
@@ -278,6 +281,7 @@ func (m *model) recalcLayout() {
 		chatHeight = 1
 	}
 	m.chat.resize(m.width, chatHeight)
+	m.help.resize(m.width, chatHeight)
 	m.chat.updateViewport()
 	m.input.setWidth(m.width)
 }
@@ -570,6 +574,14 @@ func (m model) handleReasoningKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.help.visible {
+		return m.handleHelpKey(msg)
+	}
+	if m.shouldOpenHelp(msg) {
+		m.openHelp()
+		return m, nil
+	}
+
 	// Diff overlay active — intercept all keys
 	if m.diff.visible {
 		return m.handleDiffKey(msg)
@@ -921,6 +933,58 @@ func (m model) handleDiffKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) shouldOpenHelp(msg tea.KeyPressMsg) bool {
+	if msg.String() != "?" {
+		return false
+	}
+	if m.focus == focusViewport {
+		return true
+	}
+	if m.awaitingApproval || m.awaitingClarification {
+		return false
+	}
+	return m.input.textarea.Value() == ""
+}
+
+func (m *model) openHelp() {
+	m.pendingG = false
+	m.diff.visible = false
+	m.reasoning.hide()
+	chatH := m.height - statusHeight - m.inputHeight()
+	if chatH < 1 {
+		chatH = 1
+	}
+	m.help.show(m.width, chatH)
+}
+
+func (m model) handleHelpKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.pendingG = false
+	if msg.Code == 'c' && msg.Mod == tea.ModCtrl {
+		return m.handleCtrlC()
+	}
+	switch {
+	case msg.Code == tea.KeyEscape, msg.String() == "?":
+		m.help.hide()
+	case msg.Code == 'j':
+		m.help.viewport.ScrollDown(1)
+	case msg.Code == 'k':
+		m.help.viewport.ScrollUp(1)
+	case msg.Mod == tea.ModCtrl && msg.Code == 'd':
+		m.help.viewport.HalfPageDown()
+	case msg.Mod == tea.ModCtrl && msg.Code == 'u':
+		m.help.viewport.HalfPageUp()
+	case msg.Code == tea.KeyPgDown:
+		m.help.viewport.HalfPageDown()
+	case msg.Code == tea.KeyPgUp:
+		m.help.viewport.HalfPageUp()
+	case msg.Code == tea.KeyEnd, msg.Code == 'G':
+		m.help.viewport.GotoBottom()
+	case msg.Code == tea.KeyHome, msg.Code == 'g':
+		m.help.viewport.GotoTop()
+	}
+	return m, nil
+}
+
 func (m model) handleViewportKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Code == 'j':
@@ -975,7 +1039,14 @@ func (m model) View() tea.View {
 	}
 
 	var topPane string
-	if m.reasoning.visible {
+	if m.help.visible {
+		chatH := m.height - statusHeight - m.inputHeight()
+		if chatH < 1 {
+			chatH = 1
+		}
+		m.help.resize(m.width, chatH)
+		topPane = m.help.view()
+	} else if m.reasoning.visible {
 		topPane = m.reasoning.view()
 	} else if m.diff.visible {
 		topPane = m.diff.view()
@@ -990,10 +1061,52 @@ func (m model) View() tea.View {
 		}
 	}
 
-	statusView := m.status.view(m.width)
+	statusView := m.status.view(m.width, m.statusMode(), m.statusHints())
 	inputView := m.input.view()
 
 	view := tea.NewView(topPane + "\n" + statusView + "\n" + inputView)
 	view.ReportFocus = true
 	return view
+}
+
+func (m model) statusMode() string {
+	switch {
+	case m.help.visible:
+		return "HELP"
+	case m.diff.visible:
+		return "DIFF"
+	case m.reasoning.visible:
+		return "REASONING"
+	case m.awaitingApproval:
+		return "APPROVAL"
+	case m.awaitingClarification:
+		return "CLARIFY"
+	case m.running:
+		return "RUNNING"
+	case m.focus == focusViewport:
+		return "SCROLL"
+	default:
+		return "INPUT"
+	}
+}
+
+func (m model) statusHints() string {
+	switch m.statusMode() {
+	case "HELP":
+		return "?/Esc close"
+	case "DIFF":
+		return "j/k scroll | Esc close"
+	case "REASONING":
+		return "j/k scroll | Esc close"
+	case "APPROVAL":
+		return "y Enter approve | Ctrl+Y approve"
+	case "CLARIFY":
+		return "Enter send clarification"
+	case "RUNNING":
+		return "Ctrl+C cancel"
+	case "SCROLL":
+		return "i input | ? help | Ctrl+F diff"
+	default:
+		return "Enter send | ? help"
+	}
 }
