@@ -45,6 +45,39 @@ printf '%s\n' '[{"role":"assistant","content":"{\"type\":\"done\",\"summary\":\"
 	}
 }
 
+func TestRunnerRunReturnsClarificationSummary(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "fake-clnku")
+	script := `#!/bin/sh
+out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --trajectory) out="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s\n' '[{"role":"assistant","content":"{\"type\":\"clarify\",\"question\":\"Which module?\"}"}]' > "$out"
+printf '%s\n' '{"type":"clarify","question":"Which module?"}'
+printf '%s\n' 'Clarification needed.' >&2
+exit 2
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	result, err := delegateProcessRunner{Binary: bin}.Run(context.Background(), delegateRequest{
+		Task:       "describe one module",
+		WorkingDir: dir,
+		Parent:     []clnkr.Message{{Role: "user", Content: "parent task"}},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Summary != "Delegate asked: Which module?" {
+		t.Fatalf("Summary = %q, want clarification summary", result.Summary)
+	}
+}
+
 func TestDefaultDelegateBinaryPrefersSiblingClnku(t *testing.T) {
 	dir := t.TempDir()
 	exe := filepath.Join(dir, "clnkr")
