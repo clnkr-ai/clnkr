@@ -17,6 +17,10 @@ import (
 
 func setupModel() model {
 	s := defaultStyles(true)
+	return setupModelWithStyles(s)
+}
+
+func setupModelWithStyles(s *styles) model {
 	m := newModel(modelOpts{
 		styles:    s,
 		modelName: "test-model",
@@ -61,6 +65,25 @@ func TestModelHandlesEventResponse(t *testing.T) {
 	view := um.View()
 	if !strings.Contains(view.Content, "full response") {
 		t.Error("View should contain authoritative response content")
+	}
+}
+
+func TestUINoColorViewStaysMonochromeWithNewContentIndicator(t *testing.T) {
+	m := setupModelWithStyles(startupStyles(true, true))
+	m.chat.content.WriteString("assistant output\n")
+	m.chat.hasNew = true
+	m.chat.viewport.SetContent(m.chat.content.String())
+	m.input.textarea.SetValue("follow up")
+
+	view := m.View()
+	if ansiColorPattern.MatchString(view.Content) {
+		t.Fatalf("no-color view should not emit ANSI color codes, got %q", view.Content)
+	}
+	plain := stripANSI(view.Content)
+	for _, want := range []string{"new content", "RUNNING", iconPrompt, "follow up"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("view should contain %q, got %q", want, plain)
+		}
 	}
 }
 

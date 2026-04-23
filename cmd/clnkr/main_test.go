@@ -192,6 +192,42 @@ func TestResolveProviderConfigUsesAliasesAndEnv(t *testing.T) {
 	}
 }
 
+func TestNoColorEnabled(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		want bool
+	}{
+		{name: "unset", env: "", want: false},
+		{name: "spaces", env: "   ", want: true},
+		{name: "set", env: "1", want: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := noColorEnabled(func(string) string { return tc.env })
+			if got != tc.want {
+				t.Fatalf("noColorEnabled() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStartupStylesUsesMonochromeWhenNoColorEnabled(t *testing.T) {
+	colorStyles := startupStyles(true, false)
+	monoStyles := startupStyles(true, true)
+
+	colorBadge := colorStyles.Chat.NewContent.Render("new")
+	if !ansiColorPattern.MatchString(colorBadge) {
+		t.Fatalf("color startup styles should emit ANSI color codes, got %q", colorBadge)
+	}
+
+	monoBadge := monoStyles.Chat.NewContent.Render("new")
+	if ansiColorPattern.MatchString(monoBadge) {
+		t.Fatalf("monochrome startup styles should not emit ANSI color codes, got %q", monoBadge)
+	}
+}
+
 func TestNewModelForConfigUsesOpenAIResponsesWhenConfigured(t *testing.T) {
 	var gotPath string
 
