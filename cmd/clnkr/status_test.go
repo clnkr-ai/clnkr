@@ -139,3 +139,18 @@ func TestStatusStartRunResetsPerRunState(t *testing.T) {
 		t.Error("running should be true after startRun")
 	}
 }
+
+func TestStatusNoColorViewKeepsModeWithoutANSIColor(t *testing.T) {
+	s := monochromeStyles(true)
+	st := newStatusModel("test-model", 100, &s.Status)
+
+	view := st.view(80, "RUNNING", "Esc scroll | i input")
+	if ansiColorPattern.MatchString(view) {
+		t.Fatalf("no-color status should not emit ANSI color codes, got %q", view)
+	}
+	for _, want := range []string{"RUNNING", "test-model", "Esc scroll | i input"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("status should contain %q, got %q", want, view)
+		}
+	}
+}

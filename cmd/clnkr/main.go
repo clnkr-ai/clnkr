@@ -495,6 +495,9 @@ func main() {
 
 func runTUI(agent *clnkr.Agent, taskPrompt, trajectory, modelName, cwd string, eventLog *os.File, verbose bool, fullSend bool, compactorFactory compaction.Factory, delegateRunner delegateTaskRunner) {
 	s := defaultStyles(true) // TODO: detect actual background
+	if os.Getenv("NO_COLOR") != "" {
+		s = monochromeStyles(true)
+	}
 
 	if taskPrompt != "" {
 		if !fullSend {

@@ -40,7 +40,7 @@ func TestReasoningModelWrapsLongLines(t *testing.T) {
 	r.show(content, 20, 8)
 
 	view := r.view()
-	want := strings.TrimSpace(renderMarkdown(content, 20))
+	want := strings.TrimSpace(renderMarkdown(content, 20, false))
 	if !strings.Contains(view, want) {
 		t.Fatalf("expected modal view to contain markdown-wrapped content %q, got %q", want, view)
 	}

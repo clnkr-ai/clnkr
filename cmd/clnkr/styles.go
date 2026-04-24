@@ -48,9 +48,10 @@ type inputStyles struct {
 }
 
 type styles struct {
-	Chat   chatStyles
-	Status statusStyles
-	Input  inputStyles
+	NoColor bool
+	Chat    chatStyles
+	Status  statusStyles
+	Input   inputStyles
 }
 
 func defaultStyles(hasDark bool) *styles {
@@ -65,6 +66,7 @@ func defaultStyles(hasDark bool) *styles {
 	errColor := c("#D65A31")
 
 	return &styles{
+		NoColor: false,
 		Chat: chatStyles{
 			UserMessage:    lipgloss.NewStyle().Foreground(ink).Bold(true),
 			AssistantReply: lipgloss.NewStyle().Foreground(ink),
@@ -93,6 +95,45 @@ func defaultStyles(hasDark bool) *styles {
 			CursorLine:  lipgloss.NewStyle().Foreground(ink).Background(bgSoft),
 			Cursor:      ink,
 			Running:     lipgloss.NewStyle().Foreground(inkDim),
+		},
+	}
+}
+
+func monochromeStyles(hasDark bool) *styles {
+	_ = hasDark
+
+	noColor := lipgloss.NoColor{}
+
+	return &styles{
+		NoColor: true,
+		Chat: chatStyles{
+			UserMessage:    lipgloss.NewStyle().Bold(true),
+			AssistantReply: lipgloss.NewStyle(),
+			StreamingText:  lipgloss.NewStyle(),
+			CommandPending: lipgloss.NewStyle().Faint(true),
+			CommandSuccess: lipgloss.NewStyle().Bold(true),
+			CommandError:   lipgloss.NewStyle().Bold(true).Underline(true),
+			CommandOutput:  lipgloss.NewStyle().Faint(true),
+			Debug:          lipgloss.NewStyle().Faint(true),
+			Warning:        lipgloss.NewStyle().Bold(true),
+			NewContent:     lipgloss.NewStyle().Foreground(noColor).Background(noColor).Bold(true).Reverse(true),
+		},
+		Status: statusStyles{
+			Bar:            lipgloss.NewStyle().Bold(true).Reverse(true),
+			ModelName:      lipgloss.NewStyle().Bold(true).Reverse(true),
+			Tokens:         lipgloss.NewStyle().Reverse(true),
+			StepCount:      lipgloss.NewStyle().Reverse(true),
+			Elapsed:        lipgloss.NewStyle().Reverse(true),
+			FocusIndicator: lipgloss.NewStyle().Bold(true).Reverse(true),
+			Separator:      lipgloss.NewStyle().Reverse(true),
+		},
+		Input: inputStyles{
+			Prompt:      lipgloss.NewStyle().Bold(true),
+			Text:        lipgloss.NewStyle(),
+			Placeholder: lipgloss.NewStyle().Faint(true),
+			CursorLine:  lipgloss.NewStyle(),
+			Cursor:      noColor,
+			Running:     lipgloss.NewStyle().Faint(true),
 		},
 	}
 }

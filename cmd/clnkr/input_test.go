@@ -2,6 +2,8 @@ package main
 
 import (
 	"testing"
+
+	"charm.land/lipgloss/v2"
 )
 
 func TestInputSubmitReturnsTextAndClears(t *testing.T) {
@@ -142,5 +144,14 @@ func TestInputViewContainsPrompt(t *testing.T) {
 	// View should contain the textarea rendering
 	if view == "" {
 		t.Error("view should not be empty")
+	}
+}
+
+func TestInputNoColorUsesNeutralCursorColor(t *testing.T) {
+	s := monochromeStyles(true)
+	inp := newInputModel(80, &s.Input)
+
+	if _, ok := inp.textarea.Styles().Cursor.Color.(lipgloss.NoColor); !ok {
+		t.Fatalf("cursor color = %T, want lipgloss.NoColor", inp.textarea.Styles().Cursor.Color)
 	}
 }
