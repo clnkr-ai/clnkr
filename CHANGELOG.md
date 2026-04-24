@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.3.0 (2026-04-24)
+
+- Honor NO_COLOR in clnkr TUI
+- Surface delegate clarifications
+- Prefer sibling clnku for delegates
+- Add Responses history live eval
+- Add TUI help
+- Fix Responses assistant history
+- Tighten up AGENTS.md
+- Update CHANGELOG.md for 2.2.0
+- Fix the docs overview page
+
 ## 2.2.0 (2026-04-22)
 
 - Tighten public docs and release notes
