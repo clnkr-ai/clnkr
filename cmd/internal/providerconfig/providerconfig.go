@@ -28,12 +28,19 @@ const (
 	DefaultOpenAIBaseURL    = "https://api.openai.com/v1"
 )
 
-type Inputs struct{ Provider, ProviderAPI, Model, BaseURL string }
+type Inputs struct {
+	Provider    string
+	ProviderAPI string
+	Model       string
+	BaseURL     string
+}
 
 type ResolvedProviderConfig struct {
-	Provider               Provider
-	ProviderAPI            ProviderAPI
-	Model, BaseURL, APIKey string
+	Provider    Provider
+	ProviderAPI ProviderAPI
+	Model       string
+	BaseURL     string
+	APIKey      string
 }
 
 var datedSnapshotSuffix = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`)
@@ -195,10 +202,29 @@ func resolveOpenAIProviderAPI(model string, providerAPI ProviderAPI) ProviderAPI
 	if providerAPI == ProviderAPIOpenAIChatCompletions || providerAPI == ProviderAPIOpenAIResponses {
 		return providerAPI
 	}
-	if listedModel(openAIResponsesAllowlist, model) {
+	if isKnownNonOpenAIModel(model) {
+		return ProviderAPIOpenAIChatCompletions
+	}
+	if listedModel(openAIResponsesAllowlist, model) || isOpenAILookingModel(model) {
 		return ProviderAPIOpenAIResponses
 	}
 	return ProviderAPIOpenAIChatCompletions
+}
+
+func isKnownNonOpenAIModel(model string) bool {
+	return strings.HasPrefix(model, "chatgpt-") ||
+		strings.HasPrefix(model, "olmo-") ||
+		strings.HasPrefix(model, "openhermes-") ||
+		strings.HasPrefix(model, "orca-")
+}
+
+func isOpenAILookingModel(model string) bool {
+	return strings.HasPrefix(model, "gpt-") ||
+		model == "codex" ||
+		strings.HasPrefix(model, "codex-") ||
+		strings.HasSuffix(model, "-codex") ||
+		strings.Contains(model, "-codex-") ||
+		len(model) > 1 && model[0] == 'o' && model[1] >= '0' && model[1] <= '9'
 }
 
 // Keep this matcher intentionally conservative: exact names plus dated snapshots only.

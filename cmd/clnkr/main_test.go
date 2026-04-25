@@ -149,26 +149,69 @@ func (p *scriptPrompter) Clarify(context.Context, string) (string, error) {
 	return reply.text, reply.err
 }
 
+func runMainHelper(t *testing.T, args ...string) (bytes.Buffer, bytes.Buffer, error) {
+	t.Helper()
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMainHelper")
+	cmd.Env = append(os.Environ(), "CLNKR_HELPER_MAIN="+strings.Join(args, " "))
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	return stdout, stderr, cmd.Run()
+}
+
 func TestPrintUsageMentionsProviderAPI(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=TestMainHelpHelper")
-	cmd.Env = append(os.Environ(), "CLNKR_HELPER_HELP=1")
-	out, err := cmd.CombinedOutput()
+	stdout, stderr, err := runMainHelper(t, "--help")
 	if err != nil {
-		t.Fatalf("help command: %v\n%s", err, out)
+		t.Fatalf("help command: %v\nstderr: %s", err, stderr.String())
 	}
-	stderr := string(out)
 	for _, want := range []string{"provider-api", "Maximum agent steps (default: 100)", "infers provider when provider is unset"} {
-		if !strings.Contains(stderr, want) {
-			t.Fatalf("printUsage() missing %q, got %q", want, stderr)
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("printUsage() missing %q, got %q", want, stdout.String())
 		}
 	}
 }
 
-func TestMainHelpHelper(t *testing.T) {
-	if os.Getenv("CLNKR_HELPER_HELP") != "1" {
+func TestHelpWritesUsageToStdout(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t, "--help")
+	if err != nil {
+		t.Fatalf("help command: %v\nstderr: %s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "provider-api") {
+		t.Fatalf("stdout = %q, want usage", stdout.String())
+	}
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if len(line) > 79 {
+			t.Fatalf("help line length = %d, want <= 79: %q", len(line), line)
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestInvalidFlagKeepsUsageOffStdout(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t, "--bogus")
+	if err == nil {
+		t.Fatal("invalid flag succeeded, want failure")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "Run 'clnkr --help'") {
+		t.Fatalf("stderr = %q, want help hint", stderr.String())
+	}
+	if got := strings.Count(stderr.String(), "flag provided but not defined"); got != 1 {
+		t.Fatalf("stderr repeated flag error %d times: %q", got, stderr.String())
+	}
+}
+
+func TestMainHelper(t *testing.T) {
+	rawArgs := os.Getenv("CLNKR_HELPER_MAIN")
+	if rawArgs == "" {
 		return
 	}
-	os.Args = []string{"clnkr", "--help"}
+	os.Args = append([]string{"clnkr"}, strings.Fields(rawArgs)...)
 	main()
 }
 
@@ -550,6 +593,20 @@ func TestRunSingleTaskRejectsCompactCommandBeforeApprovalCheck(t *testing.T) {
 	err := prepareSingleTask("/compact focus on tests", false, func() error {
 		called = true
 		return errors.New("approval mode requires interactive stdin")
+	})
+	if err == nil || !strings.Contains(err.Error(), "/compact is only available at the conversational prompt") {
+		t.Fatalf("got %v, want conversational prompt error", err)
+	}
+	if called {
+		t.Fatal("approval preflight should not run for /compact")
+	}
+}
+
+func TestRunSingleTaskRejectsCompactCommandInFullSend(t *testing.T) {
+	called := false
+	err := prepareSingleTask("/compact focus on tests", true, func() error {
+		called = true
+		return nil
 	})
 	if err == nil || !strings.Contains(err.Error(), "/compact is only available at the conversational prompt") {
 		t.Fatalf("got %v, want conversational prompt error", err)

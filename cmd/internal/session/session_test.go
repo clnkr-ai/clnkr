@@ -1,9 +1,11 @@
 package session_test
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +28,12 @@ func TestNormalizeProjectPath(t *testing.T) {
 	}
 	if len(got1) != 16 {
 		t.Errorf("expected 16-char hash, got %d: %q", len(got1), got1)
+	}
+	if got1 != "ldz77nnq4ybk5nbc" {
+		t.Errorf("NormalizeProjectPath changed storage key: got %q", got1)
+	}
+	if got1 == regressionHexProjectKey("/home/user/projects/myapp") {
+		t.Errorf("NormalizeProjectPath returned regression-window hex key %q", got1)
 	}
 
 	// Different paths give different hashes
@@ -137,6 +145,312 @@ func TestSaveMultipleAndLoadLatest(t *testing.T) {
 	}
 }
 
+func TestLoadLatestSessionOrdersEqualCreatedLegacyNamesBySequence(t *testing.T) {
+	tmpdir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", tmpdir)
+
+	projectDir := "/tmp/test-project-legacy-order"
+	dir, err := session.SessionDir(projectDir)
+	if err != nil {
+		t.Fatalf("SessionDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	files := map[string]string{
+		"9-2026-01-10T000000.000000Z.json":  `{"created":"2026-01-10T00:00:00Z","messages":[{"role":"user","content":"old"}]}`,
+		"10-2026-01-10T000000.000000Z.json": `{"created":"2026-01-10T00:00:00Z","messages":[{"role":"user","content":"new"}]}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatalf("WriteFile %s: %v", name, err)
+		}
+	}
+
+	loaded, err := session.LoadLatestSession(projectDir)
+	if err != nil {
+		t.Fatalf("LoadLatestSession: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].Content != "new" {
+		t.Fatalf("latest session = %#v, want new", loaded)
+	}
+	sessions, err := session.ListSessions(projectDir)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) != 2 || sessions[0].Filename != "10-2026-01-10T000000.000000Z.json" {
+		t.Fatalf("sessions = %#v, want highest legacy sequence first", sessions)
+	}
+}
+
+func TestLoadLatestSessionUsesHighestLegacySequenceBeforeCreatedTime(t *testing.T) {
+	tmpdir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", tmpdir)
+
+	projectDir := "/tmp/test-project-legacy-sequence"
+	dir, err := session.SessionDir(projectDir)
+	if err != nil {
+		t.Fatalf("SessionDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	files := map[string]string{
+		"9-2026-01-10T000000.000000Z.json":  `{"created":"2026-01-11T00:00:00Z","messages":[{"role":"user","content":"old"}]}`,
+		"10-2026-01-10T000000.000000Z.json": `{"created":"2026-01-10T00:00:00Z","messages":[{"role":"user","content":"new"}]}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatalf("WriteFile %s: %v", name, err)
+		}
+	}
+
+	loaded, err := session.LoadLatestSession(projectDir)
+	if err != nil {
+		t.Fatalf("LoadLatestSession: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].Content != "new" {
+		t.Fatalf("latest session = %#v, want highest legacy sequence", loaded)
+	}
+	sessions, err := session.ListSessions(projectDir)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) != 2 || sessions[0].Filename != "10-2026-01-10T000000.000000Z.json" {
+		t.Fatalf("sessions = %#v, want highest legacy sequence first", sessions)
+	}
+}
+
+func TestLoadLatestSessionPrefersCurrentFormatOverLegacySequence(t *testing.T) {
+	tmpdir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", tmpdir)
+
+	projectDir := "/tmp/test-project-mixed-transitive-order"
+	dir, err := session.SessionDir(projectDir)
+	if err != nil {
+		t.Fatalf("SessionDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	files := map[string]string{
+		"10-2026-01-01T000000.000000Z.json":     `{"created":"2026-01-01T00:00:00Z","messages":[{"role":"user","content":"legacy-high"}]}`,
+		"9-2026-01-03T000000.000000Z.json":      `{"created":"2026-01-03T00:00:00Z","messages":[{"role":"user","content":"legacy-low"}]}`,
+		"2026-01-02T000000.000000000Z-000.json": `{"created":"2026-01-02T00:00:00Z","messages":[{"role":"user","content":"current"}]}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatalf("WriteFile %s: %v", name, err)
+		}
+	}
+
+	loaded, err := session.LoadLatestSession(projectDir)
+	if err != nil {
+		t.Fatalf("LoadLatestSession: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].Content != "current" {
+		t.Fatalf("latest session = %#v, want current format", loaded)
+	}
+	sessions, err := session.ListSessions(projectDir)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	want := []string{
+		"2026-01-02T000000.000000000Z-000.json",
+		"10-2026-01-01T000000.000000Z.json",
+		"9-2026-01-03T000000.000000Z.json",
+	}
+	if len(sessions) != len(want) {
+		t.Fatalf("sessions = %#v, want %d sessions", sessions, len(want))
+	}
+	for i := range want {
+		if sessions[i].Filename != want[i] {
+			t.Fatalf("sessions[%d] = %q, want %q; sessions = %#v", i, sessions[i].Filename, want[i], sessions)
+		}
+	}
+}
+
+func TestLoadLatestSessionOrdersCurrentNamesBySuffix(t *testing.T) {
+	tmpdir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", tmpdir)
+
+	projectDir := "/tmp/test-project-current-order"
+	dir, err := session.SessionDir(projectDir)
+	if err != nil {
+		t.Fatalf("SessionDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	files := map[string]string{
+		"2026-01-10T000000.000000000Z-000.json": `{"created":"2026-01-10T00:00:00Z","messages":[{"role":"user","content":"old"}]}`,
+		"2026-01-10T000000.000000000Z-001.json": `{"created":"2026-01-10T00:00:00Z","messages":[{"role":"user","content":"new"}]}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatalf("WriteFile %s: %v", name, err)
+		}
+	}
+
+	loaded, err := session.LoadLatestSession(projectDir)
+	if err != nil {
+		t.Fatalf("LoadLatestSession: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].Content != "new" {
+		t.Fatalf("latest session = %#v, want new", loaded)
+	}
+}
+
+func TestLoadLatestSessionReadsRegressionHexSessionDir(t *testing.T) {
+	tmpdir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", tmpdir)
+
+	projectDir := "/tmp/test-project-regression-hex"
+	dir := filepath.Join(tmpdir, "clnkr", "projects", regressionHexProjectKey(projectDir))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	name := "2026-01-10T000000.000000000Z-000.json"
+	content := `{"created":"2026-01-10T00:00:00Z","messages":[{"role":"user","content":"hex"}]}`
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	loaded, err := session.LoadLatestSession(projectDir)
+	if err != nil {
+		t.Fatalf("LoadLatestSession: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].Content != "hex" {
+		t.Fatalf("latest session = %#v, want regression hex session", loaded)
+	}
+	sessions, err := session.ListSessions(projectDir)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].Filename != name {
+		t.Fatalf("sessions = %#v, want regression hex session", sessions)
+	}
+}
+
+func TestSaveSessionWritesCanonicalDirWhileReadingRegressionHexDir(t *testing.T) {
+	tmpdir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", tmpdir)
+
+	projectDir := "/tmp/test-project-save-canonical"
+	msgs := []clnkr.Message{{Role: "user", Content: "canonical"}}
+	if err := session.SaveSession(projectDir, msgs); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	canonicalDir, err := session.SessionDir(projectDir)
+	if err != nil {
+		t.Fatalf("SessionDir: %v", err)
+	}
+	canonicalFiles, err := filepath.Glob(filepath.Join(canonicalDir, "*.json"))
+	if err != nil || len(canonicalFiles) != 1 {
+		t.Fatalf("canonical files = %d, err = %v; want 1", len(canonicalFiles), err)
+	}
+
+	hexDir := filepath.Join(tmpdir, "clnkr", "projects", regressionHexProjectKey(projectDir))
+	hexFiles, err := filepath.Glob(filepath.Join(hexDir, "*.json"))
+	if err != nil || len(hexFiles) != 0 {
+		t.Fatalf("regression hex files = %d, err = %v; want 0", len(hexFiles), err)
+	}
+}
+
+func TestLoadLatestSessionIgnoresCorruptOlderLegacyWhenCurrentSessionIsNewest(t *testing.T) {
+	tmpdir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", tmpdir)
+
+	projectDir := "/tmp/test-project-mixed-corrupt-legacy"
+	dir, err := session.SessionDir(projectDir)
+	if err != nil {
+		t.Fatalf("SessionDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	files := map[string]string{
+		"9-2026-01-12T000000.000000Z.json":      `{`,
+		"2026-01-11T000000.000000000Z-000.json": `{"created":"2026-01-11T00:00:00Z","messages":[{"role":"user","content":"new"}]}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatalf("WriteFile %s: %v", name, err)
+		}
+	}
+
+	loaded, err := session.LoadLatestSession(projectDir)
+	if err != nil {
+		t.Fatalf("LoadLatestSession: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].Content != "new" {
+		t.Fatalf("latest session = %#v, want current session", loaded)
+	}
+}
+
+func TestLoadLatestSessionFailsOnCorruptNewestSession(t *testing.T) {
+	tmpdir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", tmpdir)
+
+	projectDir := "/tmp/test-project-corrupt-latest"
+	dir, err := session.SessionDir(projectDir)
+	if err != nil {
+		t.Fatalf("SessionDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	files := map[string]string{
+		"2026-01-10T000000.000000000Z-000.json": `{"created":"2026-01-10T00:00:00Z","messages":[{"role":"user","content":"old"}]}`,
+		"2026-01-10T000000.000000000Z-001.json": `{`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatalf("WriteFile %s: %v", name, err)
+		}
+	}
+
+	_, err = session.LoadLatestSession(projectDir)
+	if err == nil {
+		t.Fatal("LoadLatestSession succeeded, want corrupt latest session error")
+	}
+	if !strings.Contains(err.Error(), "2026-01-10T000000.000000000Z-001.json") {
+		t.Fatalf("error = %v, want corrupt latest filename", err)
+	}
+}
+
+func TestLoadLatestSessionIgnoresCorruptOlderSession(t *testing.T) {
+	tmpdir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", tmpdir)
+
+	projectDir := "/tmp/test-project-corrupt-older"
+	dir, err := session.SessionDir(projectDir)
+	if err != nil {
+		t.Fatalf("SessionDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	files := map[string]string{
+		"2026-01-10T000000.000000000Z-000.json": `{`,
+		"2026-01-10T000000.000000000Z-001.json": `{"created":"2026-01-10T00:00:00Z","messages":[{"role":"user","content":"new"}]}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatalf("WriteFile %s: %v", name, err)
+		}
+	}
+
+	loaded, err := session.LoadLatestSession(projectDir)
+	if err != nil {
+		t.Fatalf("LoadLatestSession: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].Content != "new" {
+		t.Fatalf("latest session = %#v, want new", loaded)
+	}
+}
+
 func TestListSessions(t *testing.T) {
 	tmpdir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", tmpdir)
@@ -195,4 +509,9 @@ func TestSessionDirDefaultsToLocalState(t *testing.T) {
 	if len(dir) <= len(want) || dir[:len(want)] != want {
 		t.Errorf("SessionDir without XDG: got %q, want prefix %q", dir, want)
 	}
+}
+
+func regressionHexProjectKey(path string) string {
+	hash := sha256.Sum256([]byte(path))
+	return fmt.Sprintf("%x", hash[:8])
 }

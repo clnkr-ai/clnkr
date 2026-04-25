@@ -2,11 +2,14 @@ package session
 
 import (
 	"crypto/sha256"
+	"encoding/base32"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/clnkr-ai/clnkr"
@@ -24,8 +27,25 @@ type sessionFile struct {
 	Messages []clnkr.Message `json:"messages"`
 }
 
-// NormalizeProjectPath converts an absolute working directory to a stable
-// 16-character hex identifier for session storage.
+type loadedSession struct {
+	SessionInfo
+	messages []clnkr.Message
+}
+
+type sessionFileRef struct {
+	dir  string
+	name string
+}
+
+type filenameOrder struct {
+	at     time.Time
+	seq    int
+	legacy bool
+}
+
+// NormalizeProjectPath converts an absolute working directory to a stable,
+// low-collision normalized identifier for session storage.
+// Returns lowercase base32(sha256(path))[:16].
 func NormalizeProjectPath(path string) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("normalize project path: empty path")
@@ -35,7 +55,7 @@ func NormalizeProjectPath(path string) (string, error) {
 	}
 
 	hash := sha256.Sum256([]byte(path))
-	return fmt.Sprintf("%x", hash[:8]), nil
+	return strings.ToLower(base32.StdEncoding.EncodeToString(hash[:])[:16]), nil
 }
 
 // SessionDir returns the session directory for the given working directory.
@@ -86,59 +106,100 @@ func SaveSession(pwd string, messages []clnkr.Message) error {
 // LoadLatestSession loads the most recent session for the given working directory.
 // Returns nil, nil if no sessions exist.
 func LoadLatestSession(pwd string) ([]clnkr.Message, error) {
-	dir, err := SessionDir(pwd)
+	files, err := sessionFileRefs(pwd)
 	if err != nil {
 		return nil, fmt.Errorf("load latest session: %w", err)
-	}
-
-	files, err := sessionFiles(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("load latest session: readdir: %w", err)
 	}
 	if len(files) == 0 {
 		return nil, nil
 	}
-	sf, err := loadSessionFile(filepath.Join(dir, files[0].Name()))
-	if err != nil {
-		return nil, fmt.Errorf("load latest session: %w", err)
-	}
 
-	return sf.Messages, nil
+	sort.Slice(files, func(i, j int) bool {
+		return newerFilename(files[i].name, files[j].name)
+	})
+
+	sf, err := loadSessionFile(filepath.Join(files[0].dir, files[0].name))
+	if err != nil {
+		return nil, fmt.Errorf("load latest session %s: %w", files[0].name, err)
+	}
+	latest := loadedSession{
+		SessionInfo: SessionInfo{
+			Filename: files[0].name,
+			Created:  sf.Created,
+			Messages: len(sf.Messages),
+		},
+		messages: sf.Messages,
+	}
+	for _, e := range files[1:] {
+		sf, err := loadSessionFile(filepath.Join(e.dir, e.name))
+		if err != nil {
+			continue
+		}
+		candidate := loadedSession{
+			SessionInfo: SessionInfo{
+				Filename: e.name,
+				Created:  sf.Created,
+				Messages: len(sf.Messages),
+			},
+			messages: sf.Messages,
+		}
+		if newerSession(candidate.SessionInfo, latest.SessionInfo) {
+			latest = candidate
+		}
+	}
+	return latest.messages, nil
 }
 
-// ListSessions lists all sessions for the given working directory,
-// sorted by sortable filename (newest first).
+// ListSessions lists all sessions for the given working directory.
+// Current-format sessions sort before legacy sessions; legacy sessions preserve sequence ordering.
 func ListSessions(pwd string) ([]SessionInfo, error) {
-	dir, err := SessionDir(pwd)
+	files, err := sessionFileRefs(pwd)
 	if err != nil {
-		return nil, fmt.Errorf("list sessions: %w", err)
-	}
-
-	files, err := sessionFiles(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
 
 	var sessions []SessionInfo
 	for _, e := range files {
-		sf, err := loadSessionFile(filepath.Join(dir, e.Name()))
+		sf, err := loadSessionFile(filepath.Join(e.dir, e.name))
 		if err != nil {
 			continue
 		}
 		sessions = append(sessions, SessionInfo{
-			Filename: e.Name(),
+			Filename: e.name,
 			Created:  sf.Created,
 			Messages: len(sf.Messages),
 		})
 	}
-
+	sort.Slice(sessions, func(i, j int) bool {
+		return newerSession(sessions[i], sessions[j])
+	})
 	return sessions, nil
+}
+
+func sessionFileRefs(pwd string) ([]sessionFileRef, error) {
+	canonical, err := SessionDir(pwd)
+	if err != nil {
+		return nil, err
+	}
+	hash := sha256.Sum256([]byte(pwd))
+	dirs := []string{canonical, filepath.Join(filepath.Dir(canonical), fmt.Sprintf("%x", hash[:8]))}
+	var refs []sessionFileRef
+	for i, dir := range dirs {
+		if i > 0 && dir == canonical {
+			continue
+		}
+		files, err := sessionFiles(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("readdir: %w", err)
+		}
+		for _, f := range files {
+			refs = append(refs, sessionFileRef{dir: dir, name: f.Name()})
+		}
+	}
+	return refs, nil
 }
 
 func sessionFiles(dir string) ([]os.DirEntry, error) {
@@ -152,8 +213,87 @@ func sessionFiles(dir string) ([]os.DirEntry, error) {
 			files = append(files, e)
 		}
 	}
-	sort.Slice(files, func(i, j int) bool { return files[i].Name() > files[j].Name() })
 	return files, nil
+}
+
+func newerSession(a, b SessionInfo) bool {
+	if newer, ok := newerParsedFilename(a.Filename, b.Filename); ok {
+		return newer
+	}
+	if !a.Created.Equal(b.Created) {
+		return a.Created.After(b.Created)
+	}
+	return a.Filename > b.Filename
+}
+
+func newerFilename(a, b string) bool {
+	if newer, ok := newerParsedFilename(a, b); ok {
+		return newer
+	}
+	return a > b
+}
+
+func newerParsedFilename(a, b string) (bool, bool) {
+	aInfo, aOK := parseSessionFilename(a)
+	bInfo, bOK := parseSessionFilename(b)
+	if aOK != bOK {
+		return aOK, true
+	}
+	if aOK && bOK {
+		if aInfo.legacy != bInfo.legacy {
+			return !aInfo.legacy, true
+		}
+		if aInfo.legacy {
+			if aInfo.seq != bInfo.seq {
+				return aInfo.seq > bInfo.seq, true
+			}
+			if !aInfo.at.Equal(bInfo.at) {
+				return aInfo.at.After(bInfo.at), true
+			}
+			return a > b, true
+		}
+		if !aInfo.at.Equal(bInfo.at) {
+			return aInfo.at.After(bInfo.at), true
+		}
+		if aInfo.seq != bInfo.seq {
+			return aInfo.seq > bInfo.seq, true
+		}
+		return a > b, true
+	}
+	return false, false
+}
+
+func parseSessionFilename(name string) (filenameOrder, bool) {
+	base, ok := strings.CutSuffix(name, ".json")
+	if !ok {
+		return filenameOrder{}, false
+	}
+	prefix, rest, ok := strings.Cut(base, "-")
+	if ok {
+		if seq, err := strconv.Atoi(prefix); err == nil {
+			if at, ok := parseSessionFilenameTime(rest, "2006-01-02T150405.000000Z"); ok {
+				return filenameOrder{at: at, seq: seq, legacy: true}, true
+			}
+		}
+	}
+	idx := strings.LastIndexByte(base, '-')
+	if idx <= 0 {
+		return filenameOrder{}, false
+	}
+	seq, err := strconv.Atoi(base[idx+1:])
+	if err != nil {
+		return filenameOrder{}, false
+	}
+	at, ok := parseSessionFilenameTime(base[:idx], "2006-01-02T150405.000000000Z")
+	if !ok {
+		return filenameOrder{}, false
+	}
+	return filenameOrder{at: at, seq: seq}, true
+}
+
+func parseSessionFilenameTime(value, layout string) (time.Time, bool) {
+	at, err := time.Parse(layout, value)
+	return at, err == nil
 }
 
 func loadSessionFile(path string) (sessionFile, error) {

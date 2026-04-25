@@ -42,12 +42,60 @@ type approvalPrompter interface {
 	Clarify(ctx context.Context, question string) (string, error)
 }
 
-type stdinPrompter struct{ reader *lineReader }
+type stdinPrompter struct {
+	reader *lineReader
+}
 
-func printUsage(flags *flag.FlagSet) {
-	fmt.Fprint(os.Stderr, "clnkr - a minimal coding agent\n\nUsage:\n  clnkr                     Start conversational mode\n  clnkr -p \"task\"           Run a single task and exit\n\nOptions:\n")
-	flags.PrintDefaults()
-	fmt.Fprint(os.Stderr, "\nEnvironment:\n  CLNKR_API_KEY      API key for the LLM provider (required)\n  CLNKR_PROVIDER     Provider adapter semantics\n  CLNKR_PROVIDER_API OpenAI-only API surface override\n  CLNKR_MODEL        Model identifier override\n  CLNKR_BASE_URL     LLM endpoint override; infers provider when provider is unset\n")
+func usageText() string {
+	return `clnkr - a minimal coding agent
+
+Usage:
+  clnkr                     Start conversational mode
+  clnkr -p "task"           Run a single task and exit
+
+Core:
+  -p, --prompt string       Task to run (exits after completion)
+  -m, --model string        Model identifier (required; env: $CLNKR_MODEL)
+  -u, --base-url string     LLM endpoint transport URL (env: $CLNKR_BASE_URL)
+      --provider string     Provider adapter: anthropic|openai
+                            (required in normal use; env: $CLNKR_PROVIDER)
+      --provider-api string OpenAI-only override
+                            (auto|openai-chat-completions|openai-responses)
+      --max-steps int       Maximum agent steps (default: 100)
+      --full-send           Execute every Act turn without approval
+  -v, --verbose             Show internal decisions
+
+Sessions:
+  -c, --continue            Resume most recent session for this project
+  -l, --list-sessions       List saved sessions for this project
+
+System prompt:
+  -S, --no-system-prompt              Skip the built-in system prompt entirely
+      --system-prompt-append string   Append text to the built-in system prompt
+      --dump-system-prompt            Print the composed system prompt and exit
+
+Debugging:
+      --load-messages string   Seed conversation from a JSON file
+      --event-log string       Stream JSONL events to file during execution
+      --trajectory string      Save single-task history as JSON on exit
+
+  -V, --version             Print version and exit
+
+Environment:
+  CLNKR_API_KEY      API key for the LLM provider (required)
+  CLNKR_PROVIDER     Provider adapter semantics
+  CLNKR_PROVIDER_API OpenAI-only API surface override
+  CLNKR_MODEL        Model identifier override
+  CLNKR_BASE_URL     Endpoint override; infers provider when provider is unset
+
+Defaults:
+  anthropic base URL  https://api.anthropic.com
+  openai base URL     https://api.openai.com/v1
+`
+}
+
+func printUsage(w io.Writer) {
+	fmt.Fprint(w, usageText()) //nolint:errcheck
 }
 
 func aliasedString(preferred, fallback string) string {
@@ -332,43 +380,43 @@ func formatActProposal(commands []clnkr.BashAction) string {
 
 func main() {
 	flags := flag.NewFlagSet("clnkr", flag.ContinueOnError)
-	flags.Usage = func() {
-		printUsage(flags)
-	}
+	flags.Usage = func() {}
+	flags.SetOutput(io.Discard)
 
 	var taskPrompt, promptLong, modelFlag, modelShort, baseURL, baseURLShort, providerFlag, providerAPIFlag string
 	var eventLog, trajectory, loadMessages, systemPromptAppend string
 	var maxSteps int
 	var fullSend, verbose, verboseShort, showVersion, showVersionShort, continueFlag, continueShort, listSessions, listSessionsShort bool
 	var noSystemPrompt, noSystemPromptShort, dumpSystemPrompt bool
-	flags.StringVar(&taskPrompt, "p", "", "Task to run")
-	flags.StringVar(&promptLong, "prompt", "", "Task to run")
-	flags.StringVar(&modelFlag, "model", "", "Model identifier")
-	flags.StringVar(&modelShort, "m", "", "Model identifier")
-	flags.StringVar(&baseURL, "base-url", "", "LLM endpoint URL; infers provider when provider is unset")
-	flags.StringVar(&baseURLShort, "u", "", "LLM endpoint URL; infers provider when provider is unset")
-	flags.StringVar(&providerFlag, "provider", "", "Provider semantics: anthropic|openai")
-	flags.StringVar(&providerAPIFlag, "provider-api", "", "OpenAI API surface: auto|openai-chat-completions|openai-responses")
-	flags.IntVar(&maxSteps, "max-steps", 0, "Maximum agent steps (default: 100)")
-	flags.BoolVar(&fullSend, "full-send", false, "Execute Act turns without approval")
-	flags.BoolVar(&verbose, "verbose", false, "Show internal decisions")
-	flags.BoolVar(&verboseShort, "v", false, "Show internal decisions")
-	flags.BoolVar(&showVersion, "version", false, "Print version and exit")
-	flags.BoolVar(&showVersionShort, "V", false, "Print version and exit")
-	flags.StringVar(&eventLog, "event-log", "", "Stream JSONL events to file")
-	flags.StringVar(&trajectory, "trajectory", "", "Save message history as JSON")
-	flags.StringVar(&loadMessages, "load-messages", "", "Seed conversation from JSON")
-	flags.BoolVar(&continueFlag, "continue", false, "Resume latest session")
-	flags.BoolVar(&continueShort, "c", false, "Resume latest session")
-	flags.BoolVar(&listSessions, "list-sessions", false, "List saved sessions")
-	flags.BoolVar(&listSessionsShort, "l", false, "List saved sessions")
-	flags.BoolVar(&noSystemPrompt, "no-system-prompt", false, "Skip built-in system prompt")
-	flags.BoolVar(&noSystemPromptShort, "S", false, "Skip built-in system prompt")
-	flags.StringVar(&systemPromptAppend, "system-prompt-append", "", "Append text to system prompt")
-	flags.BoolVar(&dumpSystemPrompt, "dump-system-prompt", false, "Print system prompt and exit")
+	flags.StringVar(&taskPrompt, "p", "", "")
+	flags.StringVar(&promptLong, "prompt", "", "")
+	flags.StringVar(&modelFlag, "model", "", "")
+	flags.StringVar(&modelShort, "m", "", "")
+	flags.StringVar(&baseURL, "base-url", "", "")
+	flags.StringVar(&baseURLShort, "u", "", "")
+	flags.StringVar(&providerFlag, "provider", "", "")
+	flags.StringVar(&providerAPIFlag, "provider-api", "", "")
+	flags.IntVar(&maxSteps, "max-steps", 0, "")
+	flags.BoolVar(&fullSend, "full-send", false, "")
+	flags.BoolVar(&verbose, "verbose", false, "")
+	flags.BoolVar(&verboseShort, "v", false, "")
+	flags.BoolVar(&showVersion, "version", false, "")
+	flags.BoolVar(&showVersionShort, "V", false, "")
+	flags.StringVar(&eventLog, "event-log", "", "")
+	flags.StringVar(&trajectory, "trajectory", "", "")
+	flags.StringVar(&loadMessages, "load-messages", "", "")
+	flags.BoolVar(&continueFlag, "continue", false, "")
+	flags.BoolVar(&continueShort, "c", false, "")
+	flags.BoolVar(&listSessions, "list-sessions", false, "")
+	flags.BoolVar(&listSessionsShort, "l", false, "")
+	flags.BoolVar(&noSystemPrompt, "no-system-prompt", false, "")
+	flags.BoolVar(&noSystemPromptShort, "S", false, "")
+	flags.StringVar(&systemPromptAppend, "system-prompt-append", "", "")
+	flags.BoolVar(&dumpSystemPrompt, "dump-system-prompt", false, "")
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
+			printUsage(os.Stdout)
 			os.Exit(0)
 		}
 		fmt.Fprintf(os.Stderr, "Error: %v\nRun 'clnkr --help' for available options.\n", err)

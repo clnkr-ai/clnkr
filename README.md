@@ -52,7 +52,7 @@ clnkr --provider anthropic --model claude-sonnet-4-6 --full-send -p "fix the fai
 
 ### OpenAI-compatible providers
 
-Point `--base-url` at an OpenAI-compatible endpoint that supports structured outputs for the model you select. `--provider` controls adapter semantics; `--base-url` is only the transport endpoint. In normal use, set both `--provider` and `--model`. Compatibility fallback: if `--provider` / `CLNKR_PROVIDER` is unset but `--base-url` / `CLNKR_BASE_URL` is explicitly set, clnkr infers the provider from that URL. For `--provider=openai`, `--provider-api` defaults to `auto`, which prefers `openai-responses` for known supported names and other OpenAI-looking model names such as `gpt-*`, `o` plus a digit, and `codex*`. Names that do not look OpenAI-ish, such as `llama3`, `gemini-2.0-flash`, `orca-*`, `olmo-*`, `openhermes-*`, and `chatgpt-*`, stay on `openai-chat-completions`.
+Point `--base-url` at an OpenAI-compatible endpoint that supports structured outputs for the model you select. `--provider` controls adapter semantics; `--base-url` is only the transport endpoint. In normal use, set both `--provider` and `--model`. Compatibility fallback: if `--provider` / `CLNKR_PROVIDER` is unset but `--base-url` / `CLNKR_BASE_URL` is explicitly set, clnkr infers the provider from that URL. For `--provider=openai`, `--provider-api` defaults to `auto`, which prefers `openai-responses` for known supported names and other OpenAI-looking model names such as `gpt-*`, `o` plus a digit, `codex`, `codex-*`, `*-codex`, and `*-codex-*`. Names that do not look OpenAI-ish, such as `llama3`, `gemini-2.0-flash`, `orca-*`, `olmo-*`, `openhermes-*`, and `chatgpt-*`, stay on `openai-chat-completions`.
 
 ```bash
 # vLLM
@@ -86,8 +86,10 @@ Structured outputs are a hard requirement for agent turns. clnkr rejects `gpt-5.
 -p, --prompt string            Task to run (exits after completion)
 -m, --model string             Model identifier (required; env: CLNKR_MODEL)
 -u, --base-url string          LLM endpoint transport URL (env: CLNKR_BASE_URL)
---provider string              Provider adapter semantics: anthropic|openai (required in normal use; env: CLNKR_PROVIDER)
---provider-api string          OpenAI-only override: auto|openai-chat-completions|openai-responses
+--provider string              Provider adapter: anthropic|openai
+                               (required in normal use; env: CLNKR_PROVIDER)
+--provider-api string          OpenAI-only override
+                               (auto|openai-chat-completions|openai-responses)
 --max-steps int                Maximum agent steps (default: 100)
 --full-send                    Execute every Act turn without approval
 -c, --continue                 Resume the most recent session for this project
@@ -97,7 +99,7 @@ Structured outputs are a hard requirement for agent turns. clnkr rejects `gpt-5.
 --dump-system-prompt           Print the composed system prompt and exit
 --load-messages string         Seed conversation from JSON file (e.g. from --trajectory)
 --event-log string             Write JSONL events to file (streams in real time)
---trajectory string            Write message history as JSON on exit (single-task mode only)
+--trajectory string            Save single-task history as JSON on exit
 -v, --verbose                  Show internal decisions on stderr
 -V, --version                  Print version and exit
 ```

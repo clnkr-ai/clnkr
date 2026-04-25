@@ -226,11 +226,12 @@ func TestResolveConfigKnownOpenAIResponsesModels(t *testing.T) {
 	}
 }
 
-func TestResolveConfigUnknownOpenAIStyleModelsStayOnChatCompletions(t *testing.T) {
+func TestResolveConfigOpenAIStyleModelsUseResponses(t *testing.T) {
 	tests := []string{
 		"gpt-5.2-chat-latest",
 		"gpt-4o-latest",
 		"codex-mini-latest",
+		"swift-codex",
 		"o4-mini",
 		"GPT-5.9-preview",
 		"  gpt-6  ",
@@ -247,8 +248,8 @@ func TestResolveConfigUnknownOpenAIStyleModelsStayOnChatCompletions(t *testing.T
 			if err != nil {
 				t.Fatalf("ResolveConfig(): %v", err)
 			}
-			if cfg.ProviderAPI != ProviderAPIOpenAIChatCompletions {
-				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIOpenAIChatCompletions)
+			if cfg.ProviderAPI != ProviderAPIOpenAIResponses {
+				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIOpenAIResponses)
 			}
 		})
 	}
@@ -257,9 +258,13 @@ func TestResolveConfigUnknownOpenAIStyleModelsStayOnChatCompletions(t *testing.T
 func TestResolveConfigNegativeExamplesStayOnChatCompletions(t *testing.T) {
 	tests := []string{
 		"chatgpt-4o-latest",
+		"chatgpt-codex",
 		"orca-mini",
+		"orca-codex",
 		"olmo-2",
+		"olmo-codex",
 		"openhermes-2.5",
+		"openhermes-codex",
 		"llama3",
 		"gemini-2.0-flash",
 	}
@@ -385,7 +390,7 @@ func TestResolveConfigAcceptsExplicitCodexChatCompletionsSelections(t *testing.T
 	}
 }
 
-func TestResolveConfigMatchesDatedSnapshotsOnly(t *testing.T) {
+func TestResolveConfigOpenAIStyleFallbackAndDatedSnapshots(t *testing.T) {
 	tests := []struct {
 		name    string
 		model   string
@@ -397,14 +402,14 @@ func TestResolveConfigMatchesDatedSnapshotsOnly(t *testing.T) {
 			wantAPI: ProviderAPIOpenAIResponses,
 		},
 		{
-			name:    "non snapshot suffix stays on chat completions",
+			name:    "openai-looking non snapshot suffix uses responses",
 			model:   "gpt-5.4-preview",
-			wantAPI: ProviderAPIOpenAIChatCompletions,
+			wantAPI: ProviderAPIOpenAIResponses,
 		},
 		{
-			name:    "chat latest suffix stays on chat completions",
+			name:    "chat latest suffix still looks openai",
 			model:   "gpt-5.2-chat-latest",
-			wantAPI: ProviderAPIOpenAIChatCompletions,
+			wantAPI: ProviderAPIOpenAIResponses,
 		},
 		{
 			name:    "non openai looking suffix stays on chat completions",
