@@ -243,6 +243,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case delegateDoneMsg:
 		return m.handleDelegateDone(msg)
 
+	case transcriptPagerDoneMsg:
+		if msg.cleanup != nil {
+			msg.cleanup()
+		}
+		if msg.err != nil {
+			m.chat.appendHostNote(fmt.Sprintf("Open transcript failed: %s", msg.err))
+			m.chat.updateViewport()
+		}
+		return m, nil
+
 	case eventMsg:
 		m.routeEvent(msg.event)
 		m.chat.updateViewport()
@@ -551,6 +561,43 @@ func (m *model) openReasoningModal() {
 		chatH = 1
 	}
 	m.reasoning.show(m.reasoningInfo.latest, m.width, chatH)
+}
+
+func (m model) openTranscriptPager() (tea.Model, tea.Cmd) {
+	if m.shared.agent == nil {
+		m.chat.appendHostNote("No transcript to review.")
+		m.chat.updateViewport()
+		return m, nil
+	}
+	cmd, cleanup, ok, err := prepareTranscriptPagerFunc(m.shared.agent.Messages(), os.Getenv, nil)
+	if err != nil {
+		m.chat.appendHostNote(fmt.Sprintf("Open transcript failed: %s", err))
+		m.chat.updateViewport()
+		return m, nil
+	}
+	if !ok {
+		m.chat.appendHostNote("No transcript to review.")
+		m.chat.updateViewport()
+		return m, nil
+	}
+	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return transcriptPagerDoneMsg{err: err, cleanup: cleanup}
+	})
+}
+
+func (m model) outputTranscriptScrollback() (tea.Model, tea.Cmd) {
+	if m.shared.agent == nil {
+		m.chat.appendHostNote("No transcript to review.")
+		m.chat.updateViewport()
+		return m, nil
+	}
+	content, ok := renderTranscriptReview(m.shared.agent.Messages())
+	if !ok {
+		m.chat.appendHostNote("No transcript to review.")
+		m.chat.updateViewport()
+		return m, nil
+	}
+	return m, tea.Println(transcriptScrollbackBlock(content))
 }
 
 func (m model) handleReasoningKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -1012,6 +1059,10 @@ func (m model) handleViewportKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case msg.Code == tea.KeyEnd:
 		m.chat.viewport.GotoBottom()
 		m.chat.hasNew = false
+	case msg.Code == 'o' && m.statusMode() == "SCROLL":
+		return m.outputTranscriptScrollback()
+	case msg.Code == 'p' && m.statusMode() == "SCROLL":
+		return m.openTranscriptPager()
 	case msg.Code == 'f' && msg.Mod == tea.ModCtrl:
 		// Ctrl+F toggles diff overlay
 		chatH := m.height - statusHeight - m.inputHeight()
@@ -1105,7 +1156,7 @@ func (m model) statusHints() string {
 	case "RUNNING":
 		return "Ctrl+C cancel"
 	case "SCROLL":
-		return "i input | ? help | Ctrl+F diff"
+		return "i input | o scrollback | p pager"
 	default:
 		return "Enter send | ? help"
 	}

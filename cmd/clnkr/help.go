@@ -81,6 +81,8 @@ func helpContent() string {
 		"Scroll",
 		"  j/k              line down/up",
 		"  gg/G             transcript top/bottom",
+		"  o                print transcript to host scrollback",
+		"  p                open transcript in $PAGER",
 		"  g/G              help overlay top/bottom",
 		"  Ctrl+D/Ctrl+U    half page down/up",
 		"  PgDn/PgUp        page down/up",

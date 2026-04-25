@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -761,6 +762,168 @@ func TestModelDiffOverlayToggle(t *testing.T) {
 	m = updateModel(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.diff.visible {
 		t.Error("diff overlay should be hidden after Esc")
+	}
+}
+
+func TestModelTranscriptReviewIgnoresInputMode(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	called := false
+	orig := prepareTranscriptPagerFunc
+	prepareTranscriptPagerFunc = func([]clnkr.Message, func(string) string, executableLookup) (*exec.Cmd, func(), bool, error) {
+		called = true
+		return nil, nil, false, nil
+	}
+	defer func() { prepareTranscriptPagerFunc = orig }()
+
+	m = updateModel(t, m, tea.KeyPressMsg{Code: 'o', Text: "o"})
+	if called {
+		t.Fatal("input-mode o should not open transcript pager")
+	}
+	if got := m.input.textarea.Value(); got != "o" {
+		t.Fatalf("input value = %q, want %q", got, "o")
+	}
+}
+
+func TestModelTranscriptReviewNoAgent(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	m.focus = focusViewport
+	m.shared.agent = nil
+	orig := prepareTranscriptPagerFunc
+	prepareTranscriptPagerFunc = func([]clnkr.Message, func(string) string, executableLookup) (*exec.Cmd, func(), bool, error) {
+		t.Fatal("nil agent should not prepare pager")
+		return nil, nil, false, nil
+	}
+	defer func() { prepareTranscriptPagerFunc = orig }()
+
+	result, cmd := m.Update(tea.KeyPressMsg{Code: 'o'})
+	if cmd != nil {
+		t.Fatal("nil agent should not return pager command")
+	}
+	um, ok := result.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", result)
+	}
+	if !strings.Contains(um.chat.content.String(), "No transcript to review.") {
+		t.Fatalf("expected no-transcript note, got %q", um.chat.content.String())
+	}
+}
+
+func TestModelTranscriptReviewOnlyRunsInIdleScrollMode(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		running       bool
+		approval      bool
+		clarification bool
+	}{
+		{name: "running", running: true},
+		{name: "approval", running: true, approval: true},
+		{name: "clarification", running: true, clarification: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := setupModel()
+			m.focus = focusViewport
+			m.running = tc.running
+			m.awaitingApproval = tc.approval
+			m.awaitingClarification = tc.clarification
+			m.shared.agent = clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+			called := false
+			orig := prepareTranscriptPagerFunc
+			prepareTranscriptPagerFunc = func([]clnkr.Message, func(string) string, executableLookup) (*exec.Cmd, func(), bool, error) {
+				called = true
+				return nil, nil, false, nil
+			}
+			defer func() { prepareTranscriptPagerFunc = orig }()
+
+			for _, key := range []rune{'o', 'p'} {
+				_, cmd := m.Update(tea.KeyPressMsg{Code: key})
+				if called {
+					t.Fatalf("%c should not prepare transcript pager outside idle SCROLL mode", key)
+				}
+				if cmd != nil {
+					t.Fatalf("%c should not return review command outside idle SCROLL mode", key)
+				}
+			}
+		})
+	}
+}
+
+func TestModelTranscriptScrollbackPrintsFromScrollMode(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	m.focus = focusViewport
+	m.shared.agent = clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := m.shared.agent.AddMessages([]clnkr.Message{{Role: "user", Content: "review this"}}); err != nil {
+		t.Fatalf("seed messages: %v", err)
+	}
+	orig := prepareTranscriptPagerFunc
+	prepareTranscriptPagerFunc = func([]clnkr.Message, func(string) string, executableLookup) (*exec.Cmd, func(), bool, error) {
+		t.Fatal("scrollback output should not prepare pager")
+		return nil, nil, false, nil
+	}
+	defer func() { prepareTranscriptPagerFunc = orig }()
+
+	result, cmd := m.Update(tea.KeyPressMsg{Code: 'o'})
+	if cmd == nil {
+		t.Fatal("scroll-mode o should return scrollback print command")
+	}
+	if _, ok := result.(model); !ok {
+		t.Fatalf("expected model, got %T", result)
+	}
+	msg := cmd()
+	body := reflect.ValueOf(msg).FieldByName("messageBody").String()
+	for _, want := range []string{"----- clnkr transcript -----", "User:\nreview this", "----- end clnkr transcript -----"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("scrollback output missing %q: %q", want, body)
+		}
+	}
+}
+
+func TestModelTranscriptPagerOpensFromScrollMode(t *testing.T) {
+	m := setupModel()
+	m.running = false
+	m.focus = focusViewport
+	m.shared.agent = clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := m.shared.agent.AddMessages([]clnkr.Message{{Role: "user", Content: "review this"}}); err != nil {
+		t.Fatalf("seed messages: %v", err)
+	}
+	called := false
+	orig := prepareTranscriptPagerFunc
+	prepareTranscriptPagerFunc = func(messages []clnkr.Message, _ func(string) string, _ executableLookup) (*exec.Cmd, func(), bool, error) {
+		called = true
+		if len(messages) != 1 || messages[0].Content != "review this" {
+			t.Fatalf("messages = %#v, want seeded transcript", messages)
+		}
+		return exec.Command("cat"), func() {}, true, nil
+	}
+	defer func() { prepareTranscriptPagerFunc = orig }()
+
+	result, cmd := m.Update(tea.KeyPressMsg{Code: 'p'})
+	if !called {
+		t.Fatal("scroll-mode p should prepare transcript pager")
+	}
+	if cmd == nil {
+		t.Fatal("scroll-mode p should return pager command")
+	}
+	if _, ok := result.(model); !ok {
+		t.Fatalf("expected model, got %T", result)
+	}
+}
+
+func TestModelTranscriptPagerDoneReportsErrorAndCleansUp(t *testing.T) {
+	m := setupModel()
+	cleaned := false
+
+	m = updateModel(t, m, transcriptPagerDoneMsg{
+		err:     fmt.Errorf("pager failed"),
+		cleanup: func() { cleaned = true },
+	})
+	if !cleaned {
+		t.Fatal("pager cleanup should run")
+	}
+	if !strings.Contains(m.chat.content.String(), "Open transcript failed: pager failed") {
+		t.Fatalf("expected pager error note, got %q", m.chat.content.String())
 	}
 }
 
