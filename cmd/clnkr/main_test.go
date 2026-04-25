@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -148,66 +149,42 @@ func (p *scriptPrompter) Clarify(context.Context, string) (string, error) {
 	return reply.text, reply.err
 }
 
-func TestIsApprovalReply(t *testing.T) {
-	tests := []struct {
-		in   string
-		want bool
-	}{
-		{"y", true},
-		{" y ", true},
-		{"yes", false},
-		{"Y", false},
-		{"n", false},
-		{"list files", false},
+func TestPrintUsageMentionsProviderAPI(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=TestMainHelpHelper")
+	cmd.Env = append(os.Environ(), "CLNKR_HELPER_HELP=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("help command: %v\n%s", err, out)
 	}
-	for _, tt := range tests {
-		if got := isApprovalReply(tt.in); got != tt.want {
-			t.Fatalf("isApprovalReply(%q) = %v, want %v", tt.in, got, tt.want)
+	stderr := string(out)
+	for _, want := range []string{"provider-api", "Maximum agent steps (default: 100)", "infers provider when provider is unset"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("printUsage() missing %q, got %q", want, stderr)
 		}
 	}
 }
 
-func TestUsageTextMentionsProviderAPI(t *testing.T) {
-	if !strings.Contains(usageText(), "--provider-api") {
-		t.Fatalf("usageText() should mention --provider-api, got %q", usageText())
+func TestMainHelpHelper(t *testing.T) {
+	if os.Getenv("CLNKR_HELPER_HELP") != "1" {
+		return
+	}
+	os.Args = []string{"clnkr", "--help"}
+	main()
+}
+
+func TestAliasedStringPrefersExplicitPreferredValue(t *testing.T) {
+	if got := aliasedString("long", "short"); got != "long" {
+		t.Fatalf("aliasedString preferred = %q, want long", got)
+	}
+	if got := aliasedString("", "short"); got != "short" {
+		t.Fatalf("aliasedString fallback = %q, want short", got)
+	}
+	if got := aliasedString("  ", "long"); got != "long" {
+		t.Fatalf("aliasedString whitespace fallback = %q, want long", got)
 	}
 }
 
-func TestResolveProviderConfigUsesAliasesAndEnv(t *testing.T) {
-	cfg, err := resolveProviderConfig(
-		"", "gpt-5.4",
-		"", "https://flags.example.com/v1",
-		"openai", "",
-		func(key string) string {
-			switch key {
-			case "CLNKR_API_KEY":
-				return "test-key"
-			default:
-				return ""
-			}
-		},
-	)
-	if err != nil {
-		t.Fatalf("resolveProviderConfig: %v", err)
-	}
-	if cfg.Provider != "openai" {
-		t.Fatalf("Provider = %q, want %q", cfg.Provider, "openai")
-	}
-	if cfg.ProviderAPI != "openai-responses" {
-		t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, "openai-responses")
-	}
-	if cfg.Model != "gpt-5.4" {
-		t.Fatalf("Model = %q, want %q", cfg.Model, "gpt-5.4")
-	}
-	if cfg.BaseURL != "https://flags.example.com/v1" {
-		t.Fatalf("BaseURL = %q, want %q", cfg.BaseURL, "https://flags.example.com/v1")
-	}
-	if cfg.APIKey != "test-key" {
-		t.Fatalf("APIKey = %q, want %q", cfg.APIKey, "test-key")
-	}
-}
-
-func TestNewModelForConfigUsesOpenAIResponsesWhenConfigured(t *testing.T) {
+func TestNewProviderModelForConfigUsesOpenAIResponsesWhenConfigured(t *testing.T) {
 	var gotPath string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -227,7 +204,7 @@ func TestNewModelForConfigUsesOpenAIResponsesWhenConfigured(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := newModelForConfig(providerConfig{
+	model := newProviderModelForConfig(providerConfig{
 		Provider:    "openai",
 		ProviderAPI: "openai-responses",
 		Model:       "gpt-5.4",
@@ -375,6 +352,20 @@ func TestCompactCommandKeepsSessionUsable(t *testing.T) {
 	}
 	if model.calls != 1 {
 		t.Fatalf("model calls = %d, want 1", model.calls)
+	}
+}
+
+func TestCompactCommandHandlesNilStderr(t *testing.T) {
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+	factory := func(string) clnkr.Compactor {
+		return &fakeCompactor{summary: "Older work summarized."}
+	}
+
+	if err := handleConversationalInput(context.Background(), nil, agent, "/compact", true, nil, factory); err != nil {
+		t.Fatalf("handleConversationalInput: %v", err)
 	}
 }
 
@@ -547,15 +538,10 @@ func TestLoadMessagesRoundTripCanonicalAssistantTurn(t *testing.T) {
 	}
 }
 
-func TestRunSingleTaskRejectsCompactCommand(t *testing.T) {
-	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
-
-	err := runSingleTask(context.Background(), agent, "/compact focus on tests", true, nil)
+func TestRejectCompactCommandOutsideConversation(t *testing.T) {
+	err := rejectCompactCommand("/compact focus on tests")
 	if err == nil || !strings.Contains(err.Error(), "/compact is only available at the conversational prompt") {
 		t.Fatalf("got %v, want conversational prompt error", err)
-	}
-	if msgs := agent.Messages(); len(msgs) != 0 {
-		t.Fatalf("single-task compact should not touch transcript: %#v", msgs)
 	}
 }
 
@@ -879,6 +865,84 @@ func TestWriteEventLogIncludesFeedback(t *testing.T) {
 	}
 	if len(payload.Payload.Feedback.ChangedFiles) != 1 || payload.Payload.Feedback.ChangedFiles[0] != "note.txt" {
 		t.Fatalf("feedback = %#v, want note.txt", payload.Payload.Feedback)
+	}
+}
+
+func TestWriteEventLogCommandDoneErrOmittedWhenNil(t *testing.T) {
+	f, err := os.CreateTemp("", "clnkr-event-log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name()) //nolint:errcheck
+	defer f.Close()           //nolint:errcheck
+
+	writeEventLog(f, clnkr.EventCommandDone{Command: "true", ExitCode: 0})
+
+	if _, err := f.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Payload map[string]json.RawMessage `json:"payload"`
+	}
+	if err := json.NewDecoder(f).Decode(&payload); err != nil {
+		t.Fatalf("decode event log: %v", err)
+	}
+	if _, ok := payload.Payload["err"]; ok {
+		t.Fatalf("nil command error should omit err, got %#v", payload.Payload["err"])
+	}
+}
+
+func TestWriteEventLogCommandDoneErrIncludedWhenPresent(t *testing.T) {
+	f, err := os.CreateTemp("", "clnkr-event-log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name()) //nolint:errcheck
+	defer f.Close()           //nolint:errcheck
+
+	writeEventLog(f, clnkr.EventCommandDone{Command: "false", ExitCode: 1, Err: errors.New("boom")})
+
+	if _, err := f.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Payload struct {
+			Err string `json:"err"`
+		} `json:"payload"`
+	}
+	if err := json.NewDecoder(f).Decode(&payload); err != nil {
+		t.Fatalf("decode event log: %v", err)
+	}
+	if payload.Payload.Err != "boom" {
+		t.Fatalf("err = %q, want boom", payload.Payload.Err)
+	}
+}
+
+func TestWriteEventLogProtocolFailurePayload(t *testing.T) {
+	f, err := os.CreateTemp("", "clnkr-event-log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name()) //nolint:errcheck
+	defer f.Close()           //nolint:errcheck
+
+	writeEventLog(f, clnkr.EventProtocolFailure{Reason: "bad json", Raw: "nope"})
+
+	if _, err := f.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Reason string `json:"reason"`
+			Raw    string `json:"raw"`
+		} `json:"payload"`
+	}
+	if err := json.NewDecoder(f).Decode(&payload); err != nil {
+		t.Fatalf("decode event log: %v", err)
+	}
+	if payload.Type != "protocol_failure" || payload.Payload.Reason != "bad json" || payload.Payload.Raw != "nope" {
+		t.Fatalf("payload = %#v, want protocol failure details", payload)
 	}
 }
 

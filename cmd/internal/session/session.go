@@ -2,14 +2,11 @@ package session
 
 import (
 	"crypto/sha256"
-	"encoding/base32"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/clnkr-ai/clnkr"
@@ -23,13 +20,12 @@ type SessionInfo struct {
 }
 
 type sessionFile struct {
-	Created  string          `json:"created"`
+	Created  time.Time       `json:"created"`
 	Messages []clnkr.Message `json:"messages"`
 }
 
-// NormalizeProjectPath converts an absolute working directory to a unique,
-// collision-free normalized identifier for session storage.
-// Returns lowercase base32(sha256(path))[:16].
+// NormalizeProjectPath converts an absolute working directory to a stable
+// 16-character hex identifier for session storage.
 func NormalizeProjectPath(path string) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("normalize project path: empty path")
@@ -39,8 +35,7 @@ func NormalizeProjectPath(path string) (string, error) {
 	}
 
 	hash := sha256.Sum256([]byte(path))
-	normalized := base32.StdEncoding.EncodeToString(hash[:])
-	return strings.ToLower(normalized[:16]), nil
+	return fmt.Sprintf("%x", hash[:8]), nil
 }
 
 // SessionDir returns the session directory for the given working directory.
@@ -74,38 +69,14 @@ func SaveSession(pwd string, messages []clnkr.Message) error {
 		return fmt.Errorf("save session: mkdir: %w", err)
 	}
 
-	// Find next session number by scanning existing files
-	nextNum := 0
-	entries, _ := os.ReadDir(dir)
-	for _, e := range entries {
-		name := e.Name()
-		if filepath.Ext(name) != ".json" || e.IsDir() {
-			continue
-		}
-		// Parse "N-timestamp.json" to find highest N
-		if idx := strings.IndexByte(name, '-'); idx > 0 {
-			if n, err := strconv.Atoi(name[:idx]); err == nil && n >= nextNum {
-				nextNum = n + 1
-			}
-		}
-	}
-
-	timestamp := time.Now().UTC().Format("2006-01-02T150405.000000Z")
-	filename := fmt.Sprintf("%d-%s.json", nextNum, timestamp)
-	fpath := filepath.Join(dir, filename)
-
-	f, err := os.OpenFile(fpath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	now := time.Now().UTC()
+	f, err := openSessionFile(dir, now)
 	if err != nil {
 		return fmt.Errorf("save session: open: %w", err)
 	}
 	defer f.Close() //nolint:errcheck
 
-	data := sessionFile{
-		Created:  time.Now().UTC().Format(time.RFC3339Nano),
-		Messages: messages,
-	}
-
-	if err := json.NewEncoder(f).Encode(data); err != nil {
+	if err := json.NewEncoder(f).Encode(sessionFile{Created: now, Messages: messages}); err != nil {
 		return fmt.Errorf("save session: encode: %w", err)
 	}
 
@@ -120,56 +91,33 @@ func LoadLatestSession(pwd string) ([]clnkr.Message, error) {
 		return nil, fmt.Errorf("load latest session: %w", err)
 	}
 
-	entries, err := os.ReadDir(dir)
+	files, err := sessionFiles(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("load latest session: readdir: %w", err)
 	}
-
-	// Find file with highest sequence number
-	var latestFile string
-	latestNum := -1
-	for _, e := range entries {
-		name := e.Name()
-		if filepath.Ext(name) != ".json" || e.IsDir() {
-			continue
-		}
-		if idx := strings.IndexByte(name, '-'); idx > 0 {
-			if n, err := strconv.Atoi(name[:idx]); err == nil && n > latestNum {
-				latestNum = n
-				latestFile = name
-			}
-		}
-	}
-
-	if latestFile == "" {
+	if len(files) == 0 {
 		return nil, nil
 	}
-
-	data, err := os.ReadFile(filepath.Join(dir, latestFile))
+	sf, err := loadSessionFile(filepath.Join(dir, files[0].Name()))
 	if err != nil {
-		return nil, fmt.Errorf("load latest session: read: %w", err)
-	}
-
-	var sf sessionFile
-	if err := json.Unmarshal(data, &sf); err != nil {
-		return nil, fmt.Errorf("load latest session: parse: %w", err)
+		return nil, fmt.Errorf("load latest session: %w", err)
 	}
 
 	return sf.Messages, nil
 }
 
 // ListSessions lists all sessions for the given working directory,
-// sorted by creation time (newest first).
+// sorted by sortable filename (newest first).
 func ListSessions(pwd string) ([]SessionInfo, error) {
 	dir, err := SessionDir(pwd)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
 
-	entries, err := os.ReadDir(dir)
+	files, err := sessionFiles(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -178,32 +126,52 @@ func ListSessions(pwd string) ([]SessionInfo, error) {
 	}
 
 	var sessions []SessionInfo
-	for _, e := range entries {
-		name := e.Name()
-		if filepath.Ext(name) != ".json" || e.IsDir() {
-			continue
-		}
-
-		data, err := os.ReadFile(filepath.Join(dir, name))
+	for _, e := range files {
+		sf, err := loadSessionFile(filepath.Join(dir, e.Name()))
 		if err != nil {
 			continue
 		}
-		var sf sessionFile
-		if json.Unmarshal(data, &sf) != nil {
-			continue
-		}
-
-		created, _ := time.Parse(time.RFC3339Nano, sf.Created)
 		sessions = append(sessions, SessionInfo{
-			Filename: name,
-			Created:  created,
+			Filename: e.Name(),
+			Created:  sf.Created,
 			Messages: len(sf.Messages),
 		})
 	}
 
-	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].Created.After(sessions[j].Created)
-	})
-
 	return sessions, nil
+}
+
+func sessionFiles(dir string) ([]os.DirEntry, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	files := entries[:0]
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".json" && !e.IsDir() {
+			files = append(files, e)
+		}
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Name() > files[j].Name() })
+	return files, nil
+}
+
+func loadSessionFile(path string) (sessionFile, error) {
+	var sf sessionFile
+	data, err := os.ReadFile(path)
+	if err == nil {
+		err = json.Unmarshal(data, &sf)
+	}
+	return sf, err
+}
+
+func openSessionFile(dir string, now time.Time) (*os.File, error) {
+	prefix := now.Format("2006-01-02T150405.000000000Z")
+	for i := 0; i < 1000; i++ {
+		f, err := os.OpenFile(filepath.Join(dir, fmt.Sprintf("%s-%03d.json", prefix, i)), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil || !os.IsExist(err) {
+			return f, err
+		}
+	}
+	return nil, fmt.Errorf("too many sessions for timestamp %s", prefix)
 }

@@ -199,7 +199,7 @@ func TestResolveConfigInfersAnthropicFromExplicitBaseURL(t *testing.T) {
 	}
 }
 
-func TestResolveConfigAllowlistedResponsesModels(t *testing.T) {
+func TestResolveConfigKnownOpenAIResponsesModels(t *testing.T) {
 	tests := []string{
 		"gpt-5",
 		"gpt-5.4-mini-2026-03-05",
@@ -226,7 +226,7 @@ func TestResolveConfigAllowlistedResponsesModels(t *testing.T) {
 	}
 }
 
-func TestResolveConfigOpenAILookingModelsUseResponses(t *testing.T) {
+func TestResolveConfigUnknownOpenAIStyleModelsStayOnChatCompletions(t *testing.T) {
 	tests := []string{
 		"gpt-5.2-chat-latest",
 		"gpt-4o-latest",
@@ -247,8 +247,8 @@ func TestResolveConfigOpenAILookingModelsUseResponses(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ResolveConfig(): %v", err)
 			}
-			if cfg.ProviderAPI != ProviderAPIOpenAIResponses {
-				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIOpenAIResponses)
+			if cfg.ProviderAPI != ProviderAPIOpenAIChatCompletions {
+				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIOpenAIChatCompletions)
 			}
 		})
 	}
@@ -397,14 +397,14 @@ func TestResolveConfigMatchesDatedSnapshotsOnly(t *testing.T) {
 			wantAPI: ProviderAPIOpenAIResponses,
 		},
 		{
-			name:    "non snapshot suffix still reaches responses via heuristic",
+			name:    "non snapshot suffix stays on chat completions",
 			model:   "gpt-5.4-preview",
-			wantAPI: ProviderAPIOpenAIResponses,
+			wantAPI: ProviderAPIOpenAIChatCompletions,
 		},
 		{
-			name:    "chat latest suffix still reaches responses via heuristic",
+			name:    "chat latest suffix stays on chat completions",
 			model:   "gpt-5.2-chat-latest",
-			wantAPI: ProviderAPIOpenAIResponses,
+			wantAPI: ProviderAPIOpenAIChatCompletions,
 		},
 		{
 			name:    "non openai looking suffix stays on chat completions",

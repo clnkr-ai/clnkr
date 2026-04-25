@@ -2,6 +2,7 @@ package compaction
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -50,21 +51,12 @@ func (m modelCompactor) Summarize(ctx context.Context, messages []clnkr.Message)
 
 func buildSummarizeMessages(messages []clnkr.Message) []clnkr.Message {
 	sourceBody := formatSourceText(messages)
-	fullSource := sourceTextOpen + sourceBody + sourceTextClose
-	if len(fullSource)+len(summarizeRequest) <= summarizeInputCharBudget {
-		return []clnkr.Message{
-			{Role: "user", Content: fullSource},
-			{Role: "user", Content: summarizeRequest},
-		}
+	available := summarizeInputCharBudget - len(sourceTextOpen) - len(sourceTextClose) - len(summarizeRequest)
+	if len(sourceBody) > available {
+		sourceBody = truncationHeader + tailStringWithinByteBudget(sourceBody, max(available-len(truncationHeader), 0))
 	}
-
-	available := summarizeInputCharBudget - len(sourceTextOpen) - len(sourceTextClose) - len(truncationHeader) - len(summarizeRequest)
-	if available < 0 {
-		available = 0
-	}
-	truncatedSource := sourceTextOpen + truncationHeader + tailStringWithinByteBudget(sourceBody, available) + sourceTextClose
 	return []clnkr.Message{
-		{Role: "user", Content: truncatedSource},
+		{Role: "user", Content: sourceTextOpen + sourceBody + sourceTextClose},
 		{Role: "user", Content: summarizeRequest},
 	}
 }
@@ -72,11 +64,7 @@ func buildSummarizeMessages(messages []clnkr.Message) []clnkr.Message {
 func formatSourceText(messages []clnkr.Message) string {
 	var b strings.Builder
 	for _, msg := range messages {
-		b.WriteString("[")
-		b.WriteString(msg.Role)
-		b.WriteString("]\n")
-		b.WriteString(msg.Content)
-		b.WriteString("\n\n")
+		fmt.Fprintf(&b, "[%s]\n%s\n\n", msg.Role, msg.Content)
 	}
 	return b.String()
 }
@@ -89,18 +77,9 @@ func tailStringWithinByteBudget(content string, budget int) string {
 		return content
 	}
 
-	start := len(content)
-	for start > 0 {
-		prevStart := start
-		prev, size := utf8.DecodeLastRuneInString(content[:start])
-		if prev == utf8.RuneError && size == 0 {
-			break
-		}
-		start -= size
-		if len(content)-start > budget {
-			return content[prevStart:]
-		}
+	for len(content) > budget {
+		_, size := utf8.DecodeRuneInString(content)
+		content = content[size:]
 	}
-
 	return content
 }
