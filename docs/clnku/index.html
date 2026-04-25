@@ -8,205 +8,27 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body class="page-docs">
-    <a class="skip-link" href="#main-content">Skip to content</a>
-    <div class="viewport">
-      <div class="screen">
-        <header class="status-bar">
-          <a class="status-link" href="/">F1 Help</a>
-          <a class="status-link" href="/docs/">F2 Docs</a>
-          <a class="status-link" href="https://github.com/clnkr-ai/clnkr">F3 GitHub</a>
-        </header>
-
-        <main id="main-content" class="screen-main">
-          
+  <center><h1>clnkr</h1><center>... coming soon
   
-  <div class="docs-grid docs-grid-single">
-    <aside class="pane">
-      <div class="pane-bar">
-        <span>docs.nav</span>
-        <span>docs</span>
-      </div>
-      <div class="pane-body">
-        <p class="line-label">PAGE</p>
-        <h1>clnku</h1>
-        <p class="page-summary">Plain CLI manual page</p>
-        <nav class="docs-nav" aria-label="Documentation">
-          <a href="/docs/">Overview</a>
-          
-            <a class="" href="/docs/clnkr/">clnkr</a>
-          
-            <a class="is-active" href="/docs/clnku/">clnku</a>
-          
-            <a class="" href="/docs/clankerval/">clankerval</a>
-          
-        </nav>
-      </div>
-    </aside>
-
-    <article class="pane pane-wide">
-      <div class="pane-bar">
-        <span>clnku</span>
-        <span>manual</span>
-      </div>
-      <div class="pane-body doc-body">
-        <h1 id="name">NAME</h1>
-<p>clnku - a minimal coding agent (plain CLI)</p>
-<h1 id="synopsis">SYNOPSIS</h1>
-<p><strong>clnku</strong> [<strong>-p</strong>|<strong>&ndash;prompt</strong> <em>task</em>] [<strong>-m</strong>|<strong>&ndash;model</strong> <em>name</em>]
-[<strong>-u</strong>|<strong>&ndash;base-url</strong> <em>url</em>] [<strong>&ndash;provider</strong> <em>mode</em>]
-[<strong>&ndash;provider-api</strong> <em>surface</em>] [<strong>&ndash;max-steps</strong> <em>n</em>]
-[<strong>&ndash;full-send</strong>] [<strong>-c</strong>|<strong>&ndash;continue</strong>]
-[<strong>-l</strong>|<strong>&ndash;list-sessions</strong>] [<strong>-S</strong>|<strong>&ndash;no-system-prompt</strong>]
-[<strong>&ndash;system-prompt-append</strong> <em>text</em>] [<strong>&ndash;dump-system-prompt</strong>]
-[<strong>&ndash;load-messages</strong> <em>file</em>] [<strong>&ndash;event-log</strong> <em>file</em>]
-[<strong>&ndash;trajectory</strong> <em>file</em>] [<strong>-v</strong>|<strong>&ndash;verbose</strong>]
-[<strong>-V</strong>|<strong>&ndash;version</strong>]</p>
-<h1 id="description">DESCRIPTION</h1>
-<p><strong>clnku</strong> is a minimal coding agent that queries LLMs and executes bash
-commands using a structured JSON turn protocol. It supports the
-Anthropic Messages API and OpenAI-compatible APIs that implement
-structured outputs on the selected model path.</p>
-<p>In default mode, <strong>clnku</strong> starts an interactive REPL. With <strong>-p</strong>, it
-runs a single task and exits.</p>
-<p>At the main idle conversational prompt, <strong>/compact</strong> summarizes older
-transcript history while keeping recent context intact for the current
-working thread.</p>
-<p><strong>clnku</strong> is the plain CLI variant of the clnkr project, with no
-external dependencies beyond the Go standard library. A TUI variant is
-available as <strong>clnkr</strong>(1).</p>
-<p>The agent communicates through JSON turns: <strong>act</strong> (execute a command
-through a nested <code>bash.command</code> plus optional <code>bash.workdir</code>),
-<strong>clarify</strong> (ask the user), and <strong>done</strong> (signal completion).</p>
-<p>By default, <strong>clnku</strong> asks for approval before each <strong>act</strong> turn.
-Approval prompts show the requested command and any explicit workdir
-override. Pass <strong>&ndash;full-send</strong> to execute commands immediately without
-approval.</p>
-<p>For Anthropic runs, <strong>clnku</strong> requests Anthropic&rsquo;s native structured
-output format on every turn. Keep <strong>&ndash;model</strong> on a model Anthropic
-documents as supporting structured output.</p>
-<p>On OpenAI-compatible backends, the selected model path must support
-structured outputs. If a backend rejects the resolved OpenAI API
-surface, <strong>clnku</strong> returns the provider error. When a proxy or gateway
-expects a different OpenAI surface, override with <strong>&ndash;provider-api</strong> or
-<strong>CLNKR_PROVIDER_API</strong>.</p>
-<p><strong>clnku</strong> rejects <code>gpt-5.2-pro</code>, <code>gpt-5.4-pro</code>, and their dated
-snapshots even if you force <strong>openai-chat-completions</strong>, because agent
-turns require structured outputs.</p>
-<p>Project-specific instructions are loaded from an <strong>AGENTS.md</strong> file in
-the current working directory, if present.</p>
-<h1 id="options">OPTIONS</h1>
-<p><strong>-p</strong>, <strong>&ndash;prompt</strong> <em>task</em><br>
-Run the given task and exit. Without this flag, clnku starts in
-conversational REPL mode.</p>
-<p><strong>-m</strong>, <strong>&ndash;model</strong> <em>name</em><br>
-LLM model identifier. Required unless <strong>CLNKR_MODEL</strong> is set.</p>
-<p><strong>-u</strong>, <strong>&ndash;base-url</strong> <em>url</em><br>
-LLM endpoint transport URL. If omitted, clnku uses the provider default:
-<strong><a href="https://api.anthropic.com">https://api.anthropic.com</a></strong> for <strong>anthropic</strong> or
-<strong><a href="https://api.openai.com/v1">https://api.openai.com/v1</a></strong> for <strong>openai</strong>. <strong>CLNKR_BASE_URL</strong>
-overrides the default when set.</p>
-<p><strong>&ndash;provider</strong> <em>mode</em><br>
-Provider adapter semantics: <strong>anthropic</strong> or <strong>openai</strong>. Required in
-normal use unless <strong>CLNKR_PROVIDER</strong> is set. Compatibility fallback: if
-provider is unset but <strong>&ndash;base-url</strong> or <strong>CLNKR_BASE_URL</strong> is explicitly
-set, clnku infers the provider from that URL.</p>
-<p><strong>&ndash;provider-api</strong> <em>surface</em><br>
-OpenAI-only API surface override: <strong>auto</strong>, <strong>openai-chat-completions</strong>,
-or <strong>openai-responses</strong>. With <strong>provider=openai</strong>, <strong>auto</strong> prefers
-<strong>openai-responses</strong> for known supported names and other OpenAI-looking
-model names such as <strong>gpt-</strong><em>, <strong>o</strong> followed by a digit, and
-<strong>codex</strong></em>. Names that do not look OpenAI-ish, such as <strong>llama3</strong>,
-<strong>gemini-2.0-flash</strong>, <strong>orca-</strong><em>, <strong>olmo-</strong></em>, <strong>openhermes-</strong><em>, and
-<strong>chatgpt-</strong></em>, stay on <strong>openai-chat-completions</strong>. This flag is
-rejected for <strong>provider=anthropic</strong>.</p>
-<p><strong>&ndash;max-steps</strong> <em>n</em><br>
-Maximum agent iterations. 0 uses the default of 100.</p>
-<p><strong>&ndash;full-send</strong><br>
-Execute every <strong>act</strong> turn immediately. Without this flag, clnku asks
-for approval before each command.</p>
-<p><strong>-c</strong>, <strong>&ndash;continue</strong><br>
-Resume the most recent session for the current project directory. Saved
-JSON <strong>[state]</strong> messages restore the last persisted working
-directory. Mutually exclusive with <strong>&ndash;trajectory</strong>.</p>
-<p><strong>-l</strong>, <strong>&ndash;list-sessions</strong><br>
-List all saved sessions for the current project directory and exit.</p>
-<p><strong>-S</strong>, <strong>&ndash;no-system-prompt</strong><br>
-Omit the built-in system prompt entirely.</p>
-<p><strong>&ndash;system-prompt-append</strong> <em>text</em><br>
-Append <em>text</em> to the built-in system prompt after any loaded
-<strong>AGENTS.md</strong> content.</p>
-<p><strong>&ndash;dump-system-prompt</strong><br>
-Print the composed system prompt and exit.</p>
-<p><strong>&ndash;load-messages</strong> <em>file</em><br>
-Read a JSON array of messages from <em>file</em> and prepend them to the
-conversation before starting. The format matches <strong>&ndash;trajectory</strong>
-output, so one agent&rsquo;s trajectory can seed another agent&rsquo;s context.
-Host-generated JSON <strong>[state]</strong> messages in that transcript restore
-the current working directory.</p>
-<p><strong>&ndash;event-log</strong> <em>file</em><br>
-Write every agent event as a JSONL line to <em>file</em>. Each line is a JSON
-object with &ldquo;type&rdquo; and &ldquo;payload&rdquo; fields. Uses O_APPEND for atomic
-writes, safe to tail from another process.</p>
-<p><strong>&ndash;trajectory</strong> <em>file</em><br>
-After the task finishes, write the full message history as
-pretty-printed JSON to <em>file</em>. Written before exit, even on error. Only
-applies to single-task mode (<strong>-p</strong>), not the REPL. Mutually exclusive
-with <strong>&ndash;continue</strong>.</p>
-<p><strong>-v</strong>, <strong>&ndash;verbose</strong><br>
-Show internal decisions (queries, parsing, working directory).</p>
-<p><strong>-V</strong>, <strong>&ndash;version</strong><br>
-Print version and exit.</p>
-<h1 id="interactive-commands">INTERACTIVE COMMANDS</h1>
-<p><strong>/compact</strong> [<em>instructions</em>]<br>
-At the idle conversational prompt, summarize older transcript history
-while keeping the recent working thread intact. Optional trailing text
-is passed to the compaction summarizer as extra instructions.</p>
-<p>This command is only available at the top-level conversational prompt.
-In single-task mode, approval replies, and clarification replies, the
-literal text is treated as normal input or rejected with an error rather
-than triggering compaction.</p>
-<h1 id="environment">ENVIRONMENT</h1>
-<p><strong>CLNKR_API_KEY</strong><br>
-API key for the LLM provider (required).</p>
-<p><strong>CLNKR_PROVIDER</strong><br>
-Provider adapter semantics.</p>
-<p><strong>CLNKR_PROVIDER_API</strong><br>
-OpenAI-only API surface override.</p>
-<p><strong>CLNKR_MODEL</strong><br>
-Default model identifier when <strong>&ndash;model</strong> is not provided.</p>
-<p><strong>CLNKR_BASE_URL</strong><br>
-Default LLM endpoint when <strong>&ndash;base-url</strong> is not provided.</p>
-<h1 id="files">FILES</h1>
-<p><strong>AGENTS.md</strong><br>
-If present in the current directory, its contents are appended to the
-system prompt as project-specific instructions.</p>
-<h1 id="exit-status">EXIT STATUS</h1>
-<p><strong>0</strong><br>
-Success.</p>
-<p><strong>1</strong><br>
-Error (no API key, step limit reached, invalid flags, session load
-failure, etc.).</p>
-<p><strong>2</strong><br>
-In single-task mode with <strong>&ndash;full-send</strong>, the run stopped because the
-agent asked for clarification.</p>
-<h1 id="see-also">SEE ALSO</h1>
-<p><strong>clnkr</strong>(1)</p>
-<h1 id="author">AUTHOR</h1>
-<p>Brian Cosgrove <a href="mailto:cosgroveb@gmail.com">cosgroveb@gmail.com</a></p>
-
-      </div>
-    </article>
-  </div>
-
-        </main>
-
-        <footer class="window-bar window-bar-bottom">
-          <a href="/docs/clnkr/">man clnkr</a>
-          <a href="/evaluations/">/evals/</a>
-          <a href="/docs/">/docs/</a>
-          <a href="https://github.com/clnkr-ai/clnkr">github.com/clnkr-ai/clnkr</a>
-        </footer>
-      </div>
-    </div>
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
   </body>
 </html>

@@ -8,185 +8,27 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body class="page-docs">
-    <a class="skip-link" href="#main-content">Skip to content</a>
-    <div class="viewport">
-      <div class="screen">
-        <header class="status-bar">
-          <a class="status-link" href="/">F1 Help</a>
-          <a class="status-link" href="/docs/">F2 Docs</a>
-          <a class="status-link" href="https://github.com/clnkr-ai/clnkr">F3 GitHub</a>
-        </header>
-
-        <main id="main-content" class="screen-main">
-          
+  <center><h1>clnkr</h1><center>... coming soon
   
-  <div class="docs-grid docs-grid-single">
-    <aside class="pane">
-      <div class="pane-bar">
-        <span>docs.nav</span>
-        <span>docs</span>
-      </div>
-      <div class="pane-body">
-        <p class="line-label">PAGE</p>
-        <h1>clankerval</h1>
-        <p class="page-summary">Evaluation runner manual page</p>
-        <nav class="docs-nav" aria-label="Documentation">
-          <a href="/docs/">Overview</a>
-          
-            <a class="" href="/docs/clnkr/">clnkr</a>
-          
-            <a class="" href="/docs/clnku/">clnku</a>
-          
-            <a class="is-active" href="/docs/clankerval/">clankerval</a>
-          
-        </nav>
-      </div>
-    </aside>
-
-    <article class="pane pane-wide">
-      <div class="pane-bar">
-        <span>clankerval</span>
-        <span>manual</span>
-      </div>
-      <div class="pane-body doc-body">
-        <h1 id="name">NAME</h1>
-<p>clankerval - evaluation runner for checked-in agent suites</p>
-<h1 id="synopsis">SYNOPSIS</h1>
-<p><strong>clankerval</strong> [<strong>&ndash;help</strong>] [<strong>&ndash;version</strong>] <em>command</em> [<em>flags</em>]</p>
-<h1 id="description">DESCRIPTION</h1>
-<p><strong>clankerval</strong> loads checked-in evaluation suites, runs trial workspaces
-against an agent CLI, grades the result, and writes per-trial bundles
-plus run-level reports.</p>
-<p>Today the runner supports two agent adapters: <strong>clnku</strong> and Claude Code.</p>
-<p>The two top-level commands are <strong>run</strong> and <strong>init</strong>.</p>
-<h1 id="commands">COMMANDS</h1>
-<p><strong>run</strong><br>
-Run an evaluation suite against the current directory.</p>
-<p><strong>init</strong><br>
-Scaffold an <strong>evaluations/</strong> directory with the default live-provider
-example suite.</p>
-<h1 id="run-options">RUN OPTIONS</h1>
-<p><strong>&ndash;suite</strong> <em>id</em><br>
-Suite identifier to run. Defaults to <strong>default</strong>.</p>
-<p><strong>&ndash;agent</strong> <em>id</em><br>
-Default agent under test. Must be <strong>clnku</strong> or <strong>claude</strong>. This is only
-the lowest-precedence selector. Effective agent resolution is
-<strong>task.agent</strong>, then <strong>suite.agent</strong>, then <strong>&ndash;agent</strong>. When no level
-sets an agent, the default is <strong>clnku</strong>.</p>
-<p><strong>&ndash;binary</strong> <em>path</em><br>
-Path to the <strong>clnku</strong> binary under test. When omitted, <strong>clankerval</strong>
-builds <strong>./cmd/clnku</strong> from the current source tree when present;
-otherwise it resolves <strong>clnku</strong> from <strong>PATH</strong>. Claude runs ignore this
-flag and resolve <strong>claude</strong> from <strong>PATH</strong> instead.</p>
-<p><strong>&ndash;evals-dir</strong> <em>path</em><br>
-Evaluations directory. Defaults to <strong>./evaluations</strong> relative to the
-current working directory.</p>
-<p><strong>&ndash;output-dir</strong> <em>path</em><br>
-Output directory for trial bundles and reports. Defaults to the
-evaluations directory.</p>
-<h1 id="evaluation-files">EVALUATION FILES</h1>
-<p><code>clankerval init</code> creates this shape:</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-text" data-lang="text"><span style="display:flex;"><span>evaluations/
-</span></span><span style="display:flex;"><span>  suites/
-</span></span><span style="display:flex;"><span>    default/
-</span></span><span style="display:flex;"><span>      suite.json
-</span></span><span style="display:flex;"><span>      tasks/
-</span></span><span style="display:flex;"><span>        001-example/
-</span></span><span style="display:flex;"><span>          task.json
-</span></span><span style="display:flex;"><span>          input/
-</span></span><span style="display:flex;"><span>            instruction.txt
-</span></span></code></pre></div><p><strong>suite.json</strong><br>
-Declares <strong>id</strong>, <strong>description</strong>, <strong>mode</strong>, optional <strong>agent</strong>,
-<strong>trials_per_task</strong>, <strong>failure_policy</strong>, and the ordered task list.</p>
-<p><strong>task.json</strong><br>
-Declares <strong>instruction_file</strong>, <strong>working_directory</strong>, <strong>step_limit</strong>,
-<strong>full_send</strong>, optional <strong>seed_transcript_file</strong>, optional <strong>mode</strong>,
-optional <strong>agent</strong>, optional <strong>scripted_turns_file</strong>, and grader
-configuration.</p>
-<p><strong>scripted_turns_file</strong><br>
-Required only for <strong>mock-provider</strong> tasks.</p>
-<p><strong>input/project/AGENTS.md</strong><br>
-Project-local prompt file staged into the workspace for <strong>clnku</strong> tasks.</p>
-<p><strong>input/project/CLAUDE.md</strong><br>
-Project-local prompt file staged into the workspace for Claude tasks.</p>
-<h1 id="environment">ENVIRONMENT</h1>
-<p><strong>CLNKR_EVALUATION_MODE</strong><br>
-Run mode. Must be <strong>mock-provider</strong> or <strong>live-provider</strong>. Defaults to
-<strong>mock-provider</strong> when unset.</p>
-<p><strong>CLNKR_EVALUATION_API_KEY</strong><br>
-Required in <strong>live-provider</strong> mode by the shared run-config contract.</p>
-<p><strong>CLNKR_EVALUATION_BASE_URL</strong><br>
-Required in <strong>live-provider</strong> mode. Recorded in bundle metadata as the
-configured provider endpoint.</p>
-<p><strong>CLNKR_EVALUATION_MODEL</strong><br>
-Optional in <strong>live-provider</strong> mode. Defaults to <strong>gpt-5.4-nano</strong> when
-unset. Recorded in bundle metadata as the configured provider model.</p>
-<p><strong>ANTHROPIC_API_KEY</strong><br>
-Forwarded into Claude runs when present. In practice, Claude live runs
-need this set and need the <strong>claude</strong> CLI on <strong>PATH</strong>.</p>
-<h1 id="output">OUTPUT</h1>
-<p>Each trial writes a bundle under the selected output directory.
-Important artifacts include:</p>
-<p><strong>bundle.json</strong><br>
-Canonical bundle metadata, including suite, task, trial, mode, resolved
-agent, provider metadata, and artifact paths.</p>
-<p><strong>raw/agent/</strong><br>
-Native agent artifacts, for example <strong>trajectory.json</strong> and
-<strong>events.jsonl</strong> for <strong>clnku</strong>, or <strong>transcript.jsonl</strong> and
-<strong>result.json</strong> for Claude.</p>
-<p><strong>raw/commands.jsonl</strong><br>
-Agent-neutral command trace used by graders such as
-<strong>transcript_command_trace</strong>.</p>
-<p><strong>normalized/transcript.jsonl</strong><br>
-Canonical visible transcript events.</p>
-<p><strong>normalized/outcome.json</strong><br>
-Canonical outcome record.</p>
-<p><strong>normalized/graders.jsonl</strong><br>
-Normalized grader results.</p>
-<h1 id="examples">EXAMPLES</h1>
-<p>Run this repo&rsquo;s checked-in dummy self-test suite:</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>make evaluations
-</span></span></code></pre></div><p>Scaffold the default suite:</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>clankerval init
-</span></span></code></pre></div><p>Run a consuming project&rsquo;s suite against <strong>clnku</strong>:</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>export CLNKR_EVALUATION_MODE<span style="color:#f92672">=</span>live-provider
-</span></span><span style="display:flex;"><span>export CLNKR_EVALUATION_API_KEY<span style="color:#f92672">=</span>your-api-key
-</span></span><span style="display:flex;"><span>export CLNKR_EVALUATION_BASE_URL<span style="color:#f92672">=</span>https://api.openai.com/v1
-</span></span><span style="display:flex;"><span>export CLNKR_EVALUATION_MODEL<span style="color:#f92672">=</span>gpt-5.4-nano
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span>clankerval run --suite default --binary /path/to/clnku
-</span></span></code></pre></div><p>Run a consuming project&rsquo;s suite against Claude Code:</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>export CLNKR_EVALUATION_MODE<span style="color:#f92672">=</span>live-provider
-</span></span><span style="display:flex;"><span>export CLNKR_EVALUATION_API_KEY<span style="color:#f92672">=</span>placeholder
-</span></span><span style="display:flex;"><span>export CLNKR_EVALUATION_BASE_URL<span style="color:#f92672">=</span>https://api.anthropic.com
-</span></span><span style="display:flex;"><span>export CLNKR_EVALUATION_MODEL<span style="color:#f92672">=</span>claude-code-default
-</span></span><span style="display:flex;"><span>export ANTHROPIC_API_KEY<span style="color:#f92672">=</span>your-anthropic-key
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span>clankerval run --suite default --agent claude
-</span></span></code></pre></div><p>Run the checked-in manual Claude smoke suite:</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>CLANKERVAL_CLAUDE_LIVE_SMOKE<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span> <span style="color:#ae81ff">\
-</span></span></span><span style="display:flex;"><span>go test ./internal/evaluations -run TestClaudeLiveSmokeSuite -count<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>
-</span></span></code></pre></div><h1 id="exit-status">EXIT STATUS</h1>
-<p><strong>0</strong><br>
-Success.</p>
-<p><strong>1</strong><br>
-Error.</p>
-<h1 id="author">AUTHOR</h1>
-<p>Brian Cosgrove <a href="mailto:cosgroveb@gmail.com">cosgroveb@gmail.com</a></p>
-
-      </div>
-    </article>
-  </div>
-
-        </main>
-
-        <footer class="window-bar window-bar-bottom">
-          <a href="/docs/clnkr/">man clnkr</a>
-          <a href="/evaluations/">/evals/</a>
-          <a href="/docs/">/docs/</a>
-          <a href="https://github.com/clnkr-ai/clnkr">github.com/clnkr-ai/clnkr</a>
-        </footer>
-      </div>
-    </div>
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
   </body>
 </html>
