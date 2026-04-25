@@ -8,26 +8,27 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body class="{{ if .IsHome }}page-home{{ else if eq .Section "docs" }}page-docs{{ else if eq .Section "evaluations" }}page-home{{ else }}page-default{{ end }}">
-    <a class="skip-link" href="#main-content">Skip to content</a>
-    <div class="viewport">
-      <div class="screen">
-        <header class="status-bar">
-          <a class="status-link" href="{{ .Site.Params.shortcuts.help }}">F1 Help</a>
-          <a class="status-link" href="{{ .Site.Params.shortcuts.docs }}">F2 Docs</a>
-          <a class="status-link" href="{{ .Site.Params.shortcuts.github }}">F3 GitHub</a>
-        </header>
-
-        <main id="main-content" class="screen-main">
-          {{ block "main" . }}{{ end }}
-        </main>
-
-        <footer class="window-bar window-bar-bottom">
-          <a href="/docs/clnkr/">man clnkr</a>
-          <a href="/evaluations/">/evals/</a>
-          <a href="/docs/">/docs/</a>
-          <a href="{{ .Site.Params.shortcuts.github }}">github.com/clnkr-ai/clnkr</a>
-        </footer>
-      </div>
-    </div>
+  <center><h1>clnkr</h1><center>... coming soon
+  <!--   <a class="skip-link" href="#main-content">Skip to content</a> -->
+  <!--   <div class="viewport"> -->
+  <!--     <div class="screen"> -->
+  <!--       <header class="status-bar"> -->
+  <!--         <a class="status-link" href="{{ .Site.Params.shortcuts.help }}">F1 Help</a> -->
+  <!--         <a class="status-link" href="{{ .Site.Params.shortcuts.docs }}">F2 Docs</a> -->
+  <!--         <a class="status-link" href="{{ .Site.Params.shortcuts.github }}">F3 GitHub</a> -->
+  <!--       </header> -->
+  <!---->
+  <!--       <main id="main-content" class="screen-main"> -->
+  <!--         {{ block "main" . }}{{ end }} -->
+  <!--       </main> -->
+  <!---->
+  <!--       <footer class="window-bar window-bar-bottom"> -->
+  <!--         <a href="/docs/clnkr/">man clnkr</a> -->
+  <!--         <a href="/evaluations/">/evals/</a> -->
+  <!--         <a href="/docs/">/docs/</a> -->
+  <!--         <a href="{{ .Site.Params.shortcuts.github }}">github.com/clnkr-ai/clnkr</a> -->
+  <!--       </footer> -->
+  <!--     </div> -->
+  <!--   </div> -->
   </body>
 </html>
