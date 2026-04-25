@@ -48,9 +48,9 @@ jobs:
           VERSION="${GITHUB_REF_NAME}"
           PREV_TAG=$(git tag -l '[0-9]*' --sort=-v:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
           if [ -n "${PREV_TAG}" ]; then
-            gbp dch --new-version="${VERSION}-1" --distribution=unstable --since="${PREV_TAG}" --commit
+            gbp dch --new-version="${VERSION}-1" --distribution=unstable --dch-opt=-b --since="${PREV_TAG}" --commit
           else
-            gbp dch --new-version="${VERSION}-1" --distribution=unstable --auto --commit
+            gbp dch --new-version="${VERSION}-1" --distribution=unstable --dch-opt=-b --auto --commit
           fi
 
       - name: Generate orig tarball
@@ -119,9 +119,9 @@ jobs:
           VERSION="${GITHUB_REF_NAME}"
           PREV_TAG=$(git tag -l '[0-9]*' --sort=-v:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
           if [ -n "${PREV_TAG}" ]; then
-            gbp dch --new-version="${VERSION}-1" --distribution=unstable --since="${PREV_TAG}" --commit
+            gbp dch --new-version="${VERSION}-1" --distribution=unstable --dch-opt=-b --since="${PREV_TAG}" --commit
           else
-            gbp dch --new-version="${VERSION}-1" --distribution=unstable --auto --commit
+            gbp dch --new-version="${VERSION}-1" --distribution=unstable --dch-opt=-b --auto --commit
           fi
 
       - name: Generate orig tarball
@@ -200,7 +200,7 @@ jobs:
         with:
           path: artifacts
 
-      - name: Push debian/main and tag
+      - name: Push debian/main
         run: |
           VERSION="${GITHUB_REF_NAME}"
           git checkout debian/main
@@ -208,9 +208,7 @@ jobs:
           cp artifacts/debian-changelog/debian-changelog debian/changelog
           git add debian/changelog
           git commit --allow-empty -m "Update changelog for ${VERSION}-1"
-          git tag -f "debian/${VERSION}-1"
           git push origin debian/main
-          git push origin --force "debian/${VERSION}-1"
 
       - name: Generate CHANGELOG.md
         run: |
