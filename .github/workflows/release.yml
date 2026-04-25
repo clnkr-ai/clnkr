@@ -29,7 +29,7 @@ jobs:
       - name: Install Debian tooling
         env:
           DEBIAN_FRONTEND: noninteractive
-        run: sudo apt-get update && sudo apt-get install -y debhelper dpkg-dev git-buildpackage lintian bash-completion pandoc
+        run: sudo apt-get update && sudo apt-get install -y debhelper dpkg-dev lintian bash-completion pandoc
 
       - name: Configure git and dch environment
         run: |
@@ -46,12 +46,14 @@ jobs:
       - name: Generate changelog
         run: |
           VERSION="${GITHUB_REF_NAME}"
-          PREV_TAG=$(git tag -l '[0-9]*' --sort=-v:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
-          if [ -n "${PREV_TAG}" ]; then
-            gbp dch --new-version="${VERSION}-1" --distribution=unstable --dch-opt=-b --since="${PREV_TAG}" --commit
-          else
-            gbp dch --new-version="${VERSION}-1" --distribution=unstable --dch-opt=-b --auto --commit
-          fi
+          DATE="$(date -R)"
+          cat > debian/changelog <<EOF
+          clnkr (${VERSION}-1) unstable; urgency=medium
+
+            * Release ${VERSION}.
+
+           -- Brian Cosgrove <cosgroveb@gmail.com>  ${DATE}
+          EOF
 
       - name: Generate orig tarball
         run: |
@@ -100,7 +102,7 @@ jobs:
       - name: Install Debian tooling
         env:
           DEBIAN_FRONTEND: noninteractive
-        run: sudo apt-get update && sudo apt-get install -y debhelper dpkg-dev git-buildpackage lintian bash-completion pandoc
+        run: sudo apt-get update && sudo apt-get install -y debhelper dpkg-dev lintian bash-completion pandoc
 
       - name: Configure git and dch environment
         run: |
@@ -117,12 +119,14 @@ jobs:
       - name: Generate changelog
         run: |
           VERSION="${GITHUB_REF_NAME}"
-          PREV_TAG=$(git tag -l '[0-9]*' --sort=-v:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
-          if [ -n "${PREV_TAG}" ]; then
-            gbp dch --new-version="${VERSION}-1" --distribution=unstable --dch-opt=-b --since="${PREV_TAG}" --commit
-          else
-            gbp dch --new-version="${VERSION}-1" --distribution=unstable --dch-opt=-b --auto --commit
-          fi
+          DATE="$(date -R)"
+          cat > debian/changelog <<EOF
+          clnkr (${VERSION}-1) unstable; urgency=medium
+
+            * Release ${VERSION}.
+
+           -- Brian Cosgrove <cosgroveb@gmail.com>  ${DATE}
+          EOF
 
       - name: Generate orig tarball
         run: |
@@ -213,23 +217,14 @@ jobs:
       - name: Generate CHANGELOG.md
         run: |
           git checkout main
+          VERSION="${GITHUB_REF_NAME}"
+          DATE=$(git log -1 --format=%cs "$GITHUB_REF_NAME")
           echo "# Changelog" > CHANGELOG.md
           echo "" >> CHANGELOG.md
-          mapfile -t tags < <(git tag -l '[0-9]*' --sort=-v:refname)
-          for i in "${!tags[@]}"; do
-            tag="${tags[$i]}"
-            version="${tag}"
-            date=$(git log -1 --format=%cs "$tag")
-            echo "## ${version} (${date})" >> CHANGELOG.md
-            echo "" >> CHANGELOG.md
-            if [ $((i + 1)) -lt ${#tags[@]} ]; then
-              prev="${tags[$((i + 1))]}"
-              git log --format="- %s" "${prev}..${tag}" -- ':!debian' >> CHANGELOG.md
-            else
-              git log --format="- %s" "${tag}" -- ':!debian' >> CHANGELOG.md
-            fi
-            echo "" >> CHANGELOG.md
-          done
+          echo "## ${VERSION} (${DATE})" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "- Restart release history for the clnkr CLI." >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
           git add CHANGELOG.md
           git diff --cached --quiet || {
             git commit -m "Update CHANGELOG.md for ${GITHUB_REF_NAME}"
