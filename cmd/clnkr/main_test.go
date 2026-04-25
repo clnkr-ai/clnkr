@@ -849,7 +849,7 @@ func TestStdinPrompterActReplyCanBeCanceled(t *testing.T) {
 }
 
 func TestWriteEventLogIncludesFeedback(t *testing.T) {
-	f, err := os.CreateTemp("", "clnku-event-log")
+	f, err := os.CreateTemp("", "clnkr-event-log")
 	if err != nil {
 		t.Fatal(err)
 	}

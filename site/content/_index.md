@@ -4,7 +4,7 @@ title = "clnkr"
 
 `clnkr` is a minimal coding agent built around one aggressive idea: query an LLM, execute bash commands, repeat.
 
-It ships as `clnku`, a plain CLI with only the Go standard library.
+It ships as `clnkr`, a plain CLI with only the Go standard library.
 
 ## Warning
 
@@ -19,12 +19,11 @@ That simplicity is the point and also the risk.
 ## Install
 
 ```bash
-go install github.com/clnkr-ai/clnkr/cmd/clnku@latest
+go install github.com/clnkr-ai/clnkr/cmd/clnkr@latest
 ```
 
 ## Docs
 
 - [evaluations](/evaluations/)
-- [clnku manual](/docs/clnku/)
-- [clankerval manual](/docs/clankerval/)
+- [clnkr manual](/docs/clnkr/)
 - [GitHub repository](https://github.com/clnkr-ai/clnkr)

@@ -1,10 +1,10 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LATEST_TAG ?= $(shell git tag -l 'v[0-9]*' --sort=-v:refname | head -1)
+LATEST_TAG ?= $(shell git tag -l '[0-9]*' --sort=-v:refname | head -1)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hugo)
 PANDOC ?= pandoc
 CLANKERVAL_PINNED_VERSION := 0.4.3
-CLANKERVAL_DOCS_REPO_URL ?= https://github.com/clnkr-ai/clankerval.git
+CLANKERVAL_BINARY ?= $(CURDIR)/clnkr
 CLANKERVAL_PREFLIGHT = \
 	clankerval_path="$$(command -v clankerval 2>/dev/null || true)"; \
 	if [ -z "$$clankerval_path" ]; then \
@@ -26,38 +26,36 @@ CLANKERVAL_PREFLIGHT = \
 	build clean install run \
 	check test evaluations evaluations-live evaluations-live-openai evaluations-live-anthropic \
 	help man docs docs-serve \
-	_build-clnku \
+	_build-clnkr \
 	_fmt _fmt-check _vet _lint _arch sloc _workflow-make-targets \
 	_hooks _check-docs _require-pandoc _site-sync _site-build
 
 PREFIX ?= /usr/local
 CORE_SLOC_LIMIT := 1300
 DOC_MAN_DIR := build/docs/man
-DOC_MAN_OUTPUTS := $(DOC_MAN_DIR)/clnku.1
+DOC_MAN_OUTPUTS := $(DOC_MAN_DIR)/clnkr.1
 DOC_CONTENT_DIR := site/content/docs
 DOC_PAGE_TEMPLATE := site/pandoc/doc-page.md
 GENERATED_SITE_DOCS := \
-	$(DOC_CONTENT_DIR)/clnku.md \
-	$(DOC_CONTENT_DIR)/clankerval.md
+	$(DOC_CONTENT_DIR)/clnkr.md
 
 ##@ Build
-build: _build-clnku ## Build shipped binaries
+build: _build-clnkr ## Build shipped binaries
 
 clean: ## Remove build artifacts
-	rm -f clnku clnkr
+	rm -f clnkr
 	rm -rf build/docs
-	rm -f $(GENERATED_SITE_DOCS)
+	find "$(DOC_CONTENT_DIR)" -maxdepth 1 -type f ! -name '_index.md' -delete
 
-install: build ## Install shipped binaries and clnk symlink
+install: build ## Install shipped binary
 	install -d $(DESTDIR)$(PREFIX)/bin
-	install -m 755 clnku $(DESTDIR)$(PREFIX)/bin/clnku
-	ln -sf clnku $(DESTDIR)$(PREFIX)/bin/clnk
+	install -m 755 clnkr $(DESTDIR)$(PREFIX)/bin/clnkr
 
-run: _build-clnku ## Build and start the CLI
-	./clnku
+run: _build-clnkr ## Build and start the CLI
+	./clnkr
 
-_build-clnku:
-	go build -trimpath -ldflags '$(LDFLAGS)' -o clnku ./cmd/clnku/
+_build-clnkr:
+	go build -trimpath -ldflags '$(LDFLAGS)' -o clnkr ./cmd/clnkr/
 
 ##@ Quality
 check: _fmt-check _vet _lint _arch sloc _workflow-make-targets _check-docs test evaluations ## Run formatting, vet, lint, architecture, SLOC, workflow, docs, test, and evaluation checks
@@ -65,13 +63,13 @@ check: _fmt-check _vet _lint _arch sloc _workflow-make-targets _check-docs test 
 test: ## Run all tests
 	go test ./... -v
 
-evaluations: ## Run the mock-provider evaluation suite
+evaluations: build ## Run the mock-provider evaluation suite
 	@$(CLANKERVAL_PREFLIGHT) \
-	"$$clankerval_path" run --suite default
+	"$$clankerval_path" run --suite default --binary "$(CLANKERVAL_BINARY)"
 
-evaluations-live: ## Run the live-provider evaluation suite
+evaluations-live: build ## Run the live-provider evaluation suite
 	@$(CLANKERVAL_PREFLIGHT) \
-	CLNKR_EVALUATION_MODE=live-provider "$$clankerval_path" run --suite default
+	CLNKR_EVALUATION_MODE=live-provider "$$clankerval_path" run --suite default --binary "$(CLANKERVAL_BINARY)"
 
 evaluations-live-openai: ## Run the live-provider evaluation suite against OpenAI defaults
 	@CLNKR_EVALUATION_API_KEY="$${CLNKR_EVALUATION_OPENAI_API_KEY:-$${OPENAI_API_KEY}}" \
@@ -141,7 +139,7 @@ _require-pandoc:
 	}
 
 _site-sync:
-	rm -f $(GENERATED_SITE_DOCS)
+	find "$(DOC_CONTENT_DIR)" -maxdepth 1 -type f ! -name '_index.md' -delete
 	$(MAKE) --no-print-directory $(GENERATED_SITE_DOCS)
 
 _site-build: _site-sync
@@ -151,11 +149,11 @@ $(DOC_MAN_DIR)/%.1: doc/%.1.md | _require-pandoc
 	mkdir -p "$(DOC_MAN_DIR)"
 	"$(PANDOC)" --from=markdown-smart --to=man --standalone "$<" -o "$@"
 
-$(DOC_CONTENT_DIR)/clnku.md: DOC_TITLE = clnku
-$(DOC_CONTENT_DIR)/clnku.md: DOC_DESCRIPTION = Plain CLI manual page
-$(DOC_CONTENT_DIR)/clnku.md: DOC_WEIGHT = 10
+$(DOC_CONTENT_DIR)/clnkr.md: DOC_TITLE = clnkr
+$(DOC_CONTENT_DIR)/clnkr.md: DOC_DESCRIPTION = Plain CLI manual page
+$(DOC_CONTENT_DIR)/clnkr.md: DOC_WEIGHT = 10
 
-$(DOC_CONTENT_DIR)/clnku.md: $(DOC_CONTENT_DIR)/%.md: doc/%.1.md $(DOC_PAGE_TEMPLATE) | _require-pandoc
+$(DOC_CONTENT_DIR)/clnkr.md: $(DOC_CONTENT_DIR)/%.md: doc/%.1.md $(DOC_PAGE_TEMPLATE) | _require-pandoc
 	mkdir -p "$(DOC_CONTENT_DIR)"
 	"$(PANDOC)" \
 		--from=markdown-smart \
@@ -167,25 +165,3 @@ $(DOC_CONTENT_DIR)/clnku.md: $(DOC_CONTENT_DIR)/%.md: doc/%.1.md $(DOC_PAGE_TEMP
 		--metadata slug="$*" \
 		--metadata weight="$(DOC_WEIGHT)" \
 		"$<" -o "$@"
-
-$(DOC_CONTENT_DIR)/clankerval.md: | _require-pandoc
-	tmpdir="$$(mktemp -d)"; \
-	trap 'rm -rf "$$tmpdir"' EXIT; \
-	git clone --depth 1 "$(CLANKERVAL_DOCS_REPO_URL)" "$$tmpdir"; \
-	src="$$tmpdir/doc/clankerval.1.md"; \
-	[ -f "$$src" ] || { echo "error: missing clankerval manpage at $$src" >&2; exit 1; }; \
-	normalized="$$tmpdir/clankerval.pandoc.md"; \
-	{ \
-		printf '%% clankerval(1) User Commands\n\n'; \
-		tail -n +4 "$$src"; \
-	} > "$$normalized"; \
-	mkdir -p "$(DOC_CONTENT_DIR)"; \
-	{ \
-		printf '+++\n'; \
-		printf 'title = "clankerval"\n'; \
-		printf 'description = "Evaluation runner manual page"\n'; \
-		printf 'slug = "clankerval"\n'; \
-		printf 'weight = 20\n'; \
-		printf '+++\n\n'; \
-		"$(PANDOC)" --from=markdown-smart --to=gfm "$$normalized"; \
-	} > "$@"

@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]*.[0-9]*.[0-9]*'
 
 concurrency:
   group: release
@@ -45,8 +45,8 @@ jobs:
 
       - name: Generate changelog
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          PREV_TAG=$(git tag -l 'v[0-9]*' --sort=-v:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
+          VERSION="${GITHUB_REF_NAME}"
+          PREV_TAG=$(git tag -l '[0-9]*' --sort=-v:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
           if [ -n "${PREV_TAG}" ]; then
             gbp dch --new-version="${VERSION}-1" --distribution=unstable --since="${PREV_TAG}" --commit
           else
@@ -55,7 +55,7 @@ jobs:
 
       - name: Generate orig tarball
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${GITHUB_REF_NAME}"
           git archive --format=tar.gz --prefix="clnkr-${VERSION}/" \
             HEAD -- . ':(exclude)debian' > "../clnkr_${VERSION}.orig.tar.gz"
 
@@ -116,8 +116,8 @@ jobs:
 
       - name: Generate changelog
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          PREV_TAG=$(git tag -l 'v[0-9]*' --sort=-v:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
+          VERSION="${GITHUB_REF_NAME}"
+          PREV_TAG=$(git tag -l '[0-9]*' --sort=-v:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
           if [ -n "${PREV_TAG}" ]; then
             gbp dch --new-version="${VERSION}-1" --distribution=unstable --since="${PREV_TAG}" --commit
           else
@@ -126,7 +126,7 @@ jobs:
 
       - name: Generate orig tarball
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${GITHUB_REF_NAME}"
           git archive --format=tar.gz --prefix="clnkr-${VERSION}/" \
             HEAD -- . ':(exclude)debian' > "../clnkr_${VERSION}.orig.tar.gz"
 
@@ -163,12 +163,12 @@ jobs:
 
       - name: Cross-compile binaries
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${GITHUB_REF_NAME}"
           for GOOS in linux darwin; do
             for GOARCH in amd64 arm64; do
               env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
                 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
-                -o "clnku-${GOOS}-${GOARCH}" ./cmd/clnku/
+                -o "clnkr-${GOOS}-${GOARCH}" ./cmd/clnkr/
             done
           done
 
@@ -177,7 +177,7 @@ jobs:
         with:
           name: binaries
           path: |
-            clnku-*
+            clnkr-*
 
   release:
     needs: [debian-amd64, debian-arm64, binaries]
@@ -202,7 +202,7 @@ jobs:
 
       - name: Push debian/main and tag
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${GITHUB_REF_NAME}"
           git checkout debian/main
           git merge --no-edit "${{ github.sha }}"
           cp artifacts/debian-changelog/debian-changelog debian/changelog
@@ -217,10 +217,10 @@ jobs:
           git checkout main
           echo "# Changelog" > CHANGELOG.md
           echo "" >> CHANGELOG.md
-          mapfile -t tags < <(git tag -l 'v[0-9]*' --sort=-v:refname)
+          mapfile -t tags < <(git tag -l '[0-9]*' --sort=-v:refname)
           for i in "${!tags[@]}"; do
             tag="${tags[$i]}"
-            version="${tag#v}"
+            version="${tag}"
             date=$(git log -1 --format=%cs "$tag")
             echo "## ${version} (${date})" >> CHANGELOG.md
             echo "" >> CHANGELOG.md
@@ -234,7 +234,7 @@ jobs:
           done
           git add CHANGELOG.md
           git diff --cached --quiet || {
-            git commit -m "Update CHANGELOG.md for ${GITHUB_REF_NAME#v}"
+            git commit -m "Update CHANGELOG.md for ${GITHUB_REF_NAME}"
             git push origin main
           }
 
@@ -243,11 +243,11 @@ jobs:
           mkdir -p release
           cp artifacts/deb-amd64/*.deb release/
           cp artifacts/deb-arm64/*.deb release/
-          cp artifacts/binaries/clnku-* release/
+          cp artifacts/binaries/clnkr-* release/
 
       - name: Generate source tarball
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${GITHUB_REF_NAME}"
           git archive --format=tar.gz --prefix="clnkr-${VERSION}/" \
             -o "release/clnkr_${VERSION}.orig.tar.gz" "${{ github.sha }}"
 
@@ -270,7 +270,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${GITHUB_REF_NAME}"
           # Delete any existing release from a failed run
           gh release delete "${GITHUB_REF_NAME}" --yes 2>/dev/null || true
           gh release create "${GITHUB_REF_NAME}" \
@@ -282,11 +282,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          SHA=$(curl -sL "https://github.com/clnkr-ai/clnkr/archive/refs/tags/v${VERSION}.tar.gz" | sha256sum | awk '{print $1}')
+          VERSION="${GITHUB_REF_NAME}"
+          SHA=$(curl -sL "https://github.com/clnkr-ai/clnkr/archive/refs/tags/${VERSION}.tar.gz" | sha256sum | awk '{print $1}')
           git clone "https://x-access-token:${GH_TOKEN}@github.com/clnkr-ai/homebrew-tap.git" /tmp/tap
           cd /tmp/tap
-          sed -i "s|url \".*\"|url \"https://github.com/clnkr-ai/clnkr/archive/refs/tags/v${VERSION}.tar.gz\"|" Formula/clnkr.rb
+          sed -i "s|url \".*\"|url \"https://github.com/clnkr-ai/clnkr/archive/refs/tags/${VERSION}.tar.gz\"|" Formula/clnkr.rb
           sed -i "s|sha256 \".*\"|sha256 \"${SHA}\"|" Formula/clnkr.rb
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

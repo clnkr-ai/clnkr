@@ -8,7 +8,7 @@ Platform note: today `clnkr` is Unix-only. The executor assumes `bash`, process 
 
 A minimal coding agent. Query an LLM, execute bash commands, repeat. Supports the Anthropic Messages API and OpenAI-compatible endpoints that implement structured outputs on the selected model path.
 
-Ships one binary: **clnku** (plain CLI). The evaluation runner lives in the separate **clankerval** project and is installed independently. `make install` also creates a **clnk** symlink to `clnku` for convenience.
+Ships one binary: **clnkr** (plain CLI). The evaluation runner lives in the separate **clankerval** project and is installed independently.
 
 <img width="512" height="512" alt="Isildur cut the Ring (the ring here is bash -jokeexplainer)from his hand with the hilt-shard of his father's sword, and took it for his own." src="https://github.com/user-attachments/assets/7c9d648c-f5b9-4610-a311-04f5af37b364" />
 
@@ -17,7 +17,7 @@ Ships one binary: **clnku** (plain CLI). The evaluation runner lives in the sepa
 
 ```bash
 # Plain CLI (stdlib, no external deps)
-go install github.com/clnkr-ai/clnkr/cmd/clnku@latest
+go install github.com/clnkr-ai/clnkr/cmd/clnkr@latest
 
 # Install clankerval separately when you need evals.
 # Debian-family example:
@@ -114,25 +114,25 @@ Structured outputs are a hard requirement for agent turns. clnkr rejects `gpt-5.
 
 ### Agent orchestration
 
-A parent process can spawn clnku as a child agent and monitor or chain runs:
+A parent process can spawn clnkr as a child agent and monitor or chain runs:
 
 ```bash
 # Watch events in real time
-clnku -p "fix the build" --event-log /tmp/events.jsonl &
+clnkr -p "fix the build" --event-log /tmp/events.jsonl &
 tail -f /tmp/events.jsonl | jq .
 
 # Save a run's conversation, then feed it to a second agent
-clnku -p "investigate the bug" --trajectory /tmp/investigation.json
-clnku -p "write a fix based on the investigation" --load-messages /tmp/investigation.json
+clnkr -p "investigate the bug" --trajectory /tmp/investigation.json
+clnkr -p "write a fix based on the investigation" --load-messages /tmp/investigation.json
 ```
 
 `--event-log` streams one JSON object per line as events happen (O_APPEND, safe to tail).
-`--trajectory` writes the full message array as pretty-printed JSON when the task ends — even if it failed.
+`--trajectory` writes the full message array as pretty-printed JSON when the task ends, even if it failed.
 `--load-messages` reads that same format and prepends the messages before starting, so one agent's output becomes another's context.
 The transcript may include host-generated JSON `[state]` messages. Today they persist the current working directory so `--load-messages` and `--continue` can restore it.
 With `--full-send`, a single-task run that stops to ask for clarification exits with status `2` after printing the question, so callers can distinguish "needs input" from "done". In the default approval mode, the harness asks for clarification inline instead.
 
-By default, clnku requires explicit approval before each `act` turn. Pass `--full-send` to restore the old "run every command immediately" behavior.
+By default, clnkr requires explicit approval before each `act` turn. Pass `--full-send` to restore the old "run every command immediately" behavior.
 
 ### Command result format
 
@@ -153,7 +153,7 @@ clnkr executes commands with structured results in the core: command text, exit 
 [/stderr]
 ```
 
-This is intentional. The only downstream machine consumer is clnku, so the protocol is optimized for model readability rather than external XML tooling. In practice, weaker models follow explicit flat delimiters more reliably than nested structure, while the frontend still receives fully structured events.
+This is intentional. The only downstream machine consumer is clnkr, so the protocol is optimized for model readability rather than external XML tooling. In practice, weaker models follow explicit flat delimiters more reliably than nested structure, while the frontend still receives fully structured events.
 
 ### Prompt customization
 
@@ -174,19 +174,19 @@ clnkr --no-system-prompt
 
 ## Session Persistence
 
-When using clnku in conversational mode (no `-p` flag), sessions are
+When using clnkr in conversational mode (no `-p` flag), sessions are
 automatically saved to `$XDG_STATE_HOME/clnkr/projects/` on exit.
 
 Resume a session:
 
 ```bash
-clnku --continue    # Load most recent session
+clnkr --continue    # Load most recent session
 ```
 
 List all sessions for the current project:
 
 ```bash
-clnku --list-sessions
+clnkr --list-sessions
 ```
 
 Sessions are tied to their original working directory. You can only resume a

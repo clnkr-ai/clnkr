@@ -32,7 +32,7 @@
           <li><a href="/evaluations/">evals/</a></li>
           <li><a href="/docs/">docs/</a></li>
           {{ range $docs }}
-            <li><a href="{{ .RelPermalink }}">{{ if eq .Title "clnkr" }}man clnkr{{ else if eq .Title "clnku" }}man clnku{{ else if eq .Title "clankerval" }}man clankerval{{ else }}{{ .Title }}{{ end }}</a></li>
+            <li><a href="{{ .RelPermalink }}">{{ if eq .Title "clnkr" }}man clnkr{{ else if eq .Title "clankerval" }}man clankerval{{ else }}{{ .Title }}{{ end }}</a></li>
           {{ end }}
         </ul>
         <div class="mascot-block">

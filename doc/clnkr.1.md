@@ -1,48 +1,48 @@
-% clnku(1) User Commands
+% clnkr(1) User Commands
 
 # NAME
 
-clnku - a minimal coding agent (plain CLI)
+clnkr - a minimal coding agent (plain CLI)
 
 # SYNOPSIS
 
-**clnku** [**-p**|**--prompt** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--provider** *mode*] [**--provider-api** *surface*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
+**clnkr** [**-p**|**--prompt** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--provider** *mode*] [**--provider-api** *surface*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
 
 # DESCRIPTION
 
-**clnku** is a minimal coding agent that queries LLMs and executes bash commands using a structured JSON turn protocol. It supports the Anthropic Messages API and OpenAI-compatible APIs that implement structured outputs on the selected model path.
+**clnkr** is a minimal coding agent that queries LLMs and executes bash commands using a structured JSON turn protocol. It supports the Anthropic Messages API and OpenAI-compatible APIs that implement structured outputs on the selected model path.
 
-In default mode, **clnku** starts an interactive REPL. With **-p**, it runs a single task and exits.
+In default mode, **clnkr** starts an interactive REPL. With **-p**, it runs a single task and exits.
 
 At the main idle conversational prompt, **/compact** summarizes older transcript history while keeping recent context intact for the current working thread.
 
-**clnku** has no external dependencies beyond the Go standard library.
+**clnkr** has no external dependencies beyond the Go standard library.
 
 The agent communicates through JSON turns: **act** (execute a command through a nested `bash.command` plus optional `bash.workdir`), **clarify** (ask the user), and **done** (signal completion).
 
-By default, **clnku** asks for approval before each **act** turn. Approval prompts show the requested command and any explicit workdir override. Pass **--full-send** to execute commands immediately without approval.
+By default, **clnkr** asks for approval before each **act** turn. Approval prompts show the requested command and any explicit workdir override. Pass **--full-send** to execute commands immediately without approval.
 
-For Anthropic runs, **clnku** requests Anthropic's native structured output format on every turn. Keep **--model** on a model Anthropic documents as supporting structured output.
+For Anthropic runs, **clnkr** requests Anthropic's native structured output format on every turn. Keep **--model** on a model Anthropic documents as supporting structured output.
 
-On OpenAI-compatible backends, the selected model path must support structured outputs. If a backend rejects the resolved OpenAI API surface, **clnku** returns the provider error. When a proxy or gateway expects a different OpenAI surface, override with **--provider-api** or **CLNKR_PROVIDER_API**.
+On OpenAI-compatible backends, the selected model path must support structured outputs. If a backend rejects the resolved OpenAI API surface, **clnkr** returns the provider error. When a proxy or gateway expects a different OpenAI surface, override with **--provider-api** or **CLNKR_PROVIDER_API**.
 
-**clnku** rejects `gpt-5.2-pro`, `gpt-5.4-pro`, and their dated snapshots even if you force **openai-chat-completions**, because agent turns require structured outputs.
+**clnkr** rejects `gpt-5.2-pro`, `gpt-5.4-pro`, and their dated snapshots even if you force **openai-chat-completions**, because agent turns require structured outputs.
 
 Project-specific instructions are loaded from an **AGENTS.md** file in the current working directory, if present.
 
 # OPTIONS
 
 **-p**, **--prompt** *task*
-: Run the given task and exit. Without this flag, clnku starts in conversational REPL mode.
+: Run the given task and exit. Without this flag, clnkr starts in conversational REPL mode.
 
 **-m**, **--model** *name*
 : LLM model identifier. Required unless **CLNKR_MODEL** is set.
 
 **-u**, **--base-url** *url*
-: LLM endpoint transport URL. If omitted, clnku uses the provider default: **https://api.anthropic.com** for **anthropic** or **https://api.openai.com/v1** for **openai**. **CLNKR_BASE_URL** overrides the default when set.
+: LLM endpoint transport URL. If omitted, clnkr uses the provider default: **https://api.anthropic.com** for **anthropic** or **https://api.openai.com/v1** for **openai**. **CLNKR_BASE_URL** overrides the default when set.
 
 **--provider** *mode*
-: Provider adapter semantics: **anthropic** or **openai**. Required in normal use unless **CLNKR_PROVIDER** is set. Compatibility fallback: if provider is unset but **--base-url** or **CLNKR_BASE_URL** is explicitly set, clnku infers the provider from that URL.
+: Provider adapter semantics: **anthropic** or **openai**. Required in normal use unless **CLNKR_PROVIDER** is set. Compatibility fallback: if provider is unset but **--base-url** or **CLNKR_BASE_URL** is explicitly set, clnkr infers the provider from that URL.
 
 **--provider-api** *surface*
 : OpenAI-only API surface override: **auto**, **openai-chat-completions**, or **openai-responses**. With **provider=openai**, **auto** prefers **openai-responses** for known supported names and other OpenAI-looking model names such as **gpt-***, **o** followed by a digit, and **codex***. Names that do not look OpenAI-ish, such as **llama3**, **gemini-2.0-flash**, **orca-***, **olmo-***, **openhermes-***, and **chatgpt-***, stay on **openai-chat-completions**. This flag is rejected for **provider=anthropic**.
@@ -51,7 +51,7 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : Maximum agent iterations. 0 uses the default of 100.
 
 **--full-send**
-: Execute every **act** turn immediately. Without this flag, clnku asks for approval before each command.
+: Execute every **act** turn immediately. Without this flag, clnkr asks for approval before each command.
 
 **-c**, **--continue**
 : Resume the most recent session for the current project directory. Saved JSON **[state]** messages restore the last persisted working directory. Mutually exclusive with **--trajectory**.

@@ -1,6 +1,6 @@
 # Evaluations
 
-This directory holds the checked-in evaluation suites for `clnku`.
+This directory holds the checked-in evaluation suites for `clnkr`.
 
 Execution is owned by the external `clankerval` runner. Install it from [GitHub Releases](https://github.com/clnkr-ai/clankerval/releases).
 
@@ -20,7 +20,7 @@ evaluations/
             instruction.txt
             model-turns.json      # mock-provider tasks only
             project/
-              AGENTS.md           # optional clnku prompt file
+              AGENTS.md           # optional clnkr prompt file
   trials/
     <trial-id>/
       bundle.json

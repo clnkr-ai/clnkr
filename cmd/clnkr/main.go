@@ -42,11 +42,11 @@ type stdinPrompter struct {
 }
 
 func usageText() string {
-	return `clnku - a minimal coding agent
+	return `clnkr - a minimal coding agent
 
 Usage:
-  clnku                     Start conversational mode
-  clnku -p "task"           Run a single task and exit
+  clnkr                     Start conversational mode
+  clnkr -p "task"           Run a single task and exit
 
 Core:
   -p, --prompt string       Task to run (exits after completion)
@@ -404,7 +404,7 @@ func waitForClarification(ctx context.Context, prompter approvalPrompter, questi
 }
 
 func main() {
-	flags := flag.NewFlagSet("clnku", flag.ContinueOnError)
+	flags := flag.NewFlagSet("clnkr", flag.ContinueOnError)
 	flags.Usage = func() {
 		fmt.Fprint(os.Stderr, usageText())
 	}
@@ -439,12 +439,12 @@ func main() {
 		if err == flag.ErrHelp {
 			os.Exit(0)
 		}
-		fmt.Fprintf(os.Stderr, "Error: %v\nRun 'clnku --help' for available options.\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %v\nRun 'clnkr --help' for available options.\n", err)
 		os.Exit(1)
 	}
 
 	if *showVersion || *showVersionShort {
-		fmt.Printf("clnku %s\n", version)
+		fmt.Printf("clnkr %s\n", version)
 		os.Exit(0)
 	}
 
@@ -539,11 +539,11 @@ func main() {
 			fmt.Fprintln(os.Stdout, "--- done ---") //nolint:errcheck
 		case clnkr.EventProtocolFailure:
 			if showDebug {
-				fmt.Fprintf(os.Stderr, "[clnku] protocol error: %s\n", e.Reason) //nolint:errcheck
+				fmt.Fprintf(os.Stderr, "[clnkr] protocol error: %s\n", e.Reason) //nolint:errcheck
 			}
 		case clnkr.EventDebug:
 			if showDebug {
-				fmt.Fprintf(os.Stderr, "[clnku] %s\n", e.Message)
+				fmt.Fprintf(os.Stderr, "[clnkr] %s\n", e.Message)
 			}
 		}
 		if eventLogFile != nil {
@@ -583,7 +583,7 @@ func main() {
 			os.Exit(1)
 		}
 		if msgs == nil {
-			fmt.Fprintf(os.Stderr, "Error: no session found for this project.\nRun 'clnku --list-sessions' to see available sessions.\n")
+			fmt.Fprintf(os.Stderr, "Error: no session found for this project.\nRun 'clnkr --list-sessions' to see available sessions.\n")
 			os.Exit(1)
 		}
 		if err := agent.AddMessages(msgs); err != nil {
@@ -650,7 +650,7 @@ func main() {
 	reader := newLineReader(os.Stdin)
 	prompter := &stdinPrompter{reader: reader}
 	for {
-		fmt.Print("clnku> ")
+		fmt.Print("clnkr> ")
 		input, err := reader.ReadLine(context.Background())
 		if err != nil {
 			if errors.Is(err, io.EOF) {
