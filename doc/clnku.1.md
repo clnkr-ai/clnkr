@@ -16,7 +16,7 @@ In default mode, **clnku** starts an interactive REPL. With **-p**, it runs a si
 
 At the main idle conversational prompt, **/compact** summarizes older transcript history while keeping recent context intact for the current working thread.
 
-**clnku** is the plain CLI variant of the clnkr project, with no external dependencies beyond the Go standard library. A TUI variant is available as **clnkr**(1).
+**clnku** has no external dependencies beyond the Go standard library.
 
 The agent communicates through JSON turns: **act** (execute a command through a nested `bash.command` plus optional `bash.workdir`), **clarify** (ask the user), and **done** (signal completion).
 
@@ -122,10 +122,6 @@ This command is only available at the top-level conversational prompt. In single
 
 **2**
 : In single-task mode with **--full-send**, the run stopped because the agent asked for clarification.
-
-# SEE ALSO
-
-**clnkr**(1)
 
 # AUTHOR
 

@@ -38,8 +38,8 @@ while IFS=$'\t' read -r importer target; do
   [[ -n "$importer" && "$target" == "$module"* && "$target" != "$importer" ]] || continue
   edge_count=$((edge_count + 1))
   check_edge "$importer" "$target" || bad=1
-done < <({ go list -json ./...; (cd cmd/clnkr && go list -json ./...); } | jq -r '. as $pkg | ($pkg.ImportPath // empty) as $importer | [($pkg.Imports // []), ($pkg.TestImports // []), ($pkg.XTestImports // [])] | add | unique | .[] | [$importer, .] | @tsv')
+done < <(go list -json ./... | jq -r '. as $pkg | ($pkg.ImportPath // empty) as $importer | [($pkg.Imports // []), ($pkg.TestImports // []), ($pkg.XTestImports // [])] | add | unique | .[] | [$importer, .] | @tsv')
 
 (( bad == 0 )) || exit 1
-package_count="$({ go list ./...; (cd cmd/clnkr && go list ./...); } | sort -u | wc -l | tr -d '[:space:]')"
+package_count="$(go list ./... | sort -u | wc -l | tr -d '[:space:]')"
 echo "architecture import checks passed (${package_count} packages, ${edge_count} repo-local edges)"

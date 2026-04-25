@@ -25,7 +25,6 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache-dependency-path: cmd/clnkr/go.sum
 
       - name: Install Debian tooling
         env:
@@ -97,7 +96,6 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache-dependency-path: cmd/clnkr/go.sum
 
       - name: Install Debian tooling
         env:
@@ -159,13 +157,9 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache-dependency-path: cmd/clnkr/go.sum
 
-      - name: Test core
+      - name: Test
         run: go test -race ./...
-
-      - name: Test TUI
-        run: cd cmd/clnkr && go test -race ./...
 
       - name: Cross-compile binaries
         run: |
@@ -175,9 +169,6 @@ jobs:
               env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
                 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
                 -o "clnku-${GOOS}-${GOARCH}" ./cmd/clnku/
-              env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
-                go -C cmd/clnkr build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
-                -o "../../clnkr-${GOOS}-${GOARCH}" .
             done
           done
 
@@ -187,7 +178,6 @@ jobs:
           name: binaries
           path: |
             clnku-*
-            clnkr-*
 
   release:
     needs: [debian-amd64, debian-arm64, binaries]
@@ -254,7 +244,6 @@ jobs:
           cp artifacts/deb-amd64/*.deb release/
           cp artifacts/deb-arm64/*.deb release/
           cp artifacts/binaries/clnku-* release/
-          cp artifacts/binaries/clnkr-* release/
 
       - name: Generate source tarball
         run: |

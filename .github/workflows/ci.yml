@@ -15,7 +15,6 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache-dependency-path: cmd/clnkr/go.sum
 
       - name: Install actionlint
         run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
@@ -24,22 +23,13 @@ jobs:
         run: |
           "$(go env GOPATH)/bin/actionlint"
           ./scripts/check-workflow-make-targets.sh
-      - name: Lint core
+      - name: Lint
         uses: golangci/golangci-lint-action@v7
         with:
           version: v2.11.1
 
-      - name: Lint TUI
-        uses: golangci/golangci-lint-action@v7
-        with:
-          version: v2.11.1
-          working-directory: cmd/clnkr
-
-      - name: Test core
+      - name: Test
         run: go test -race ./... -v
-
-      - name: Test TUI
-        run: cd cmd/clnkr && go test -race ./... -v
 
       - name: Build
         run: make build
@@ -61,7 +51,6 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache-dependency-path: cmd/clnkr/go.sum
 
       - name: Add local user bin to PATH
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"

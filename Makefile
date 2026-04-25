@@ -26,23 +26,22 @@ CLANKERVAL_PREFLIGHT = \
 	build clean install run \
 	check test evaluations evaluations-live evaluations-live-openai evaluations-live-anthropic \
 	help man docs docs-serve \
-	_build-clnku _build-clnkr \
+	_build-clnku \
 	_fmt _fmt-check _vet _lint _arch sloc _workflow-make-targets \
 	_hooks _check-docs _require-pandoc _site-sync _site-build
 
 PREFIX ?= /usr/local
 CORE_SLOC_LIMIT := 1300
 DOC_MAN_DIR := build/docs/man
-DOC_MAN_OUTPUTS := $(DOC_MAN_DIR)/clnkr.1 $(DOC_MAN_DIR)/clnku.1
+DOC_MAN_OUTPUTS := $(DOC_MAN_DIR)/clnku.1
 DOC_CONTENT_DIR := site/content/docs
 DOC_PAGE_TEMPLATE := site/pandoc/doc-page.md
 GENERATED_SITE_DOCS := \
-	$(DOC_CONTENT_DIR)/clnkr.md \
 	$(DOC_CONTENT_DIR)/clnku.md \
 	$(DOC_CONTENT_DIR)/clankerval.md
 
 ##@ Build
-build: _build-clnku _build-clnkr ## Build shipped binaries
+build: _build-clnku ## Build shipped binaries
 
 clean: ## Remove build artifacts
 	rm -f clnku clnkr
@@ -51,25 +50,20 @@ clean: ## Remove build artifacts
 
 install: build ## Install shipped binaries and clnk symlink
 	install -d $(DESTDIR)$(PREFIX)/bin
-	install -m 755 clnkr $(DESTDIR)$(PREFIX)/bin/clnkr
 	install -m 755 clnku $(DESTDIR)$(PREFIX)/bin/clnku
-	ln -sf clnkr $(DESTDIR)$(PREFIX)/bin/clnk
+	ln -sf clnku $(DESTDIR)$(PREFIX)/bin/clnk
 
-run: _build-clnkr ## Build and start TUI
-	./clnkr
+run: _build-clnku ## Build and start the CLI
+	./clnku
 
 _build-clnku:
 	go build -trimpath -ldflags '$(LDFLAGS)' -o clnku ./cmd/clnku/
-
-_build-clnkr:
-	cd cmd/clnkr && go build -trimpath -ldflags '$(LDFLAGS)' -o ../../clnkr .
 
 ##@ Quality
 check: _fmt-check _vet _lint _arch sloc _workflow-make-targets _check-docs test evaluations ## Run formatting, vet, lint, architecture, SLOC, workflow, docs, test, and evaluation checks
 
 test: ## Run all tests
 	go test ./... -v
-	cd cmd/clnkr && go test ./... -v
 
 evaluations: ## Run the mock-provider evaluation suite
 	@$(CLANKERVAL_PREFLIGHT) \
@@ -93,7 +87,6 @@ evaluations-live-anthropic: ## Run the live-provider evaluation suite against An
 
 _fmt:
 	go fmt ./...
-	cd cmd/clnkr && go fmt ./...
 
 _fmt-check:
 	@files=$$(find . -type f -name '*.go' -not -path './.git/*'); \
@@ -106,11 +99,9 @@ _fmt-check:
 
 _vet:
 	go vet ./...
-	cd cmd/clnkr && go vet ./...
 
 _lint:
 	golangci-lint run ./...
-	cd cmd/clnkr && golangci-lint run ./...
 
 _arch:
 	@./scripts/check-architecture-imports.sh
@@ -160,14 +151,11 @@ $(DOC_MAN_DIR)/%.1: doc/%.1.md | _require-pandoc
 	mkdir -p "$(DOC_MAN_DIR)"
 	"$(PANDOC)" --from=markdown-smart --to=man --standalone "$<" -o "$@"
 
-$(DOC_CONTENT_DIR)/clnkr.md: DOC_TITLE = clnkr
-$(DOC_CONTENT_DIR)/clnkr.md: DOC_DESCRIPTION = Terminal UI manual page
-$(DOC_CONTENT_DIR)/clnkr.md: DOC_WEIGHT = 10
 $(DOC_CONTENT_DIR)/clnku.md: DOC_TITLE = clnku
 $(DOC_CONTENT_DIR)/clnku.md: DOC_DESCRIPTION = Plain CLI manual page
 $(DOC_CONTENT_DIR)/clnku.md: DOC_WEIGHT = 10
 
-$(DOC_CONTENT_DIR)/clnkr.md $(DOC_CONTENT_DIR)/clnku.md: $(DOC_CONTENT_DIR)/%.md: doc/%.1.md $(DOC_PAGE_TEMPLATE) | _require-pandoc
+$(DOC_CONTENT_DIR)/clnku.md: $(DOC_CONTENT_DIR)/%.md: doc/%.1.md $(DOC_PAGE_TEMPLATE) | _require-pandoc
 	mkdir -p "$(DOC_CONTENT_DIR)"
 	"$(PANDOC)" \
 		--from=markdown-smart \

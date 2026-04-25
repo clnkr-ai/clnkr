@@ -8,7 +8,7 @@ Platform note: today `clnkr` is Unix-only. The executor assumes `bash`, process 
 
 A minimal coding agent. Query an LLM, execute bash commands, repeat. Supports the Anthropic Messages API and OpenAI-compatible endpoints that implement structured outputs on the selected model path.
 
-Ships two binaries: **clnkr** (TUI) and **clnku** (plain CLI). The evaluation runner lives in the separate **clankerval** project and is installed independently. `make install` also creates a **clnk** symlink to `clnkr` for convenience.
+Ships one binary: **clnku** (plain CLI). The evaluation runner lives in the separate **clankerval** project and is installed independently. `make install` also creates a **clnk** symlink to `clnku` for convenience.
 
 <img width="512" height="512" alt="Isildur cut the Ring (the ring here is bash -jokeexplainer)from his hand with the hilt-shard of his father's sword, and took it for his own." src="https://github.com/user-attachments/assets/7c9d648c-f5b9-4610-a311-04f5af37b364" />
 
@@ -16,11 +16,8 @@ Ships two binaries: **clnkr** (TUI) and **clnku** (plain CLI). The evaluation ru
 ## Install
 
 ```bash
-# Plain CLI only (stdlib, no external deps)
+# Plain CLI (stdlib, no external deps)
 go install github.com/clnkr-ai/clnkr/cmd/clnku@latest
-
-# TUI requires building from source (due to replace directive)
-make build
 
 # Install clankerval separately when you need evals.
 # Debian-family example:
@@ -135,7 +132,7 @@ clnku -p "write a fix based on the investigation" --load-messages /tmp/investiga
 The transcript may include host-generated JSON `[state]` messages. Today they persist the current working directory so `--load-messages` and `--continue` can restore it.
 With `--full-send`, a single-task run that stops to ask for clarification exits with status `2` after printing the question, so callers can distinguish "needs input" from "done". In the default approval mode, the harness asks for clarification inline instead.
 
-By default, both binaries require explicit approval before each `act` turn. Pass `--full-send` to restore the old "run every command immediately" behavior.
+By default, clnku requires explicit approval before each `act` turn. Pass `--full-send` to restore the old "run every command immediately" behavior.
 
 ### Command result format
 
@@ -156,19 +153,7 @@ clnkr executes commands with structured results in the core: command text, exit 
 [/stderr]
 ```
 
-This is intentional. The only downstream machine consumers are clnkr and clnku, so the protocol is optimized for model readability rather than external XML tooling. In practice, weaker models follow explicit flat delimiters more reliably than nested structure, while the frontends still receive fully structured events.
-
-### Reasoning trace in the TUI
-
-In the `clnkr` TUI, model `reasoning` is available as a lightweight trace rather than being printed inline with every assistant message. When a parsed assistant turn includes non-empty `reasoning`, the chat shows a breadcrumb like `Reasoning trace available (press Ctrl+Y)`. Press `Ctrl+Y` to open a modal with the latest reasoning trace.
-
-A few important details:
-
-- Act turns do not render their command text as assistant chat; command proposals and execution are shown through the command UI instead. The reasoning breadcrumb can still appear for those turns.
-- Done turns render their summary in chat and can also attach a reasoning breadcrumb.
-- Live clarify turns do not print the clarify text directly in the chat stream, but their reasoning can still be cached for the reasoning modal.
-- If there is no cached reasoning trace, pressing `Ctrl+Y` shows `No reasoning trace available.`
-- This is separate from `--verbose`. Verbose mode shows debug/internal event lines; the reasoning modal shows the model-provided `reasoning` field from the structured turn protocol.
+This is intentional. The only downstream machine consumer is clnku, so the protocol is optimized for model readability rather than external XML tooling. In practice, weaker models follow explicit flat delimiters more reliably than nested structure, while the frontend still receives fully structured events.
 
 ### Prompt customization
 
@@ -189,20 +174,18 @@ clnkr --no-system-prompt
 
 ## Session Persistence
 
-When using clnkr or clnku in conversational mode (no `-p` flag), sessions are
+When using clnku in conversational mode (no `-p` flag), sessions are
 automatically saved to `$XDG_STATE_HOME/clnkr/projects/` on exit.
 
 Resume a session:
 
 ```bash
-clnkr --continue   # Load most recent session (TUI)
-clnku --continue    # Load most recent session (plain CLI)
+clnku --continue    # Load most recent session
 ```
 
 List all sessions for the current project:
 
 ```bash
-clnkr --list-sessions
 clnku --list-sessions
 ```
 
@@ -216,8 +199,6 @@ still persist only within the live process.
 ### Conversational commands
 
 At the main idle conversational prompt, run `/compact` to summarize older transcript history while keeping the recent working thread intact. You can add extra instructions, for example `/compact focus on failing tests and edited files`.
-
-In the TUI, `/delegate TASK` runs a child `clnku` session seeded with the current transcript and appends a delegation summary back into the conversation when the child run completes.
 
 ## How it works
 
