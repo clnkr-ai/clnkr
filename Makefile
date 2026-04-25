@@ -27,11 +27,12 @@ CLANKERVAL_PREFLIGHT = \
 	check test evaluations evaluations-live evaluations-live-openai evaluations-live-anthropic \
 	help man docs docs-serve \
 	_build-clnkr \
-	_fmt _fmt-check _vet _lint _arch sloc _workflow-make-targets \
+	_fmt _fmt-check _vet _lint _arch sloc frontend-sloc _workflow-make-targets \
 	_hooks _check-docs _require-pandoc _site-sync _site-build
 
 PREFIX ?= /usr/local
 CORE_SLOC_LIMIT := 1300
+FRONTEND_SLOC_LIMIT := 1200
 DOC_MAN_DIR := build/docs/man
 DOC_MAN_OUTPUTS := $(DOC_MAN_DIR)/clnkr.1
 DOC_CONTENT_DIR := site/content/docs
@@ -58,7 +59,7 @@ _build-clnkr:
 	go build -trimpath -ldflags '$(LDFLAGS)' -o clnkr ./cmd/clnkr/
 
 ##@ Quality
-check: _fmt-check _vet _lint _arch sloc _workflow-make-targets _check-docs test evaluations ## Run formatting, vet, lint, architecture, SLOC, workflow, docs, test, and evaluation checks
+check: _fmt-check _vet _lint _arch sloc frontend-sloc _workflow-make-targets _check-docs test evaluations ## Run formatting, vet, lint, architecture, SLOC, workflow, docs, test, and evaluation checks
 
 test: ## Run all tests
 	go test ./... -v
@@ -109,6 +110,11 @@ sloc: ## Report core runtime graph SLOC and fail if it exceeds CORE_SLOC_LIMIT
 	@sloc="$$(cloc --quiet --csv $$(go list -deps -f '{{if .Module}}{{if .Module.Main}}{{range .GoFiles}}{{$$.Dir}}/{{.}}{{"\n"}}{{end}}{{end}}{{end}}' . | sort -u) | awk -F, 'END { print $$5 }')"; \
 	echo "core runtime graph: $$sloc / $(CORE_SLOC_LIMIT) SLOC"; \
 	test "$$sloc" -le "$(CORE_SLOC_LIMIT)" || { echo "error: core runtime graph exceeds $(CORE_SLOC_LIMIT) SLOC limit" >&2; exit 1; }
+
+frontend-sloc: ## Report non-test frontend SLOC and fail if it exceeds FRONTEND_SLOC_LIMIT
+	@sloc="$$(cloc --quiet --csv --not-match-f='_test\.go$$' cmd | awk -F, 'END { print $$5 }')"; \
+	echo "frontend: $$sloc / $(FRONTEND_SLOC_LIMIT) SLOC"; \
+	test "$$sloc" -le "$(FRONTEND_SLOC_LIMIT)" || { echo "error: frontend exceeds $(FRONTEND_SLOC_LIMIT) SLOC limit" >&2; exit 1; }
 
 _workflow-make-targets:
 	./scripts/check-workflow-make-targets.sh
