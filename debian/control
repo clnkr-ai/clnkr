@@ -1,0 +1,25 @@
+Source: clnkr
+Section: devel
+Priority: optional
+Maintainer: Brian Cosgrove <bcosgrove@gmail.com>
+Build-Depends: bash-completion,
+               debhelper-compat (= 13),
+               golang-go (>= 2:1.25~),
+               pandoc
+Standards-Version: 4.6.2
+Homepage: https://github.com/clnkr-ai/clnkr
+Vcs-Git: https://github.com/clnkr-ai/clnkr.git -b debian/main
+Vcs-Browser: https://github.com/clnkr-ai/clnkr
+Rules-Requires-Root: no
+
+Package: clnkr
+Architecture: any
+Depends: ${misc:Depends}
+Recommends: clankerval (>= 0.1.0)
+Description: minimal coding agent CLI
+ clnkr is a minimal coding agent that queries LLMs and executes bash
+ commands in an iterative loop. It supports both Anthropic and
+ OpenAI-compatible APIs, runs in conversational REPL mode or
+ single-prompt mode, and loads project-specific instructions from
+ AGENTS.md files. It ships one clnkr binary. The
+ standalone clankerval package provides the external evaluation runner.

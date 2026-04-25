@@ -1,0 +1,27 @@
+#!/usr/bin/make -f
+
+include /usr/share/dpkg/pkg-info.mk
+
+export CGO_ENABLED=0
+
+VERSION := $(DEB_VERSION_UPSTREAM)
+
+%:
+	dh $@ --with bash-completion
+
+override_dh_auto_build:
+	$(MAKE) man
+	go build -trimpath -ldflags '-s -w -X main.version=$(VERSION)' -o clnkr ./cmd/clnkr
+
+override_dh_auto_test:
+	go test ./...
+
+override_dh_auto_install:
+	install -D -m 0755 clnkr debian/clnkr/usr/bin/clnkr
+
+override_dh_auto_clean:
+	rm -f clnkr
+	rm -rf build/docs
+
+override_dh_dwz:
+	# dwz fails on Go binaries

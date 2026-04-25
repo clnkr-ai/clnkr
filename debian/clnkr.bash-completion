@@ -1,0 +1,21 @@
+# Flag list sourced from cmd/clnkr/main.go; update when flags change.
+_clnkr()
+{
+    local cur prev opts
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    opts="-p --prompt -m --model -u --base-url --provider --provider-api --max-steps --full-send -c --continue -l --list-sessions -S --no-system-prompt --system-prompt-append --dump-system-prompt --load-messages --event-log --trajectory -v --verbose -V --version --help"
+
+    # Flags that take a value, suppress completion for their arguments.
+    case "${prev}" in
+        -p|--prompt|-m|--model|-u|--base-url|--provider|--provider-api|--max-steps|--system-prompt-append|--load-messages|--event-log|--trajectory)
+            return 0
+            ;;
+    esac
+
+    if [[ ${cur} == -* ]]; then
+        COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+    fi
+}
+complete -F _clnkr clnkr

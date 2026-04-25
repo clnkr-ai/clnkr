@@ -1,0 +1,5 @@
+clnkr (0.0.1-1) unstable; urgency=medium
+
+  * Start Debian package history over for the clnkr CLI.
+
+ -- Brian Cosgrove <cosgroveb@gmail.com>  Sat, 25 Apr 2026 12:24:08 +0000
