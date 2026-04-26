@@ -43,11 +43,11 @@ export CLNKR_API_KEY=your-api-key
 # Conversational mode
 clnkr --provider anthropic --model claude-sonnet-4-6
 
-# Single task
+# Single unattended task
 clnkr --provider anthropic --model claude-sonnet-4-6 -p "find all TODO comments in this project"
 
-# Skip act-batch approval
-clnkr --provider anthropic --model claude-sonnet-4-6 --full-send -p "fix the failing test"
+# Skip act-batch approval in conversational mode
+clnkr --provider anthropic --model claude-sonnet-4-6 --full-send
 ```
 
 ### OpenAI-compatible providers
@@ -83,7 +83,7 @@ Structured outputs are a hard requirement for agent turns. clnkr rejects `gpt-5.
 ### Common flags
 
 ```
--p, --prompt string            Task to run (exits after completion)
+-p, --prompt string            Task to run unattended and exit
 -m, --model string             Model identifier (required; env: CLNKR_MODEL)
 -u, --base-url string          LLM endpoint transport URL (env: CLNKR_BASE_URL)
 --provider string              Provider adapter: anthropic|openai
@@ -93,6 +93,7 @@ Structured outputs are a hard requirement for agent turns. clnkr rejects `gpt-5.
 --max-steps int                Limit executed commands
                                before summary (default: 100)
 --full-send                    Execute every act batch without approval
+                               (implied by -p)
 -c, --continue                 Resume the most recent session for this project
 -l, --list-sessions            List saved sessions for this project
 -S, --no-system-prompt         Omit the built-in system prompt
@@ -133,9 +134,9 @@ clnkr -p "write a fix based on the investigation" --load-messages /tmp/investiga
 `--trajectory` writes the full message array as pretty-printed JSON when the task ends, even if it failed.
 `--load-messages` reads that same format and prepends the messages before starting, so one agent's output becomes another's context.
 The transcript may include host-generated JSON `[state]` messages. Today they persist the current working directory so `--load-messages` and `--continue` can restore it.
-With `--full-send`, a single-task run that stops to ask for clarification exits with status `2` after printing the question to stdout. Non-interactive stdin exits with status `2` after printing the question to stderr. In the default approval mode, the harness asks for clarification inline instead.
+Single-task mode (`-p`) runs unattended and uses the same execution path as `--full-send`. Passing `--full-send=false` with `-p` is rejected. If a single-task run stops to ask for clarification, it exits with status `2` after printing the question to stderr. Non-interactive stdin in `--full-send` mode behaves the same. In the default conversational approval mode, clnkr asks for clarification inline instead.
 
-By default, clnkr requires explicit approval before each `act` turn. One approval accepts all commands in that turn. Pass `--full-send` to restore the old "run every command immediately" behavior.
+By default, conversational mode requires explicit approval before each `act` turn. One approval accepts all commands in that turn. Pass `--full-send` to run every command immediately.
 
 ### Command result format
 

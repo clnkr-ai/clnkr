@@ -466,7 +466,7 @@ func TestStepLimitInvalidSummaryExitsNonzero(t *testing.T) {
 	}
 }
 
-func TestSingleTaskFullSendClarificationWritesQuestionToStdout(t *testing.T) {
+func TestSingleTaskFullSendClarificationWritesQuestionToStderr(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -492,11 +492,11 @@ func TestSingleTaskFullSendClarificationWritesQuestionToStdout(t *testing.T) {
 	if !ok || exitErr.ExitCode() != clarificationExit {
 		t.Fatalf("run main err = %v, want exit %d", err, clarificationExit)
 	}
-	if stdout.String() != "Which repo?\n" {
-		t.Fatalf("stdout = %q, want clarification question", stdout.String())
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
-	if stderr.String() != "Clarification needed.\n" {
-		t.Fatalf("stderr = %q, want clarification status", stderr.String())
+	if stderr.String() != "Which repo?\nClarification needed.\n" {
+		t.Fatalf("stderr = %q, want clarification question and status", stderr.String())
 	}
 	if calls != 1 {
 		t.Fatalf("model calls = %d, want 1", calls)
@@ -602,13 +602,96 @@ func TestReplPromptIsSuppressedForNonTTY(t *testing.T) {
 	}
 }
 
-func TestSingleTaskApprovalRejectsNonTTYStdin(t *testing.T) {
+func TestSingleTaskPromptImpliesFullSend(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"role": "assistant", "content": openAIWrappedDone("done")}},
+			},
+			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
+		})
+	}))
+	defer server.Close()
+
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{
+		"CLNKR_API_KEY=test-key",
+	}, "--provider", "openai",
+		"--provider-api", "openai-chat-completions",
+		"--base-url", server.URL,
+		"--model", "gpt-test",
+		"-p", "hi",
+	)
+	if err != nil {
+		t.Fatalf("run main: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+	}
+	if stdout.String() != "done\n" {
+		t.Fatalf("stdout = %q, want summary", stdout.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	if calls != 1 {
+		t.Fatalf("model calls = %d, want 1", calls)
+	}
+}
+
+func TestSingleTaskRejectsExplicitFullSendFalseBeforeProviderConfig(t *testing.T) {
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{
+		"CLNKR_API_KEY=test-key",
+	}, "-p", "hi", "--full-send=false")
+	if err == nil {
+		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "--full-send=false conflicts with -p") {
+		t.Fatalf("stderr = %q, want full-send conflict", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "provider is required") || strings.Contains(stderr.String(), "No API key found") {
+		t.Fatalf("stderr = %q, provider config ran before conflict validation", stderr.String())
+	}
+}
+
+func TestSingleTaskRejectsRepeatedExplicitFullSendFalse(t *testing.T) {
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{
+		"CLNKR_API_KEY=test-key",
+	}, "-p", "hi", "--full-send=false", "--full-send=true")
+	if err == nil {
+		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "--full-send=false conflicts with -p") {
+		t.Fatalf("stderr = %q, want full-send conflict", stderr.String())
+	}
+}
+
+func TestSingleTaskRejectsNumericFullSendFalse(t *testing.T) {
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{
+		"CLNKR_API_KEY=test-key",
+	}, "-p", "hi", "--full-send=0")
+	if err == nil {
+		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "--full-send=false conflicts with -p") {
+		t.Fatalf("stderr = %q, want full-send conflict", stderr.String())
+	}
+}
+
+func TestConversationalApprovalRejectsNonTTYStdin(t *testing.T) {
 	stdout, stderr, err := runMainHelperWithEnv(t, []string{
 		"CLNKR_API_KEY=test-key",
 		"CLNKR_PROVIDER=openai",
 		"CLNKR_MODEL=gpt-test",
 		"TERM=xterm",
-	}, "-p", "hi")
+	})
 	if err == nil {
 		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
 	}
