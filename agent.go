@@ -80,7 +80,8 @@ func (a *Agent) appendStateMessageIfNeeded() {
 	a.messages = append(a.messages, Message{Role: "user", Content: transcript.FormatStateMessage(a.cwd)})
 }
 
-func (a *Agent) appendSuccessfulResponse(resp Response) error {
+func (a *Agent) appendSuccessfulResponse(resp *Response) error {
+	resp.Turn = turnPointer(resp.Turn)
 	if resp.Turn == nil {
 		return fmt.Errorf("query model: missing turn")
 	}
@@ -164,7 +165,7 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 		return StepResult{Response: resp, ParseErr: resp.ProtocolErr}, nil
 	}
 
-	if err := a.appendSuccessfulResponse(resp); err != nil {
+	if err := a.appendSuccessfulResponse(&resp); err != nil {
 		return StepResult{}, err
 	}
 	a.notify(EventDebug{Message: fmt.Sprintf("parsed turn: %T", resp.Turn)})
@@ -239,7 +240,7 @@ func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, erro
 // caller decides the step budget is exhausted.
 func (a *Agent) RequestStepLimitSummary(ctx context.Context) error {
 	a.notify(EventDebug{Message: "step limit reached, requesting summary"})
-	a.AppendUserMessage("Step limit reached. Respond with " + mustCanonicalDoneJSON("...") + " summarizing your progress.")
+	a.AppendUserMessage("Step limit reached. Respond with " + protocolDoneExample + " summarizing your progress.")
 
 	resp, err := a.model.Query(ctx, a.messages)
 	if err != nil {
@@ -248,9 +249,13 @@ func (a *Agent) RequestStepLimitSummary(ctx context.Context) error {
 	if resp.ProtocolErr != nil {
 		a.appendProtocolFailure(resp, false)
 		a.notify(EventDebug{Message: fmt.Sprintf("final response not a valid turn: %v", resp.ProtocolErr)})
-		return nil
+		return fmt.Errorf("query model (final): %w", resp.ProtocolErr)
 	}
-	if err := a.appendSuccessfulResponse(resp); err != nil {
+	resp.Turn = turnPointer(resp.Turn)
+	if _, ok := resp.Turn.(*DoneTurn); !ok {
+		return fmt.Errorf("query model (final): expected done turn, got %T", resp.Turn)
+	}
+	if err := a.appendSuccessfulResponse(&resp); err != nil {
 		return fmt.Errorf("query model (final): %w", err)
 	}
 	a.notify(EventDebug{Message: fmt.Sprintf("final response turn: %T", resp.Turn)})
@@ -280,14 +285,13 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 		}
 		protocolErrors = 0
 
-		switch result.Turn.(type) {
+		switch turn := result.Turn.(type) {
 		case *DoneTurn:
 			return nil
 		case *ClarifyTurn:
 			return ErrClarificationNeeded
 		case *ActTurn:
-			act := result.Turn.(*ActTurn)
-			execResult, err := a.ExecuteTurn(ctx, act)
+			execResult, err := a.ExecuteTurn(ctx, turn)
 			if err != nil {
 				return err
 			}

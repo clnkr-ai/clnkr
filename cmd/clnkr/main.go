@@ -26,6 +26,7 @@ var version = "dev"
 
 const exitClarificationNeeded = 2
 const missingAPIKeyMessage = "Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key"
+const approvalInputMessage = "approval mode requires interactive stdin; pass --full-send=true to bypass approval"
 
 var errApprovalPending = errors.New("approval pending")
 var errCompactCommandOutsideConversation = errors.New("/compact is only available at the conversational prompt")
@@ -56,8 +57,9 @@ Core:
                             (required in normal use; env: $CLNKR_PROVIDER)
       --provider-api string OpenAI-only override
                             (auto|openai-chat-completions|openai-responses)
-      --max-steps int       Maximum agent steps (default: 100)
-      --full-send           Execute every Act turn without approval
+      --max-steps int       Limit executed commands
+                            before summary (default: 100)
+      --full-send           Execute every act batch without approval
   -v, --verbose             Show internal decisions
 
 Sessions:
@@ -186,38 +188,6 @@ func (p *stdinPrompter) readReply(ctx context.Context, kind string) (string, err
 	return strings.TrimSpace(line), nil
 }
 
-func approvalInputAllowed(mode os.FileMode, termEnv string) bool {
-	return mode&os.ModeCharDevice != 0 && termEnv != "" && termEnv != "dumb"
-}
-
-func requireApprovalInput() error {
-	info, err := os.Stdin.Stat()
-	if err != nil {
-		return fmt.Errorf("stat stdin: %w", err)
-	}
-	if !approvalInputAllowed(info.Mode(), os.Getenv("TERM")) {
-		return fmt.Errorf("approval mode requires interactive stdin; pass --full-send=true to bypass approval")
-	}
-	return nil
-}
-
-func runTask(ctx context.Context, agent *clnkr.Agent, task string, fullSend bool, prompter approvalPrompter) error {
-	if fullSend {
-		return agent.Run(ctx, task)
-	}
-	return runApprovalTask(ctx, agent, task, prompter)
-}
-
-func prepareSingleTask(task string, fullSend bool, requireApproval func() error) error {
-	if err := rejectCompactCommand(task); err != nil {
-		return err
-	}
-	if fullSend {
-		return nil
-	}
-	return requireApproval()
-}
-
 func parseCompactCommand(input string) (instructions string, ok bool) {
 	input = strings.TrimSpace(input)
 	fields := strings.Fields(input)
@@ -233,10 +203,7 @@ func makeCompactorFactory(cfg providerConfig) compaction.Factory {
 	})
 }
 
-func handleConversationalInput(ctx context.Context, stderr io.Writer, agent *clnkr.Agent, input string, fullSend bool, prompter approvalPrompter, compactorFactory compaction.Factory) error {
-	if stderr == nil {
-		stderr = io.Discard
-	}
+func handleConversationalInput(ctx context.Context, agent *clnkr.Agent, input string, fullSend bool, prompter approvalPrompter, compactorFactory compaction.Factory) error {
 	if instructions, ok := parseCompactCommand(input); ok {
 		if compactorFactory == nil {
 			return fmt.Errorf("compact command: no compactor factory configured")
@@ -252,10 +219,13 @@ func handleConversationalInput(ctx context.Context, stderr io.Writer, agent *cln
 		if err != nil {
 			return err
 		}
-		_, _ = fmt.Fprintf(stderr, "[Session compacted: %d messages summarized, %d kept]\n", stats.CompactedMessages, stats.KeptMessages)
+		_, _ = fmt.Fprintf(os.Stderr, "[Session compacted: %d messages summarized, %d kept]\n", stats.CompactedMessages, stats.KeptMessages)
 		return nil
 	}
-	return runTask(ctx, agent, input, fullSend, prompter)
+	if fullSend {
+		return agent.Run(ctx, input)
+	}
+	return runApprovalTask(ctx, agent, input, prompter)
 }
 
 func rejectCompactCommand(input string) error {
@@ -428,11 +398,12 @@ func main() {
 		os.Exit(0)
 	}
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		fatalf("cannot get working directory: %v", err)
+	}
+
 	if *listSessions || *listSessionsShort {
-		cwd, err := os.Getwd()
-		if err != nil {
-			fatalf("cannot get working directory: %v", err)
-		}
 		sessions, err := session.ListSessions(cwd)
 		if err != nil {
 			fatalf("cannot list sessions: %v", err)
@@ -449,6 +420,24 @@ func main() {
 	}
 
 	taskPrompt := aliasedString(*promptLong, *taskPromptFlag)
+	singleTask := taskPrompt != ""
+
+	systemPrompt := clnkr.LoadPromptWithOptions(cwd, clnkr.PromptOptions{
+		OmitSystemPrompt:   *noSystemPrompt || *noSystemPromptShort,
+		SystemPromptAppend: *systemPromptAppend,
+	})
+
+	if *dumpSystemPrompt {
+		fmt.Print(systemPrompt)
+		os.Exit(0)
+	}
+
+	if (*continueFlag || *continueShort) && *trajectory != "" {
+		fatalf("--continue and --trajectory are mutually exclusive")
+	}
+	if *trajectory != "" && !singleTask {
+		fatalf("--trajectory requires -p (single-task mode)")
+	}
 
 	cfg, err := providerconfig.ResolveConfig(providerconfig.Inputs{
 		Provider:    *providerFlag,
@@ -464,29 +453,13 @@ func main() {
 		fatalf("%v", err)
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fatalf("cannot get working directory: %v", err)
-	}
-
 	var eventLogFile *os.File
 	if *eventLog != "" {
-		var err error
 		eventLogFile, err = os.OpenFile(*eventLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
 			fatalf("cannot open event log %q: %v", *eventLog, err)
 		}
 		defer eventLogFile.Close() //nolint:errcheck
-	}
-
-	systemPrompt := clnkr.LoadPromptWithOptions(cwd, clnkr.PromptOptions{
-		OmitSystemPrompt:   *noSystemPrompt || *noSystemPromptShort,
-		SystemPromptAppend: *systemPromptAppend,
-	})
-
-	if *dumpSystemPrompt {
-		fmt.Print(systemPrompt)
-		os.Exit(0)
 	}
 
 	model := newModelForConfig(cfg, systemPrompt)
@@ -500,19 +473,38 @@ func main() {
 	agent.Notify = func(e clnkr.Event) {
 		switch e := e.(type) {
 		case clnkr.EventResponse:
-			if text, err := clnkr.CanonicalTurnJSON(e.Turn); err == nil {
-				fmt.Fprintln(os.Stdout, text) //nolint:errcheck
+			switch turn := e.Turn.(type) {
+			case *clnkr.DoneTurn:
+				fmt.Fprintln(os.Stdout, turn.Summary) //nolint:errcheck
+			case *clnkr.ClarifyTurn:
+				if *fullSend && singleTask {
+					fmt.Fprintln(os.Stdout, turn.Question) //nolint:errcheck
+				} else if *fullSend {
+					fmt.Fprintln(os.Stderr, turn.Question) //nolint:errcheck
+				}
+			default:
+				if showDebug {
+					if text, err := clnkr.CanonicalTurnJSON(e.Turn); err == nil {
+						fmt.Fprintln(os.Stderr, text) //nolint:errcheck
+					}
+				}
 			}
 		case clnkr.EventCommandStart:
-			fmt.Fprintf(os.Stdout, "--- running: %s ---\n", summarizeCommand(e.Command)) //nolint:errcheck
+			command := summarizeCommand(e.Command)
+			if e.Dir != "" && e.Dir != cwd {
+				command += " in " + e.Dir
+			}
+			fmt.Fprintf(os.Stderr, "--- running: %s ---\n", command) //nolint:errcheck
 		case clnkr.EventCommandDone:
-			if e.Stdout != "" {
-				fmt.Fprint(os.Stdout, e.Stdout) //nolint:errcheck
+			fmt.Fprint(os.Stdout, e.Stdout) //nolint:errcheck
+			if e.Stdout != "" && !strings.HasSuffix(e.Stdout, "\n") {
+				fmt.Fprintln(os.Stdout) //nolint:errcheck
 			}
-			if e.Stderr != "" {
-				fmt.Fprint(os.Stderr, e.Stderr) //nolint:errcheck
+			fmt.Fprint(os.Stderr, e.Stderr) //nolint:errcheck
+			if e.Stderr != "" && !strings.HasSuffix(e.Stderr, "\n") {
+				fmt.Fprintln(os.Stderr) //nolint:errcheck
 			}
-			fmt.Fprintln(os.Stdout, "--- done ---") //nolint:errcheck
+			fmt.Fprintln(os.Stderr, "--- done ---") //nolint:errcheck
 		case clnkr.EventProtocolFailure:
 			if showDebug {
 				fmt.Fprintf(os.Stderr, "[clnkr] protocol error: %s\n", e.Reason) //nolint:errcheck
@@ -546,9 +538,6 @@ func main() {
 	}
 
 	if *continueFlag || *continueShort {
-		if *trajectory != "" {
-			fatalf("--continue and --trajectory are mutually exclusive")
-		}
 		msgs, err := session.LoadLatestSession(cwd)
 		if err != nil {
 			fatalf("cannot load session: %v", err)
@@ -563,17 +552,21 @@ func main() {
 		fmt.Fprintf(os.Stderr, "[Resumed session with %d messages]\n", len(msgs))
 	}
 
-	if *trajectory != "" && taskPrompt == "" {
-		fatalf("--trajectory requires -p (single-task mode)")
-	}
-
-	if taskPrompt != "" {
+	if singleTask {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
-		if err := prepareSingleTask(taskPrompt, *fullSend, requireApprovalInput); err != nil {
+		if err := rejectCompactCommand(taskPrompt); err != nil {
 			fatalf("%v", err)
 		}
-		runErr := runTask(ctx, agent, taskPrompt, *fullSend, &stdinPrompter{reader: newLineReader(os.Stdin)})
+		if !*fullSend && !isTerminal(os.Stdin.Fd()) {
+			fatalf("%v", approvalInputMessage)
+		}
+		var runErr error
+		if *fullSend {
+			runErr = agent.Run(ctx, taskPrompt)
+		} else {
+			runErr = runApprovalTask(ctx, agent, taskPrompt, &stdinPrompter{reader: newLineReader(os.Stdin)})
+		}
 		if *trajectory != "" {
 			if err := writeTrajectory(*trajectory, agent.Messages()); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -589,15 +582,17 @@ func main() {
 
 	// REPL mode — fresh context per run so Ctrl-C cancels the current
 	// operation without killing the REPL.
-	if !*fullSend {
-		if err := requireApprovalInput(); err != nil {
-			fatalf("%v", err)
-		}
+	showPrompt := isTerminal(os.Stdin.Fd())
+	if !*fullSend && !showPrompt {
+		fatalf("%v", approvalInputMessage)
 	}
 	reader := newLineReader(os.Stdin)
 	prompter := &stdinPrompter{reader: reader}
+	var loopErr error
 	for {
-		fmt.Print("clnkr> ")
+		if showPrompt {
+			fmt.Fprint(os.Stderr, "clnkr> ") //nolint:errcheck
+		}
 		input, err := reader.ReadLine(context.Background())
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -610,7 +605,12 @@ func main() {
 			continue
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-		if err := handleConversationalInput(ctx, os.Stderr, agent, input, *fullSend, prompter, compactorFactory); err != nil {
+		if err := handleConversationalInput(ctx, agent, input, *fullSend, prompter, compactorFactory); err != nil {
+			if !showPrompt {
+				stop()
+				loopErr = err
+				break
+			}
 			if errors.Is(err, clnkr.ErrClarificationNeeded) || errors.Is(err, errApprovalPending) || errors.Is(err, context.Canceled) {
 				stop()
 				continue
@@ -628,6 +628,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "[Session saved to %s]\n", dir)
 		}
 	}
+	exitRunErr(loopErr)
 
 }
 
@@ -640,14 +641,25 @@ func writeEventLog(f *os.File, e clnkr.Event) {
 	var je jsonEvent
 	switch e := e.(type) {
 	case clnkr.EventResponse:
-		payload, ok := responseEventPayload(e)
-		if !ok {
+		canonical, err := clnkr.CanonicalTurnJSON(e.Turn)
+		if err != nil {
 			return
+		}
+		payload := map[string]any{
+			"turn":  json.RawMessage(canonical),
+			"usage": map[string]int{"input_tokens": e.Usage.InputTokens, "output_tokens": e.Usage.OutputTokens},
+		}
+		if e.Raw != "" {
+			payload["raw"] = e.Raw
 		}
 		je = jsonEvent{Type: "response", Payload: payload}
 	case clnkr.EventCommandStart:
-		je = jsonEvent{Type: "command_start", Payload: e}
+		je = jsonEvent{Type: "command_start", Payload: map[string]string{"command": e.Command, "dir": e.Dir}}
 	case clnkr.EventCommandDone:
+		errText := ""
+		if e.Err != nil {
+			errText = e.Err.Error()
+		}
 		je = jsonEvent{Type: "command_done", Payload: struct {
 			Command  string                `json:"command"`
 			Stdout   string                `json:"stdout"`
@@ -655,48 +667,20 @@ func writeEventLog(f *os.File, e clnkr.Event) {
 			ExitCode int                   `json:"exit_code"`
 			Feedback clnkr.CommandFeedback `json:"feedback,omitempty"`
 			Err      string                `json:"err,omitempty"`
-		}{Command: e.Command, Stdout: e.Stdout, Stderr: e.Stderr, ExitCode: e.ExitCode, Feedback: e.Feedback, Err: errString(e.Err)}}
+		}{Command: e.Command, Stdout: e.Stdout, Stderr: e.Stderr, ExitCode: e.ExitCode, Feedback: e.Feedback, Err: errText}}
 	case clnkr.EventProtocolFailure:
-		je = jsonEvent{Type: "protocol_failure", Payload: struct {
-			Reason string `json:"reason"`
-			Raw    string `json:"raw"`
-		}{Reason: e.Reason, Raw: e.Raw}}
+		je = jsonEvent{Type: "protocol_failure", Payload: map[string]string{"reason": e.Reason, "raw": e.Raw}}
 	case clnkr.EventDebug:
-		je = jsonEvent{Type: "debug", Payload: e}
+		je = jsonEvent{Type: "debug", Payload: map[string]string{"message": e.Message}}
 	default:
 		return
 	}
 	json.NewEncoder(f).Encode(je) //nolint:errcheck
 }
 
-func errString(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
-}
-
-func responseEventPayload(ev clnkr.EventResponse) (any, bool) {
-	canonical, err := clnkr.CanonicalTurnJSON(ev.Turn)
-	if err != nil {
-		return nil, false
-	}
-	return struct {
-		Turn  json.RawMessage `json:"turn"`
-		Usage clnkr.Usage     `json:"usage"`
-		Raw   string          `json:"raw,omitempty"`
-	}{
-		Turn:  json.RawMessage(canonical),
-		Usage: ev.Usage,
-		Raw:   ev.Raw,
-	}, true
-}
-
 func summarizeCommand(cmd string) string {
-	lines := strings.Split(cmd, "\n")
-	first := lines[0]
-	if len(lines) == 1 {
-		return first
+	if idx := strings.IndexByte(cmd, '\n'); idx >= 0 {
+		return fmt.Sprintf("%s ... (%d lines)", cmd[:idx], strings.Count(cmd, "\n")+1)
 	}
-	return fmt.Sprintf("%s ... (%d lines)", first, len(lines))
+	return cmd
 }

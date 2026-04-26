@@ -18,9 +18,9 @@ At the main idle conversational prompt, **/compact** summarizes older transcript
 
 **clnkr** has no external dependencies beyond the Go standard library.
 
-The agent communicates through JSON turns: **act** (execute a command through a nested `bash.command` plus optional `bash.workdir`), **clarify** (ask the user), and **done** (signal completion).
+The agent communicates through JSON turns: **act** (execute one or more `bash.commands[]` entries with `command` and nullable `workdir`), **clarify** (ask the user), and **done** (signal completion).
 
-By default, **clnkr** asks for approval before each **act** turn. Approval prompts show the requested command and any explicit workdir override. Pass **--full-send** to execute commands immediately without approval.
+By default, **clnkr** asks for approval before each **act** turn. One approval accepts the whole command batch. Approval prompts show each requested command and any explicit workdir override. Pass **--full-send** to execute commands immediately without approval.
 
 For Anthropic runs, **clnkr** requests Anthropic's native structured output format on every turn. Keep **--model** on a model Anthropic documents as supporting structured output.
 
@@ -48,10 +48,10 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : OpenAI-only API surface override: **auto**, **openai-chat-completions**, or **openai-responses**. With **provider=openai**, **auto** prefers **openai-responses** for known supported names and other OpenAI-looking model names such as **gpt-***, **o** followed by a digit, **codex**, **codex-***, names ending in **-codex**, and names containing **-codex-**. Names that do not look OpenAI-ish, such as **llama3**, **gemini-2.0-flash**, **orca-***, **olmo-***, **openhermes-***, and **chatgpt-***, stay on **openai-chat-completions**. This flag is rejected for **provider=anthropic**.
 
 **--max-steps** *n*
-: Maximum agent iterations. 0 uses the default of 100.
+: Maximum executed commands before requesting a final summary. 0 uses the default of 100. The limit is checked after each **act** batch.
 
 **--full-send**
-: Execute every **act** turn immediately. Without this flag, clnkr asks for approval before each command.
+: Execute every **act** turn immediately. Without this flag, clnkr asks for approval before each command batch.
 
 **-c**, **--continue**
 : Resume the most recent session for the current project directory. Saved JSON **[state]** messages restore the last persisted working directory. Mutually exclusive with **--trajectory**.
@@ -118,10 +118,10 @@ This command is only available at the top-level conversational prompt. In single
 : Success.
 
 **1**
-: Error (no API key, step limit reached, invalid flags, session load failure, etc.).
+: Error (no API key, invalid flags, session load failure, failed final step-limit summary, etc.).
 
 **2**
-: In single-task mode with **--full-send**, the run stopped because the agent asked for clarification.
+: In **--full-send** mode, a single-task run or non-interactive stdin run stopped because the agent asked for clarification.
 
 # AUTHOR
 

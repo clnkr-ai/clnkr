@@ -513,7 +513,7 @@ func TestStepStoresRawInvalidProviderResponse(t *testing.T) {
 func TestEventResponseCarriesTypedTurn(t *testing.T) {
 	raw := `{"turn":{"type":"done","summary":"wrapped summary"}}`
 	model := &fakeModel{responses: []Response{
-		{Turn: &DoneTurn{Summary: "wrapped summary"}, Raw: raw, Usage: Usage{InputTokens: 9, OutputTokens: 4}},
+		{Turn: DoneTurn{Summary: "wrapped summary"}, Raw: raw, Usage: Usage{InputTokens: 9, OutputTokens: 4}},
 	}}
 	notify, events := collectEvents()
 	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -1424,7 +1424,7 @@ func TestAppendUserMessage(t *testing.T) {
 }
 
 func TestRequestStepLimitSummary(t *testing.T) {
-	t.Run("treats response protocol errors as invalid final turns", func(t *testing.T) {
+	t.Run("rejects response protocol errors as invalid final turns", func(t *testing.T) {
 		raw := `{"type":"done","summary":"ignored schema"}`
 		model := &fakeModel{responses: []Response{
 			{
@@ -1438,8 +1438,9 @@ func TestRequestStepLimitSummary(t *testing.T) {
 		agent.Notify = notify
 		agent.messages = append(agent.messages, Message{Role: "user", Content: "do it"})
 
-		if err := agent.RequestStepLimitSummary(context.Background()); err != nil {
-			t.Fatalf("RequestStepLimitSummary: %v", err)
+		err := agent.RequestStepLimitSummary(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "query model (final)") {
+			t.Fatalf("RequestStepLimitSummary error = %v, want final query error", err)
 		}
 		if got := agent.messages[len(agent.messages)-1]; got != (Message{Role: "assistant", Content: raw}) {
 			t.Fatalf("assistant message = %#v, want raw payload", got)
@@ -1468,6 +1469,29 @@ func TestRequestStepLimitSummary(t *testing.T) {
 		}
 		if sawResponse {
 			t.Fatal("unexpected EventResponse for final response protocol error")
+		}
+	})
+
+	t.Run("rejects valid non-done final turns", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			mustResponse(actJSON("echo keep-going")),
+		}}
+		notify, events := collectEvents()
+
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		agent.Notify = notify
+
+		err := agent.RequestStepLimitSummary(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "expected done turn") {
+			t.Fatalf("RequestStepLimitSummary error = %v, want expected done turn", err)
+		}
+		if got := agent.messages[len(agent.messages)-1]; got.Role == "assistant" {
+			t.Fatalf("unexpected assistant message for non-done final turn: %#v", got)
+		}
+		for _, e := range *events {
+			if _, ok := e.(EventResponse); ok {
+				t.Fatal("unexpected EventResponse for non-done final turn")
+			}
 		}
 	})
 }
@@ -1507,6 +1531,26 @@ func TestFinalSummaryUsesCanonicalTranscript(t *testing.T) {
 }
 
 func TestAgent(t *testing.T) {
+	t.Run("accepts value turns from model", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Turn: ActTurn{Bash: BashBatch{Commands: []BashAction{{Command: "ls"}}}}},
+			{Turn: DoneTurn{Summary: "done"}},
+		}}
+		executor := &fakeExecutor{results: []CommandResult{{Stdout: "file1.go\n", ExitCode: 0}}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		err := agent.Run(context.Background(), "list files")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if model.calls != 2 {
+			t.Fatalf("model calls = %d, want 2", model.calls)
+		}
+		if executor.calls != 1 {
+			t.Fatalf("executor calls = %d, want 1", executor.calls)
+		}
+	})
+
 	t.Run("single step then exit", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			mustResponse(actJSON("ls")),
@@ -1553,15 +1597,15 @@ func TestAgent(t *testing.T) {
 	})
 
 	t.Run("respects max steps", func(t *testing.T) {
-		responses := make([]Response, 12)
-		for i := 0; i < 10; i++ {
+		responses := make([]Response, 4)
+		for i := 0; i < 3; i++ {
 			responses[i] = mustResponse(actJSON("echo step"))
 		}
-		responses[10] = mustResponse(`{"type":"done","summary":"Step limit reached."}`)
+		responses[3] = mustResponse(`{"type":"done","summary":"Step limit reached."}`)
 
 		model := &fakeModel{responses: responses}
-		results := make([]CommandResult, 10)
-		for i := 0; i < 10; i++ {
+		results := make([]CommandResult, 3)
+		for i := 0; i < 3; i++ {
 			results[i] = CommandResult{Stdout: "step", ExitCode: 0}
 		}
 		executor := &fakeExecutor{results: results}
