@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.0.1 (2026-04-25)
+## 0.0.2 (2026-04-26)
 
 - Restart release history for the clnkr CLI.
 
