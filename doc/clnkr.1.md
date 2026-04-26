@@ -12,7 +12,7 @@ clnkr - a minimal coding agent (plain CLI)
 
 **clnkr** is a minimal coding agent that queries LLMs and executes bash commands using a structured JSON turn protocol. It supports the Anthropic Messages API and OpenAI-compatible APIs that implement structured outputs on the selected model path.
 
-In default mode, **clnkr** starts an interactive REPL. With **-p**, it runs a single task and exits.
+In default mode, **clnkr** starts an interactive REPL. With **-p**, it runs a single unattended task and exits.
 
 At the main idle conversational prompt, **/compact** summarizes older transcript history while keeping recent context intact for the current working thread.
 
@@ -20,7 +20,7 @@ At the main idle conversational prompt, **/compact** summarizes older transcript
 
 The agent communicates through JSON turns: **act** (execute one or more `bash.commands[]` entries with `command` and nullable `workdir`), **clarify** (ask the user), and **done** (signal completion).
 
-By default, **clnkr** asks for approval before each **act** turn. One approval accepts the whole command batch. Approval prompts show each requested command and any explicit workdir override. Pass **--full-send** to execute commands immediately without approval.
+By default, **clnkr** asks for approval before each **act** turn in conversational mode. One approval accepts the whole command batch. Approval prompts show each requested command and any explicit workdir override. Pass **--full-send** to execute commands immediately without approval. Single-task mode (**-p**) implies **--full-send**.
 
 For Anthropic runs, **clnkr** requests Anthropic's native structured output format on every turn. Keep **--model** on a model Anthropic documents as supporting structured output.
 
@@ -33,7 +33,7 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 # OPTIONS
 
 **-p**, **--prompt** *task*
-: Run the given task and exit. Without this flag, clnkr starts in conversational REPL mode.
+: Run the given task unattended and exit. Without this flag, clnkr starts in conversational REPL mode. This implies **--full-send**; passing **--full-send=false** with **-p** is rejected.
 
 **-m**, **--model** *name*
 : LLM model identifier. Required unless **CLNKR_MODEL** is set.
@@ -51,7 +51,7 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : Maximum executed commands before requesting a final summary. 0 uses the default of 100. The limit is checked after each **act** batch.
 
 **--full-send**
-: Execute every **act** turn immediately. Without this flag, clnkr asks for approval before each command batch.
+: Execute every **act** turn immediately. Without this flag, clnkr asks for approval before each command batch in conversational mode. Implied by **-p**.
 
 **-c**, **--continue**
 : Resume the most recent session for the current project directory. Saved JSON **[state]** messages restore the last persisted working directory. Mutually exclusive with **--trajectory**.
@@ -121,7 +121,7 @@ This command is only available at the top-level conversational prompt. In single
 : Error (no API key, invalid flags, session load failure, failed final step-limit summary, etc.).
 
 **2**
-: In **--full-send** mode, a single-task run or non-interactive stdin run stopped because the agent asked for clarification.
+: In single-task mode or non-interactive **--full-send** mode, the run stopped because the agent asked for clarification. The question is printed to stderr.
 
 # AUTHOR
 

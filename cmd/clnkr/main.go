@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 
 	"github.com/clnkr-ai/clnkr"
@@ -47,19 +48,16 @@ func usageText() string {
 
 Usage:
   clnkr                     Start conversational mode
-  clnkr -p "task"           Run a single task and exit
 
-Core:
-  -p, --prompt string       Task to run (exits after completion)
+  -p, --prompt string       Task to run unattended and exit
   -m, --model string        Model identifier (required; env: $CLNKR_MODEL)
   -u, --base-url string     LLM endpoint transport URL (env: $CLNKR_BASE_URL)
       --provider string     Provider adapter: anthropic|openai
-                            (required in normal use; env: $CLNKR_PROVIDER)
       --provider-api string OpenAI-only override
-                            (auto|openai-chat-completions|openai-responses)
       --max-steps int       Limit executed commands
                             before summary (default: 100)
       --full-send           Execute every act batch without approval
+                            (implied by -p)
   -v, --verbose             Show internal decisions
 
 Sessions:
@@ -367,20 +365,26 @@ func main() {
 	providerFlag := flags.String("provider", "", "")
 	providerAPIFlag := flags.String("provider-api", "", "")
 	maxSteps := flags.Int("max-steps", 0, "")
-	fullSend := flags.Bool("full-send", false, "")
-	verbose := flags.Bool("verbose", false, "")
-	verboseShort := flags.Bool("v", false, "")
-	showVersion := flags.Bool("version", false, "")
-	showVersionShort := flags.Bool("V", false, "")
+	fullSend := new(bool)
+	explicitFullSendFalse := false
+	flags.BoolFunc("full-send", "", func(s string) error {
+		value, err := strconv.ParseBool(s)
+		if err != nil {
+			return err
+		}
+		*fullSend = value
+		explicitFullSendFalse = explicitFullSendFalse || !value
+		return nil
+	})
+	verbose, verboseShort := flags.Bool("verbose", false, ""), flags.Bool("v", false, "")
+	showVersion, showVersionShort := flags.Bool("version", false, ""), flags.Bool("V", false, "")
 	eventLog := flags.String("event-log", "", "")
 	trajectory := flags.String("trajectory", "", "")
 	loadMessages := flags.String("load-messages", "", "")
 	continueFlag := flags.Bool("continue", false, "")
 	continueShort := flags.Bool("c", false, "")
-	listSessions := flags.Bool("list-sessions", false, "")
-	listSessionsShort := flags.Bool("l", false, "")
-	noSystemPrompt := flags.Bool("no-system-prompt", false, "")
-	noSystemPromptShort := flags.Bool("S", false, "")
+	listSessions, listSessionsShort := flags.Bool("list-sessions", false, ""), flags.Bool("l", false, "")
+	noSystemPrompt, noSystemPromptShort := flags.Bool("no-system-prompt", false, ""), flags.Bool("S", false, "")
 	systemPromptAppend := flags.String("system-prompt-append", "", "")
 	dumpSystemPrompt := flags.Bool("dump-system-prompt", false, "")
 
@@ -421,6 +425,12 @@ func main() {
 
 	taskPrompt := aliasedString(*promptLong, *taskPromptFlag)
 	singleTask := taskPrompt != ""
+	if singleTask && explicitFullSendFalse {
+		fatalf("--full-send=false conflicts with -p")
+	}
+	if singleTask {
+		*fullSend = true
+	}
 
 	systemPrompt := clnkr.LoadPromptWithOptions(cwd, clnkr.PromptOptions{
 		OmitSystemPrompt:   *noSystemPrompt || *noSystemPromptShort,
@@ -477,9 +487,7 @@ func main() {
 			case *clnkr.DoneTurn:
 				fmt.Fprintln(os.Stdout, turn.Summary) //nolint:errcheck
 			case *clnkr.ClarifyTurn:
-				if *fullSend && singleTask {
-					fmt.Fprintln(os.Stdout, turn.Question) //nolint:errcheck
-				} else if *fullSend {
+				if *fullSend {
 					fmt.Fprintln(os.Stderr, turn.Question) //nolint:errcheck
 				}
 			default:
@@ -558,15 +566,7 @@ func main() {
 		if err := rejectCompactCommand(taskPrompt); err != nil {
 			fatalf("%v", err)
 		}
-		if !*fullSend && !isTerminal(os.Stdin.Fd()) {
-			fatalf("%v", approvalInputMessage)
-		}
-		var runErr error
-		if *fullSend {
-			runErr = agent.Run(ctx, taskPrompt)
-		} else {
-			runErr = runApprovalTask(ctx, agent, taskPrompt, &stdinPrompter{reader: newLineReader(os.Stdin)})
-		}
+		runErr := agent.Run(ctx, taskPrompt)
 		if *trajectory != "" {
 			if err := writeTrajectory(*trajectory, agent.Messages()); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
