@@ -32,11 +32,6 @@ var errCompactCommandOutsideConversation = errors.New("/compact is only availabl
 
 type providerConfig = providerconfig.ResolvedProviderConfig
 
-type providerModel interface {
-	clnkr.Model
-	compaction.FreeformModel
-}
-
 type approvalPrompter interface {
 	ActReply(ctx context.Context, command string) (string, error)
 	Clarify(ctx context.Context, question string) (string, error)
@@ -94,10 +89,6 @@ Defaults:
 `
 }
 
-func printUsage(w io.Writer) {
-	fmt.Fprint(w, usageText()) //nolint:errcheck
-}
-
 func aliasedString(preferred, fallback string) string {
 	if strings.TrimSpace(preferred) != "" {
 		return preferred
@@ -105,15 +96,24 @@ func aliasedString(preferred, fallback string) string {
 	return fallback
 }
 
-func newProviderModelForConfig(cfg providerConfig, systemPrompt string) providerModel {
-	switch {
-	case cfg.Provider == providerconfig.ProviderAnthropic:
+func newModelForConfig(cfg providerConfig, systemPrompt string) clnkr.Model {
+	if cfg.Provider == providerconfig.ProviderAnthropic {
 		return anthropic.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
-	case cfg.ProviderAPI == providerconfig.ProviderAPIOpenAIResponses:
-		return openairesponses.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
-	default:
-		return openai.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
 	}
+	if cfg.ProviderAPI == providerconfig.ProviderAPIOpenAIResponses {
+		return openairesponses.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
+	}
+	return openai.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
+}
+
+func newFreeformModelForConfig(cfg providerConfig, systemPrompt string) compaction.FreeformModel {
+	if cfg.Provider == providerconfig.ProviderAnthropic {
+		return anthropic.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
+	}
+	if cfg.ProviderAPI == providerconfig.ProviderAPIOpenAIResponses {
+		return openairesponses.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
+	}
+	return openai.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
 }
 
 type lineResult struct {
@@ -121,7 +121,9 @@ type lineResult struct {
 	err  error
 }
 
-type lineReader struct{ lines chan lineResult }
+type lineReader struct {
+	lines chan lineResult
+}
 
 func newLineReader(r io.Reader) *lineReader {
 	lr := &lineReader{lines: make(chan lineResult)}
@@ -207,8 +209,11 @@ func runTask(ctx context.Context, agent *clnkr.Agent, task string, fullSend bool
 }
 
 func prepareSingleTask(task string, fullSend bool, requireApproval func() error) error {
-	if err := rejectCompactCommand(task); err != nil || fullSend {
+	if err := rejectCompactCommand(task); err != nil {
 		return err
+	}
+	if fullSend {
+		return nil
 	}
 	return requireApproval()
 }
@@ -224,7 +229,7 @@ func parseCompactCommand(input string) (instructions string, ok bool) {
 
 func makeCompactorFactory(cfg providerConfig) compaction.Factory {
 	return compaction.NewFactory(func(instructions string) compaction.FreeformModel {
-		return newProviderModelForConfig(cfg, compaction.LoadCompactionPrompt(instructions))
+		return newFreeformModelForConfig(cfg, compaction.LoadCompactionPrompt(instructions))
 	})
 }
 
@@ -383,52 +388,47 @@ func main() {
 	flags.Usage = func() {}
 	flags.SetOutput(io.Discard)
 
-	var taskPrompt, promptLong, modelFlag, modelShort, baseURL, baseURLShort, providerFlag, providerAPIFlag string
-	var eventLog, trajectory, loadMessages, systemPromptAppend string
-	var maxSteps int
-	var fullSend, verbose, verboseShort, showVersion, showVersionShort, continueFlag, continueShort, listSessions, listSessionsShort bool
-	var noSystemPrompt, noSystemPromptShort, dumpSystemPrompt bool
-	flags.StringVar(&taskPrompt, "p", "", "")
-	flags.StringVar(&promptLong, "prompt", "", "")
-	flags.StringVar(&modelFlag, "model", "", "")
-	flags.StringVar(&modelShort, "m", "", "")
-	flags.StringVar(&baseURL, "base-url", "", "")
-	flags.StringVar(&baseURLShort, "u", "", "")
-	flags.StringVar(&providerFlag, "provider", "", "")
-	flags.StringVar(&providerAPIFlag, "provider-api", "", "")
-	flags.IntVar(&maxSteps, "max-steps", 0, "")
-	flags.BoolVar(&fullSend, "full-send", false, "")
-	flags.BoolVar(&verbose, "verbose", false, "")
-	flags.BoolVar(&verboseShort, "v", false, "")
-	flags.BoolVar(&showVersion, "version", false, "")
-	flags.BoolVar(&showVersionShort, "V", false, "")
-	flags.StringVar(&eventLog, "event-log", "", "")
-	flags.StringVar(&trajectory, "trajectory", "", "")
-	flags.StringVar(&loadMessages, "load-messages", "", "")
-	flags.BoolVar(&continueFlag, "continue", false, "")
-	flags.BoolVar(&continueShort, "c", false, "")
-	flags.BoolVar(&listSessions, "list-sessions", false, "")
-	flags.BoolVar(&listSessionsShort, "l", false, "")
-	flags.BoolVar(&noSystemPrompt, "no-system-prompt", false, "")
-	flags.BoolVar(&noSystemPromptShort, "S", false, "")
-	flags.StringVar(&systemPromptAppend, "system-prompt-append", "", "")
-	flags.BoolVar(&dumpSystemPrompt, "dump-system-prompt", false, "")
+	taskPromptFlag := flags.String("p", "", "")
+	promptLong := flags.String("prompt", "", "")
+	modelFlag := flags.String("model", "", "")
+	modelShort := flags.String("m", "", "")
+	baseURLFlag := flags.String("base-url", "", "")
+	baseURLShort := flags.String("u", "", "")
+	providerFlag := flags.String("provider", "", "")
+	providerAPIFlag := flags.String("provider-api", "", "")
+	maxSteps := flags.Int("max-steps", 0, "")
+	fullSend := flags.Bool("full-send", false, "")
+	verbose := flags.Bool("verbose", false, "")
+	verboseShort := flags.Bool("v", false, "")
+	showVersion := flags.Bool("version", false, "")
+	showVersionShort := flags.Bool("V", false, "")
+	eventLog := flags.String("event-log", "", "")
+	trajectory := flags.String("trajectory", "", "")
+	loadMessages := flags.String("load-messages", "", "")
+	continueFlag := flags.Bool("continue", false, "")
+	continueShort := flags.Bool("c", false, "")
+	listSessions := flags.Bool("list-sessions", false, "")
+	listSessionsShort := flags.Bool("l", false, "")
+	noSystemPrompt := flags.Bool("no-system-prompt", false, "")
+	noSystemPromptShort := flags.Bool("S", false, "")
+	systemPromptAppend := flags.String("system-prompt-append", "", "")
+	dumpSystemPrompt := flags.Bool("dump-system-prompt", false, "")
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
-			printUsage(os.Stdout)
+			fmt.Fprint(os.Stdout, usageText()) //nolint:errcheck
 			os.Exit(0)
 		}
 		fmt.Fprintf(os.Stderr, "Error: %v\nRun 'clnkr --help' for available options.\n", err)
 		os.Exit(1)
 	}
 
-	if showVersion || showVersionShort {
+	if *showVersion || *showVersionShort {
 		fmt.Printf("clnkr %s\n", version)
 		os.Exit(0)
 	}
 
-	if listSessions || listSessionsShort {
+	if *listSessions || *listSessionsShort {
 		cwd, err := os.Getwd()
 		if err != nil {
 			fatalf("cannot get working directory: %v", err)
@@ -448,15 +448,13 @@ func main() {
 		os.Exit(0)
 	}
 
-	taskPrompt = aliasedString(promptLong, taskPrompt)
-	modelFlag = aliasedString(modelShort, modelFlag)
-	baseURL = aliasedString(baseURLShort, baseURL)
+	taskPrompt := aliasedString(*promptLong, *taskPromptFlag)
 
 	cfg, err := providerconfig.ResolveConfig(providerconfig.Inputs{
-		Provider:    providerFlag,
-		ProviderAPI: providerAPIFlag,
-		Model:       modelFlag,
-		BaseURL:     baseURL,
+		Provider:    *providerFlag,
+		ProviderAPI: *providerAPIFlag,
+		Model:       aliasedString(*modelShort, *modelFlag),
+		BaseURL:     aliasedString(*baseURLShort, *baseURLFlag),
 	}, os.Getenv)
 	if err != nil {
 		if strings.Contains(err.Error(), "api key is required") {
@@ -472,33 +470,33 @@ func main() {
 	}
 
 	var eventLogFile *os.File
-	if eventLog != "" {
+	if *eventLog != "" {
 		var err error
-		eventLogFile, err = os.OpenFile(eventLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		eventLogFile, err = os.OpenFile(*eventLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
-			fatalf("cannot open event log %q: %v", eventLog, err)
+			fatalf("cannot open event log %q: %v", *eventLog, err)
 		}
 		defer eventLogFile.Close() //nolint:errcheck
 	}
 
 	systemPrompt := clnkr.LoadPromptWithOptions(cwd, clnkr.PromptOptions{
-		OmitSystemPrompt:   noSystemPrompt || noSystemPromptShort,
-		SystemPromptAppend: systemPromptAppend,
+		OmitSystemPrompt:   *noSystemPrompt || *noSystemPromptShort,
+		SystemPromptAppend: *systemPromptAppend,
 	})
 
-	if dumpSystemPrompt {
+	if *dumpSystemPrompt {
 		fmt.Print(systemPrompt)
 		os.Exit(0)
 	}
 
-	model := newProviderModelForConfig(cfg, systemPrompt)
+	model := newModelForConfig(cfg, systemPrompt)
 	compactorFactory := makeCompactorFactory(cfg)
 
 	executor := &clnkr.CommandExecutor{}
 
 	agent := clnkr.NewAgent(model, executor, cwd)
 
-	showDebug := verbose || verboseShort
+	showDebug := *verbose || *verboseShort
 	agent.Notify = func(e clnkr.Event) {
 		switch e := e.(type) {
 		case clnkr.EventResponse:
@@ -529,26 +527,26 @@ func main() {
 		}
 	}
 
-	if maxSteps > 0 {
-		agent.MaxSteps = maxSteps
+	if *maxSteps > 0 {
+		agent.MaxSteps = *maxSteps
 	}
 
-	if loadMessages != "" {
-		data, err := os.ReadFile(loadMessages)
+	if *loadMessages != "" {
+		data, err := os.ReadFile(*loadMessages)
 		if err != nil {
-			fatalf("cannot read messages file %q: %v", loadMessages, err)
+			fatalf("cannot read messages file %q: %v", *loadMessages, err)
 		}
 		var msgs []clnkr.Message
 		if err := json.Unmarshal(data, &msgs); err != nil {
-			fatalf("cannot parse messages file %q: %v", loadMessages, err)
+			fatalf("cannot parse messages file %q: %v", *loadMessages, err)
 		}
 		if err := agent.AddMessages(msgs); err != nil {
 			fatalf("cannot load messages: %v", err)
 		}
 	}
 
-	if continueFlag || continueShort {
-		if trajectory != "" {
+	if *continueFlag || *continueShort {
+		if *trajectory != "" {
 			fatalf("--continue and --trajectory are mutually exclusive")
 		}
 		msgs, err := session.LoadLatestSession(cwd)
@@ -565,19 +563,19 @@ func main() {
 		fmt.Fprintf(os.Stderr, "[Resumed session with %d messages]\n", len(msgs))
 	}
 
-	if trajectory != "" && taskPrompt == "" {
+	if *trajectory != "" && taskPrompt == "" {
 		fatalf("--trajectory requires -p (single-task mode)")
 	}
 
 	if taskPrompt != "" {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
-		if err := prepareSingleTask(taskPrompt, fullSend, requireApprovalInput); err != nil {
+		if err := prepareSingleTask(taskPrompt, *fullSend, requireApprovalInput); err != nil {
 			fatalf("%v", err)
 		}
-		runErr := runTask(ctx, agent, taskPrompt, fullSend, &stdinPrompter{reader: newLineReader(os.Stdin)})
-		if trajectory != "" {
-			if err := writeTrajectory(trajectory, agent.Messages()); err != nil {
+		runErr := runTask(ctx, agent, taskPrompt, *fullSend, &stdinPrompter{reader: newLineReader(os.Stdin)})
+		if *trajectory != "" {
+			if err := writeTrajectory(*trajectory, agent.Messages()); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				if runErr != nil {
 					fmt.Fprintf(os.Stderr, "Error: %v\n", runErr)
@@ -591,7 +589,7 @@ func main() {
 
 	// REPL mode — fresh context per run so Ctrl-C cancels the current
 	// operation without killing the REPL.
-	if !fullSend {
+	if !*fullSend {
 		if err := requireApprovalInput(); err != nil {
 			fatalf("%v", err)
 		}
@@ -612,7 +610,7 @@ func main() {
 			continue
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-		if err := handleConversationalInput(ctx, os.Stderr, agent, input, fullSend, prompter, compactorFactory); err != nil {
+		if err := handleConversationalInput(ctx, os.Stderr, agent, input, *fullSend, prompter, compactorFactory); err != nil {
 			if errors.Is(err, clnkr.ErrClarificationNeeded) || errors.Is(err, errApprovalPending) || errors.Is(err, context.Canceled) {
 				stop()
 				continue
@@ -638,20 +636,6 @@ type jsonEvent struct {
 	Payload any    `json:"payload"`
 }
 
-type commandDonePayload struct {
-	Command  string                `json:"command"`
-	Stdout   string                `json:"stdout"`
-	Stderr   string                `json:"stderr"`
-	ExitCode int                   `json:"exit_code"`
-	Feedback clnkr.CommandFeedback `json:"feedback,omitempty"`
-	Err      string                `json:"err,omitempty"`
-}
-
-type protocolFailurePayload struct {
-	Reason string `json:"reason"`
-	Raw    string `json:"raw"`
-}
-
 func writeEventLog(f *os.File, e clnkr.Event) {
 	var je jsonEvent
 	switch e := e.(type) {
@@ -664,9 +648,19 @@ func writeEventLog(f *os.File, e clnkr.Event) {
 	case clnkr.EventCommandStart:
 		je = jsonEvent{Type: "command_start", Payload: e}
 	case clnkr.EventCommandDone:
-		je = jsonEvent{Type: "command_done", Payload: commandDonePayload{Command: e.Command, Stdout: e.Stdout, Stderr: e.Stderr, ExitCode: e.ExitCode, Feedback: e.Feedback, Err: errString(e.Err)}}
+		je = jsonEvent{Type: "command_done", Payload: struct {
+			Command  string                `json:"command"`
+			Stdout   string                `json:"stdout"`
+			Stderr   string                `json:"stderr"`
+			ExitCode int                   `json:"exit_code"`
+			Feedback clnkr.CommandFeedback `json:"feedback,omitempty"`
+			Err      string                `json:"err,omitempty"`
+		}{Command: e.Command, Stdout: e.Stdout, Stderr: e.Stderr, ExitCode: e.ExitCode, Feedback: e.Feedback, Err: errString(e.Err)}}
 	case clnkr.EventProtocolFailure:
-		je = jsonEvent{Type: "protocol_failure", Payload: protocolFailurePayload{Reason: e.Reason, Raw: e.Raw}}
+		je = jsonEvent{Type: "protocol_failure", Payload: struct {
+			Reason string `json:"reason"`
+			Raw    string `json:"raw"`
+		}{Reason: e.Reason, Raw: e.Raw}}
 	case clnkr.EventDebug:
 		je = jsonEvent{Type: "debug", Payload: e}
 	default:

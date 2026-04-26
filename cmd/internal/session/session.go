@@ -23,7 +23,7 @@ type SessionInfo struct {
 }
 
 type sessionFile struct {
-	Created  time.Time       `json:"created"`
+	Created  string          `json:"created"`
 	Messages []clnkr.Message `json:"messages"`
 }
 
@@ -96,7 +96,12 @@ func SaveSession(pwd string, messages []clnkr.Message) error {
 	}
 	defer f.Close() //nolint:errcheck
 
-	if err := json.NewEncoder(f).Encode(sessionFile{Created: now, Messages: messages}); err != nil {
+	data := sessionFile{
+		Created:  now.Format(time.RFC3339Nano),
+		Messages: messages,
+	}
+
+	if err := json.NewEncoder(f).Encode(data); err != nil {
 		return fmt.Errorf("save session: encode: %w", err)
 	}
 
@@ -123,12 +128,8 @@ func LoadLatestSession(pwd string) ([]clnkr.Message, error) {
 		return nil, fmt.Errorf("load latest session %s: %w", files[0].name, err)
 	}
 	latest := loadedSession{
-		SessionInfo: SessionInfo{
-			Filename: files[0].name,
-			Created:  sf.Created,
-			Messages: len(sf.Messages),
-		},
-		messages: sf.Messages,
+		SessionInfo: sessionInfo(files[0].name, sf),
+		messages:    sf.Messages,
 	}
 	for _, e := range files[1:] {
 		sf, err := loadSessionFile(filepath.Join(e.dir, e.name))
@@ -136,12 +137,8 @@ func LoadLatestSession(pwd string) ([]clnkr.Message, error) {
 			continue
 		}
 		candidate := loadedSession{
-			SessionInfo: SessionInfo{
-				Filename: e.name,
-				Created:  sf.Created,
-				Messages: len(sf.Messages),
-			},
-			messages: sf.Messages,
+			SessionInfo: sessionInfo(e.name, sf),
+			messages:    sf.Messages,
 		}
 		if newerSession(candidate.SessionInfo, latest.SessionInfo) {
 			latest = candidate
@@ -151,7 +148,7 @@ func LoadLatestSession(pwd string) ([]clnkr.Message, error) {
 }
 
 // ListSessions lists all sessions for the given working directory.
-// Current-format sessions sort before legacy sessions; legacy sessions preserve sequence ordering.
+// Session filenames define recency before Created metadata.
 func ListSessions(pwd string) ([]SessionInfo, error) {
 	files, err := sessionFileRefs(pwd)
 	if err != nil {
@@ -164,16 +161,21 @@ func ListSessions(pwd string) ([]SessionInfo, error) {
 		if err != nil {
 			continue
 		}
-		sessions = append(sessions, SessionInfo{
-			Filename: e.name,
-			Created:  sf.Created,
-			Messages: len(sf.Messages),
-		})
+		sessions = append(sessions, sessionInfo(e.name, sf))
 	}
 	sort.Slice(sessions, func(i, j int) bool {
 		return newerSession(sessions[i], sessions[j])
 	})
 	return sessions, nil
+}
+
+func sessionInfo(filename string, sf sessionFile) SessionInfo {
+	created, _ := time.Parse(time.RFC3339Nano, sf.Created)
+	return SessionInfo{
+		Filename: filename,
+		Created:  created,
+		Messages: len(sf.Messages),
+	}
 }
 
 func sessionFileRefs(pwd string) ([]sessionFileRef, error) {
@@ -240,20 +242,11 @@ func newerParsedFilename(a, b string) (bool, bool) {
 		return aOK, true
 	}
 	if aOK && bOK {
-		if aInfo.legacy != bInfo.legacy {
-			return !aInfo.legacy, true
-		}
-		if aInfo.legacy {
-			if aInfo.seq != bInfo.seq {
-				return aInfo.seq > bInfo.seq, true
-			}
-			if !aInfo.at.Equal(bInfo.at) {
-				return aInfo.at.After(bInfo.at), true
-			}
-			return a > b, true
-		}
 		if !aInfo.at.Equal(bInfo.at) {
 			return aInfo.at.After(bInfo.at), true
+		}
+		if aInfo.legacy != bInfo.legacy {
+			return !aInfo.legacy, true
 		}
 		if aInfo.seq != bInfo.seq {
 			return aInfo.seq > bInfo.seq, true
@@ -308,7 +301,9 @@ func loadSessionFile(path string) (sessionFile, error) {
 func openSessionFile(dir string, now time.Time) (*os.File, error) {
 	prefix := now.Format("2006-01-02T150405.000000000Z")
 	for i := 0; i < 1000; i++ {
-		f, err := os.OpenFile(filepath.Join(dir, fmt.Sprintf("%s-%03d.json", prefix, i)), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		filename := fmt.Sprintf("%s-%03d.json", prefix, i)
+		path := filepath.Join(dir, filename)
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil || !os.IsExist(err) {
 			return f, err
 		}

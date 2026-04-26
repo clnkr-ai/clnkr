@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
-	"slices"
 	"strings"
 )
 
@@ -45,31 +44,31 @@ type ResolvedProviderConfig struct {
 
 var datedSnapshotSuffix = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`)
 
-var openAIResponsesAllowlist = []string{
-	"gpt-5",
-	"gpt-5-mini",
-	"gpt-5-nano",
-	"gpt-5-pro",
-	"gpt-5.1",
-	"gpt-5.2",
-	"gpt-5.4",
-	"gpt-5.4-mini",
-	"gpt-5.4-nano",
-	"gpt-5-codex",
-	"gpt-5.1-codex",
-	"gpt-5.1-codex-mini",
-	"gpt-5.1-codex-max",
-	"gpt-5.2-codex",
-	"gpt-5.3-codex",
-	"gpt-4.1",
-	"gpt-4.1-mini",
-	"gpt-4.1-nano",
-	"o3-pro",
+var openAIResponsesAllowlist = map[string]struct{}{
+	"gpt-5":              {},
+	"gpt-5-mini":         {},
+	"gpt-5-nano":         {},
+	"gpt-5-pro":          {},
+	"gpt-5.1":            {},
+	"gpt-5.2":            {},
+	"gpt-5.4":            {},
+	"gpt-5.4-mini":       {},
+	"gpt-5.4-nano":       {},
+	"gpt-5-codex":        {},
+	"gpt-5.1-codex":      {},
+	"gpt-5.1-codex-mini": {},
+	"gpt-5.1-codex-max":  {},
+	"gpt-5.2-codex":      {},
+	"gpt-5.3-codex":      {},
+	"gpt-4.1":            {},
+	"gpt-4.1-mini":       {},
+	"gpt-4.1-nano":       {},
+	"o3-pro":             {},
 }
 
-var unsupportedStructuredOpenAIModels = []string{
-	"gpt-5.2-pro",
-	"gpt-5.4-pro",
+var unsupportedStructuredOpenAIModels = map[string]struct{}{
+	"gpt-5.2-pro": {},
+	"gpt-5.4-pro": {},
 }
 
 func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConfig, error) {
@@ -148,12 +147,16 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 }
 
 func chooseValue(flagValue, envValue, flagSource, envSource string) (string, string, bool) {
-	if flagValue = strings.TrimSpace(flagValue); flagValue != "" {
+	flagValue = strings.TrimSpace(flagValue)
+	if flagValue != "" {
 		return flagValue, flagSource, true
 	}
-	if envValue = strings.TrimSpace(envValue); envValue != "" {
+
+	envValue = strings.TrimSpace(envValue)
+	if envValue != "" {
 		return envValue, envSource, true
 	}
+
 	return "", "", false
 }
 
@@ -228,7 +231,10 @@ func isOpenAILookingModel(model string) bool {
 }
 
 // Keep this matcher intentionally conservative: exact names plus dated snapshots only.
-func listedModel(models []string, model string) bool {
-	return slices.Contains(models, model) ||
-		datedSnapshotSuffix.MatchString(model) && slices.Contains(models, model[:len(model)-11])
+func listedModel(models map[string]struct{}, model string) bool {
+	_, ok := models[model]
+	if !ok && datedSnapshotSuffix.MatchString(model) {
+		_, ok = models[model[:len(model)-11]]
+	}
+	return ok
 }

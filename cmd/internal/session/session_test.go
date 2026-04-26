@@ -183,7 +183,7 @@ func TestLoadLatestSessionOrdersEqualCreatedLegacyNamesBySequence(t *testing.T) 
 	}
 }
 
-func TestLoadLatestSessionUsesHighestLegacySequenceBeforeCreatedTime(t *testing.T) {
+func TestLoadLatestSessionOrdersEqualTimestampLegacyNamesBySequenceBeforeCreatedTime(t *testing.T) {
 	tmpdir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", tmpdir)
 
@@ -210,18 +210,18 @@ func TestLoadLatestSessionUsesHighestLegacySequenceBeforeCreatedTime(t *testing.
 		t.Fatalf("LoadLatestSession: %v", err)
 	}
 	if len(loaded) != 1 || loaded[0].Content != "new" {
-		t.Fatalf("latest session = %#v, want highest legacy sequence", loaded)
+		t.Fatalf("latest session = %#v, want highest equal-timestamp legacy sequence", loaded)
 	}
 	sessions, err := session.ListSessions(projectDir)
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
 	if len(sessions) != 2 || sessions[0].Filename != "10-2026-01-10T000000.000000Z.json" {
-		t.Fatalf("sessions = %#v, want highest legacy sequence first", sessions)
+		t.Fatalf("sessions = %#v, want highest equal-timestamp legacy sequence first", sessions)
 	}
 }
 
-func TestLoadLatestSessionPrefersCurrentFormatOverLegacySequence(t *testing.T) {
+func TestLoadLatestSessionOrdersMixedFormatsByFilenameTime(t *testing.T) {
 	tmpdir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", tmpdir)
 
@@ -248,17 +248,17 @@ func TestLoadLatestSessionPrefersCurrentFormatOverLegacySequence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLatestSession: %v", err)
 	}
-	if len(loaded) != 1 || loaded[0].Content != "current" {
-		t.Fatalf("latest session = %#v, want current format", loaded)
+	if len(loaded) != 1 || loaded[0].Content != "legacy-low" {
+		t.Fatalf("latest session = %#v, want newest filename timestamp", loaded)
 	}
 	sessions, err := session.ListSessions(projectDir)
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
 	want := []string{
+		"9-2026-01-03T000000.000000Z.json",
 		"2026-01-02T000000.000000000Z-000.json",
 		"10-2026-01-01T000000.000000Z.json",
-		"9-2026-01-03T000000.000000Z.json",
 	}
 	if len(sessions) != len(want) {
 		t.Fatalf("sessions = %#v, want %d sessions", sessions, len(want))
@@ -267,6 +267,47 @@ func TestLoadLatestSessionPrefersCurrentFormatOverLegacySequence(t *testing.T) {
 		if sessions[i].Filename != want[i] {
 			t.Fatalf("sessions[%d] = %q, want %q; sessions = %#v", i, sessions[i].Filename, want[i], sessions)
 		}
+	}
+}
+
+func TestLoadLatestSessionToleratesMalformedCreatedMetadata(t *testing.T) {
+	tmpdir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", tmpdir)
+
+	projectDir := "/tmp/test-project-bad-created"
+	dir, err := session.SessionDir(projectDir)
+	if err != nil {
+		t.Fatalf("SessionDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	files := map[string]string{
+		"2026-01-12T000000.000000000Z-000.json": `{"created":"not-a-time","messages":[{"role":"user","content":"new"}]}`,
+		"2026-01-11T000000.000000000Z-000.json": `{"created":"2026-01-11T00:00:00Z","messages":[{"role":"user","content":"old"}]}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatalf("WriteFile %s: %v", name, err)
+		}
+	}
+
+	loaded, err := session.LoadLatestSession(projectDir)
+	if err != nil {
+		t.Fatalf("LoadLatestSession: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].Content != "new" {
+		t.Fatalf("latest session = %#v, want session with malformed created metadata", loaded)
+	}
+	sessions, err := session.ListSessions(projectDir)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) != 2 || sessions[0].Filename != "2026-01-12T000000.000000000Z-000.json" {
+		t.Fatalf("sessions = %#v, want malformed-created session listed first", sessions)
+	}
+	if !sessions[0].Created.IsZero() {
+		t.Fatalf("sessions[0].Created = %v, want zero time for malformed created metadata", sessions[0].Created)
 	}
 }
 
@@ -371,7 +412,7 @@ func TestLoadLatestSessionIgnoresCorruptOlderLegacyWhenCurrentSessionIsNewest(t 
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	files := map[string]string{
-		"9-2026-01-12T000000.000000Z.json":      `{`,
+		"9-2026-01-10T000000.000000Z.json":      `{`,
 		"2026-01-11T000000.000000000Z-000.json": `{"created":"2026-01-11T00:00:00Z","messages":[{"role":"user","content":"new"}]}`,
 	}
 	for name, content := range files {

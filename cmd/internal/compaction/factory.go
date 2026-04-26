@@ -2,7 +2,6 @@ package compaction
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -53,7 +52,11 @@ func buildSummarizeMessages(messages []clnkr.Message) []clnkr.Message {
 	sourceBody := formatSourceText(messages)
 	available := summarizeInputCharBudget - len(sourceTextOpen) - len(sourceTextClose) - len(summarizeRequest)
 	if len(sourceBody) > available {
-		sourceBody = truncationHeader + tailStringWithinByteBudget(sourceBody, max(available-len(truncationHeader), 0))
+		tailBudget := available - len(truncationHeader)
+		if tailBudget < 0 {
+			tailBudget = 0
+		}
+		sourceBody = truncationHeader + tailStringWithinByteBudget(sourceBody, tailBudget)
 	}
 	return []clnkr.Message{
 		{Role: "user", Content: sourceTextOpen + sourceBody + sourceTextClose},
@@ -64,7 +67,11 @@ func buildSummarizeMessages(messages []clnkr.Message) []clnkr.Message {
 func formatSourceText(messages []clnkr.Message) string {
 	var b strings.Builder
 	for _, msg := range messages {
-		fmt.Fprintf(&b, "[%s]\n%s\n\n", msg.Role, msg.Content)
+		b.WriteString("[")
+		b.WriteString(msg.Role)
+		b.WriteString("]\n")
+		b.WriteString(msg.Content)
+		b.WriteString("\n\n")
 	}
 	return b.String()
 }
@@ -77,9 +84,14 @@ func tailStringWithinByteBudget(content string, budget int) string {
 		return content
 	}
 
-	for len(content) > budget {
-		_, size := utf8.DecodeRuneInString(content)
-		content = content[size:]
+	start := len(content)
+	for start > 0 {
+		prevStart := start
+		_, size := utf8.DecodeLastRuneInString(content[:start])
+		start -= size
+		if len(content)-start > budget {
+			return content[prevStart:]
+		}
 	}
 	return content
 }

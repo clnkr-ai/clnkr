@@ -152,22 +152,23 @@ func (p *scriptPrompter) Clarify(context.Context, string) (string, error) {
 func runMainHelper(t *testing.T, args ...string) (bytes.Buffer, bytes.Buffer, error) {
 	t.Helper()
 
-	cmd := exec.Command(os.Args[0], "-test.run=TestMainHelper")
-	cmd.Env = append(os.Environ(), "CLNKR_HELPER_MAIN="+strings.Join(args, " "))
+	cmdArgs := append([]string{"-test.run=TestMainHelper", "--"}, args...)
+	cmd := exec.Command(os.Args[0], cmdArgs...)
+	cmd.Env = append(os.Environ(), "CLNKR_HELPER_MAIN=1")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	return stdout, stderr, cmd.Run()
 }
 
-func TestPrintUsageMentionsProviderAPI(t *testing.T) {
+func TestUsageMentionsProviderAPI(t *testing.T) {
 	stdout, stderr, err := runMainHelper(t, "--help")
 	if err != nil {
 		t.Fatalf("help command: %v\nstderr: %s", err, stderr.String())
 	}
 	for _, want := range []string{"provider-api", "Maximum agent steps (default: 100)", "infers provider when provider is unset"} {
 		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("printUsage() missing %q, got %q", want, stdout.String())
+			t.Fatalf("usage output missing %q, got %q", want, stdout.String())
 		}
 	}
 }
@@ -207,12 +208,17 @@ func TestInvalidFlagKeepsUsageOffStdout(t *testing.T) {
 }
 
 func TestMainHelper(t *testing.T) {
-	rawArgs := os.Getenv("CLNKR_HELPER_MAIN")
-	if rawArgs == "" {
+	if os.Getenv("CLNKR_HELPER_MAIN") == "" {
 		return
 	}
-	os.Args = append([]string{"clnkr"}, strings.Fields(rawArgs)...)
-	main()
+	for i, arg := range os.Args {
+		if arg == "--" {
+			os.Args = append([]string{"clnkr"}, os.Args[i+1:]...)
+			main()
+			return
+		}
+	}
+	t.Fatal("missing helper arg separator")
 }
 
 func TestAliasedStringPrefersExplicitPreferredValue(t *testing.T) {
@@ -227,7 +233,7 @@ func TestAliasedStringPrefersExplicitPreferredValue(t *testing.T) {
 	}
 }
 
-func TestNewProviderModelForConfigUsesOpenAIResponsesWhenConfigured(t *testing.T) {
+func TestNewModelForConfigUsesOpenAIResponsesWhenConfigured(t *testing.T) {
 	var gotPath string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -247,7 +253,7 @@ func TestNewProviderModelForConfigUsesOpenAIResponsesWhenConfigured(t *testing.T
 	}))
 	defer server.Close()
 
-	model := newProviderModelForConfig(providerConfig{
+	model := newModelForConfig(providerConfig{
 		Provider:    "openai",
 		ProviderAPI: "openai-responses",
 		Model:       "gpt-5.4",
@@ -442,6 +448,50 @@ func TestMakeCompactorFactoryUsesOpenAIWhenProviderSelected(t *testing.T) {
 	}
 	if _, ok := gotBody["response_format"]; ok {
 		t.Fatalf("response_format should be omitted for compaction, got %#v", gotBody["response_format"])
+	}
+}
+
+func TestMakeCompactorFactoryUsesOpenAIResponsesWhenConfigured(t *testing.T) {
+	var requestPath string
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPath = r.URL.Path
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": []map[string]any{
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]any{
+						{"type": "output_text", "text": "Older work summarized."},
+					},
+				},
+			},
+			"usage": map[string]int{"input_tokens": 1, "output_tokens": 1},
+		})
+	}))
+	defer server.Close()
+
+	compactor := makeCompactorFactory(providerConfig{
+		Provider:    "openai",
+		ProviderAPI: "openai-responses",
+		BaseURL:     server.URL,
+		APIKey:      "test-key",
+		Model:       "gpt-test",
+	})("")
+	summary, err := compactor.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if summary != "Older work summarized." {
+		t.Fatalf("summary = %q, want %q", summary, "Older work summarized.")
+	}
+	if requestPath != "/responses" {
+		t.Fatalf("request path = %q, want %q", requestPath, "/responses")
+	}
+	if _, ok := gotBody["text"]; ok {
+		t.Fatalf("text should be omitted for compaction, got %#v", gotBody["text"])
 	}
 }
 
