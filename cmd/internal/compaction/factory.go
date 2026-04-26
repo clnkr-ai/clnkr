@@ -50,21 +50,16 @@ func (m modelCompactor) Summarize(ctx context.Context, messages []clnkr.Message)
 
 func buildSummarizeMessages(messages []clnkr.Message) []clnkr.Message {
 	sourceBody := formatSourceText(messages)
-	fullSource := sourceTextOpen + sourceBody + sourceTextClose
-	if len(fullSource)+len(summarizeRequest) <= summarizeInputCharBudget {
-		return []clnkr.Message{
-			{Role: "user", Content: fullSource},
-			{Role: "user", Content: summarizeRequest},
+	available := summarizeInputCharBudget - len(sourceTextOpen) - len(sourceTextClose) - len(summarizeRequest)
+	if len(sourceBody) > available {
+		tailBudget := available - len(truncationHeader)
+		if tailBudget < 0 {
+			tailBudget = 0
 		}
+		sourceBody = truncationHeader + tailStringWithinByteBudget(sourceBody, tailBudget)
 	}
-
-	available := summarizeInputCharBudget - len(sourceTextOpen) - len(sourceTextClose) - len(truncationHeader) - len(summarizeRequest)
-	if available < 0 {
-		available = 0
-	}
-	truncatedSource := sourceTextOpen + truncationHeader + tailStringWithinByteBudget(sourceBody, available) + sourceTextClose
 	return []clnkr.Message{
-		{Role: "user", Content: truncatedSource},
+		{Role: "user", Content: sourceTextOpen + sourceBody + sourceTextClose},
 		{Role: "user", Content: summarizeRequest},
 	}
 }
@@ -92,15 +87,11 @@ func tailStringWithinByteBudget(content string, budget int) string {
 	start := len(content)
 	for start > 0 {
 		prevStart := start
-		prev, size := utf8.DecodeLastRuneInString(content[:start])
-		if prev == utf8.RuneError && size == 0 {
-			break
-		}
+		_, size := utf8.DecodeLastRuneInString(content[:start])
 		start -= size
 		if len(content)-start > budget {
 			return content[prevStart:]
 		}
 	}
-
 	return content
 }

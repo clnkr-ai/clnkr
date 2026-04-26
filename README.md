@@ -46,13 +46,13 @@ clnkr --provider anthropic --model claude-sonnet-4-6
 # Single task
 clnkr --provider anthropic --model claude-sonnet-4-6 -p "find all TODO comments in this project"
 
-# Skip per-command approval
+# Skip act-batch approval
 clnkr --provider anthropic --model claude-sonnet-4-6 --full-send -p "fix the failing test"
 ```
 
 ### OpenAI-compatible providers
 
-Point `--base-url` at an OpenAI-compatible endpoint that supports structured outputs for the model you select. `--provider` controls adapter semantics; `--base-url` is only the transport endpoint. In normal use, set both `--provider` and `--model`. Compatibility fallback: if `--provider` / `CLNKR_PROVIDER` is unset but `--base-url` / `CLNKR_BASE_URL` is explicitly set, clnkr infers the provider from that URL. For `--provider=openai`, `--provider-api` defaults to `auto`, which prefers `openai-responses` for known supported names and other OpenAI-looking model names such as `gpt-*`, `o` plus a digit, and `codex*`. Names that do not look OpenAI-ish, such as `llama3`, `gemini-2.0-flash`, `orca-*`, `olmo-*`, `openhermes-*`, and `chatgpt-*`, stay on `openai-chat-completions`.
+Point `--base-url` at an OpenAI-compatible endpoint that supports structured outputs for the model you select. `--provider` controls adapter semantics; `--base-url` is only the transport endpoint. In normal use, set both `--provider` and `--model`. Compatibility fallback: if `--provider` / `CLNKR_PROVIDER` is unset but `--base-url` / `CLNKR_BASE_URL` is explicitly set, clnkr infers the provider from that URL. For `--provider=openai`, `--provider-api` defaults to `auto`, which prefers `openai-responses` for known supported names and other OpenAI-looking model names such as `gpt-*`, `o` plus a digit, `codex`, `codex-*`, `*-codex`, and `*-codex-*`. Names that do not look OpenAI-ish, such as `llama3`, `gemini-2.0-flash`, `orca-*`, `olmo-*`, `openhermes-*`, and `chatgpt-*`, stay on `openai-chat-completions`.
 
 ```bash
 # vLLM
@@ -86,10 +86,13 @@ Structured outputs are a hard requirement for agent turns. clnkr rejects `gpt-5.
 -p, --prompt string            Task to run (exits after completion)
 -m, --model string             Model identifier (required; env: CLNKR_MODEL)
 -u, --base-url string          LLM endpoint transport URL (env: CLNKR_BASE_URL)
---provider string              Provider adapter semantics: anthropic|openai (required in normal use; env: CLNKR_PROVIDER)
---provider-api string          OpenAI-only override: auto|openai-chat-completions|openai-responses
---max-steps int                Maximum agent steps (default: 100)
---full-send                    Execute every Act turn without approval
+--provider string              Provider adapter: anthropic|openai
+                               (required in normal use; env: CLNKR_PROVIDER)
+--provider-api string          OpenAI-only override
+                               (auto|openai-chat-completions|openai-responses)
+--max-steps int                Limit executed commands
+                               before summary (default: 100)
+--full-send                    Execute every act batch without approval
 -c, --continue                 Resume the most recent session for this project
 -l, --list-sessions            List saved sessions for this project
 -S, --no-system-prompt         Omit the built-in system prompt
@@ -97,7 +100,7 @@ Structured outputs are a hard requirement for agent turns. clnkr rejects `gpt-5.
 --dump-system-prompt           Print the composed system prompt and exit
 --load-messages string         Seed conversation from JSON file (e.g. from --trajectory)
 --event-log string             Write JSONL events to file (streams in real time)
---trajectory string            Write message history as JSON on exit (single-task mode only)
+--trajectory string            Save single-task history as JSON on exit
 -v, --verbose                  Show internal decisions on stderr
 -V, --version                  Print version and exit
 ```
@@ -130,9 +133,9 @@ clnkr -p "write a fix based on the investigation" --load-messages /tmp/investiga
 `--trajectory` writes the full message array as pretty-printed JSON when the task ends, even if it failed.
 `--load-messages` reads that same format and prepends the messages before starting, so one agent's output becomes another's context.
 The transcript may include host-generated JSON `[state]` messages. Today they persist the current working directory so `--load-messages` and `--continue` can restore it.
-With `--full-send`, a single-task run that stops to ask for clarification exits with status `2` after printing the question, so callers can distinguish "needs input" from "done". In the default approval mode, the harness asks for clarification inline instead.
+With `--full-send`, a single-task run that stops to ask for clarification exits with status `2` after printing the question to stdout. Non-interactive stdin exits with status `2` after printing the question to stderr. In the default approval mode, the harness asks for clarification inline instead.
 
-By default, clnkr requires explicit approval before each `act` turn. Pass `--full-send` to restore the old "run every command immediately" behavior.
+By default, clnkr requires explicit approval before each `act` turn. One approval accepts all commands in that turn. Pass `--full-send` to restore the old "run every command immediately" behavior.
 
 ### Command result format
 
@@ -207,10 +210,10 @@ clnkr runs a loop using a structured JSON turn protocol:
 1. Send conversation history to the LLM
 2. The selected provider adapter owns the provider-facing structured-output schema, any provider wire wrapper such as `{"turn": ...}`, and the translation from provider response text into a typed turn (`clarify`, `act`, or `done`).
 3. If `clarify`: return control to the frontend for more input
-4. If `act`: either ask the user for approval or execute the bash commands sequentially, then append structured output to the conversation for each executed command, including optional `[command_feedback]` when the host started from a clean git worktree
+4. If `act`: either ask the user to approve the command batch or execute the bash commands sequentially, then append structured output to the conversation for each executed command, including optional `[command_feedback]` when the host started from a clean git worktree
 5. If `done`: exit with the model's summary
 6. Successful assistant turns are stored in canonical internal JSON for replay and resume. Invalid provider responses are stored raw alongside protocol error metadata.
-7. Repeat until done or step limit
+7. Repeat until done, or until the executed-command limit triggers a final `done` summary request
 
 The LLM is the agent. clnkr is the scaffold.
 

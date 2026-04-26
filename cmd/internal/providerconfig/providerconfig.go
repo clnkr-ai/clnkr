@@ -47,13 +47,13 @@ var datedSnapshotSuffix = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`)
 var openAIResponsesAllowlist = map[string]struct{}{
 	"gpt-5":              {},
 	"gpt-5-mini":         {},
+	"gpt-5-nano":         {},
+	"gpt-5-pro":          {},
 	"gpt-5.1":            {},
 	"gpt-5.2":            {},
 	"gpt-5.4":            {},
 	"gpt-5.4-mini":       {},
 	"gpt-5.4-nano":       {},
-	"gpt-5-nano":         {},
-	"gpt-5-pro":          {},
 	"gpt-5-codex":        {},
 	"gpt-5.1-codex":      {},
 	"gpt-5.1-codex-mini": {},
@@ -118,7 +118,10 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 	}
 
 	if !baseURLSet {
-		baseURL = defaultBaseURL(provider)
+		baseURL = DefaultAnthropicBaseURL
+		if provider == ProviderOpenAI {
+			baseURL = DefaultOpenAIBaseURL
+		}
 		baseURLSource = "default"
 	}
 	if _, err := parseBaseURL(baseURL, baseURLSource); err != nil {
@@ -126,9 +129,9 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 	}
 
 	if provider == ProviderOpenAI {
-		normalizedModel := normalizeModelName(model)
-		if isUnsupportedStructuredOpenAIModel(normalizedModel) {
-			return ResolvedProviderConfig{}, unsupportedStructuredOutputsError(model)
+		normalizedModel := strings.ToLower(strings.TrimSpace(model))
+		if listedModel(unsupportedStructuredOpenAIModels, normalizedModel) {
+			return ResolvedProviderConfig{}, fmt.Errorf("model %q is unsupported for clnkr agent turns: structured outputs are required and this model does not support that contract", model)
 		}
 
 		providerAPI = resolveOpenAIProviderAPI(normalizedModel, providerAPI)
@@ -158,39 +161,27 @@ func chooseValue(flagValue, envValue, flagSource, envSource string) (string, str
 }
 
 func parseProvider(raw string) (Provider, error) {
-	switch Provider(strings.ToLower(strings.TrimSpace(raw))) {
-	case ProviderAnthropic:
-		return ProviderAnthropic, nil
-	case ProviderOpenAI:
-		return ProviderOpenAI, nil
+	provider := Provider(strings.ToLower(strings.TrimSpace(raw)))
+	switch provider {
+	case ProviderAnthropic, ProviderOpenAI:
+		return provider, nil
 	default:
 		return "", fmt.Errorf(`invalid provider %q (allowed: anthropic, openai)`, raw)
 	}
 }
 
 func parseProviderAPI(raw string) (ProviderAPI, error) {
-	switch ProviderAPI(strings.ToLower(strings.TrimSpace(raw))) {
-	case ProviderAPIAuto:
-		return ProviderAPIAuto, nil
-	case ProviderAPIOpenAIChatCompletions:
-		return ProviderAPIOpenAIChatCompletions, nil
-	case ProviderAPIOpenAIResponses:
-		return ProviderAPIOpenAIResponses, nil
+	api := ProviderAPI(strings.ToLower(strings.TrimSpace(raw)))
+	switch api {
+	case ProviderAPIAuto, ProviderAPIOpenAIChatCompletions, ProviderAPIOpenAIResponses:
+		return api, nil
 	default:
 		return "", fmt.Errorf(`invalid provider-api %q (allowed: auto, openai-chat-completions, openai-responses)`, raw)
 	}
 }
 
-func defaultBaseURL(provider Provider) string {
-	if provider == ProviderOpenAI {
-		return DefaultOpenAIBaseURL
-	}
-	return DefaultAnthropicBaseURL
-}
-
 func inferProviderFromBaseURL(baseURL *url.URL) Provider {
-	host := strings.ToLower(baseURL.Hostname())
-	if host == "anthropic.com" || strings.HasSuffix(host, ".anthropic.com") {
+	if host := strings.ToLower(baseURL.Hostname()); host == "anthropic.com" || strings.HasSuffix(host, ".anthropic.com") {
 		return ProviderAnthropic
 	}
 	return ProviderOpenAI
@@ -214,57 +205,36 @@ func resolveOpenAIProviderAPI(model string, providerAPI ProviderAPI) ProviderAPI
 	if providerAPI == ProviderAPIOpenAIChatCompletions || providerAPI == ProviderAPIOpenAIResponses {
 		return providerAPI
 	}
-	if isAllowlistedResponsesModel(model) {
-		return ProviderAPIOpenAIResponses
+	if isKnownNonOpenAIModel(model) {
+		return ProviderAPIOpenAIChatCompletions
 	}
-	if isOpenAILookingModel(model) {
+	if listedModel(openAIResponsesAllowlist, model) || isOpenAILookingModel(model) {
 		return ProviderAPIOpenAIResponses
 	}
 	return ProviderAPIOpenAIChatCompletions
 }
 
-// Keep this matcher intentionally conservative: exact names plus dated snapshots only.
-func isAllowlistedResponsesModel(model string) bool {
-	if _, ok := openAIResponsesAllowlist[model]; ok {
-		return true
-	}
-	if !datedSnapshotSuffix.MatchString(model) {
-		return false
-	}
-	baseModel := model[:len(model)-11]
-	_, ok := openAIResponsesAllowlist[baseModel]
-	return ok
-}
-
-func isUnsupportedStructuredOpenAIModel(model string) bool {
-	if _, ok := unsupportedStructuredOpenAIModels[model]; ok {
-		return true
-	}
-	if !datedSnapshotSuffix.MatchString(model) {
-		return false
-	}
-	baseModel := model[:len(model)-11]
-	_, ok := unsupportedStructuredOpenAIModels[baseModel]
-	return ok
+func isKnownNonOpenAIModel(model string) bool {
+	return strings.HasPrefix(model, "chatgpt-") ||
+		strings.HasPrefix(model, "olmo-") ||
+		strings.HasPrefix(model, "openhermes-") ||
+		strings.HasPrefix(model, "orca-")
 }
 
 func isOpenAILookingModel(model string) bool {
-	if strings.HasPrefix(model, "gpt-") {
-		return true
-	}
-	if model == "codex" ||
+	return strings.HasPrefix(model, "gpt-") ||
+		model == "codex" ||
 		strings.HasPrefix(model, "codex-") ||
 		strings.HasSuffix(model, "-codex") ||
-		strings.Contains(model, "-codex-") {
-		return true
+		strings.Contains(model, "-codex-") ||
+		len(model) > 1 && model[0] == 'o' && model[1] >= '0' && model[1] <= '9'
+}
+
+// Keep this matcher intentionally conservative: exact names plus dated snapshots only.
+func listedModel(models map[string]struct{}, model string) bool {
+	_, ok := models[model]
+	if !ok && datedSnapshotSuffix.MatchString(model) {
+		_, ok = models[model[:len(model)-11]]
 	}
-	return len(model) > 1 && model[0] == 'o' && model[1] >= '0' && model[1] <= '9'
-}
-
-func normalizeModelName(model string) string {
-	return strings.ToLower(strings.TrimSpace(model))
-}
-
-func unsupportedStructuredOutputsError(model string) error {
-	return fmt.Errorf("model %q is unsupported for clnkr agent turns: structured outputs are required and this model does not support that contract in this pass", model)
+	return ok
 }

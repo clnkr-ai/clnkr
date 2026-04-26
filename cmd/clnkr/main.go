@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"unicode"
 
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/compaction"
@@ -26,6 +25,8 @@ import (
 var version = "dev"
 
 const exitClarificationNeeded = 2
+const missingAPIKeyMessage = "Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key"
+const approvalInputMessage = "approval mode requires interactive stdin; pass --full-send=true to bypass approval"
 
 var errApprovalPending = errors.New("approval pending")
 var errCompactCommandOutsideConversation = errors.New("/compact is only available at the conversational prompt")
@@ -51,11 +52,14 @@ Usage:
 Core:
   -p, --prompt string       Task to run (exits after completion)
   -m, --model string        Model identifier (required; env: $CLNKR_MODEL)
-  -u, --base-url string     LLM endpoint transport URL (env: $CLNKR_BASE_URL; default: anthropic=https://api.anthropic.com, openai=https://api.openai.com/v1)
-      --provider string     Provider adapter semantics: anthropic|openai (required in normal use; env: $CLNKR_PROVIDER)
-      --provider-api string OpenAI-only override: auto|openai-chat-completions|openai-responses
-      --max-steps int       Maximum agent steps (default: 100)
-      --full-send           Execute every Act turn without approval
+  -u, --base-url string     LLM endpoint transport URL (env: $CLNKR_BASE_URL)
+      --provider string     Provider adapter: anthropic|openai
+                            (required in normal use; env: $CLNKR_PROVIDER)
+      --provider-api string OpenAI-only override
+                            (auto|openai-chat-completions|openai-responses)
+      --max-steps int       Limit executed commands
+                            before summary (default: 100)
+      --full-send           Execute every act batch without approval
   -v, --verbose             Show internal decisions
 
 Sessions:
@@ -70,7 +74,7 @@ System prompt:
 Debugging:
       --load-messages string   Seed conversation from a JSON file
       --event-log string       Stream JSONL events to file during execution
-      --trajectory string      Save message history as JSON on exit (single-task only)
+      --trajectory string      Save single-task history as JSON on exit
 
   -V, --version             Print version and exit
 
@@ -79,27 +83,19 @@ Environment:
   CLNKR_PROVIDER     Provider adapter semantics
   CLNKR_PROVIDER_API OpenAI-only API surface override
   CLNKR_MODEL        Model identifier override
-  CLNKR_BASE_URL     LLM endpoint override; also drives provider inference when CLNKR_PROVIDER is unset
+  CLNKR_BASE_URL     Endpoint override; infers provider when provider is unset
+
+Defaults:
+  anthropic base URL  https://api.anthropic.com
+  openai base URL     https://api.openai.com/v1
 `
 }
 
-func resolveProviderConfig(modelFlag, modelShort, baseURLFlag, baseURLShort, providerFlag, providerAPIFlag string, getenv func(string) string) (providerConfig, error) {
-	if strings.TrimSpace(modelShort) != "" {
-		modelFlag = modelShort
+func aliasedString(preferred, fallback string) string {
+	if strings.TrimSpace(preferred) != "" {
+		return preferred
 	}
-	if strings.TrimSpace(baseURLShort) != "" {
-		baseURLFlag = baseURLShort
-	}
-	return providerconfig.ResolveConfig(providerconfig.Inputs{
-		Provider:    providerFlag,
-		ProviderAPI: providerAPIFlag,
-		Model:       modelFlag,
-		BaseURL:     baseURLFlag,
-	}, getenv)
-}
-
-func missingAPIKeyMessage() string {
-	return "Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key"
+	return fallback
 }
 
 func newModelForConfig(cfg providerConfig, systemPrompt string) clnkr.Model {
@@ -165,19 +161,9 @@ func (p *stdinPrompter) ActReply(ctx context.Context, command string) (string, e
 	fmt.Fprintln(os.Stderr, command) //nolint:errcheck
 	for {
 		fmt.Fprint(os.Stderr, "Send 'y' to approve, or type what the agent should do instead: ") //nolint:errcheck
-		line, err := p.reader.ReadLine(ctx)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return "", errApprovalPending
-			}
-			if errors.Is(err, context.Canceled) {
-				return "", err
-			}
-			return "", fmt.Errorf("read approval input: %w", err)
-		}
-		reply := strings.TrimSpace(line)
-		if reply != "" {
-			return reply, nil
+		reply, err := p.readReply(ctx, "approval")
+		if err != nil || reply != "" {
+			return reply, err
 		}
 	}
 }
@@ -185,6 +171,10 @@ func (p *stdinPrompter) ActReply(ctx context.Context, command string) (string, e
 func (p *stdinPrompter) Clarify(ctx context.Context, question string) (string, error) {
 	fmt.Fprintln(os.Stderr, question)  //nolint:errcheck
 	fmt.Fprint(os.Stderr, "Clarify: ") //nolint:errcheck
+	return p.readReply(ctx, "clarification")
+}
+
+func (p *stdinPrompter) readReply(ctx context.Context, kind string) (string, error) {
 	line, err := p.reader.ReadLine(ctx)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
@@ -193,83 +183,27 @@ func (p *stdinPrompter) Clarify(ctx context.Context, question string) (string, e
 		if errors.Is(err, context.Canceled) {
 			return "", err
 		}
-		return "", fmt.Errorf("read clarification input: %w", err)
+		return "", fmt.Errorf("read %s input: %w", kind, err)
 	}
 	return strings.TrimSpace(line), nil
 }
 
-func isApprovalReply(s string) bool {
-	return strings.TrimSpace(s) == "y"
-}
-
-func approvalInputAllowed(mode os.FileMode, termEnv string) bool {
-	return mode&os.ModeCharDevice != 0 && termEnv != "" && termEnv != "dumb"
-}
-
-func requireApprovalInput() error {
-	info, err := os.Stdin.Stat()
-	if err != nil {
-		return fmt.Errorf("stat stdin: %w", err)
-	}
-	if !approvalInputAllowed(info.Mode(), os.Getenv("TERM")) {
-		return fmt.Errorf("approval mode requires interactive stdin; pass --full-send=true to bypass approval")
-	}
-	return nil
-}
-
-func runTask(ctx context.Context, agent *clnkr.Agent, task string, fullSend bool, prompter approvalPrompter) error {
-	if fullSend {
-		return agent.Run(ctx, task)
-	}
-	return runApprovalTask(ctx, agent, task, prompter)
-}
-
-func runSingleTask(ctx context.Context, agent *clnkr.Agent, task string, fullSend bool, prompter approvalPrompter) error {
-	if err := rejectCompactCommand(task); err != nil {
-		return err
-	}
-	return runTask(ctx, agent, task, fullSend, prompter)
-}
-
-func prepareSingleTask(task string, fullSend bool, requireApproval func() error) error {
-	if err := rejectCompactCommand(task); err != nil {
-		return err
-	}
-	if fullSend {
-		return nil
-	}
-	return requireApproval()
-}
-
 func parseCompactCommand(input string) (instructions string, ok bool) {
 	input = strings.TrimSpace(input)
-	const command = "/compact"
-	if input == command {
-		return "", true
-	}
-	if !strings.HasPrefix(input, command) {
+	fields := strings.Fields(input)
+	if len(fields) == 0 || fields[0] != "/compact" {
 		return "", false
 	}
-	if len(input) == len(command) {
-		return "", true
-	}
-	if !unicode.IsSpace(rune(input[len(command)])) {
-		return "", false
-	}
-	return strings.TrimSpace(input[len(command):]), true
+	return strings.TrimSpace(strings.TrimPrefix(input, "/compact")), true
 }
 
 func makeCompactorFactory(cfg providerConfig) compaction.Factory {
 	return compaction.NewFactory(func(instructions string) compaction.FreeformModel {
-		systemPrompt := compaction.LoadCompactionPrompt(instructions)
-		return newFreeformModelForConfig(cfg, systemPrompt)
+		return newFreeformModelForConfig(cfg, compaction.LoadCompactionPrompt(instructions))
 	})
 }
 
-func handleConversationalInput(ctx context.Context, stderr io.Writer, agent *clnkr.Agent, input string, fullSend bool, prompter approvalPrompter, compactorFactory compaction.Factory) error {
-	if stderr == nil {
-		stderr = io.Discard
-	}
+func handleConversationalInput(ctx context.Context, agent *clnkr.Agent, input string, fullSend bool, prompter approvalPrompter, compactorFactory compaction.Factory) error {
 	if instructions, ok := parseCompactCommand(input); ok {
 		if compactorFactory == nil {
 			return fmt.Errorf("compact command: no compactor factory configured")
@@ -285,10 +219,13 @@ func handleConversationalInput(ctx context.Context, stderr io.Writer, agent *cln
 		if err != nil {
 			return err
 		}
-		_, _ = fmt.Fprintf(stderr, "[Session compacted: %d messages summarized, %d kept]\n", stats.CompactedMessages, stats.KeptMessages)
+		_, _ = fmt.Fprintf(os.Stderr, "[Session compacted: %d messages summarized, %d kept]\n", stats.CompactedMessages, stats.KeptMessages)
 		return nil
 	}
-	return runTask(ctx, agent, input, fullSend, prompter)
+	if fullSend {
+		return agent.Run(ctx, input)
+	}
+	return runApprovalTask(ctx, agent, input, prompter)
 }
 
 func rejectCompactCommand(input string) error {
@@ -326,17 +263,17 @@ func runApprovalLoop(ctx context.Context, agent *clnkr.Agent, prompter approvalP
 		case *clnkr.DoneTurn:
 			return nil
 		case *clnkr.ClarifyTurn:
-			reply, err := waitForClarification(ctx, prompter, turn.Question)
+			reply, err := waitForReply(ctx, prompter.Clarify, turn.Question)
 			if err != nil {
 				return err
 			}
 			agent.AppendUserMessage(reply)
 		case *clnkr.ActTurn:
-			reply, err := waitForActReply(ctx, prompter, formatActProposal(turn.Bash.Commands))
+			reply, err := waitForReply(ctx, prompter.ActReply, formatActProposal(turn.Bash.Commands))
 			if err != nil {
 				return err
 			}
-			if !isApprovalReply(reply) {
+			if strings.TrimSpace(reply) != "y" {
 				agent.AppendUserMessage(reply)
 				continue
 			}
@@ -354,9 +291,9 @@ func runApprovalLoop(ctx context.Context, agent *clnkr.Agent, prompter approvalP
 	}
 }
 
-func waitForActReply(ctx context.Context, prompter approvalPrompter, command string) (string, error) {
+func waitForReply(ctx context.Context, prompt func(context.Context, string) (string, error), text string) (string, error) {
 	for {
-		reply, err := prompter.ActReply(ctx, command)
+		reply, err := prompt(ctx, text)
 		if err != nil {
 			return "", err
 		}
@@ -369,6 +306,36 @@ func waitForActReply(ctx context.Context, prompter approvalPrompter, command str
 		}
 		return reply, nil
 	}
+}
+
+func fatalf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
+	os.Exit(1)
+}
+
+func exitRunErr(err error) {
+	if err == nil {
+		return
+	}
+	if errors.Is(err, context.Canceled) {
+		os.Exit(130)
+	}
+	if errors.Is(err, clnkr.ErrClarificationNeeded) {
+		fmt.Fprintln(os.Stderr, "Clarification needed.")
+		os.Exit(exitClarificationNeeded)
+	}
+	fatalf("%v", err)
+}
+
+func writeTrajectory(path string, messages []clnkr.Message) error {
+	data, err := json.MarshalIndent(messages, "", "  ")
+	if err != nil {
+		return fmt.Errorf("cannot marshal trajectory: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("cannot write trajectory %q: %w", path, err)
+	}
+	return nil
 }
 
 func formatActProposal(commands []clnkr.BashAction) string {
@@ -386,34 +353,16 @@ func formatActProposal(commands []clnkr.BashAction) string {
 	return b.String()
 }
 
-func waitForClarification(ctx context.Context, prompter approvalPrompter, question string) (string, error) {
-	for {
-		reply, err := prompter.Clarify(ctx, question)
-		if err != nil {
-			return "", err
-		}
-		if strings.TrimSpace(reply) == "" {
-			continue
-		}
-		if err := rejectCompactCommand(reply); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err) //nolint:errcheck
-			continue
-		}
-		return reply, nil
-	}
-}
-
 func main() {
 	flags := flag.NewFlagSet("clnkr", flag.ContinueOnError)
-	flags.Usage = func() {
-		fmt.Fprint(os.Stderr, usageText())
-	}
+	flags.Usage = func() {}
+	flags.SetOutput(io.Discard)
 
-	prompt := flags.String("p", "", "")
+	taskPromptFlag := flags.String("p", "", "")
 	promptLong := flags.String("prompt", "", "")
 	modelFlag := flags.String("model", "", "")
 	modelShort := flags.String("m", "", "")
-	baseURL := flags.String("base-url", "", "")
+	baseURLFlag := flags.String("base-url", "", "")
 	baseURLShort := flags.String("u", "", "")
 	providerFlag := flags.String("provider", "", "")
 	providerAPIFlag := flags.String("provider-api", "", "")
@@ -437,6 +386,7 @@ func main() {
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
+			fmt.Fprint(os.Stdout, usageText()) //nolint:errcheck
 			os.Exit(0)
 		}
 		fmt.Fprintf(os.Stderr, "Error: %v\nRun 'clnkr --help' for available options.\n", err)
@@ -448,16 +398,15 @@ func main() {
 		os.Exit(0)
 	}
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		fatalf("cannot get working directory: %v", err)
+	}
+
 	if *listSessions || *listSessionsShort {
-		cwd, err := os.Getwd()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot get working directory: %v\n", err)
-			os.Exit(1)
-		}
 		sessions, err := session.ListSessions(cwd)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot list sessions: %v\n", err)
-			os.Exit(1)
+			fatalf("cannot list sessions: %v", err)
 		}
 		if len(sessions) == 0 {
 			fmt.Println("No sessions found for this project.")
@@ -470,38 +419,8 @@ func main() {
 		os.Exit(0)
 	}
 
-	// --prompt and -p are aliases; prefer whichever is set
-	taskPrompt := *prompt
-	if *promptLong != "" {
-		taskPrompt = *promptLong
-	}
-
-	cfg, err := resolveProviderConfig(*modelFlag, *modelShort, *baseURL, *baseURLShort, *providerFlag, *providerAPIFlag, os.Getenv)
-	if err != nil {
-		if strings.Contains(err.Error(), "api key is required") {
-			fmt.Fprintln(os.Stderr, missingAPIKeyMessage())
-			os.Exit(1)
-		}
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot get working directory: %v\n", err)
-		os.Exit(1)
-	}
-
-	var eventLogFile *os.File
-	if *eventLog != "" {
-		var err error
-		eventLogFile, err = os.OpenFile(*eventLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot open event log %q: %v\n", *eventLog, err)
-			os.Exit(1)
-		}
-		defer eventLogFile.Close() //nolint:errcheck
-	}
+	taskPrompt := aliasedString(*promptLong, *taskPromptFlag)
+	singleTask := taskPrompt != ""
 
 	systemPrompt := clnkr.LoadPromptWithOptions(cwd, clnkr.PromptOptions{
 		OmitSystemPrompt:   *noSystemPrompt || *noSystemPromptShort,
@@ -511,6 +430,36 @@ func main() {
 	if *dumpSystemPrompt {
 		fmt.Print(systemPrompt)
 		os.Exit(0)
+	}
+
+	if (*continueFlag || *continueShort) && *trajectory != "" {
+		fatalf("--continue and --trajectory are mutually exclusive")
+	}
+	if *trajectory != "" && !singleTask {
+		fatalf("--trajectory requires -p (single-task mode)")
+	}
+
+	cfg, err := providerconfig.ResolveConfig(providerconfig.Inputs{
+		Provider:    *providerFlag,
+		ProviderAPI: *providerAPIFlag,
+		Model:       aliasedString(*modelShort, *modelFlag),
+		BaseURL:     aliasedString(*baseURLShort, *baseURLFlag),
+	}, os.Getenv)
+	if err != nil {
+		if strings.Contains(err.Error(), "api key is required") {
+			fmt.Fprintln(os.Stderr, missingAPIKeyMessage)
+			os.Exit(1)
+		}
+		fatalf("%v", err)
+	}
+
+	var eventLogFile *os.File
+	if *eventLog != "" {
+		eventLogFile, err = os.OpenFile(*eventLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			fatalf("cannot open event log %q: %v", *eventLog, err)
+		}
+		defer eventLogFile.Close() //nolint:errcheck
 	}
 
 	model := newModelForConfig(cfg, systemPrompt)
@@ -524,19 +473,38 @@ func main() {
 	agent.Notify = func(e clnkr.Event) {
 		switch e := e.(type) {
 		case clnkr.EventResponse:
-			if text, err := clnkr.CanonicalTurnJSON(e.Turn); err == nil {
-				fmt.Fprintln(os.Stdout, text) //nolint:errcheck
+			switch turn := e.Turn.(type) {
+			case *clnkr.DoneTurn:
+				fmt.Fprintln(os.Stdout, turn.Summary) //nolint:errcheck
+			case *clnkr.ClarifyTurn:
+				if *fullSend && singleTask {
+					fmt.Fprintln(os.Stdout, turn.Question) //nolint:errcheck
+				} else if *fullSend {
+					fmt.Fprintln(os.Stderr, turn.Question) //nolint:errcheck
+				}
+			default:
+				if showDebug {
+					if text, err := clnkr.CanonicalTurnJSON(e.Turn); err == nil {
+						fmt.Fprintln(os.Stderr, text) //nolint:errcheck
+					}
+				}
 			}
 		case clnkr.EventCommandStart:
-			fmt.Fprintf(os.Stdout, "--- running: %s ---\n", summarizeCommand(e.Command)) //nolint:errcheck
+			command := summarizeCommand(e.Command)
+			if e.Dir != "" && e.Dir != cwd {
+				command += " in " + e.Dir
+			}
+			fmt.Fprintf(os.Stderr, "--- running: %s ---\n", command) //nolint:errcheck
 		case clnkr.EventCommandDone:
-			if e.Stdout != "" {
-				fmt.Fprint(os.Stdout, e.Stdout) //nolint:errcheck
+			fmt.Fprint(os.Stdout, e.Stdout) //nolint:errcheck
+			if e.Stdout != "" && !strings.HasSuffix(e.Stdout, "\n") {
+				fmt.Fprintln(os.Stdout) //nolint:errcheck
 			}
-			if e.Stderr != "" {
-				fmt.Fprint(os.Stderr, e.Stderr) //nolint:errcheck
+			fmt.Fprint(os.Stderr, e.Stderr) //nolint:errcheck
+			if e.Stderr != "" && !strings.HasSuffix(e.Stderr, "\n") {
+				fmt.Fprintln(os.Stderr) //nolint:errcheck
 			}
-			fmt.Fprintln(os.Stdout, "--- done ---") //nolint:errcheck
+			fmt.Fprintln(os.Stderr, "--- done ---") //nolint:errcheck
 		case clnkr.EventProtocolFailure:
 			if showDebug {
 				fmt.Fprintf(os.Stderr, "[clnkr] protocol error: %s\n", e.Reason) //nolint:errcheck
@@ -558,113 +526,91 @@ func main() {
 	if *loadMessages != "" {
 		data, err := os.ReadFile(*loadMessages)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot read messages file %q: %v\n", *loadMessages, err)
-			os.Exit(1)
+			fatalf("cannot read messages file %q: %v", *loadMessages, err)
 		}
 		var msgs []clnkr.Message
 		if err := json.Unmarshal(data, &msgs); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot parse messages file %q: %v\n", *loadMessages, err)
-			os.Exit(1)
+			fatalf("cannot parse messages file %q: %v", *loadMessages, err)
 		}
 		if err := agent.AddMessages(msgs); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot load messages: %v\n", err)
-			os.Exit(1)
+			fatalf("cannot load messages: %v", err)
 		}
 	}
 
 	if *continueFlag || *continueShort {
-		if *trajectory != "" {
-			fmt.Fprintln(os.Stderr, "Error: --continue and --trajectory are mutually exclusive")
-			os.Exit(1)
-		}
 		msgs, err := session.LoadLatestSession(cwd)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot load session: %v\n", err)
-			os.Exit(1)
+			fatalf("cannot load session: %v", err)
 		}
 		if msgs == nil {
 			fmt.Fprintf(os.Stderr, "Error: no session found for this project.\nRun 'clnkr --list-sessions' to see available sessions.\n")
 			os.Exit(1)
 		}
 		if err := agent.AddMessages(msgs); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot resume session: %v\n", err)
-			os.Exit(1)
+			fatalf("cannot resume session: %v", err)
 		}
 		fmt.Fprintf(os.Stderr, "[Resumed session with %d messages]\n", len(msgs))
 	}
 
-	if *trajectory != "" && taskPrompt == "" {
-		fmt.Fprintln(os.Stderr, "Error: --trajectory requires -p (single-task mode)")
-		os.Exit(1)
-	}
-
-	if taskPrompt != "" {
+	if singleTask {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
+		if err := rejectCompactCommand(taskPrompt); err != nil {
+			fatalf("%v", err)
+		}
+		if !*fullSend && !isTerminal(os.Stdin.Fd()) {
+			fatalf("%v", approvalInputMessage)
+		}
 		var runErr error
-		if err := prepareSingleTask(taskPrompt, *fullSend, requireApprovalInput); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+		if *fullSend {
+			runErr = agent.Run(ctx, taskPrompt)
+		} else {
+			runErr = runApprovalTask(ctx, agent, taskPrompt, &stdinPrompter{reader: newLineReader(os.Stdin)})
 		}
-		runErr = runSingleTask(ctx, agent, taskPrompt, *fullSend, &stdinPrompter{reader: newLineReader(os.Stdin)})
 		if *trajectory != "" {
-			msgs := agent.Messages()
-			data, err := json.MarshalIndent(msgs, "", "  ")
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: cannot marshal trajectory: %v\n", err)
-				if runErr != nil {
-					fmt.Fprintf(os.Stderr, "Error: %v\n", runErr)
-				}
-				os.Exit(1)
-			}
-			if err := os.WriteFile(*trajectory, data, 0o644); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: cannot write trajectory %q: %v\n", *trajectory, err)
+			if err := writeTrajectory(*trajectory, agent.Messages()); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				if runErr != nil {
 					fmt.Fprintf(os.Stderr, "Error: %v\n", runErr)
 				}
 				os.Exit(1)
 			}
 		}
-		if runErr != nil {
-			if errors.Is(runErr, context.Canceled) {
-				os.Exit(130)
-			}
-			if errors.Is(runErr, clnkr.ErrClarificationNeeded) {
-				fmt.Fprintln(os.Stderr, "Clarification needed.")
-				os.Exit(exitClarificationNeeded)
-			}
-			fmt.Fprintf(os.Stderr, "Error: %v\n", runErr)
-			os.Exit(1)
-		}
+		exitRunErr(runErr)
 		return
 	}
 
 	// REPL mode — fresh context per run so Ctrl-C cancels the current
 	// operation without killing the REPL.
-	if !*fullSend {
-		if err := requireApprovalInput(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
+	showPrompt := isTerminal(os.Stdin.Fd())
+	if !*fullSend && !showPrompt {
+		fatalf("%v", approvalInputMessage)
 	}
 	reader := newLineReader(os.Stdin)
 	prompter := &stdinPrompter{reader: reader}
+	var loopErr error
 	for {
-		fmt.Print("clnkr> ")
+		if showPrompt {
+			fmt.Fprint(os.Stderr, "clnkr> ") //nolint:errcheck
+		}
 		input, err := reader.ReadLine(context.Background())
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fatalf("%v", err)
 		}
 		input = strings.TrimSpace(input)
 		if input == "" {
 			continue
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-		if err := handleConversationalInput(ctx, os.Stderr, agent, input, *fullSend, prompter, compactorFactory); err != nil {
+		if err := handleConversationalInput(ctx, agent, input, *fullSend, prompter, compactorFactory); err != nil {
+			if !showPrompt {
+				stop()
+				loopErr = err
+				break
+			}
 			if errors.Is(err, clnkr.ErrClarificationNeeded) || errors.Is(err, errApprovalPending) || errors.Is(err, context.Canceled) {
 				stop()
 				continue
@@ -682,6 +628,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "[Session saved to %s]\n", dir)
 		}
 	}
+	exitRunErr(loopErr)
 
 }
 
@@ -694,14 +641,25 @@ func writeEventLog(f *os.File, e clnkr.Event) {
 	var je jsonEvent
 	switch e := e.(type) {
 	case clnkr.EventResponse:
-		payload, ok := responseEventPayload(e)
-		if !ok {
+		canonical, err := clnkr.CanonicalTurnJSON(e.Turn)
+		if err != nil {
 			return
+		}
+		payload := map[string]any{
+			"turn":  json.RawMessage(canonical),
+			"usage": map[string]int{"input_tokens": e.Usage.InputTokens, "output_tokens": e.Usage.OutputTokens},
+		}
+		if e.Raw != "" {
+			payload["raw"] = e.Raw
 		}
 		je = jsonEvent{Type: "response", Payload: payload}
 	case clnkr.EventCommandStart:
-		je = jsonEvent{Type: "command_start", Payload: e}
+		je = jsonEvent{Type: "command_start", Payload: map[string]string{"command": e.Command, "dir": e.Dir}}
 	case clnkr.EventCommandDone:
+		errText := ""
+		if e.Err != nil {
+			errText = e.Err.Error()
+		}
 		je = jsonEvent{Type: "command_done", Payload: struct {
 			Command  string                `json:"command"`
 			Stdout   string                `json:"stdout"`
@@ -709,53 +667,20 @@ func writeEventLog(f *os.File, e clnkr.Event) {
 			ExitCode int                   `json:"exit_code"`
 			Feedback clnkr.CommandFeedback `json:"feedback,omitempty"`
 			Err      string                `json:"err,omitempty"`
-		}{Command: e.Command, Stdout: e.Stdout, Stderr: e.Stderr, ExitCode: e.ExitCode, Feedback: e.Feedback, Err: errString(e.Err)}}
+		}{Command: e.Command, Stdout: e.Stdout, Stderr: e.Stderr, ExitCode: e.ExitCode, Feedback: e.Feedback, Err: errText}}
 	case clnkr.EventProtocolFailure:
-		je = jsonEvent{Type: "protocol_failure", Payload: struct {
-			Reason string `json:"reason"`
-			Raw    string `json:"raw"`
-		}{Reason: e.Reason, Raw: e.Raw}}
+		je = jsonEvent{Type: "protocol_failure", Payload: map[string]string{"reason": e.Reason, "raw": e.Raw}}
 	case clnkr.EventDebug:
-		je = jsonEvent{Type: "debug", Payload: e}
+		je = jsonEvent{Type: "debug", Payload: map[string]string{"message": e.Message}}
 	default:
 		return
 	}
-	data, err := json.Marshal(je)
-	if err != nil {
-		return
-	}
-	data = append(data, '\n')
-	f.Write(data) //nolint:errcheck
-}
-
-func responseEventPayload(ev clnkr.EventResponse) (any, bool) {
-	canonical, err := clnkr.CanonicalTurnJSON(ev.Turn)
-	if err != nil {
-		return nil, false
-	}
-	return struct {
-		Turn  json.RawMessage `json:"turn"`
-		Usage clnkr.Usage     `json:"usage"`
-		Raw   string          `json:"raw,omitempty"`
-	}{
-		Turn:  json.RawMessage(canonical),
-		Usage: ev.Usage,
-		Raw:   ev.Raw,
-	}, true
-}
-
-func errString(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
+	json.NewEncoder(f).Encode(je) //nolint:errcheck
 }
 
 func summarizeCommand(cmd string) string {
-	lines := strings.Split(cmd, "\n")
-	first := lines[0]
-	if len(lines) == 1 {
-		return first
+	if idx := strings.IndexByte(cmd, '\n'); idx >= 0 {
+		return fmt.Sprintf("%s ... (%d lines)", cmd[:idx], strings.Count(cmd, "\n")+1)
 	}
-	return fmt.Sprintf("%s ... (%d lines)", first, len(lines))
+	return cmd
 }

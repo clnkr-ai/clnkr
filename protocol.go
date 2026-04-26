@@ -37,6 +37,19 @@ func (ActTurn) turn()     {}
 func (ClarifyTurn) turn() {}
 func (DoneTurn) turn()    {}
 
+func turnPointer(turn Turn) Turn {
+	switch v := turn.(type) {
+	case ActTurn:
+		return &v
+	case ClarifyTurn:
+		return &v
+	case DoneTurn:
+		return &v
+	default:
+		return turn
+	}
+}
+
 type jsonEnvelope struct {
 	Type      string            `json:"type"`
 	Bash      *jsonBashEnvelope `json:"bash,omitempty"`
@@ -64,14 +77,7 @@ var (
 )
 
 const protocolActExample = `{"type":"act","bash":{"commands":[{"command":"...","workdir":null}]}}`
-
-func mustCanonicalDoneJSON(summary string) string {
-	raw, err := CanonicalTurnJSON(&DoneTurn{Summary: summary})
-	if err != nil {
-		panic(err)
-	}
-	return raw
-}
+const protocolDoneExample = `{"type":"done","summary":"..."}`
 
 func errorToReason(err error) string {
 	switch {

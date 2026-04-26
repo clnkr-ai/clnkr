@@ -10,7 +10,10 @@ import (
 type Message = transcript.Message
 
 // Usage tracks token consumption for a single LLM call.
-type Usage struct{ InputTokens, OutputTokens int }
+type Usage struct {
+	InputTokens  int
+	OutputTokens int
+}
 
 // Response captures one model reply.
 // On success Turn is non-nil and ProtocolErr is nil.

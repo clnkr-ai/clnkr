@@ -219,12 +219,14 @@ jobs:
           git checkout main
           VERSION="${GITHUB_REF_NAME}"
           DATE=$(git log -1 --format=%cs "$GITHUB_REF_NAME")
-          echo "# Changelog" > CHANGELOG.md
-          echo "" >> CHANGELOG.md
-          echo "## ${VERSION} (${DATE})" >> CHANGELOG.md
-          echo "" >> CHANGELOG.md
-          echo "- Restart release history for the clnkr CLI." >> CHANGELOG.md
-          echo "" >> CHANGELOG.md
+          {
+            echo "# Changelog"
+            echo ""
+            echo "## ${VERSION} (${DATE})"
+            echo ""
+            echo "- Restart release history for the clnkr CLI."
+            echo ""
+          } > CHANGELOG.md
           git add CHANGELOG.md
           git diff --cached --quiet || {
             git commit -m "Update CHANGELOG.md for ${GITHUB_REF_NAME}"

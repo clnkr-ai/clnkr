@@ -199,7 +199,7 @@ func TestResolveConfigInfersAnthropicFromExplicitBaseURL(t *testing.T) {
 	}
 }
 
-func TestResolveConfigAllowlistedResponsesModels(t *testing.T) {
+func TestResolveConfigKnownOpenAIResponsesModels(t *testing.T) {
 	tests := []string{
 		"gpt-5",
 		"gpt-5.4-mini-2026-03-05",
@@ -226,11 +226,12 @@ func TestResolveConfigAllowlistedResponsesModels(t *testing.T) {
 	}
 }
 
-func TestResolveConfigOpenAILookingModelsUseResponses(t *testing.T) {
+func TestResolveConfigOpenAIStyleModelsUseResponses(t *testing.T) {
 	tests := []string{
 		"gpt-5.2-chat-latest",
 		"gpt-4o-latest",
 		"codex-mini-latest",
+		"swift-codex",
 		"o4-mini",
 		"GPT-5.9-preview",
 		"  gpt-6  ",
@@ -257,9 +258,13 @@ func TestResolveConfigOpenAILookingModelsUseResponses(t *testing.T) {
 func TestResolveConfigNegativeExamplesStayOnChatCompletions(t *testing.T) {
 	tests := []string{
 		"chatgpt-4o-latest",
+		"chatgpt-codex",
 		"orca-mini",
+		"orca-codex",
 		"olmo-2",
+		"olmo-codex",
 		"openhermes-2.5",
+		"openhermes-codex",
 		"llama3",
 		"gemini-2.0-flash",
 	}
@@ -385,7 +390,7 @@ func TestResolveConfigAcceptsExplicitCodexChatCompletionsSelections(t *testing.T
 	}
 }
 
-func TestResolveConfigMatchesDatedSnapshotsOnly(t *testing.T) {
+func TestResolveConfigOpenAIStyleFallbackAndDatedSnapshots(t *testing.T) {
 	tests := []struct {
 		name    string
 		model   string
@@ -397,12 +402,12 @@ func TestResolveConfigMatchesDatedSnapshotsOnly(t *testing.T) {
 			wantAPI: ProviderAPIOpenAIResponses,
 		},
 		{
-			name:    "non snapshot suffix still reaches responses via heuristic",
+			name:    "openai-looking non snapshot suffix uses responses",
 			model:   "gpt-5.4-preview",
 			wantAPI: ProviderAPIOpenAIResponses,
 		},
 		{
-			name:    "chat latest suffix still reaches responses via heuristic",
+			name:    "chat latest suffix still looks openai",
 			model:   "gpt-5.2-chat-latest",
 			wantAPI: ProviderAPIOpenAIResponses,
 		},
