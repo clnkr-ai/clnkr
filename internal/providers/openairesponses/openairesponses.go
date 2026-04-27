@@ -37,10 +37,10 @@ func NewModel(baseURL, apiKey, model, systemPrompt string) *Model {
 }
 
 type request struct {
-	Model        string         `json:"model"`
-	Instructions string         `json:"instructions,omitempty"`
-	Input        []inputMessage `json:"input"`
-	Text         *textOptions   `json:"text,omitempty"`
+	Model        string               `json:"model"`
+	Instructions string               `json:"instructions,omitempty"`
+	Input        []responsesInputItem `json:"input"`
+	Text         *textOptions         `json:"text,omitempty"`
 }
 
 type textOptions struct {
@@ -54,14 +54,18 @@ type responseFormat struct {
 	Schema map[string]any `json:"schema"`
 }
 
-type inputMessage struct {
-	Role    string      `json:"role"`
-	Content []inputItem `json:"content"`
+type responsesInputItem struct {
+	Type    string                 `json:"type,omitempty"`
+	ID      string                 `json:"id,omitempty"`
+	Role    string                 `json:"role"`
+	Status  string                 `json:"status,omitempty"`
+	Content []responsesContentItem `json:"content"`
 }
 
-type inputItem struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+type responsesContentItem struct {
+	Type        string `json:"type"`
+	Text        string `json:"text"`
+	Annotations *[]any `json:"annotations,omitempty"`
 }
 
 type response struct {
@@ -160,26 +164,38 @@ func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string
 	return "", fmt.Errorf("retry loop exhausted")
 }
 
-func mapMessages(messages []clnkr.Message) []inputMessage {
+func mapMessages(messages []clnkr.Message) []responsesInputItem {
 	normalized := openaiwire.NormalizeMessagesForProvider(messages)
-	input := make([]inputMessage, 0, len(normalized))
+	input := make([]responsesInputItem, 0, len(normalized))
+	assistantIndex := 0
 	for _, msg := range normalized {
-		input = append(input, inputMessage{
+		if msg.Role == "assistant" {
+			assistantIndex++
+			annotations := []any{}
+			input = append(input, responsesInputItem{
+				Type:   "message",
+				ID:     fmt.Sprintf("msg_prev_%d", assistantIndex),
+				Role:   "assistant",
+				Status: "completed",
+				Content: []responsesContentItem{{
+					Type:        "output_text",
+					Text:        msg.Content,
+					Annotations: &annotations,
+				}},
+			})
+			continue
+		}
+
+		input = append(input, responsesInputItem{
+			Type: "message",
 			Role: msg.Role,
-			Content: []inputItem{{
-				Type: responsesInputContentType(msg.Role),
+			Content: []responsesContentItem{{
+				Type: "input_text",
 				Text: msg.Content,
 			}},
 		})
 	}
 	return input
-}
-
-func responsesInputContentType(role string) string {
-	if role == "assistant" {
-		return "output_text"
-	}
-	return "input_text"
 }
 
 func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, int, string, error) {
