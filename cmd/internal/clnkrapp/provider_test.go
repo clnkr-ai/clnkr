@@ -1,0 +1,169 @@
+package clnkrapp
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/clnkr-ai/clnkr"
+	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
+)
+
+func TestNewModelForConfigUsesOpenAIResponsesWhenConfigured(t *testing.T) {
+	var gotPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": []map[string]any{
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]any{
+						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","reasoning":null}}`},
+					},
+				},
+			},
+			"usage": map[string]int{"input_tokens": 1, "output_tokens": 1},
+		})
+	}))
+	defer server.Close()
+
+	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
+		Provider:    "openai",
+		ProviderAPI: "openai-responses",
+		Model:       "gpt-5.4",
+		BaseURL:     server.URL,
+		APIKey:      "test-key",
+	}, "sys")
+	resp, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if gotPath != "/responses" {
+		t.Fatalf("path = %q, want %q", gotPath, "/responses")
+	}
+	if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok"}` {
+		t.Fatalf("canonical turn = %q, want %q", got, `{"type":"done","summary":"ok"}`)
+	}
+}
+
+func TestMakeCompactorFactoryUsesOpenAIWhenProviderSelected(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"role": "assistant", "content": "Older work summarized."}},
+			},
+			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
+		})
+	}))
+	defer server.Close()
+
+	compactor := MakeCompactorFactory(providerconfig.ResolvedProviderConfig{
+		Provider:    "openai",
+		ProviderAPI: "openai-chat-completions",
+		BaseURL:     server.URL,
+		APIKey:      "test-key",
+		Model:       "gpt-test",
+	})("")
+	summary, err := compactor.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if summary != "Older work summarized." {
+		t.Fatalf("summary = %q, want %q", summary, "Older work summarized.")
+	}
+	if _, ok := gotBody["response_format"]; ok {
+		t.Fatalf("response_format should be omitted for compaction, got %#v", gotBody["response_format"])
+	}
+}
+
+func TestMakeCompactorFactoryUsesOpenAIResponsesWhenConfigured(t *testing.T) {
+	var requestPath string
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPath = r.URL.Path
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": []map[string]any{
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]any{
+						{"type": "output_text", "text": "Older work summarized."},
+					},
+				},
+			},
+			"usage": map[string]int{"input_tokens": 1, "output_tokens": 1},
+		})
+	}))
+	defer server.Close()
+
+	compactor := MakeCompactorFactory(providerconfig.ResolvedProviderConfig{
+		Provider:    "openai",
+		ProviderAPI: "openai-responses",
+		BaseURL:     server.URL,
+		APIKey:      "test-key",
+		Model:       "gpt-test",
+	})("")
+	summary, err := compactor.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if summary != "Older work summarized." {
+		t.Fatalf("summary = %q, want %q", summary, "Older work summarized.")
+	}
+	if requestPath != "/responses" {
+		t.Fatalf("request path = %q, want %q", requestPath, "/responses")
+	}
+	if _, ok := gotBody["text"]; ok {
+		t.Fatalf("text should be omitted for compaction, got %#v", gotBody["text"])
+	}
+}
+
+func TestMakeCompactorFactoryUsesAnthropicWhenProviderSelected(t *testing.T) {
+	var requestPath string
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPath = r.URL.Path
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]string{
+				{"type": "text", "text": "Older work summarized."},
+			},
+			"usage": map[string]int{"input_tokens": 1, "output_tokens": 1},
+		})
+	}))
+	defer server.Close()
+
+	compactor := MakeCompactorFactory(providerconfig.ResolvedProviderConfig{
+		Provider: "anthropic",
+		BaseURL:  server.URL,
+		APIKey:   "test-key",
+		Model:    "claude-test",
+	})("")
+	summary, err := compactor.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if summary != "Older work summarized." {
+		t.Fatalf("summary = %q, want %q", summary, "Older work summarized.")
+	}
+	if requestPath != "/v1/messages" {
+		t.Fatalf("request path = %q, want %q", requestPath, "/v1/messages")
+	}
+	if _, ok := gotBody["response_format"]; ok {
+		t.Fatalf("response_format should be omitted for compaction, got %#v", gotBody["response_format"])
+	}
+	if _, ok := gotBody["max_tokens"]; !ok {
+		t.Fatalf("anthropic request missing max_tokens: %#v", gotBody)
+	}
+}

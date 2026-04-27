@@ -14,34 +14,13 @@ import (
 	"strings"
 
 	"github.com/clnkr-ai/clnkr"
-	"github.com/clnkr-ai/clnkr/cmd/internal/compaction"
+	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
 	"github.com/clnkr-ai/clnkr/cmd/internal/session"
-	"github.com/clnkr-ai/clnkr/internal/providers/anthropic"
-	"github.com/clnkr-ai/clnkr/internal/providers/openai"
-	"github.com/clnkr-ai/clnkr/internal/providers/openairesponses"
 )
 
 // version is set at build time via -ldflags.
 var version = "dev"
-
-const exitClarificationNeeded = 2
-const missingAPIKeyMessage = "Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key"
-const approvalInputMessage = "approval mode requires interactive stdin; pass --full-send=true to bypass approval"
-
-var errApprovalPending = errors.New("approval pending")
-var errCompactCommandOutsideConversation = errors.New("/compact is only available at the conversational prompt")
-
-type providerConfig = providerconfig.ResolvedProviderConfig
-
-type approvalPrompter interface {
-	ActReply(ctx context.Context, command string) (string, error)
-	Clarify(ctx context.Context, question string) (string, error)
-}
-
-type stdinPrompter struct {
-	reader *lineReader
-}
 
 func usageText() string {
 	return `clnkr - a minimal coding agent
@@ -89,31 +68,13 @@ Defaults:
 `
 }
 
+type stdinPrompter struct{ reader *lineReader }
+
 func aliasedString(preferred, fallback string) string {
 	if strings.TrimSpace(preferred) != "" {
 		return preferred
 	}
 	return fallback
-}
-
-func newModelForConfig(cfg providerConfig, systemPrompt string) clnkr.Model {
-	if cfg.Provider == providerconfig.ProviderAnthropic {
-		return anthropic.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
-	}
-	if cfg.ProviderAPI == providerconfig.ProviderAPIOpenAIResponses {
-		return openairesponses.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
-	}
-	return openai.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
-}
-
-func newFreeformModelForConfig(cfg providerConfig, systemPrompt string) compaction.FreeformModel {
-	if cfg.Provider == providerconfig.ProviderAnthropic {
-		return anthropic.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
-	}
-	if cfg.ProviderAPI == providerconfig.ProviderAPIOpenAIResponses {
-		return openairesponses.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
-	}
-	return openai.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
 }
 
 type lineResult struct {
@@ -176,7 +137,7 @@ func (p *stdinPrompter) readReply(ctx context.Context, kind string) (string, err
 	line, err := p.reader.ReadLine(ctx)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
-			return "", errApprovalPending
+			return "", io.EOF
 		}
 		if errors.Is(err, context.Canceled) {
 			return "", err
@@ -186,124 +147,20 @@ func (p *stdinPrompter) readReply(ctx context.Context, kind string) (string, err
 	return strings.TrimSpace(line), nil
 }
 
-func parseCompactCommand(input string) (instructions string, ok bool) {
-	input = strings.TrimSpace(input)
-	fields := strings.Fields(input)
-	if len(fields) == 0 || fields[0] != "/compact" {
-		return "", false
-	}
-	return strings.TrimSpace(strings.TrimPrefix(input, "/compact")), true
-}
-
-func makeCompactorFactory(cfg providerConfig) compaction.Factory {
-	return compaction.NewFactory(func(instructions string) compaction.FreeformModel {
-		return newFreeformModelForConfig(cfg, compaction.LoadCompactionPrompt(instructions))
-	})
-}
-
-func handleConversationalInput(ctx context.Context, agent *clnkr.Agent, input string, fullSend bool, prompter approvalPrompter, compactorFactory compaction.Factory) error {
-	if instructions, ok := parseCompactCommand(input); ok {
-		if compactorFactory == nil {
-			return fmt.Errorf("compact command: no compactor factory configured")
+func handleConversationalInput(ctx context.Context, agent *clnkr.Agent, input string, fullSend bool, prompter clnkrapp.ApprovalPrompter, compactorFactory func(string) clnkr.Compactor) error {
+	stats, compacted, err := clnkrapp.HandleCompactCommand(ctx, agent, input, compactorFactory)
+	if err != nil || compacted {
+		if err == nil {
+			_, _ = fmt.Fprintf(os.Stderr, "[Session compacted: %d messages summarized, %d kept]\n", stats.CompactedMessages, stats.KeptMessages)
 		}
-		compactor := compactorFactory(instructions)
-		if compactor == nil {
-			return fmt.Errorf("compact command: no compactor configured")
-		}
-		stats, err := agent.Compact(ctx, compactor, clnkr.CompactOptions{
-			Instructions:    instructions,
-			KeepRecentTurns: 2,
-		})
-		if err != nil {
-			return err
-		}
-		_, _ = fmt.Fprintf(os.Stderr, "[Session compacted: %d messages summarized, %d kept]\n", stats.CompactedMessages, stats.KeptMessages)
-		return nil
+		return err
 	}
 	if fullSend {
 		return agent.Run(ctx, input)
 	}
-	return runApprovalTask(ctx, agent, input, prompter)
-}
-
-func rejectCompactCommand(input string) error {
-	if _, ok := parseCompactCommand(input); ok {
-		return errCompactCommandOutsideConversation
-	}
-	return nil
-}
-
-func runApprovalTask(ctx context.Context, agent *clnkr.Agent, task string, prompter approvalPrompter) error {
-	agent.AppendUserMessage(task)
-	return runApprovalLoop(ctx, agent, prompter)
-}
-
-func runApprovalLoop(ctx context.Context, agent *clnkr.Agent, prompter approvalPrompter) error {
-	steps := 0
-	protocolErrors := 0
-
-	for {
-		result, err := agent.Step(ctx)
-		if err != nil {
-			return err
-		}
-
-		if result.ParseErr != nil {
-			protocolErrors++
-			if protocolErrors >= 3 {
-				return fmt.Errorf("consecutive protocol failures, exiting")
-			}
-			continue
-		}
-		protocolErrors = 0
-
-		switch turn := result.Turn.(type) {
-		case *clnkr.DoneTurn:
-			return nil
-		case *clnkr.ClarifyTurn:
-			reply, err := waitForReply(ctx, prompter.Clarify, turn.Question)
-			if err != nil {
-				return err
-			}
-			agent.AppendUserMessage(reply)
-		case *clnkr.ActTurn:
-			reply, err := waitForReply(ctx, prompter.ActReply, formatActProposal(turn.Bash.Commands))
-			if err != nil {
-				return err
-			}
-			if strings.TrimSpace(reply) != "y" {
-				agent.AppendUserMessage(reply)
-				continue
-			}
-			result, err := agent.ExecuteTurn(ctx, turn)
-			if err != nil {
-				return err
-			}
-			steps += result.ExecCount
-			if agent.MaxSteps > 0 && steps >= agent.MaxSteps {
-				return agent.RequestStepLimitSummary(ctx)
-			}
-		default:
-			return fmt.Errorf("unexpected turn type %T", turn)
-		}
-	}
-}
-
-func waitForReply(ctx context.Context, prompt func(context.Context, string) (string, error), text string) (string, error) {
-	for {
-		reply, err := prompt(ctx, text)
-		if err != nil {
-			return "", err
-		}
-		if strings.TrimSpace(reply) == "" {
-			continue
-		}
-		if err := rejectCompactCommand(reply); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err) //nolint:errcheck
-			continue
-		}
-		return reply, nil
-	}
+	return clnkrapp.RunApprovalTask(ctx, agent, input, prompter, func(err error) {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err) //nolint:errcheck
+	})
 }
 
 func fatalf(format string, args ...any) {
@@ -320,35 +177,9 @@ func exitRunErr(err error) {
 	}
 	if errors.Is(err, clnkr.ErrClarificationNeeded) {
 		fmt.Fprintln(os.Stderr, "Clarification needed.")
-		os.Exit(exitClarificationNeeded)
+		os.Exit(2)
 	}
 	fatalf("%v", err)
-}
-
-func writeTrajectory(path string, messages []clnkr.Message) error {
-	data, err := json.MarshalIndent(messages, "", "  ")
-	if err != nil {
-		return fmt.Errorf("cannot marshal trajectory: %w", err)
-	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("cannot write trajectory %q: %w", path, err)
-	}
-	return nil
-}
-
-func formatActProposal(commands []clnkr.BashAction) string {
-	var b strings.Builder
-	for i, action := range commands {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		command := action.Command
-		if workdir := strings.TrimSpace(action.Workdir); workdir != "" {
-			command = fmt.Sprintf("%s in %s", command, workdir)
-		}
-		fmt.Fprintf(&b, "%d. %s", i+1, command)
-	}
-	return b.String()
 }
 
 func main() {
@@ -457,7 +288,7 @@ func main() {
 	}, os.Getenv)
 	if err != nil {
 		if strings.Contains(err.Error(), "api key is required") {
-			fmt.Fprintln(os.Stderr, missingAPIKeyMessage)
+			fmt.Fprintln(os.Stderr, "Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key")
 			os.Exit(1)
 		}
 		fatalf("%v", err)
@@ -472,8 +303,8 @@ func main() {
 		defer eventLogFile.Close() //nolint:errcheck
 	}
 
-	model := newModelForConfig(cfg, systemPrompt)
-	compactorFactory := makeCompactorFactory(cfg)
+	model := clnkrapp.NewModelForConfig(cfg, systemPrompt)
+	compactorFactory := clnkrapp.MakeCompactorFactory(cfg)
 
 	executor := &clnkr.CommandExecutor{}
 
@@ -523,7 +354,7 @@ func main() {
 			}
 		}
 		if eventLogFile != nil {
-			writeEventLog(eventLogFile, e)
+			_ = clnkrapp.WriteEventLog(eventLogFile, e)
 		}
 	}
 
@@ -563,12 +394,12 @@ func main() {
 	if singleTask {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
-		if err := rejectCompactCommand(taskPrompt); err != nil {
+		if err := clnkrapp.RejectCompactCommand(taskPrompt); err != nil {
 			fatalf("%v", err)
 		}
 		runErr := agent.Run(ctx, taskPrompt)
 		if *trajectory != "" {
-			if err := writeTrajectory(*trajectory, agent.Messages()); err != nil {
+			if err := clnkrapp.WriteTrajectory(*trajectory, agent.Messages()); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				if runErr != nil {
 					fmt.Fprintf(os.Stderr, "Error: %v\n", runErr)
@@ -584,7 +415,7 @@ func main() {
 	// operation without killing the REPL.
 	showPrompt := isTerminal(os.Stdin.Fd())
 	if !*fullSend && !showPrompt {
-		fatalf("%v", approvalInputMessage)
+		fatalf("%v", "approval mode requires interactive stdin; pass --full-send=true to bypass approval")
 	}
 	reader := newLineReader(os.Stdin)
 	prompter := &stdinPrompter{reader: reader}
@@ -611,7 +442,7 @@ func main() {
 				loopErr = err
 				break
 			}
-			if errors.Is(err, clnkr.ErrClarificationNeeded) || errors.Is(err, errApprovalPending) || errors.Is(err, context.Canceled) {
+			if errors.Is(err, clnkr.ErrClarificationNeeded) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				stop()
 				continue
 			}
@@ -630,52 +461,6 @@ func main() {
 	}
 	exitRunErr(loopErr)
 
-}
-
-type jsonEvent struct {
-	Type    string `json:"type"`
-	Payload any    `json:"payload"`
-}
-
-func writeEventLog(f *os.File, e clnkr.Event) {
-	var je jsonEvent
-	switch e := e.(type) {
-	case clnkr.EventResponse:
-		canonical, err := clnkr.CanonicalTurnJSON(e.Turn)
-		if err != nil {
-			return
-		}
-		payload := map[string]any{
-			"turn":  json.RawMessage(canonical),
-			"usage": map[string]int{"input_tokens": e.Usage.InputTokens, "output_tokens": e.Usage.OutputTokens},
-		}
-		if e.Raw != "" {
-			payload["raw"] = e.Raw
-		}
-		je = jsonEvent{Type: "response", Payload: payload}
-	case clnkr.EventCommandStart:
-		je = jsonEvent{Type: "command_start", Payload: map[string]string{"command": e.Command, "dir": e.Dir}}
-	case clnkr.EventCommandDone:
-		errText := ""
-		if e.Err != nil {
-			errText = e.Err.Error()
-		}
-		je = jsonEvent{Type: "command_done", Payload: struct {
-			Command  string                `json:"command"`
-			Stdout   string                `json:"stdout"`
-			Stderr   string                `json:"stderr"`
-			ExitCode int                   `json:"exit_code"`
-			Feedback clnkr.CommandFeedback `json:"feedback,omitempty"`
-			Err      string                `json:"err,omitempty"`
-		}{Command: e.Command, Stdout: e.Stdout, Stderr: e.Stderr, ExitCode: e.ExitCode, Feedback: e.Feedback, Err: errText}}
-	case clnkr.EventProtocolFailure:
-		je = jsonEvent{Type: "protocol_failure", Payload: map[string]string{"reason": e.Reason, "raw": e.Raw}}
-	case clnkr.EventDebug:
-		je = jsonEvent{Type: "debug", Payload: map[string]string{"message": e.Message}}
-	default:
-		return
-	}
-	json.NewEncoder(f).Encode(je) //nolint:errcheck
 }
 
 func summarizeCommand(cmd string) string {
