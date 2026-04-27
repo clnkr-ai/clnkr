@@ -66,6 +66,9 @@ func TestModelQueryUsesResponsesStructuredRequest(t *testing.T) {
 	if got, want := msg["role"], "user"; got != want {
 		t.Fatalf("input[0].role = %#v, want %q", got, want)
 	}
+	if got, want := msg["type"], "message"; got != want {
+		t.Fatalf("input[0].type = %#v, want %q", got, want)
+	}
 
 	content, ok := msg["content"].([]any)
 	if !ok || len(content) != 1 {
@@ -80,6 +83,9 @@ func TestModelQueryUsesResponsesStructuredRequest(t *testing.T) {
 	}
 	if got, want := textItem["text"], "hello"; got != want {
 		t.Fatalf("input text = %#v, want %q", got, want)
+	}
+	if _, ok := textItem["annotations"]; ok {
+		t.Fatalf("input text annotations = %#v, want omitted", textItem["annotations"])
 	}
 
 	text, ok := gotBody["text"].(map[string]any)
@@ -111,6 +117,117 @@ func TestModelQueryUsesResponsesStructuredRequest(t *testing.T) {
 	}
 	if resp.Usage.InputTokens != 11 || resp.Usage.OutputTokens != 7 {
 		t.Fatalf("usage = %+v, want 11/7", resp.Usage)
+	}
+}
+
+func TestModelQuerySendsAssistantHistoryAsResponsesOutputItems(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var gotBody map[string]any
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+
+		input, ok := gotBody["input"].([]any)
+		if !ok || len(input) != 2 {
+			http.Error(w, "input must have two messages", http.StatusBadRequest)
+			return
+		}
+
+		user, ok := input[0].(map[string]any)
+		if !ok {
+			http.Error(w, "user history must be object", http.StatusBadRequest)
+			return
+		}
+		if got := user["type"]; got != "message" {
+			http.Error(w, "user history missing type message", http.StatusBadRequest)
+			return
+		}
+		userContent, ok := user["content"].([]any)
+		if !ok || len(userContent) != 1 {
+			http.Error(w, "user history content must have one item", http.StatusBadRequest)
+			return
+		}
+		userText, ok := userContent[0].(map[string]any)
+		if !ok {
+			http.Error(w, "user history content must be object", http.StatusBadRequest)
+			return
+		}
+		if got := userText["type"]; got != "input_text" {
+			http.Error(w, "user history must use input_text", http.StatusBadRequest)
+			return
+		}
+		if _, ok := userText["annotations"]; ok {
+			http.Error(w, "user history must omit annotations", http.StatusBadRequest)
+			return
+		}
+
+		assistant, ok := input[1].(map[string]any)
+		if !ok {
+			http.Error(w, "assistant history must be object", http.StatusBadRequest)
+			return
+		}
+		if got := assistant["type"]; got != "message" {
+			http.Error(w, "assistant history missing type message", http.StatusBadRequest)
+			return
+		}
+		if got := assistant["id"]; got != "msg_prev_1" {
+			http.Error(w, "assistant history missing id", http.StatusBadRequest)
+			return
+		}
+		if got := assistant["role"]; got != "assistant" {
+			http.Error(w, "assistant history missing assistant role", http.StatusBadRequest)
+			return
+		}
+		if got := assistant["status"]; got != "completed" {
+			http.Error(w, "assistant history missing completed status", http.StatusBadRequest)
+			return
+		}
+		content, ok := assistant["content"].([]any)
+		if !ok || len(content) != 1 {
+			http.Error(w, "assistant history content must have one item", http.StatusBadRequest)
+			return
+		}
+		item, ok := content[0].(map[string]any)
+		if !ok {
+			http.Error(w, "assistant history content must be object", http.StatusBadRequest)
+			return
+		}
+		if got := item["type"]; got != "output_text" {
+			http.Error(w, "assistant history must use output_text", http.StatusBadRequest)
+			return
+		}
+		if got := item["text"]; got != `{"turn":{"type":"done","bash":null,"question":null,"summary":"canonical transcript","reasoning":null}}` {
+			http.Error(w, "assistant history text not normalized", http.StatusBadRequest)
+			return
+		}
+		annotations, ok := item["annotations"].([]any)
+		if !ok || len(annotations) != 0 {
+			http.Error(w, "assistant history annotations must be empty array", http.StatusBadRequest)
+			return
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": []map[string]any{
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]any{
+						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","reasoning":null}}`},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	history := []clnkr.Message{
+		{Role: "user", Content: "first task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"canonical transcript"}`},
+	}
+
+	model := openairesponses.NewModel(server.URL, "test-key", "gpt-5", "sys prompt")
+	_, err := model.Query(context.Background(), history)
+	if err != nil {
+		t.Fatalf("Query: %v", err)
 	}
 }
 
@@ -167,6 +284,15 @@ func TestModelQueryTextOmitsStructuredOutputConfigAndNormalizesAssistantHistory(
 	if got, want := last["role"], "assistant"; got != want {
 		t.Fatalf("input[1].role = %#v, want %q", got, want)
 	}
+	if got, want := last["type"], "message"; got != want {
+		t.Fatalf("input[1].type = %#v, want %q", got, want)
+	}
+	if got, want := last["id"], "msg_prev_1"; got != want {
+		t.Fatalf("input[1].id = %#v, want %q", got, want)
+	}
+	if got, want := last["status"], "completed"; got != want {
+		t.Fatalf("input[1].status = %#v, want %q", got, want)
+	}
 	content, ok := last["content"].([]any)
 	if !ok || len(content) != 1 {
 		t.Fatalf("input[1].content = %#v, want one text item", last["content"])
@@ -180,6 +306,10 @@ func TestModelQueryTextOmitsStructuredOutputConfigAndNormalizesAssistantHistory(
 	}
 	if got, want := item["text"], `{"turn":{"type":"done","bash":null,"question":null,"summary":"canonical transcript","reasoning":null}}`; got != want {
 		t.Fatalf("assistant text = %#v, want %q", got, want)
+	}
+	annotations, ok := item["annotations"].([]any)
+	if !ok || len(annotations) != 0 {
+		t.Fatalf("assistant annotations = %#v, want empty array", item["annotations"])
 	}
 }
 
