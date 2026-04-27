@@ -44,6 +44,28 @@ func TestFindCompactBoundaryIgnoresHostBlocks(t *testing.T) {
 			wantBoundary:    0,
 			wantOK:          false,
 		},
+		{
+			name: "ignores command feedback blocks",
+			messages: []Message{
+				{Role: "user", Content: "first task"},
+				{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+				{Role: "user", Content: "second task"},
+				{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
+				{Role: "user", Content: FormatCommandResult(CommandResult{
+					Command:  "printf next > note.txt",
+					ExitCode: 0,
+					Feedback: CommandFeedback{
+						ChangedFiles: []string{"note.txt"},
+						Diff:         "diff --git a/note.txt b/note.txt",
+					},
+				})},
+				{Role: "user", Content: "third task"},
+				{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+			},
+			keepRecentTurns: 2,
+			wantBoundary:    2,
+			wantOK:          true,
+		},
 	}
 
 	for _, tt := range tests {

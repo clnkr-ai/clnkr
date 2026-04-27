@@ -105,6 +105,22 @@ func TestParseTurn(t *testing.T) {
 			t.Fatalf("reasoning = %q, want %q", cl.Reasoning, wantReasoning)
 		}
 	})
+
+	t.Run("rejects whitespace only clarify question", func(t *testing.T) {
+		raw := `{"type":"clarify","question":"   "}`
+		_, err := clnkr.ParseTurn(raw)
+		if !errors.Is(err, clnkr.ErrEmptyClarify) {
+			t.Fatalf("ParseTurn(%q) error = %v, want ErrEmptyClarify", raw, err)
+		}
+	})
+
+	t.Run("rejects whitespace only done summary", func(t *testing.T) {
+		raw := `{"type":"done","summary":"\n\t"}`
+		_, err := clnkr.ParseTurn(raw)
+		if !errors.Is(err, clnkr.ErrEmptySummary) {
+			t.Fatalf("ParseTurn(%q) error = %v, want ErrEmptySummary", raw, err)
+		}
+	})
 }
 
 func TestCanonicalRoundTrip(t *testing.T) {

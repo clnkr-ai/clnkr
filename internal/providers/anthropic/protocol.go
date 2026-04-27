@@ -296,6 +296,34 @@ func validateWrappedTurnShape(raw string) error {
 				}
 			}
 		}
+		if err := rejectNonNullField(fields, "question", "act turn only allows question when it is null or omitted"); err != nil {
+			return err
+		}
+		if err := rejectNonNullField(fields, "summary", "act turn only allows summary when it is null or omitted"); err != nil {
+			return err
+		}
+	case "clarify":
+		if err := rejectNonNullField(fields, "bash", "clarify turn only allows bash when it is null or omitted"); err != nil {
+			return err
+		}
+		if err := rejectNonNullField(fields, "summary", "clarify turn only allows summary when it is null or omitted"); err != nil {
+			return err
+		}
+	case "done":
+		if err := rejectNonNullField(fields, "bash", "done turn only allows bash when it is null or omitted"); err != nil {
+			return err
+		}
+		if err := rejectNonNullField(fields, "question", "done turn only allows question when it is null or omitted"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func rejectNonNullField(fields map[string]json.RawMessage, field, detail string) error {
+	raw, ok := fields[field]
+	if ok && string(raw) != "null" {
+		return fmt.Errorf("%w: %s", clnkr.ErrInvalidJSON, detail)
 	}
 	return nil
 }

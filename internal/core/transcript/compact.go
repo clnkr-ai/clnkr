@@ -23,11 +23,7 @@ func messageKind(msg Message) string {
 		return "compact"
 	case stateMessage(content):
 		return "state"
-	case strings.HasPrefix(content, "[command]\n") &&
-		strings.Contains(content, "\n[/command]\n[exit_code]\n") &&
-		strings.Contains(content, "\n[/exit_code]\n[stdout]\n") &&
-		strings.Contains(content, "\n[/stdout]\n[stderr]\n") &&
-		strings.HasSuffix(content, "\n[/stderr]"):
+	case strings.HasPrefix(content, "[command]\n") && strings.Contains(content, "\n[/command]\n[exit_code]\n") && strings.Contains(content, "\n[/exit_code]\n[stdout]\n") && strings.Contains(content, "\n[/stdout]\n[stderr]\n") && (strings.HasSuffix(content, "\n[/stderr]") || strings.Contains(content, "\n[/stderr]\n[command_feedback]\n") && strings.HasSuffix(content, "\n[/command_feedback]")):
 		return "command"
 	case strings.HasPrefix(content, "[protocol_error]") &&
 		strings.HasSuffix(content, "[/protocol_error]"):

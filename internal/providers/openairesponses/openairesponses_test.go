@@ -3,6 +3,7 @@ package openairesponses_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -117,6 +118,37 @@ func TestModelQueryUsesResponsesStructuredRequest(t *testing.T) {
 	}
 	if resp.Usage.InputTokens != 11 || resp.Usage.OutputTokens != 7 {
 		t.Fatalf("usage = %+v, want 11/7", resp.Usage)
+	}
+}
+
+func TestModelQueryRejectsContradictoryStructuredTurn(t *testing.T) {
+	content := `{"turn":{"type":"done","bash":{"commands":[{"command":"rm -rf tmp","workdir":null}]},"question":null,"summary":"done","reasoning":null}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": []map[string]any{
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]any{
+						{"type": "output_text", "text": content},
+					},
+				},
+			},
+			"usage": map[string]int{"input_tokens": 11, "output_tokens": 7},
+		})
+	}))
+	defer server.Close()
+
+	model := openairesponses.NewModel(server.URL, "test-key", "gpt-test", "sys")
+	resp, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hello"}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if resp.Raw != content {
+		t.Fatalf("Raw = %q, want %q", resp.Raw, content)
+	}
+	if !errors.Is(resp.ProtocolErr, clnkr.ErrInvalidJSON) {
+		t.Fatalf("ProtocolErr = %v, want ErrInvalidJSON", resp.ProtocolErr)
 	}
 }
 

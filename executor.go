@@ -60,9 +60,8 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 		cmd.Env = append(cmd.Env, "CLNKR_STATE_FILE="+stateFile)
 	}
 
-	if e.ProcessGroup {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

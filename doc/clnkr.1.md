@@ -48,7 +48,7 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : OpenAI-only API surface override: **auto**, **openai-chat-completions**, or **openai-responses**. With **provider=openai**, **auto** prefers **openai-responses** for known supported names and other OpenAI-looking model names such as **gpt-***, **o** followed by a digit, **codex**, **codex-***, names ending in **-codex**, and names containing **-codex-**. Names that do not look OpenAI-ish, such as **llama3**, **gemini-2.0-flash**, **orca-***, **olmo-***, **openhermes-***, and **chatgpt-***, stay on **openai-chat-completions**. This flag is rejected for **provider=anthropic**.
 
 **--max-steps** *n*
-: Maximum executed commands before requesting a final summary. 0 uses the default of 100. The limit is checked after each **act** batch.
+: Maximum executed commands before requesting a final summary. 0 uses the default of 100. If an **act** batch exceeds the remaining budget, clnkr executes only the commands that fit and then requests a final summary.
 
 **--full-send**
 : Execute every **act** turn immediately. Without this flag, clnkr asks for approval before each command batch in conversational mode. Implied by **-p**.
@@ -126,3 +126,7 @@ This command is only available at the top-level conversational prompt. In single
 # AUTHOR
 
 Brian Cosgrove <cosgroveb@gmail.com>
+
+# SEE ALSO
+
+**clnkr**(7)
