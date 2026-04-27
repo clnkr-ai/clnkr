@@ -2,33 +2,31 @@
 
 # NAME
 
-clnkr - architecture, glossary, and agent design notes
+clnkr - architecture and agent design notes
 
 # DESCRIPTION
 
-**clnkr** is a terminal coding agent built around a small loop: send a
-transcript to a model, parse exactly one structured turn, execute host commands
-when requested, append the result, and repeat.
+**clnkr** is a terminal coding agent with a small loop: send the transcript to
+a model, parse one structured turn, run host commands when the turn asks for
+them, append the result, and repeat.
 
-The user-facing command is documented in **clnkr**(1). This page documents the
-conceptual model behind the tool: the turn protocol, transcript structure,
-provider boundary, command execution model, and the project's orientation
-toward 12-factor agent design.
+The user-facing command is documented in **clnkr**(1). This page documents
+clnkr's turn protocol, transcript structure, provider boundary, command
+execution model, and 12-factor-agent mapping.
 
 # ARCHITECTURE
 
 **Agent**
-: The runtime object that owns the transcript, current working directory,
-model, executor, and loop policy.
+: The owner of the transcript, current working directory, model, executor, and
+loop policy for one run.
 
 **Model**
-: The provider-facing interface that sends transcript messages to an LLM
-provider and returns a response.
+: The provider connection used to send transcript messages to an LLM provider
+and return a response.
 
 **Provider adapter**
-: Code that translates between a provider API and clnkr's canonical protocol.
-clnkr has Anthropic, OpenAI Responses, and OpenAI-compatible Chat Completions
-adapters.
+: The Anthropic, OpenAI Responses, or OpenAI-compatible Chat Completions path
+between a provider API and clnkr's canonical protocol.
 
 **Executor**
 : The host component that runs one bash action and returns a structured command
@@ -37,8 +35,8 @@ result.
 **Transcript**
 : The ordered message history sent to the model.
 
-The core boundary is deliberate: **Step** performs one model query and protocol
-parse, while **Run** owns policy such as retrying after protocol failures,
+The main boundary is **Step** versus **Run**. **Step** performs one model query
+and protocol parse. **Run** owns policy: retrying after protocol failures,
 executing act turns, stopping on clarify or done, and enforcing step limits.
 
 # TURN PROTOCOL
@@ -58,21 +56,21 @@ An **act** turn contains a **bash batch**. Each **bash action** contains a shell
 command and an optional working directory. A batch is intentionally small: the
 prompt asks for one or two commands, and the parser rejects more than three.
 
-A **canonical turn** is the exact internal JSON shape accepted by the root
-protocol parser and persisted as assistant transcript content. A **provider
-turn** is the provider-specific structured-output shape that a provider adapter
-translates into a canonical turn.
+A **canonical turn** is the internal JSON shape clnkr writes to the transcript
+after a provider adapter projects provider output into clnkr's turn space:
+**act**, **clarify**, or **done**. A **provider turn** is the provider-specific
+structured-output shape before that projection.
 
 A **protocol failure** is a model response that cannot be accepted as exactly
 one valid turn. When that happens, clnkr appends a **protocol correction** to
-the transcript telling the model why the previous response was ignored and what
-shape to emit next.
+the transcript. The correction tells the model why clnkr ignored the previous
+response and what shape to emit next.
 
 # TRANSCRIPT
 
 The transcript includes human-authored messages and host-authored blocks.
 Host-authored blocks use normal transcript roles because they are part of the
-model-visible conversation, but they are not user-authored text.
+conversation sent to the model, but they are not user-authored text.
 
 **User-authored message**
 : A transcript message whose content came from the human user.
@@ -91,14 +89,14 @@ command feedback.
 : A host block containing a summary of older transcript history.
 
 During compaction, clnkr replaces an older transcript prefix with one compact
-block and preserves a recent tail of user-authored turns plus required host
-state.
+block. It keeps a recent tail of user-authored turns and any host state the
+next model call still needs.
 
 # COMMAND EXECUTION
 
-The executor runs bash through the host shell and captures stdout, stderr, exit
-code, post-command working directory, post-command environment, and optional
-command feedback.
+The executor runs bash through the host shell. It captures stdout, stderr, exit
+code, the post-command working directory, the post-command environment, and
+optional command feedback.
 
 **Command result**
 : The structured outcome of one bash action.
@@ -117,8 +115,8 @@ Command feedback is emitted only when the command started from a clean git
 baseline. The feedback contains changed file paths relative to the final
 working directory and a combined unstaged plus staged diff.
 
-On cancellation, clnkr kills the command process group so child processes do
-not keep running after the shell exits.
+On cancellation, clnkr kills the command process group. Child processes should
+not survive the shell command that started them.
 
 # PROVIDER BOUNDARY
 
@@ -126,7 +124,7 @@ clnkr treats provider APIs as adapters around one internal protocol.
 
 For OpenAI, clnkr can use the Responses API or an OpenAI-compatible Chat
 Completions API. OpenAI-compatible endpoints, including vLLM's compatible
-server, must support the structured-output surface selected for the model path.
+server, must support structured model outputs.
 
 For Anthropic, clnkr uses the Messages API and asks for structured JSON output
 through the provider adapter.
@@ -182,68 +180,65 @@ final summary.
 
 # 12-FACTOR AGENTS
 
-clnkr is closest to a 12-factor terminal agent core, not a 12-factor production
-workflow platform. It does the high-leverage engineering pieces directly:
-structured output instead of magical tool dispatch, prompt ownership, context
-ownership, deterministic control flow, transcript persistence, and explicit
-recovery after invalid model output. It deliberately does less on distributed
-state, external triggers, and human-contact channels because those would expand
-the product boundary beyond a local coding CLI.
+clnkr matches the local-agent parts of the 12-factor model: prompt
+construction, transcript state, the turn protocol, the control loop, session
+persistence, and recovery after invalid model output. Distributed state,
+external triggers, and Slack/email/SMS delivery are outside clnkr's local
+coding CLI boundary.
 
 **1. Natural language to tool calls**
-: Strong fit. clnkr turns natural-language tasks into **act**, **clarify**, or
-**done** JSON; **act** carries bash actions that deterministic Go code
-executes.
+: clnkr turns natural-language tasks into **act**, **clarify**, or **done**
+JSON. **act** carries bash actions; the executor runs them.
 
 **2. Own your prompts**
-: Strong fit. clnkr owns the base prompt, protocol examples, AGENTS.md
-layering, prompt omission, and prompt append behavior in repo code.
+: clnkr defines the base prompt, protocol examples, AGENTS.md layering, prompt
+omission, and prompt append behavior.
 
 **3. Own your context window**
-: Strong fit. clnkr explicitly appends state blocks, command result blocks,
-protocol corrections, canonical assistant turns, and compact blocks into the
-transcript.
+: clnkr appends state blocks, command result blocks, protocol corrections,
+canonical assistant turns, and compact blocks into the transcript.
 
 **4. Tools are just structured outputs**
-: Strong fit. clnkr's **act** turn is structured output; **ExecuteTurn**
-interprets it and calls the executor.
+: clnkr's **act** turn is structured output. **ExecuteTurn** interprets it and
+calls the executor.
 
 **5. Unify execution state and business state**
-: Partial fit. clnkr keeps execution state in transcript messages and session
-files, but it has no separate business object model beyond the working tree,
-cwd, environment, and git feedback.
+: clnkr keeps execution state in transcript messages and session files. The
+working tree, cwd, environment, and git feedback are the state the agent acts
+on.
 
 **6. Launch/Pause/Resume with simple APIs**
-: Partial fit. clnkr has CLI launch, **--continue**, **--load-messages**, saved
-sessions, and single-task mode, but no HTTP or webhook API and no durable pause
-primitive outside local session files.
+: clnkr starts from a prompt, stdin, or an interactive session. **--continue**,
+**--load-messages**, saved sessions, and single-task mode cover local resume
+flows. clnkr has no HTTP API, webhook entry point, or pause state outside local
+session files.
 
 **7. Contact humans with tool calls**
-: Partial fit. clnkr has **clarify** turns and approval mode, but human contact
-is local stdin interaction, not a generalized contact-human tool with
-Slack/email/SMS delivery.
+: clnkr has **clarify** turns and approval mode. Human contact is local stdin
+interaction, not a general contact-human tool with Slack, email, or SMS
+delivery.
 
 **8. Own your control flow**
-: Strong fit. **Run** and approval mode switch on accepted turn types, count
-protocol failures, enforce step limits, and decide when commands execute.
+: **Run** and approval mode switch on accepted turn types, count protocol
+failures, enforce step limits, and decide when commands execute.
 
 **9. Compact errors into context window**
-: Strong fit. Protocol failures become protocol correction blocks, command
-stderr and exit codes become command result blocks, and compaction preserves
-recent context while summarizing older history.
+: Protocol failures become protocol correction blocks. Command stderr and exit
+codes become command result blocks. Compaction preserves recent context while
+summarizing older history.
 
 **10. Small, focused agents**
-: Mixed fit. clnkr is a focused coding-agent CLI with one shipped binary and a
-small core API, but the available bash surface is intentionally broad.
+: clnkr is a focused coding-agent CLI with one shipped binary and a small core
+API. Bash is still a broad tool surface.
 
-**11. Trigger from anywhere, meet users where they are**
-: Weak fit. clnkr starts from CLI flags, stdin, and an interactive REPL; it does
-not expose Slack, email, webhook, cron, or service integrations.
+**11. External triggers**
+: clnkr starts from CLI flags, stdin, and an interactive REPL. It has no Slack,
+email, webhook, cron, or service integrations.
 
 **12. Make your agent a stateless reducer**
-: Partial fit. clnkr's transcript and sessions make state explicit, but
-**Agent** is a mutable in-process object and **Step**/**ExecuteTurn** mutate
-messages, cwd, and environment directly.
+: clnkr's transcript and sessions make state explicit. **Agent** still holds
+mutable state while **Step** and **ExecuteTurn** process a turn: messages, cwd,
+and environment.
 
 # REFERENCES
 
@@ -279,12 +274,6 @@ Anthropic JSON output with tool schemas:
 
 vLLM OpenAI-compatible server:
 <https://docs.vllm.ai/en/latest/serving/openai_compatible_server/>
-
-# FILES
-
-**UBIQUITOUS_LANGUAGE.md**
-: Repository-local source glossary with line-level references for project
-terms.
 
 # SEE ALSO
 
