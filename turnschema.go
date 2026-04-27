@@ -87,7 +87,7 @@ func strictTurnFromEnvelope(env turnEnvelope, fields map[string]json.RawMessage)
 			Reasoning: env.Reasoning,
 		}, nil
 	case "clarify":
-		if env.Question == "" {
+		if strings.TrimSpace(env.Question) == "" {
 			return nil, ErrEmptyClarify
 		}
 		if err := rejectPresentField(fields, "bash", "clarify turn only allows bash when it is omitted"); err != nil {
@@ -98,7 +98,7 @@ func strictTurnFromEnvelope(env turnEnvelope, fields map[string]json.RawMessage)
 		}
 		return &ClarifyTurn{Question: env.Question, Reasoning: env.Reasoning}, nil
 	case "done":
-		if env.Summary == "" {
+		if strings.TrimSpace(env.Summary) == "" {
 			return nil, ErrEmptySummary
 		}
 		if err := rejectPresentField(fields, "bash", "done turn only allows bash when it is omitted"); err != nil {

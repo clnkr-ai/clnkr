@@ -1496,6 +1496,15 @@ func TestRequestStepLimitSummary(t *testing.T) {
 	})
 }
 
+func TestExecuteTurnRejectsNilActTurn(t *testing.T) {
+	agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+
+	_, err := agent.ExecuteTurn(context.Background(), nil)
+	if !errors.Is(err, ErrMissingCommand) {
+		t.Fatalf("ExecuteTurn nil error = %v, want ErrMissingCommand", err)
+	}
+}
+
 func TestFinalSummaryUsesCanonicalTranscript(t *testing.T) {
 	raw := `{"turn":{"type":"done","summary":"wrapped summary"}}`
 	model := &fakeModel{responses: []Response{
@@ -1618,6 +1627,31 @@ func TestAgent(t *testing.T) {
 		}
 		if executor.calls > 3 {
 			t.Errorf("expected at most 3 commands, got %d", executor.calls)
+		}
+	})
+
+	t.Run("does not execute past max steps inside a batch", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			mustResponse(actJSON("echo one", "echo two", "echo three")),
+			mustResponse(`{"type":"done","summary":"Step limit reached."}`),
+		}}
+		executor := &fakeExecutor{results: []CommandResult{
+			{Stdout: "one", ExitCode: 0},
+			{Stdout: "two", ExitCode: 0},
+			{Stdout: "three", ExitCode: 0},
+		}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		agent.MaxSteps = 2
+		err := agent.Run(context.Background(), "run three commands")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if executor.calls != 2 {
+			t.Fatalf("executor calls = %d, want 2", executor.calls)
+		}
+		if model.calls != 2 {
+			t.Fatalf("model calls = %d, want act then summary", model.calls)
 		}
 	})
 

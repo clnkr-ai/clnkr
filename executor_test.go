@@ -115,6 +115,25 @@ func TestCommandExecutor(t *testing.T) {
 		}
 	})
 
+	t.Run("context cancellation kills child processes", func(t *testing.T) {
+		dir := t.TempDir()
+		marker := filepath.Join(dir, "child-survived")
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		_, err := exec.Execute(ctx, "sh -c 'sleep 1; touch child-survived' & wait", dir)
+		if err == nil {
+			t.Fatal("expected error from expired context, got nil")
+		}
+
+		time.Sleep(1500 * time.Millisecond)
+		if _, err := os.Stat(marker); err == nil {
+			t.Fatalf("child process survived cancellation and wrote %s", marker)
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stat marker: %v", err)
+		}
+	})
+
 	t.Run("process group assigns new pgid", func(t *testing.T) {
 		pgExec := &CommandExecutor{ProcessGroup: true}
 

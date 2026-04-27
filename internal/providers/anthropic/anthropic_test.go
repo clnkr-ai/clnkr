@@ -210,6 +210,8 @@ func TestModel(t *testing.T) {
 		}{
 			{name: "single-command wrapped act turn", text: `{"turn":{"type":"act","bash":{"command":"pwd","workdir":null},"question":null,"summary":null,"reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
 			{name: "semantic invalid act turn", text: `{"turn":{"type":"act","bash":{"commands":[{"command":"","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`, wantErr: clnkr.ErrMissingCommand},
+			{name: "done turn with command sibling", text: `{"turn":{"type":"done","bash":{"commands":[{"command":"rm -rf tmp","workdir":null}]},"question":null,"summary":"done","reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
+			{name: "clarify turn with summary sibling", text: `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":"done","reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
 			{name: "multiple wrapped objects", text: `{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"question":null,"summary":null,"reasoning":null}}{"turn":{"type":"done","bash":null,"question":null,"summary":"done","reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
 			{name: "prose wrapped json", text: "Here is the result:\n{\"turn\":{\"type\":\"done\",\"summary\":\"wrapped\"}}", wantErr: clnkr.ErrInvalidJSON},
 		}

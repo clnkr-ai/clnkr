@@ -174,7 +174,7 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 
 // ExecuteTurn runs an act turn and appends the command result payload.
 func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, error) {
-	if len(act.Bash.Commands) == 0 {
+	if act == nil || len(act.Bash.Commands) == 0 {
 		return StepResult{Turn: act}, fmt.Errorf("execute act turn: %w", ErrMissingCommand)
 	}
 
@@ -291,6 +291,9 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 		case *ClarifyTurn:
 			return ErrClarificationNeeded
 		case *ActTurn:
+			if remaining := a.MaxSteps - steps; a.MaxSteps > 0 && len(turn.Bash.Commands) > remaining {
+				turn = &ActTurn{Bash: BashBatch{Commands: turn.Bash.Commands[:remaining]}, Reasoning: turn.Reasoning}
+			}
 			execResult, err := a.ExecuteTurn(ctx, turn)
 			if err != nil {
 				return err
