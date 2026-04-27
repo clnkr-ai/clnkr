@@ -2,7 +2,7 @@
 
 # NAME
 
-clnkr - architecture, glossary, and agent design notes
+clnkr - architecture and agent design notes
 
 # DESCRIPTION
 
@@ -279,12 +279,6 @@ Anthropic JSON output with tool schemas:
 
 vLLM OpenAI-compatible server:
 <https://docs.vllm.ai/en/latest/serving/openai_compatible_server/>
-
-# FILES
-
-**UBIQUITOUS_LANGUAGE.md**
-: Repository-local source glossary with line-level references for project
-terms.
 
 # SEE ALSO
 
