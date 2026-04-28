@@ -127,6 +127,81 @@ func TestModelQueryUsesResponsesStructuredRequest(t *testing.T) {
 	}
 }
 
+func TestModelQueryJoinsBaseURLPath(t *testing.T) {
+	tests := []struct {
+		name            string
+		baseURLSuffix   string
+		wantPath        string
+		wantRawQuery    string
+		wantEscapedPath string
+	}{
+		{
+			name:          "trailing slash",
+			baseURLSuffix: "/v1/",
+			wantPath:      "/v1/responses",
+		},
+		{
+			name:          "preserves internal repeated slashes",
+			baseURLSuffix: "/proxy//v1/",
+			wantPath:      "/proxy//v1/responses",
+		},
+		{
+			name:          "keeps query on base URL",
+			baseURLSuffix: "/v1/?token=abc",
+			wantPath:      "/v1/responses",
+			wantRawQuery:  "token=abc",
+		},
+		{
+			name:            "preserves escaped slash",
+			baseURLSuffix:   "/proxy%2Fv1/",
+			wantPath:        "/proxy/v1/responses",
+			wantEscapedPath: "/proxy%2Fv1/responses",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotPath string
+			var gotRawQuery string
+			var gotEscapedPath string
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotRawQuery = r.URL.RawQuery
+				gotEscapedPath = r.URL.EscapedPath()
+
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"output": []map[string]any{
+						{
+							"type": "message",
+							"role": "assistant",
+							"content": []map[string]any{
+								{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","reasoning":null}}`},
+							},
+						},
+					},
+				})
+			}))
+			defer server.Close()
+
+			model := openairesponses.NewModel(server.URL+tt.baseURLSuffix, "test-key", "gpt-5", "sys prompt")
+			_, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hello"}})
+			if err != nil {
+				t.Fatalf("Query: %v", err)
+			}
+			if gotPath != tt.wantPath {
+				t.Fatalf("path = %q, want %q", gotPath, tt.wantPath)
+			}
+			if gotRawQuery != tt.wantRawQuery {
+				t.Fatalf("raw query = %q, want %q", gotRawQuery, tt.wantRawQuery)
+			}
+			if tt.wantEscapedPath != "" && gotEscapedPath != tt.wantEscapedPath {
+				t.Fatalf("escaped path = %q, want %q", gotEscapedPath, tt.wantEscapedPath)
+			}
+		})
+	}
+}
+
 func TestModelQuerySerializesProviderRequestOptions(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

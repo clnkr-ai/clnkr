@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -251,7 +252,7 @@ func (m *Model) thinkingOptions() *thinkingOptions {
 }
 
 func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, "POST", m.baseURL+"/v1/messages", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", endpointURL(m.baseURL, "/v1/messages"), bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -273,6 +274,29 @@ func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, error) {
 		return nil, fmt.Errorf("api error (status %d): %s", resp.StatusCode, extractErrorMessage(respBody))
 	}
 	return respBody, nil
+}
+
+func endpointURL(baseURL, endpoint string) string {
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.Opaque != "" {
+		return joinURLBoundary(baseURL, endpoint)
+	}
+
+	escapedPath := strings.TrimRight(parsed.EscapedPath(), "/") + "/" + strings.TrimLeft(endpoint, "/")
+	decodedPath, err := url.PathUnescape(escapedPath)
+	if err != nil {
+		return joinURLBoundary(baseURL, endpoint)
+	}
+	parsed.Path = decodedPath
+	parsed.RawPath = ""
+	if escapedPath != (&url.URL{Path: decodedPath}).EscapedPath() {
+		parsed.RawPath = escapedPath
+	}
+	return parsed.String()
+}
+
+func joinURLBoundary(baseURL, endpoint string) string {
+	return strings.TrimRight(baseURL, "/") + "/" + strings.TrimLeft(endpoint, "/")
 }
 
 func extractTextBlocks(blocks []contentBlock) (string, int) {

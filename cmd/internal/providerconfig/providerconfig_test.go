@@ -733,6 +733,74 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 	}
 }
 
+func TestResolveConfigNormalizesBaseURLTrailingSlash(t *testing.T) {
+	tests := []struct {
+		name    string
+		inputs  Inputs
+		wantURL string
+	}{
+		{
+			name: "openai path",
+			inputs: Inputs{
+				Provider: "openai",
+				Model:    "gpt-test",
+				BaseURL:  "https://api.openai.com/v1/",
+			},
+			wantURL: "https://api.openai.com/v1",
+		},
+		{
+			name: "anthropic root",
+			inputs: Inputs{
+				Provider: "anthropic",
+				Model:    "claude-sonnet-4-6",
+				BaseURL:  "https://api.anthropic.com/",
+			},
+			wantURL: "https://api.anthropic.com",
+		},
+		{
+			name: "custom root",
+			inputs: Inputs{
+				Provider: "openai",
+				Model:    "gpt-test",
+				BaseURL:  "https://example.com/",
+			},
+			wantURL: "https://example.com",
+		},
+		{
+			name: "preserves internal repeated slashes",
+			inputs: Inputs{
+				Provider: "openai",
+				Model:    "gpt-test",
+				BaseURL:  "https://example.com/proxy//v1/",
+			},
+			wantURL: "https://example.com/proxy//v1",
+		},
+		{
+			name: "preserves escaped slash",
+			inputs: Inputs{
+				Provider: "openai",
+				Model:    "gpt-test",
+				BaseURL:  "https://example.com/proxy%2Fv1/",
+			},
+			wantURL: "https://example.com/proxy%2Fv1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := ResolveConfig(tt.inputs, envMap(map[string]string{
+				"CLNKR_API_KEY": "test-key",
+			}))
+			if err != nil {
+				t.Fatalf("ResolveConfig(): %v", err)
+			}
+			if cfg.BaseURL != tt.wantURL {
+				t.Fatalf("BaseURL = %q, want %q", cfg.BaseURL, tt.wantURL)
+			}
+		})
+	}
+}
+
 func envMap(values map[string]string) func(string) string {
 	return func(key string) string {
 		return values[key]
