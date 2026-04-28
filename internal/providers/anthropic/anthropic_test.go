@@ -43,6 +43,12 @@ func TestModel(t *testing.T) {
 		if gotBody["system"] != "sys prompt" {
 			t.Errorf("got system %v, want %q", gotBody["system"], "sys prompt")
 		}
+		if gotBody["max_tokens"] != float64(4096) {
+			t.Errorf("got max_tokens %v, want 4096", gotBody["max_tokens"])
+		}
+		if _, ok := gotBody["thinking"]; ok {
+			t.Fatalf("thinking = %#v, want omitted by default", gotBody["thinking"])
+		}
 		outputConfig, ok := gotBody["output_config"].(map[string]interface{})
 		if !ok {
 			t.Fatalf("output_config = %T, want map[string]interface{}", gotBody["output_config"])
@@ -91,8 +97,17 @@ func TestModel(t *testing.T) {
 		if summary != "Older work summarized." {
 			t.Fatalf("summary = %q, want %q", summary, "Older work summarized.")
 		}
-		if _, ok := gotBody["output_config"]; ok {
-			t.Fatalf("output_config should be omitted for QueryText, got %#v", gotBody["output_config"])
+		if outputCfg, ok := gotBody["output_config"]; ok {
+			// output_config should be omitted for QueryText when no effort is set
+			if outputCfg != nil {
+				t.Fatalf("output_config should be omitted for QueryText by default, got %#v", outputCfg)
+			}
+		}
+		if gotBody["max_tokens"] != float64(4096) {
+			t.Fatalf("max_tokens = %#v, want 4096", gotBody["max_tokens"])
+		}
+		if _, ok := gotBody["thinking"]; ok {
+			t.Fatalf("thinking should be omitted by default for QueryText, got %#v", gotBody["thinking"])
 		}
 		msgs, ok := gotBody["messages"].([]any)
 		if !ok || len(msgs) != len(history) {
@@ -104,6 +119,41 @@ func TestModel(t *testing.T) {
 		}
 		if got, want := last["content"], `{"type":"done","summary":"canonical transcript"}`; got != want {
 			t.Fatalf("last assistant content = %#v, want %q", got, want)
+		}
+	})
+
+	t.Run("serializes harness options", func(t *testing.T) {
+		var gotBody map[string]any
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &gotBody)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"content": []map[string]string{{"type": "text", "text": anthropicWrappedDone("ok")}},
+				"usage":   map[string]int{"input_tokens": 1, "output_tokens": 1},
+			})
+		}))
+		defer server.Close()
+
+		m := anthropic.NewModelWithOptions(server.URL, "test-key", "claude-sonnet-4-20250514", "sys", anthropic.Options{
+			MaxTokens:            8000,
+			ThinkingBudgetTokens: 2048,
+		})
+		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hello"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gotBody["max_tokens"] != float64(8000) {
+			t.Fatalf("max_tokens = %#v, want 8000", gotBody["max_tokens"])
+		}
+		thinking, ok := gotBody["thinking"].(map[string]any)
+		if !ok {
+			t.Fatalf("thinking = %#v, want object", gotBody["thinking"])
+		}
+		if got, want := thinking["type"], "enabled"; got != want {
+			t.Fatalf("thinking.type = %#v, want %q", got, want)
+		}
+		if got, want := thinking["budget_tokens"], float64(2048); got != want {
+			t.Fatalf("thinking.budget_tokens = %#v, want %v", got, want)
 		}
 	})
 

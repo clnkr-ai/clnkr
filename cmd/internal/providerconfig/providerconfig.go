@@ -3,23 +3,9 @@ package providerconfig
 import (
 	"fmt"
 	"net/url"
-	"regexp"
 	"strings"
-)
 
-type Provider string
-
-const (
-	ProviderAnthropic Provider = "anthropic"
-	ProviderOpenAI    Provider = "openai"
-)
-
-type ProviderAPI string
-
-const (
-	ProviderAPIAuto                  ProviderAPI = "auto"
-	ProviderAPIOpenAIChatCompletions ProviderAPI = "openai-chat-completions"
-	ProviderAPIOpenAIResponses       ProviderAPI = "openai-responses"
+	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
 )
 
 const (
@@ -28,47 +14,20 @@ const (
 )
 
 type Inputs struct {
-	Provider    string
-	ProviderAPI string
-	Model       string
-	BaseURL     string
+	Provider       string
+	ProviderAPI    string
+	Model          string
+	BaseURL        string
+	RequestOptions providerdomain.ProviderRequestOptions
 }
 
 type ResolvedProviderConfig struct {
-	Provider    Provider
-	ProviderAPI ProviderAPI
-	Model       string
-	BaseURL     string
-	APIKey      string
-}
-
-var datedSnapshotSuffix = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`)
-
-var openAIResponsesAllowlist = map[string]struct{}{
-	"gpt-5":              {},
-	"gpt-5-mini":         {},
-	"gpt-5-nano":         {},
-	"gpt-5-pro":          {},
-	"gpt-5.1":            {},
-	"gpt-5.2":            {},
-	"gpt-5.4":            {},
-	"gpt-5.4-mini":       {},
-	"gpt-5.4-nano":       {},
-	"gpt-5-codex":        {},
-	"gpt-5.1-codex":      {},
-	"gpt-5.1-codex-mini": {},
-	"gpt-5.1-codex-max":  {},
-	"gpt-5.2-codex":      {},
-	"gpt-5.3-codex":      {},
-	"gpt-4.1":            {},
-	"gpt-4.1-mini":       {},
-	"gpt-4.1-nano":       {},
-	"o3-pro":             {},
-}
-
-var unsupportedStructuredOpenAIModels = map[string]struct{}{
-	"gpt-5.2-pro": {},
-	"gpt-5.4-pro": {},
+	Provider       providerdomain.Provider
+	ProviderAPI    providerdomain.ProviderAPI
+	Model          string
+	BaseURL        string
+	APIKey         string
+	RequestOptions providerdomain.ProviderRequestOptions
 }
 
 func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConfig, error) {
@@ -76,11 +35,11 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 
 	providerRaw, _, providerSet := chooseValue(inputs.Provider, env("CLNKR_PROVIDER"), "--provider", "CLNKR_PROVIDER")
 	var (
-		provider Provider
+		provider providerdomain.Provider
 		err      error
 	)
 	if providerSet {
-		provider, err = parseProvider(providerRaw)
+		provider, err = providerdomain.ParseProvider(providerRaw)
 		if err != nil {
 			return ResolvedProviderConfig{}, err
 		}
@@ -105,13 +64,13 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 	}
 
 	providerAPIRaw, _, providerAPISet := chooseValue(inputs.ProviderAPI, env("CLNKR_PROVIDER_API"), "--provider-api", "CLNKR_PROVIDER_API")
-	if provider == ProviderAnthropic && providerAPISet {
+	if provider == providerdomain.ProviderAnthropic && providerAPISet {
 		return ResolvedProviderConfig{}, fmt.Errorf(`provider-api is only valid for provider "openai"`)
 	}
 
-	providerAPI := ProviderAPIAuto
+	providerAPI := providerdomain.ProviderAPIAuto
 	if providerAPISet {
-		providerAPI, err = parseProviderAPI(providerAPIRaw)
+		providerAPI, err = providerdomain.ParseProviderAPI(providerAPIRaw)
 		if err != nil {
 			return ResolvedProviderConfig{}, err
 		}
@@ -119,7 +78,7 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 
 	if !baseURLSet {
 		baseURL = DefaultAnthropicBaseURL
-		if provider == ProviderOpenAI {
+		if provider == providerdomain.ProviderOpenAI {
 			baseURL = DefaultOpenAIBaseURL
 		}
 		baseURLSource = "default"
@@ -128,21 +87,22 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 		return ResolvedProviderConfig{}, err
 	}
 
-	if provider == ProviderOpenAI {
-		normalizedModel := strings.ToLower(strings.TrimSpace(model))
-		if listedModel(unsupportedStructuredOpenAIModels, normalizedModel) {
-			return ResolvedProviderConfig{}, fmt.Errorf("model %q is unsupported for clnkr agent turns: structured outputs are required and this model does not support that contract", model)
-		}
-
-		providerAPI = resolveOpenAIProviderAPI(normalizedModel, providerAPI)
+	providerAPI, err = providerdomain.ResolveProviderAPI(provider, providerAPI, model)
+	if err != nil {
+		return ResolvedProviderConfig{}, err
+	}
+	requestOptions, err := providerdomain.ValidateRequestOptions(provider, providerAPI, model, inputs.RequestOptions)
+	if err != nil {
+		return ResolvedProviderConfig{}, err
 	}
 
 	return ResolvedProviderConfig{
-		Provider:    provider,
-		ProviderAPI: providerAPI,
-		Model:       model,
-		BaseURL:     baseURL,
-		APIKey:      apiKey,
+		Provider:       provider,
+		ProviderAPI:    providerAPI,
+		Model:          model,
+		BaseURL:        baseURL,
+		APIKey:         apiKey,
+		RequestOptions: requestOptions,
 	}, nil
 }
 
@@ -151,40 +111,18 @@ func chooseValue(flagValue, envValue, flagSource, envSource string) (string, str
 	if flagValue != "" {
 		return flagValue, flagSource, true
 	}
-
 	envValue = strings.TrimSpace(envValue)
 	if envValue != "" {
 		return envValue, envSource, true
 	}
-
 	return "", "", false
 }
 
-func parseProvider(raw string) (Provider, error) {
-	provider := Provider(strings.ToLower(strings.TrimSpace(raw)))
-	switch provider {
-	case ProviderAnthropic, ProviderOpenAI:
-		return provider, nil
-	default:
-		return "", fmt.Errorf(`invalid provider %q (allowed: anthropic, openai)`, raw)
-	}
-}
-
-func parseProviderAPI(raw string) (ProviderAPI, error) {
-	api := ProviderAPI(strings.ToLower(strings.TrimSpace(raw)))
-	switch api {
-	case ProviderAPIAuto, ProviderAPIOpenAIChatCompletions, ProviderAPIOpenAIResponses:
-		return api, nil
-	default:
-		return "", fmt.Errorf(`invalid provider-api %q (allowed: auto, openai-chat-completions, openai-responses)`, raw)
-	}
-}
-
-func inferProviderFromBaseURL(baseURL *url.URL) Provider {
+func inferProviderFromBaseURL(baseURL *url.URL) providerdomain.Provider {
 	if host := strings.ToLower(baseURL.Hostname()); host == "anthropic.com" || strings.HasSuffix(host, ".anthropic.com") {
-		return ProviderAnthropic
+		return providerdomain.ProviderAnthropic
 	}
-	return ProviderOpenAI
+	return providerdomain.ProviderOpenAI
 }
 
 func parseBaseURL(baseURL, source string) (*url.URL, error) {
@@ -199,42 +137,4 @@ func parseBaseURL(baseURL, source string) (*url.URL, error) {
 		return nil, fmt.Errorf("invalid base URL %q (from %s): missing host", baseURL, source)
 	}
 	return parsed, nil
-}
-
-func resolveOpenAIProviderAPI(model string, providerAPI ProviderAPI) ProviderAPI {
-	if providerAPI == ProviderAPIOpenAIChatCompletions || providerAPI == ProviderAPIOpenAIResponses {
-		return providerAPI
-	}
-	if isKnownNonOpenAIModel(model) {
-		return ProviderAPIOpenAIChatCompletions
-	}
-	if listedModel(openAIResponsesAllowlist, model) || isOpenAILookingModel(model) {
-		return ProviderAPIOpenAIResponses
-	}
-	return ProviderAPIOpenAIChatCompletions
-}
-
-func isKnownNonOpenAIModel(model string) bool {
-	return strings.HasPrefix(model, "chatgpt-") ||
-		strings.HasPrefix(model, "olmo-") ||
-		strings.HasPrefix(model, "openhermes-") ||
-		strings.HasPrefix(model, "orca-")
-}
-
-func isOpenAILookingModel(model string) bool {
-	return strings.HasPrefix(model, "gpt-") ||
-		model == "codex" ||
-		strings.HasPrefix(model, "codex-") ||
-		strings.HasSuffix(model, "-codex") ||
-		strings.Contains(model, "-codex-") ||
-		len(model) > 1 && model[0] == 'o' && model[1] >= '0' && model[1] <= '9'
-}
-
-// Keep this matcher intentionally conservative: exact names plus dated snapshots only.
-func listedModel(models map[string]struct{}, model string) bool {
-	_, ok := models[model]
-	if !ok && datedSnapshotSuffix.MatchString(model) {
-		_, ok = models[model[:len(model)-11]]
-	}
-	return ok
 }

@@ -2,6 +2,7 @@ package clnkrapp
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"github.com/clnkr-ai/clnkr/internal/providers/anthropic"
 	"github.com/clnkr-ai/clnkr/internal/providers/openai"
 	"github.com/clnkr-ai/clnkr/internal/providers/openairesponses"
+	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
 )
 
 type model interface {
@@ -26,11 +28,32 @@ func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt s
 }
 
 func newModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt string) model {
+	opts := cfg.RequestOptions
 	switch {
-	case cfg.Provider == providerconfig.ProviderAnthropic:
-		return anthropic.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
-	case cfg.ProviderAPI == providerconfig.ProviderAPIOpenAIResponses:
-		return openairesponses.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
+	case cfg.Provider == providerdomain.ProviderAnthropic:
+		anthropicOpts := anthropic.Options{}
+		if opts.Output.MaxOutputTokens.Set {
+			anthropicOpts.MaxTokens = opts.Output.MaxOutputTokens.Value
+		}
+		if opts.AnthropicManual.ThinkingBudgetTokens.Set {
+			anthropicOpts.ThinkingBudgetTokens = opts.AnthropicManual.ThinkingBudgetTokens.Value
+			anthropicOpts.ThinkingMode = anthropic.ThinkingModeManual
+		}
+		if opts.Effort.Set && opts.Effort.Level != "auto" {
+			anthropicOpts.Effort = opts.Effort.Level
+			anthropicOpts.ThinkingMode = anthropic.ThinkingModeAdaptive
+		}
+		return anthropic.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, anthropicOpts)
+	case cfg.ProviderAPI == providerdomain.ProviderAPIOpenAIResponses:
+		var effort string
+		if opts.Effort.Set && opts.Effort.Level != "auto" {
+			effort = opts.Effort.Level
+		}
+		return openairesponses.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, openairesponses.Options{
+			ReasoningEffort:    effort,
+			MaxOutputTokens:    opts.Output.MaxOutputTokens.Value,
+			HasMaxOutputTokens: opts.Output.MaxOutputTokens.Set,
+		})
 	default:
 		return openai.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
 	}
@@ -78,6 +101,115 @@ func writeEvent(w io.Writer, typ string, payload any) error {
 	}{typ, payload})
 }
 
+// RunMetadata describes the configuration for a clnkr run, recorded as debug
+// metadata and persisted alongside session files.
+type RunMetadata struct {
+	ClnkrVersion string                     `json:"clnkr_version"`
+	Provider     providerdomain.Provider    `json:"provider"`
+	ProviderAPI  providerdomain.ProviderAPI `json:"provider_api"`
+	Model        string                     `json:"model"`
+	PromptSHA256 string                     `json:"prompt_sha256"`
+	Requested    ProviderRequestMetadata    `json:"requested"`
+	Effective    ProviderRequestMetadata    `json:"effective"`
+	Compaction   CompactionMetadata         `json:"compaction"`
+}
+
+type ProviderRequestMetadata struct {
+	Effort          EffortMetadata          `json:"effort"`
+	Output          OutputMetadata          `json:"output"`
+	AnthropicManual AnthropicManualMetadata `json:"anthropic_manual"`
+}
+
+type EffortMetadata struct {
+	LevelOmitted          bool    `json:"level_omitted"`
+	Level                 *string `json:"level,omitempty"`
+	AnthropicThinkingMode *string `json:"anthropic_thinking_mode,omitempty"`
+}
+
+type OutputMetadata struct {
+	MaxOutputTokensOmitted bool `json:"max_output_tokens_omitted"`
+	MaxOutputTokens        *int `json:"max_output_tokens,omitempty"`
+	AnthropicMaxTokens     *int `json:"anthropic_max_tokens,omitempty"`
+}
+
+type AnthropicManualMetadata struct {
+	ThinkingBudgetTokensOmitted bool `json:"thinking_budget_tokens_omitted"`
+	ThinkingBudgetTokens        *int `json:"thinking_budget_tokens,omitempty"`
+}
+
+type CompactionMetadata struct {
+	Policy          string `json:"policy"`
+	KeepRecentTurns int    `json:"keep_recent_turns"`
+}
+
+func NewRunMetadata(version string, cfg providerconfig.ResolvedProviderConfig, systemPrompt string) RunMetadata {
+	opts := cfg.RequestOptions
+
+	meta := RunMetadata{
+		ClnkrVersion: version,
+		Provider:     cfg.Provider,
+		ProviderAPI:  cfg.ProviderAPI,
+		Model:        cfg.Model,
+		PromptSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(systemPrompt))),
+		Requested:    providerRequestMetadata(opts, !opts.Effort.Set),
+		Effective:    providerRequestMetadata(opts, !opts.Effort.Set || opts.Effort.Level == "auto"),
+		Compaction:   CompactionMetadata{Policy: "manual", KeepRecentTurns: 2},
+	}
+
+	if cfg.Provider == providerdomain.ProviderAnthropic {
+		maxTokens := providerdomain.DefaultAnthropicMaxTokens
+		if opts.Output.MaxOutputTokens.Set {
+			maxTokens = opts.Output.MaxOutputTokens.Value
+		}
+		meta.Effective.Output.AnthropicMaxTokens = &maxTokens
+
+		if opts.Effort.Set && opts.Effort.Level != "auto" {
+			adaptive := "adaptive"
+			meta.Effective.Effort.AnthropicThinkingMode = &adaptive
+			meta.Effective.Effort.Level = &opts.Effort.Level
+			meta.Effective.Effort.LevelOmitted = false
+		} else if opts.AnthropicManual.ThinkingBudgetTokens.Set {
+			enabled := "enabled"
+			meta.Effective.Effort.AnthropicThinkingMode = &enabled
+		}
+	}
+
+	return meta
+}
+
+func providerRequestMetadata(opts providerdomain.ProviderRequestOptions, effortOmitted bool) ProviderRequestMetadata {
+	meta := ProviderRequestMetadata{
+		Effort: EffortMetadata{LevelOmitted: effortOmitted},
+		Output: OutputMetadata{
+			MaxOutputTokensOmitted: !opts.Output.MaxOutputTokens.Set,
+			MaxOutputTokens:        optionalIntPtr(opts.Output.MaxOutputTokens),
+		},
+		AnthropicManual: AnthropicManualMetadata{
+			ThinkingBudgetTokensOmitted: !opts.AnthropicManual.ThinkingBudgetTokens.Set,
+			ThinkingBudgetTokens:        optionalIntPtr(opts.AnthropicManual.ThinkingBudgetTokens),
+		},
+	}
+	if !effortOmitted {
+		meta.Effort.Level = &opts.Effort.Level
+	}
+	return meta
+}
+
+func RunMetadataDebugEvent(meta RunMetadata) (clnkr.EventDebug, error) {
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return clnkr.EventDebug{}, fmt.Errorf("marshal run metadata: %w", err)
+	}
+	return clnkr.EventDebug{Message: string(data)}, nil
+}
+
+func optionalIntPtr(value providerdomain.OptionalInt) *int {
+	if !value.Set {
+		return nil
+	}
+	return &value.Value
+}
+
 func WriteTrajectory(path string, messages []clnkr.Message) error {
 	data, err := json.MarshalIndent(messages, "", "  ")
 	if err != nil {
@@ -87,6 +219,23 @@ func WriteTrajectory(path string, messages []clnkr.Message) error {
 		return fmt.Errorf("cannot write trajectory %q: %w", path, err)
 	}
 	return nil
+}
+
+func LoadMessages(data []byte) ([]clnkr.Message, error) {
+	var messages []clnkr.Message
+	if err := json.Unmarshal(data, &messages); err == nil {
+		return messages, nil
+	}
+	var envelope struct {
+		Messages *[]clnkr.Message `json:"messages"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return nil, fmt.Errorf("parse messages: %w", err)
+	}
+	if envelope.Messages == nil {
+		return nil, fmt.Errorf("parse messages: missing messages")
+	}
+	return *envelope.Messages, nil
 }
 
 func ParseCompactCommand(input string) (instructions string, ok bool) {

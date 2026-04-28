@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,6 +16,7 @@ import (
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
 	"github.com/clnkr-ai/clnkr/cmd/internal/session"
+	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
 )
 
 // version is set at build time via -ldflags.
@@ -33,6 +33,11 @@ Usage:
   -u, --base-url string     LLM endpoint transport URL (env: $CLNKR_BASE_URL)
       --provider string     Provider adapter: anthropic|openai
       --provider-api string OpenAI-only override
+      --effort string       Provider effort: auto|low|medium|high|xhigh|max
+      --max-output-tokens int
+                            Maximum response output tokens
+      --thinking-budget-tokens int
+                            Anthropic manual thinking budget; legacy/debug
       --max-steps int       Limit executed commands
                             before summary (default: 100)
       --full-send           Execute every act batch without approval
@@ -195,6 +200,9 @@ func main() {
 	baseURLShort := flags.String("u", "", "")
 	providerFlag := flags.String("provider", "", "")
 	providerAPIFlag := flags.String("provider-api", "", "")
+	effortFlag := flags.String("effort", "", "")
+	thinkingBudgetTokens := flags.Int("thinking-budget-tokens", 0, "")
+	maxOutputTokens := flags.Int("max-output-tokens", 0, "")
 	maxSteps := flags.Int("max-steps", 0, "")
 	fullSend := new(bool)
 	explicitFullSendFalse := false
@@ -227,6 +235,15 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\nRun 'clnkr --help' for available options.\n", err)
 		os.Exit(1)
 	}
+	var thinkingBudgetTokensSet, maxOutputTokensSet bool
+	flags.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "thinking-budget-tokens":
+			thinkingBudgetTokensSet = true
+		case "max-output-tokens":
+			maxOutputTokensSet = true
+		}
+	})
 
 	if *showVersion || *showVersionShort {
 		fmt.Printf("clnkr %s\n", version)
@@ -285,6 +302,24 @@ func main() {
 		ProviderAPI: *providerAPIFlag,
 		Model:       aliasedString(*modelShort, *modelFlag),
 		BaseURL:     aliasedString(*baseURLShort, *baseURLFlag),
+		RequestOptions: providerdomain.ProviderRequestOptions{
+			Effort: providerdomain.ProviderEffortOptions{
+				Level: *effortFlag,
+				Set:   *effortFlag != "",
+			},
+			Output: providerdomain.ProviderOutputOptions{
+				MaxOutputTokens: providerdomain.OptionalInt{
+					Value: *maxOutputTokens,
+					Set:   maxOutputTokensSet,
+				},
+			},
+			AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
+				ThinkingBudgetTokens: providerdomain.OptionalInt{
+					Value: *thinkingBudgetTokens,
+					Set:   thinkingBudgetTokensSet,
+				},
+			},
+		},
 	}, os.Getenv)
 	if err != nil {
 		if strings.Contains(err.Error(), "api key is required") {
@@ -293,6 +328,7 @@ func main() {
 		}
 		fatalf("%v", err)
 	}
+	runMetadata := clnkrapp.NewRunMetadata(version, cfg, systemPrompt)
 
 	var eventLogFile *os.File
 	if *eventLog != "" {
@@ -357,6 +393,11 @@ func main() {
 			_ = clnkrapp.WriteEventLog(eventLogFile, e)
 		}
 	}
+	if event, err := clnkrapp.RunMetadataDebugEvent(runMetadata); err != nil {
+		fatalf("%v", err)
+	} else {
+		agent.Notify(event)
+	}
 
 	if *maxSteps > 0 {
 		agent.MaxSteps = *maxSteps
@@ -367,8 +408,8 @@ func main() {
 		if err != nil {
 			fatalf("cannot read messages file %q: %v", *loadMessages, err)
 		}
-		var msgs []clnkr.Message
-		if err := json.Unmarshal(data, &msgs); err != nil {
+		msgs, err := clnkrapp.LoadMessages(data)
+		if err != nil {
 			fatalf("cannot parse messages file %q: %v", *loadMessages, err)
 		}
 		if err := agent.AddMessages(msgs); err != nil {
@@ -452,7 +493,7 @@ func main() {
 	}
 	// Auto-save session on exit (conversational mode)
 	if msgs := agent.Messages(); len(msgs) > 0 {
-		if err := session.SaveSession(cwd, msgs); err != nil {
+		if err := session.SaveSessionWithMetadata(cwd, msgs, runMetadata); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", err)
 		} else {
 			dir, _ := session.SessionDir(cwd)

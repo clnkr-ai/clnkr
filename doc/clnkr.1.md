@@ -6,7 +6,7 @@ clnkr - a minimal coding agent (plain CLI)
 
 # SYNOPSIS
 
-**clnkr** [**-p**|**--prompt** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--provider** *mode*] [**--provider-api** *surface*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
+**clnkr** [**-p**|**--prompt** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--provider** *mode*] [**--provider-api** *surface*] [**--effort** *level*] [**--thinking-budget-tokens** *n*] [**--max-output-tokens** *n*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
 
 # DESCRIPTION
 
@@ -47,6 +47,15 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 **--provider-api** *surface*
 : OpenAI-only API surface override: **auto**, **openai-chat-completions**, or **openai-responses**. With **provider=openai**, **auto** prefers **openai-responses** for known supported names and other OpenAI-looking model names such as **gpt-***, **o** followed by a digit, **codex**, **codex-***, names ending in **-codex**, and names containing **-codex-**. Names that do not look OpenAI-ish, such as **llama3**, **gemini-2.0-flash**, **orca-***, **olmo-***, **openhermes-***, and **chatgpt-***, stay on **openai-chat-completions**. This flag is rejected for **provider=anthropic**.
 
+**--effort** *level*
+: Provider effort level. Accepted values are **auto**, **low**, **medium**, **high**, **xhigh**, and **max**. Provider/model validation rejects levels that are not supported. For OpenAI Responses, maps to reasoning effort; **gpt-5-pro** accepts only **high**, and **xhigh** is accepted only for known codex-max-or-newer model families. For Anthropic, **low**, **medium**, and **high** send both `output_config.effort` and `thinking.type=adaptive` to the API. **auto** omits both fields. **max** is accepted only where supported and is otherwise rejected.
+
+**--thinking-budget-tokens** *n*
+: Anthropic manual thinking budget (legacy/debug flag). Requires **provider=anthropic** and a Claude model that supports extended thinking. Uses `thinking.type=enabled` with `budget_tokens=n`. Cannot be used with non-auto **--effort** or with Opus 4.7+ models. The value must be at least 1024 and less than the effective Anthropic **max_tokens** value.
+
+**--max-output-tokens** *n*
+: Provider output-token limit. Supported for Anthropic Messages and OpenAI Responses. For Anthropic it overrides the **max_tokens** request field; the default is 4096 when unset. Anthropic values above 21333 are rejected. OpenAI Chat Completions rejects this flag.
+
 **--max-steps** *n*
 : Maximum executed commands before requesting a final summary. 0 uses the default of 100. If an **act** batch exceeds the remaining budget, clnkr executes only the commands that fit and then requests a final summary.
 
@@ -69,13 +78,13 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : Print the composed system prompt and exit.
 
 **--load-messages** *file*
-: Read a JSON array of messages from *file* and prepend them to the conversation before starting. The format matches **--trajectory** output, so one agent's trajectory can seed another agent's context. Host-generated JSON **[state]** messages in that transcript restore the current working directory.
+: Read a JSON message array, or a compatible envelope with a **messages** field, from *file* and prepend the messages to the conversation before starting. Host-generated JSON **[state]** messages in that transcript restore the current working directory.
 
 **--event-log** *file*
 : Write every agent event as a JSONL line to *file*. Each line is a JSON object with "type" and "payload" fields. Uses O_APPEND for atomic writes, safe to tail from another process.
 
 **--trajectory** *file*
-: After the task finishes, write the full message history as pretty-printed JSON to *file*. Written before exit, even on error. Only applies to single-task mode (**-p**), not the REPL. Mutually exclusive with **--continue**.
+: After the task finishes, write the full message history as a pretty-printed JSON array to *file*. Written before exit, even on error. Only applies to single-task mode (**-p**), not the REPL. Mutually exclusive with **--continue**.
 
 **-v**, **--verbose**
 : Show internal decisions (queries, parsing, working directory).

@@ -55,6 +55,12 @@ func TestModelQueryUsesResponsesStructuredRequest(t *testing.T) {
 	if got, want := gotBody["instructions"], "sys prompt"; got != want {
 		t.Fatalf("instructions = %#v, want %q", got, want)
 	}
+	if _, ok := gotBody["reasoning"]; ok {
+		t.Fatalf("reasoning = %#v, want omitted by default", gotBody["reasoning"])
+	}
+	if _, ok := gotBody["max_output_tokens"]; ok {
+		t.Fatalf("max_output_tokens = %#v, want omitted by default", gotBody["max_output_tokens"])
+	}
 
 	input, ok := gotBody["input"].([]any)
 	if !ok || len(input) != 1 {
@@ -118,6 +124,47 @@ func TestModelQueryUsesResponsesStructuredRequest(t *testing.T) {
 	}
 	if resp.Usage.InputTokens != 11 || resp.Usage.OutputTokens != 7 {
 		t.Fatalf("usage = %+v, want 11/7", resp.Usage)
+	}
+}
+
+func TestModelQuerySerializesProviderRequestOptions(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": []map[string]any{
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]any{
+						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","reasoning":null}}`},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5.1", "sys", openairesponses.Options{
+		ReasoningEffort:    "high",
+		MaxOutputTokens:    8000,
+		HasMaxOutputTokens: true,
+	})
+	_, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+
+	reasoning, ok := gotBody["reasoning"].(map[string]any)
+	if !ok {
+		t.Fatalf("reasoning = %#v, want object", gotBody["reasoning"])
+	}
+	if got, want := reasoning["effort"], "high"; got != want {
+		t.Fatalf("reasoning.effort = %#v, want %q", got, want)
+	}
+	if got, want := gotBody["max_output_tokens"], float64(8000); got != want {
+		t.Fatalf("max_output_tokens = %#v, want %v", got, want)
 	}
 }
 
@@ -303,6 +350,12 @@ func TestModelQueryTextOmitsStructuredOutputConfigAndNormalizesAssistantHistory(
 	}
 	if _, ok := gotBody["text"]; ok {
 		t.Fatalf("text should be omitted for QueryText, got %#v", gotBody["text"])
+	}
+	if _, ok := gotBody["reasoning"]; ok {
+		t.Fatalf("reasoning should be omitted by default for QueryText, got %#v", gotBody["reasoning"])
+	}
+	if _, ok := gotBody["max_output_tokens"]; ok {
+		t.Fatalf("max_output_tokens should be omitted by default for QueryText, got %#v", gotBody["max_output_tokens"])
 	}
 
 	input, ok := gotBody["input"].([]any)

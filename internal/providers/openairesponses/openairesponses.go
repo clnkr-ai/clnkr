@@ -18,33 +18,56 @@ import (
 
 // Model talks to the OpenAI Responses API.
 type Model struct {
-	baseURL      string
-	apiKey       string
-	model        string
-	systemPrompt string
-	client       *http.Client
+	baseURL            string
+	apiKey             string
+	model              string
+	systemPrompt       string
+	reasoningEffort    string
+	maxOutputTokens    int
+	hasMaxOutputTokens bool
+	client             *http.Client
+}
+
+type Options struct {
+	ReasoningEffort    string
+	MaxOutputTokens    int
+	HasMaxOutputTokens bool
 }
 
 // NewModel sets up an OpenAI Responses adapter.
 func NewModel(baseURL, apiKey, model, systemPrompt string) *Model {
+	return NewModelWithOptions(baseURL, apiKey, model, systemPrompt, Options{})
+}
+
+// NewModelWithOptions sets up an OpenAI Responses adapter with request options.
+func NewModelWithOptions(baseURL, apiKey, model, systemPrompt string, opts Options) *Model {
 	return &Model{
-		baseURL:      baseURL,
-		apiKey:       apiKey,
-		model:        model,
-		systemPrompt: systemPrompt,
-		client:       &http.Client{Timeout: 240 * time.Second},
+		baseURL:            baseURL,
+		apiKey:             apiKey,
+		model:              model,
+		systemPrompt:       systemPrompt,
+		reasoningEffort:    opts.ReasoningEffort,
+		maxOutputTokens:    opts.MaxOutputTokens,
+		hasMaxOutputTokens: opts.HasMaxOutputTokens,
+		client:             &http.Client{Timeout: 240 * time.Second},
 	}
 }
 
 type request struct {
-	Model        string               `json:"model"`
-	Instructions string               `json:"instructions,omitempty"`
-	Input        []responsesInputItem `json:"input"`
-	Text         *textOptions         `json:"text,omitempty"`
+	Model           string               `json:"model"`
+	Instructions    string               `json:"instructions,omitempty"`
+	Input           []responsesInputItem `json:"input"`
+	Text            *textOptions         `json:"text,omitempty"`
+	Reasoning       *reasoningOptions    `json:"reasoning,omitempty"`
+	MaxOutputTokens *int                 `json:"max_output_tokens,omitempty"`
 }
 
 type textOptions struct {
 	Format *responseFormat `json:"format,omitempty"`
+}
+
+type reasoningOptions struct {
+	Effort string `json:"effort"`
 }
 
 type responseFormat struct {
@@ -96,9 +119,11 @@ const (
 
 func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
 	body, err := json.Marshal(request{
-		Model:        m.model,
-		Instructions: m.systemPrompt,
-		Input:        mapMessages(messages),
+		Model:           m.model,
+		Instructions:    m.systemPrompt,
+		Input:           mapMessages(messages),
+		Reasoning:       m.reasoningOptions(),
+		MaxOutputTokens: m.maxOutputTokensValue(),
 		Text: &textOptions{
 			Format: &responseFormat{
 				Type:   "json_schema",
@@ -135,9 +160,11 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 
 func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string, error) {
 	body, err := json.Marshal(request{
-		Model:        m.model,
-		Instructions: m.systemPrompt,
-		Input:        mapMessages(messages),
+		Model:           m.model,
+		Instructions:    m.systemPrompt,
+		Input:           mapMessages(messages),
+		Reasoning:       m.reasoningOptions(),
+		MaxOutputTokens: m.maxOutputTokensValue(),
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
@@ -162,6 +189,20 @@ func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string
 	}
 
 	return "", fmt.Errorf("retry loop exhausted")
+}
+
+func (m *Model) reasoningOptions() *reasoningOptions {
+	if m.reasoningEffort == "" {
+		return nil
+	}
+	return &reasoningOptions{Effort: m.reasoningEffort}
+}
+
+func (m *Model) maxOutputTokensValue() *int {
+	if !m.hasMaxOutputTokens {
+		return nil
+	}
+	return &m.maxOutputTokens
 }
 
 func mapMessages(messages []clnkr.Message) []responsesInputItem {

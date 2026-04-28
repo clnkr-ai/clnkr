@@ -24,6 +24,7 @@ type SessionInfo struct {
 
 type sessionFile struct {
 	Created  string          `json:"created"`
+	Metadata json.RawMessage `json:"metadata,omitempty"`
 	Messages []clnkr.Message `json:"messages"`
 }
 
@@ -80,6 +81,11 @@ func SessionDir(pwd string) (string, error) {
 
 // SaveSession writes the message history to an atomic session file.
 func SaveSession(pwd string, messages []clnkr.Message) error {
+	return SaveSessionWithMetadata(pwd, messages, nil)
+}
+
+// SaveSessionWithMetadata writes the message history and optional metadata to an atomic session file.
+func SaveSessionWithMetadata(pwd string, messages []clnkr.Message, metadata any) error {
 	dir, err := SessionDir(pwd)
 	if err != nil {
 		return fmt.Errorf("save session: %w", err)
@@ -99,6 +105,13 @@ func SaveSession(pwd string, messages []clnkr.Message) error {
 	data := sessionFile{
 		Created:  now.Format(time.RFC3339Nano),
 		Messages: messages,
+	}
+	if metadata != nil {
+		encoded, err := json.Marshal(metadata)
+		if err != nil {
+			return fmt.Errorf("save session: marshal metadata: %w", err)
+		}
+		data.Metadata = encoded
 	}
 
 	if err := json.NewEncoder(f).Encode(data); err != nil {
