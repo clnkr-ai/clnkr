@@ -8,6 +8,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -179,7 +180,7 @@ func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string
 }
 
 func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, int, string, error) {
-	req, err := http.NewRequestWithContext(ctx, "POST", m.baseURL+"/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", endpointURL(m.baseURL, "/chat/completions"), bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("create request: %w", err)
 	}
@@ -197,6 +198,29 @@ func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, int, string
 		return nil, 0, "", fmt.Errorf("read response: %w", err)
 	}
 	return respBody, resp.StatusCode, resp.Header.Get("Retry-After"), nil
+}
+
+func endpointURL(baseURL, endpoint string) string {
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.Opaque != "" {
+		return joinURLBoundary(baseURL, endpoint)
+	}
+
+	escapedPath := strings.TrimRight(parsed.EscapedPath(), "/") + "/" + strings.TrimLeft(endpoint, "/")
+	decodedPath, err := url.PathUnescape(escapedPath)
+	if err != nil {
+		return joinURLBoundary(baseURL, endpoint)
+	}
+	parsed.Path = decodedPath
+	parsed.RawPath = ""
+	if escapedPath != (&url.URL{Path: decodedPath}).EscapedPath() {
+		parsed.RawPath = escapedPath
+	}
+	return parsed.String()
+}
+
+func joinURLBoundary(baseURL, endpoint string) string {
+	return strings.TrimRight(baseURL, "/") + "/" + strings.TrimLeft(endpoint, "/")
 }
 
 func parseResponse(respBody []byte) (clnkr.Response, error) {

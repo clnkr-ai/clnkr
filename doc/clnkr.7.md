@@ -30,8 +30,8 @@ between a provider API and clnkr's canonical protocol.
 
 **CLI config resolver**
 : The frontend-owned resolver that applies flag and **CLNKR_** environment
-precedence, parses base URLs, finds the API key, selects provider semantics,
-and returns a **Resolved provider config**.
+precedence, parses and normalizes base URLs, finds the API key, selects
+provider semantics, and returns a **Resolved provider config**.
 
 **Provider request semantics**
 : The provider-domain vocabulary and validation for provider, provider API,
@@ -123,12 +123,20 @@ optional command feedback.
 Provider request options affect model calls only. Once a model emits an
 accepted **act** turn, command execution sees the same bash batch shape.
 
+The executor always starts each command in its own process group so cancellation
+can kill the shell and its children. A **base environment snapshot**, when set,
+is the complete environment used for the next command; it is not an additive
+overlay on top of the parent process environment.
+
 **Command result**
 : The structured outcome of one bash action.
 
 **Post-command state**
 : The current working directory and environment snapshot captured after a
 command runs.
+
+**Base environment snapshot**
+: The complete environment snapshot used as the base for command execution.
 
 **Command feedback**
 : Git-backed host feedback attached to a command result.
@@ -166,7 +174,9 @@ through the provider adapter.
 
 Provider adapters serialize validated provider request options. They do not
 resolve **CLNKR_** environment variables, choose API keys, or parse CLI base
-URLs.
+URLs. They do join provider endpoint paths against the configured base URL so
+direct adapter construction and CLI config resolution follow the same request
+path rules.
 
 **Response**
 : One provider reply plus usage and any protocol failure.
@@ -205,14 +215,23 @@ effective metadata also records the Anthropic thinking mode and effective
 
 # GLOSSARY
 
+**Act proposal**
+: The approval-mode prompt text shown before an accepted act turn executes.
+
 **Act turn**
 : A turn that asks the host to run one or more bash actions.
+
+**Approval mode**
+: The local human-gated loop that asks before executing accepted act turns.
 
 **Bash action**
 : One shell command plus an optional working directory.
 
 **Bash batch**
 : The ordered list of bash actions in a single act turn.
+
+**Base environment snapshot**
+: The complete environment map used as the base for command execution.
 
 **Canonical turn**
 : The internal JSON shape used by core code and persisted assistant transcript
@@ -251,6 +270,10 @@ explicit token budget.
 : The provider-neutral request settings clnkr validates before constructing a
 provider adapter request.
 
+**Provider base URL**
+: The configured provider API root that provider adapters join with their API
+endpoint paths.
+
 **Provider request semantics**
 : Provider-domain rules for provider/API names, model capability checks, and
 request-option validation.
@@ -276,6 +299,9 @@ metadata, and compaction policy for one run.
 **Step limit**
 : The maximum number of commands an agent run may execute before asking for a
 final summary.
+
+**Remaining step budget**
+: The number of commands left before the step limit is reached.
 
 **Turn**
 : One structured model instruction in the agent protocol.
@@ -308,9 +334,9 @@ calls the executor.
 
 **5. Unify execution state and business state**
 : clnkr keeps execution state in transcript messages and session files. The
-working tree, cwd, environment, and git feedback are the state the agent acts
-on. Run metadata records the provider request options used to construct model
-calls.
+working tree, cwd, base environment snapshot, post-command environment, and git
+feedback are the state the agent acts on. Run metadata records the provider
+request options used to construct model calls.
 
 **6. Launch/Pause/Resume with simple APIs**
 : clnkr starts from a prompt, stdin, or an interactive session. **--continue**,
@@ -325,9 +351,10 @@ delivery.
 
 **8. Own your control flow**
 : **Run** and approval mode switch on accepted turn types, count protocol
-failures, enforce step limits, and decide when commands execute.
-Provider request validation happens before the control loop constructs the
-model.
+failures, enforce step limits, and decide when commands execute. Approval mode
+truncates an act batch to the remaining step budget before showing the proposal
+or executing commands. Provider request validation happens before the control
+loop constructs the model.
 
 **9. Compact errors into context window**
 : Protocol failures become protocol correction blocks. Command stderr and exit
@@ -345,8 +372,8 @@ email, webhook, cron, or service integrations.
 **12. Make your agent a stateless reducer**
 : clnkr's transcript and sessions make state explicit. **Agent** still holds
 mutable state while **Step** and **ExecuteTurn** process a turn: messages, cwd,
-and environment. Provider request options live outside **Agent** and are
-passed to the model adapter before the run starts.
+and base environment snapshot. Provider request options live outside **Agent**
+and are passed to the model adapter before the run starts.
 
 # REFERENCES
 

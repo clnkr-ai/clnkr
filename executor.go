@@ -14,20 +14,23 @@ import (
 	"time"
 )
 
-// CommandExecutor shells out to bash.
+// CommandExecutor runs bash commands, captures post-command shell state, and
+// always runs commands in their own process group.
 type CommandExecutor struct {
-	ProcessGroup bool
-	ExtraEnv     map[string]string
+	// BaseEnv, when non-nil, is the complete base environment snapshot for
+	// command execution. Direct mutation is caller-owned.
+	BaseEnv map[string]string
 }
 
+// SetEnv copies a full environment snapshot for future command execution.
 func (e *CommandExecutor) SetEnv(env map[string]string) {
 	if env == nil {
-		e.ExtraEnv = nil
+		e.BaseEnv = nil
 		return
 	}
-	e.ExtraEnv = make(map[string]string, len(env))
+	e.BaseEnv = make(map[string]string, len(env))
 	for k, v := range env {
-		e.ExtraEnv[k] = v
+		e.BaseEnv[k] = v
 	}
 }
 
@@ -45,8 +48,8 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 	cmd.WaitDelay = 500 * time.Millisecond
 	cmd.Dir = dir
 	baseEnv := os.Environ()
-	if e.ExtraEnv != nil {
-		baseEnv = shellstate.EnvMapToList(e.ExtraEnv)
+	if e.BaseEnv != nil {
+		baseEnv = shellstate.EnvMapToList(e.BaseEnv)
 	}
 	cmd.Env = append([]string{}, baseEnv...)
 	// Appended last; exec uses last-wins for duplicate keys.

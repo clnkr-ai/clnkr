@@ -217,6 +217,27 @@ func TestModel(t *testing.T) {
 		}
 	})
 
+	t.Run("joins trailing slash base URL", func(t *testing.T) {
+		var gotPath string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"content": []map[string]string{{"type": "text", "text": anthropicWrappedDone("ok")}},
+				"usage":   map[string]int{"input_tokens": 1, "output_tokens": 1},
+			})
+		}))
+		defer server.Close()
+
+		m := anthropic.NewModel(server.URL+"/", "test-key", "claude-test", "sys")
+		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gotPath != "/v1/messages" {
+			t.Errorf("got path %q, want %q", gotPath, "/v1/messages")
+		}
+	})
+
 	t.Run("fails closed on missing or empty structured text payload", func(t *testing.T) {
 		tests := []struct {
 			name    string

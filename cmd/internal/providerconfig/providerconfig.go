@@ -34,10 +34,8 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 	baseURL, baseURLSource, baseURLSet := chooseValue(inputs.BaseURL, env("CLNKR_BASE_URL"), "--base-url", "CLNKR_BASE_URL")
 
 	providerRaw, _, providerSet := chooseValue(inputs.Provider, env("CLNKR_PROVIDER"), "--provider", "CLNKR_PROVIDER")
-	var (
-		provider providerdomain.Provider
-		err      error
-	)
+	var provider providerdomain.Provider
+	var err error
 	if providerSet {
 		provider, err = providerdomain.ParseProvider(providerRaw)
 		if err != nil {
@@ -70,22 +68,22 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 
 	providerAPI := providerdomain.ProviderAPIAuto
 	if providerAPISet {
-		providerAPI, err = providerdomain.ParseProviderAPI(providerAPIRaw)
-		if err != nil {
+		if providerAPI, err = providerdomain.ParseProviderAPI(providerAPIRaw); err != nil {
 			return ResolvedProviderConfig{}, err
 		}
 	}
 
 	if !baseURLSet {
-		baseURL = DefaultAnthropicBaseURL
+		baseURL, baseURLSource = DefaultAnthropicBaseURL, "default"
 		if provider == providerdomain.ProviderOpenAI {
 			baseURL = DefaultOpenAIBaseURL
 		}
-		baseURLSource = "default"
 	}
-	if _, err := parseBaseURL(baseURL, baseURLSource); err != nil {
+	parsedBaseURL, err := parseBaseURL(baseURL, baseURLSource)
+	if err != nil {
 		return ResolvedProviderConfig{}, err
 	}
+	baseURL = parsedBaseURL.String()
 
 	providerAPI, err = providerdomain.ResolveProviderAPI(provider, providerAPI, model)
 	if err != nil {
@@ -96,23 +94,14 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 		return ResolvedProviderConfig{}, err
 	}
 
-	return ResolvedProviderConfig{
-		Provider:       provider,
-		ProviderAPI:    providerAPI,
-		Model:          model,
-		BaseURL:        baseURL,
-		APIKey:         apiKey,
-		RequestOptions: requestOptions,
-	}, nil
+	return ResolvedProviderConfig{Provider: provider, ProviderAPI: providerAPI, Model: model, BaseURL: baseURL, APIKey: apiKey, RequestOptions: requestOptions}, nil
 }
 
 func chooseValue(flagValue, envValue, flagSource, envSource string) (string, string, bool) {
-	flagValue = strings.TrimSpace(flagValue)
-	if flagValue != "" {
+	if flagValue = strings.TrimSpace(flagValue); flagValue != "" {
 		return flagValue, flagSource, true
 	}
-	envValue = strings.TrimSpace(envValue)
-	if envValue != "" {
+	if envValue = strings.TrimSpace(envValue); envValue != "" {
 		return envValue, envSource, true
 	}
 	return "", "", false
@@ -135,6 +124,16 @@ func parseBaseURL(baseURL, source string) (*url.URL, error) {
 	}
 	if parsed.Hostname() == "" {
 		return nil, fmt.Errorf("invalid base URL %q (from %s): missing host", baseURL, source)
+	}
+	escapedPath := strings.TrimRight(parsed.EscapedPath(), "/")
+	path, err := url.PathUnescape(escapedPath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base URL %q (from %s): invalid path escape: %w", baseURL, source, err)
+	}
+	parsed.Path = path
+	parsed.RawPath = ""
+	if escapedPath != (&url.URL{Path: parsed.Path}).EscapedPath() {
+		parsed.RawPath = escapedPath
 	}
 	return parsed, nil
 }

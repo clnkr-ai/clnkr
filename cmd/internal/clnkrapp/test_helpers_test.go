@@ -56,9 +56,11 @@ type fakeExecutor struct {
 	results []clnkr.CommandResult
 	errs    []error
 	calls   int
+	gotCmds []string
 }
 
 func (e *fakeExecutor) Execute(_ context.Context, command, _ string) (clnkr.CommandResult, error) {
+	e.gotCmds = append(e.gotCmds, command)
 	if e.calls >= len(e.results) {
 		return clnkr.CommandResult{}, fmt.Errorf("no more results")
 	}
