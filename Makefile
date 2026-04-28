@@ -3,7 +3,7 @@ LATEST_TAG ?= $(shell git tag -l '[0-9]*' --sort=-v:refname | head -1)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hugo)
 PANDOC ?= pandoc
-CLANKERVAL_PINNED_VERSION := 0.4.3
+CLANKERVAL_PINNED_VERSION := 0.4.5
 CLANKERVAL_BINARY ?= $(CURDIR)/clnkr
 CLANKERVAL_PREFLIGHT = \
 	clankerval_path="$$(command -v clankerval 2>/dev/null || true)"; \
