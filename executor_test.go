@@ -93,6 +93,18 @@ func TestCommandExecutor(t *testing.T) {
 		}
 	})
 
+	t.Run("does not expose process group field", func(t *testing.T) {
+		if _, ok := reflect.TypeOf(CommandExecutor{}).FieldByName("ProcessGroup"); ok {
+			t.Fatal("CommandExecutor should not expose a ProcessGroup field")
+		}
+	})
+
+	t.Run("does not expose extra env field", func(t *testing.T) {
+		if _, ok := reflect.TypeOf(CommandExecutor{}).FieldByName("ExtraEnv"); ok {
+			t.Fatal("CommandExecutor should not expose an ExtraEnv field")
+		}
+	})
+
 	t.Run("respects context deadline", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
@@ -135,14 +147,12 @@ func TestCommandExecutor(t *testing.T) {
 	})
 
 	t.Run("process group assigns new pgid", func(t *testing.T) {
-		pgExec := &CommandExecutor{ProcessGroup: true}
-
 		parentPgid, err := syscall.Getpgid(os.Getpid())
 		if err != nil {
 			t.Fatalf("failed to get parent pgid: %v", err)
 		}
 
-		out, err := pgExec.Execute(ctx, "ps -o pgid= -p $$", "/tmp")
+		out, err := exec.Execute(ctx, "ps -o pgid= -p $$", "/tmp")
 		if err != nil {
 			if strings.Contains(out.Stderr, "Operation not permitted") {
 				t.Skip("ps is not permitted in this sandbox")
@@ -185,6 +195,40 @@ func TestCommandExecutor(t *testing.T) {
 		}
 	})
 
+	t.Run("direct BaseEnv replaces base environment", func(t *testing.T) {
+		t.Setenv("CLNKR_PARENT_ONLY", "parent")
+		envExec := &CommandExecutor{
+			BaseEnv: map[string]string{
+				"CLNKR_ONLY": "yes",
+				"PATH":       os.Getenv("PATH"),
+			},
+		}
+
+		out, err := envExec.Execute(ctx, `printf "%s,%s" "$CLNKR_ONLY" "$CLNKR_PARENT_ONLY"`, "/tmp")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if out.Stdout != "yes," {
+			t.Fatalf("got %q, want %q", out.Stdout, "yes,")
+		}
+	})
+
+	t.Run("SetEnv copies environment snapshot", func(t *testing.T) {
+		envExec := &CommandExecutor{}
+		base := envListToMap(os.Environ())
+		base["CLNKR_SETENV_COPY"] = "before"
+		envExec.SetEnv(base)
+		base["CLNKR_SETENV_COPY"] = "after"
+
+		out, err := envExec.Execute(ctx, `printf %s "$CLNKR_SETENV_COPY"`, "/tmp")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if out.Stdout != "before" {
+			t.Fatalf("got %q, want %q", out.Stdout, "before")
+		}
+	})
+
 	t.Run("captures post-command shell state", func(t *testing.T) {
 		stateExec := &CommandExecutor{}
 		cmd := `export CLNKR_TEST_VAR=ok && cd /tmp && printf done`
@@ -216,8 +260,8 @@ func TestCommandExecutor(t *testing.T) {
 		if _, ok := out.PostEnv["CLNKR_STATE_FILE"]; ok {
 			t.Fatalf("CLNKR_STATE_FILE leaked into PostEnv: %+v", out.PostEnv)
 		}
-		if got := stateExec.ExtraEnv["CLNKR_STATE_FILE"]; got != "" {
-			t.Fatalf("CLNKR_STATE_FILE leaked into ExtraEnv: %q", got)
+		if got := stateExec.BaseEnv["CLNKR_STATE_FILE"]; got != "" {
+			t.Fatalf("CLNKR_STATE_FILE leaked into BaseEnv: %q", got)
 		}
 	})
 
