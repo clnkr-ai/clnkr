@@ -16,6 +16,7 @@ import (
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
 	"github.com/clnkr-ai/clnkr/cmd/internal/session"
+	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
 )
 
 // version is set at build time via -ldflags.
@@ -301,19 +302,19 @@ func main() {
 		ProviderAPI: *providerAPIFlag,
 		Model:       aliasedString(*modelShort, *modelFlag),
 		BaseURL:     aliasedString(*baseURLShort, *baseURLFlag),
-		RequestOptions: providerconfig.ProviderRequestOptions{
-			Effort: providerconfig.ProviderEffortOptions{
+		RequestOptions: providerdomain.ProviderRequestOptions{
+			Effort: providerdomain.ProviderEffortOptions{
 				Level: *effortFlag,
 				Set:   *effortFlag != "",
 			},
-			Output: providerconfig.ProviderOutputOptions{
-				MaxOutputTokens: providerconfig.OptionalInt{
+			Output: providerdomain.ProviderOutputOptions{
+				MaxOutputTokens: providerdomain.OptionalInt{
 					Value: *maxOutputTokens,
 					Set:   maxOutputTokensSet,
 				},
 			},
-			AnthropicManual: providerconfig.AnthropicManualThinkingOptions{
-				ThinkingBudgetTokens: providerconfig.OptionalInt{
+			AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
+				ThinkingBudgetTokens: providerdomain.OptionalInt{
 					Value: *thinkingBudgetTokens,
 					Set:   thinkingBudgetTokensSet,
 				},

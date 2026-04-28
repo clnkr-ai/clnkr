@@ -22,7 +22,9 @@ Run `make _fmt` then `make check` before committing. Do not commit if either fai
 - Root `clnkr` is the only public import surface. `internal/` is allowed when it clarifies ownership.
 - Output goes through typed events. Do not add `io.Writer` parameters.
 - Policy logic in `Run()`, shared logic in `Step()`. No policy in `Step()`.
-- Provider detection only in `main.go`.
+- CLI config resolution stays in `cmd/internal/providerconfig`: env/flag precedence, `CLNKR_*`, API keys, base URL parsing, provider detection, and user-facing config errors.
+- Provider request semantics stay in `internal/providers/providerconfig`: provider/API constants, request options, model capability checks, and provider-specific validation.
+- Provider adapters serialize validated options; they do not resolve CLI config.
 - Wrap errors: `fmt.Errorf("context: %w", err)`. No bare returns or third-party error packages.
 - Adapter tests use external packages (`package anthropic_test`). Core tests use internal (`package clnkr`). CLI tests use internal (`package main`). Match the existing pattern.
 - `exhaustive` linter is enabled. Switch on sealed types must cover all cases. `default` counts as exhaustive.

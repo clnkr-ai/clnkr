@@ -3,6 +3,8 @@ package providerconfig
 import (
 	"strings"
 	"testing"
+
+	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
 )
 
 func TestResolveConfigRequiresProviderModelAndAPIKey(t *testing.T) {
@@ -45,8 +47,8 @@ func TestResolveConfigRequiresProviderModelAndAPIKey(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ResolveConfig(): %v", err)
 		}
-		if cfg.Provider != ProviderOpenAI {
-			t.Fatalf("Provider = %q, want %q", cfg.Provider, ProviderOpenAI)
+		if cfg.Provider != providerdomain.ProviderOpenAI {
+			t.Fatalf("Provider = %q, want %q", cfg.Provider, providerdomain.ProviderOpenAI)
 		}
 	})
 }
@@ -67,11 +69,11 @@ func TestResolveConfigPrefersFlagsOverEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveConfig(): %v", err)
 	}
-	if cfg.Provider != ProviderOpenAI {
-		t.Fatalf("Provider = %q, want %q", cfg.Provider, ProviderOpenAI)
+	if cfg.Provider != providerdomain.ProviderOpenAI {
+		t.Fatalf("Provider = %q, want %q", cfg.Provider, providerdomain.ProviderOpenAI)
 	}
-	if cfg.ProviderAPI != ProviderAPIOpenAIChatCompletions {
-		t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIOpenAIChatCompletions)
+	if cfg.ProviderAPI != providerdomain.ProviderAPIOpenAIChatCompletions {
+		t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, providerdomain.ProviderAPIOpenAIChatCompletions)
 	}
 	if cfg.Model != "flag-model" {
 		t.Fatalf("Model = %q, want %q", cfg.Model, "flag-model")
@@ -130,8 +132,8 @@ func TestResolveConfigAppliesProviderSpecificBaseURLDefaults(t *testing.T) {
 		name            string
 		inputs          Inputs
 		env             map[string]string
-		wantProvider    Provider
-		wantProviderAPI ProviderAPI
+		wantProvider    providerdomain.Provider
+		wantProviderAPI providerdomain.ProviderAPI
 		wantBaseURL     string
 	}{
 		{
@@ -143,8 +145,8 @@ func TestResolveConfigAppliesProviderSpecificBaseURLDefaults(t *testing.T) {
 			env: map[string]string{
 				"CLNKR_API_KEY": "anthropic-key",
 			},
-			wantProvider:    ProviderAnthropic,
-			wantProviderAPI: ProviderAPIAuto,
+			wantProvider:    providerdomain.ProviderAnthropic,
+			wantProviderAPI: providerdomain.ProviderAPIAuto,
 			wantBaseURL:     DefaultAnthropicBaseURL,
 		},
 		{
@@ -156,8 +158,8 @@ func TestResolveConfigAppliesProviderSpecificBaseURLDefaults(t *testing.T) {
 			env: map[string]string{
 				"CLNKR_API_KEY": "openai-key",
 			},
-			wantProvider:    ProviderOpenAI,
-			wantProviderAPI: ProviderAPIOpenAIChatCompletions,
+			wantProvider:    providerdomain.ProviderOpenAI,
+			wantProviderAPI: providerdomain.ProviderAPIOpenAIChatCompletions,
 			wantBaseURL:     DefaultOpenAIBaseURL,
 		},
 	}
@@ -191,11 +193,11 @@ func TestResolveConfigInfersAnthropicFromExplicitBaseURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveConfig(): %v", err)
 	}
-	if cfg.Provider != ProviderAnthropic {
-		t.Fatalf("Provider = %q, want %q", cfg.Provider, ProviderAnthropic)
+	if cfg.Provider != providerdomain.ProviderAnthropic {
+		t.Fatalf("Provider = %q, want %q", cfg.Provider, providerdomain.ProviderAnthropic)
 	}
-	if cfg.ProviderAPI != ProviderAPIAuto {
-		t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIAuto)
+	if cfg.ProviderAPI != providerdomain.ProviderAPIAuto {
+		t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, providerdomain.ProviderAPIAuto)
 	}
 }
 
@@ -219,8 +221,8 @@ func TestResolveConfigKnownOpenAIResponsesModels(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ResolveConfig(): %v", err)
 			}
-			if cfg.ProviderAPI != ProviderAPIOpenAIResponses {
-				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIOpenAIResponses)
+			if cfg.ProviderAPI != providerdomain.ProviderAPIOpenAIResponses {
+				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, providerdomain.ProviderAPIOpenAIResponses)
 			}
 		})
 	}
@@ -248,8 +250,8 @@ func TestResolveConfigOpenAIStyleModelsUseResponses(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ResolveConfig(): %v", err)
 			}
-			if cfg.ProviderAPI != ProviderAPIOpenAIResponses {
-				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIOpenAIResponses)
+			if cfg.ProviderAPI != providerdomain.ProviderAPIOpenAIResponses {
+				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, providerdomain.ProviderAPIOpenAIResponses)
 			}
 		})
 	}
@@ -280,8 +282,8 @@ func TestResolveConfigNegativeExamplesStayOnChatCompletions(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ResolveConfig(): %v", err)
 			}
-			if cfg.ProviderAPI != ProviderAPIOpenAIChatCompletions {
-				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIOpenAIChatCompletions)
+			if cfg.ProviderAPI != providerdomain.ProviderAPIOpenAIChatCompletions {
+				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, providerdomain.ProviderAPIOpenAIChatCompletions)
 			}
 		})
 	}
@@ -357,8 +359,8 @@ func TestResolveConfigAcceptsExplicitCodexResponsesSelections(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ResolveConfig(): %v", err)
 			}
-			if cfg.ProviderAPI != ProviderAPIOpenAIResponses {
-				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIOpenAIResponses)
+			if cfg.ProviderAPI != providerdomain.ProviderAPIOpenAIResponses {
+				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, providerdomain.ProviderAPIOpenAIResponses)
 			}
 		})
 	}
@@ -383,8 +385,8 @@ func TestResolveConfigAcceptsExplicitCodexChatCompletionsSelections(t *testing.T
 			if err != nil {
 				t.Fatalf("ResolveConfig(): %v", err)
 			}
-			if cfg.ProviderAPI != ProviderAPIOpenAIChatCompletions {
-				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, ProviderAPIOpenAIChatCompletions)
+			if cfg.ProviderAPI != providerdomain.ProviderAPIOpenAIChatCompletions {
+				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, providerdomain.ProviderAPIOpenAIChatCompletions)
 			}
 		})
 	}
@@ -394,27 +396,27 @@ func TestResolveConfigOpenAIStyleFallbackAndDatedSnapshots(t *testing.T) {
 	tests := []struct {
 		name    string
 		model   string
-		wantAPI ProviderAPI
+		wantAPI providerdomain.ProviderAPI
 	}{
 		{
 			name:    "dated snapshot matches",
 			model:   "gpt-5.4-2026-03-05",
-			wantAPI: ProviderAPIOpenAIResponses,
+			wantAPI: providerdomain.ProviderAPIOpenAIResponses,
 		},
 		{
 			name:    "openai-looking non snapshot suffix uses responses",
 			model:   "gpt-5.4-preview",
-			wantAPI: ProviderAPIOpenAIResponses,
+			wantAPI: providerdomain.ProviderAPIOpenAIResponses,
 		},
 		{
 			name:    "chat latest suffix still looks openai",
 			model:   "gpt-5.2-chat-latest",
-			wantAPI: ProviderAPIOpenAIResponses,
+			wantAPI: providerdomain.ProviderAPIOpenAIResponses,
 		},
 		{
 			name:    "non openai looking suffix stays on chat completions",
 			model:   "llama3-2026-03-05",
-			wantAPI: ProviderAPIOpenAIChatCompletions,
+			wantAPI: providerdomain.ProviderAPIOpenAIChatCompletions,
 		},
 	}
 
@@ -442,10 +444,10 @@ func TestResolveConfigAcceptsRequestOptions(t *testing.T) {
 			Provider:    "openai",
 			ProviderAPI: "openai-responses",
 			Model:       "gpt-5.1-codex-max",
-			RequestOptions: ProviderRequestOptions{
-				Effort: ProviderEffortOptions{Level: "high", Set: true},
-				Output: ProviderOutputOptions{
-					MaxOutputTokens: OptionalInt{Value: 8000, Set: true},
+			RequestOptions: providerdomain.ProviderRequestOptions{
+				Effort: providerdomain.ProviderEffortOptions{Level: "high", Set: true},
+				Output: providerdomain.ProviderOutputOptions{
+					MaxOutputTokens: providerdomain.OptionalInt{Value: 8000, Set: true},
 				},
 			},
 		}, envMap(map[string]string{"CLNKR_API_KEY": "test-key"}))
@@ -455,7 +457,7 @@ func TestResolveConfigAcceptsRequestOptions(t *testing.T) {
 		if !cfg.RequestOptions.Effort.Set || cfg.RequestOptions.Effort.Level != "high" {
 			t.Fatalf("Effort = %#v, want high", cfg.RequestOptions.Effort)
 		}
-		if cfg.RequestOptions.Output.MaxOutputTokens != (OptionalInt{Value: 8000, Set: true}) {
+		if cfg.RequestOptions.Output.MaxOutputTokens != (providerdomain.OptionalInt{Value: 8000, Set: true}) {
 			t.Fatalf("Output.MaxOutputTokens = %#v, want set 8000", cfg.RequestOptions.Output.MaxOutputTokens)
 		}
 	})
@@ -464,23 +466,38 @@ func TestResolveConfigAcceptsRequestOptions(t *testing.T) {
 		cfg, err := ResolveConfig(Inputs{
 			Provider: "anthropic",
 			Model:    "claude-sonnet-4-20250514",
-			RequestOptions: ProviderRequestOptions{
-				AnthropicManual: AnthropicManualThinkingOptions{
-					ThinkingBudgetTokens: OptionalInt{Value: 2048, Set: true},
+			RequestOptions: providerdomain.ProviderRequestOptions{
+				AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
+					ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true},
 				},
-				Output: ProviderOutputOptions{
-					MaxOutputTokens: OptionalInt{Value: 4096, Set: true},
+				Output: providerdomain.ProviderOutputOptions{
+					MaxOutputTokens: providerdomain.OptionalInt{Value: 4096, Set: true},
 				},
 			},
 		}, envMap(map[string]string{"CLNKR_API_KEY": "test-key"}))
 		if err != nil {
 			t.Fatalf("ResolveConfig(): %v", err)
 		}
-		if cfg.RequestOptions.AnthropicManual.ThinkingBudgetTokens != (OptionalInt{Value: 2048, Set: true}) {
+		if cfg.RequestOptions.AnthropicManual.ThinkingBudgetTokens != (providerdomain.OptionalInt{Value: 2048, Set: true}) {
 			t.Fatalf("ThinkingBudgetTokens = %#v, want set 2048", cfg.RequestOptions.AnthropicManual.ThinkingBudgetTokens)
 		}
-		if cfg.RequestOptions.Output.MaxOutputTokens != (OptionalInt{Value: 4096, Set: true}) {
+		if cfg.RequestOptions.Output.MaxOutputTokens != (providerdomain.OptionalInt{Value: 4096, Set: true}) {
 			t.Fatalf("Output.MaxOutputTokens = %#v, want set 4096", cfg.RequestOptions.Output.MaxOutputTokens)
+		}
+	})
+
+	t.Run("anthropic opus 4 date snapshot manual thinking", func(t *testing.T) {
+		_, err := ResolveConfig(Inputs{
+			Provider: "anthropic",
+			Model:    "claude-opus-4-20250514",
+			RequestOptions: providerdomain.ProviderRequestOptions{
+				AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
+					ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true},
+				},
+			},
+		}, envMap(map[string]string{"CLNKR_API_KEY": "test-key"}))
+		if err != nil {
+			t.Fatalf("ResolveConfig(): %v", err)
 		}
 	})
 }
@@ -496,8 +513,8 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "openai",
 				Model:    "gpt-5.1",
-				RequestOptions: ProviderRequestOptions{
-					Effort: ProviderEffortOptions{Level: "extreme", Set: true},
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					Effort: providerdomain.ProviderEffortOptions{Level: "extreme", Set: true},
 				},
 			},
 			want: "invalid effort",
@@ -508,8 +525,8 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 				Provider:    "openai",
 				ProviderAPI: "openai-chat-completions",
 				Model:       "gpt-5.1",
-				RequestOptions: ProviderRequestOptions{
-					Effort: ProviderEffortOptions{Level: "high", Set: true},
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					Effort: providerdomain.ProviderEffortOptions{Level: "high", Set: true},
 				},
 			},
 			want: `effort is not supported for provider-api "openai-chat-completions"`,
@@ -519,8 +536,8 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "anthropic",
 				Model:    "claude-sonnet-4-20250514",
-				RequestOptions: ProviderRequestOptions{
-					Effort: ProviderEffortOptions{Level: "xhigh", Set: true},
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					Effort: providerdomain.ProviderEffortOptions{Level: "xhigh", Set: true},
 				},
 			},
 			want: `effort "xhigh" is not supported for provider anthropic`,
@@ -530,8 +547,8 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "openai",
 				Model:    "gpt-5-pro",
-				RequestOptions: ProviderRequestOptions{
-					Effort: ProviderEffortOptions{Level: "low", Set: true},
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					Effort: providerdomain.ProviderEffortOptions{Level: "low", Set: true},
 				},
 			},
 			want: "gpt-5-pro only supports high",
@@ -541,8 +558,8 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "openai",
 				Model:    "gpt-5-pro-2026-03-05",
-				RequestOptions: ProviderRequestOptions{
-					Effort: ProviderEffortOptions{Level: "low", Set: true},
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					Effort: providerdomain.ProviderEffortOptions{Level: "low", Set: true},
 				},
 			},
 			want: "gpt-5-pro only supports high",
@@ -552,8 +569,8 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "openai",
 				Model:    "gpt-5.1",
-				RequestOptions: ProviderRequestOptions{
-					Effort: ProviderEffortOptions{Level: "xhigh", Set: true},
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					Effort: providerdomain.ProviderEffortOptions{Level: "xhigh", Set: true},
 				},
 			},
 			want: `effort "xhigh" is not supported for model "gpt-5.1"`,
@@ -563,8 +580,8 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "openai",
 				Model:    "gpt-4.1",
-				RequestOptions: ProviderRequestOptions{
-					Effort: ProviderEffortOptions{Level: "high", Set: true},
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					Effort: providerdomain.ProviderEffortOptions{Level: "high", Set: true},
 				},
 			},
 			want: "effort requires an OpenAI reasoning-capable model",
@@ -574,9 +591,9 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "openai",
 				Model:    "gpt-5",
-				RequestOptions: ProviderRequestOptions{
-					Output: ProviderOutputOptions{
-						MaxOutputTokens: OptionalInt{Value: 0, Set: true},
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					Output: providerdomain.ProviderOutputOptions{
+						MaxOutputTokens: providerdomain.OptionalInt{Value: 0, Set: true},
 					},
 				},
 			},
@@ -588,9 +605,9 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 				Provider:    "openai",
 				ProviderAPI: "openai-chat-completions",
 				Model:       "gpt-5",
-				RequestOptions: ProviderRequestOptions{
-					Output: ProviderOutputOptions{
-						MaxOutputTokens: OptionalInt{Value: 1000, Set: true},
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					Output: providerdomain.ProviderOutputOptions{
+						MaxOutputTokens: providerdomain.OptionalInt{Value: 1000, Set: true},
 					},
 				},
 			},
@@ -601,9 +618,9 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "anthropic",
 				Model:    "claude-sonnet-4-20250514",
-				RequestOptions: ProviderRequestOptions{
-					Output: ProviderOutputOptions{
-						MaxOutputTokens: OptionalInt{Value: MaxAnthropicNonStreamingTokens + 1, Set: true},
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					Output: providerdomain.ProviderOutputOptions{
+						MaxOutputTokens: providerdomain.OptionalInt{Value: providerdomain.MaxAnthropicNonStreamingTokens + 1, Set: true},
 					},
 				},
 			},
@@ -614,9 +631,9 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "openai",
 				Model:    "gpt-5",
-				RequestOptions: ProviderRequestOptions{
-					AnthropicManual: AnthropicManualThinkingOptions{
-						ThinkingBudgetTokens: OptionalInt{Value: 2048, Set: true},
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
+						ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true},
 					},
 				},
 			},
@@ -627,9 +644,9 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "anthropic",
 				Model:    "claude-sonnet-4-20250514",
-				RequestOptions: ProviderRequestOptions{
-					AnthropicManual: AnthropicManualThinkingOptions{
-						ThinkingBudgetTokens: OptionalInt{Value: 1023, Set: true},
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
+						ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 1023, Set: true},
 					},
 				},
 			},
@@ -640,9 +657,9 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "anthropic",
 				Model:    "claude-3-5-sonnet-20241022",
-				RequestOptions: ProviderRequestOptions{
-					AnthropicManual: AnthropicManualThinkingOptions{
-						ThinkingBudgetTokens: OptionalInt{Value: 2048, Set: true},
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
+						ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true},
 					},
 				},
 			},
@@ -653,9 +670,9 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "anthropic",
 				Model:    "claude-sonnet-4-20250514",
-				RequestOptions: ProviderRequestOptions{
-					AnthropicManual: AnthropicManualThinkingOptions{
-						ThinkingBudgetTokens: OptionalInt{Value: DefaultAnthropicMaxTokens, Set: true},
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
+						ThinkingBudgetTokens: providerdomain.OptionalInt{Value: providerdomain.DefaultAnthropicMaxTokens, Set: true},
 					},
 				},
 			},
@@ -666,12 +683,12 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "anthropic",
 				Model:    "claude-sonnet-4-20250514",
-				RequestOptions: ProviderRequestOptions{
-					AnthropicManual: AnthropicManualThinkingOptions{
-						ThinkingBudgetTokens: OptionalInt{Value: 4096, Set: true},
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
+						ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 4096, Set: true},
 					},
-					Output: ProviderOutputOptions{
-						MaxOutputTokens: OptionalInt{Value: 4096, Set: true},
+					Output: providerdomain.ProviderOutputOptions{
+						MaxOutputTokens: providerdomain.OptionalInt{Value: 4096, Set: true},
 					},
 				},
 			},
@@ -682,10 +699,10 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "anthropic",
 				Model:    "claude-sonnet-4-20250514",
-				RequestOptions: ProviderRequestOptions{
-					Effort: ProviderEffortOptions{Level: "high", Set: true},
-					AnthropicManual: AnthropicManualThinkingOptions{
-						ThinkingBudgetTokens: OptionalInt{Value: 2048, Set: true},
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					Effort: providerdomain.ProviderEffortOptions{Level: "high", Set: true},
+					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
+						ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true},
 					},
 				},
 			},
@@ -695,10 +712,10 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			name: "thinking budget rejects Opus 4.7+",
 			in: Inputs{
 				Provider: "anthropic",
-				Model:    "claude-opus-4-20250514-7",
-				RequestOptions: ProviderRequestOptions{
-					AnthropicManual: AnthropicManualThinkingOptions{
-						ThinkingBudgetTokens: OptionalInt{Value: 2048, Set: true},
+				Model:    "claude-opus-4-7-20250514",
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
+						ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true},
 					},
 				},
 			},

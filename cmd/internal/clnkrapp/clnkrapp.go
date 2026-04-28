@@ -15,6 +15,7 @@ import (
 	"github.com/clnkr-ai/clnkr/internal/providers/anthropic"
 	"github.com/clnkr-ai/clnkr/internal/providers/openai"
 	"github.com/clnkr-ai/clnkr/internal/providers/openairesponses"
+	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
 )
 
 type model interface {
@@ -29,7 +30,7 @@ func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt s
 func newModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt string) model {
 	opts := cfg.RequestOptions
 	switch {
-	case cfg.Provider == providerconfig.ProviderAnthropic:
+	case cfg.Provider == providerdomain.ProviderAnthropic:
 		anthropicOpts := anthropic.Options{}
 		if opts.Output.MaxOutputTokens.Set {
 			anthropicOpts.MaxTokens = opts.Output.MaxOutputTokens.Value
@@ -43,7 +44,7 @@ func newModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt s
 			anthropicOpts.ThinkingMode = anthropic.ThinkingModeAdaptive
 		}
 		return anthropic.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, anthropicOpts)
-	case cfg.ProviderAPI == providerconfig.ProviderAPIOpenAIResponses:
+	case cfg.ProviderAPI == providerdomain.ProviderAPIOpenAIResponses:
 		var effort string
 		if opts.Effort.Set && opts.Effort.Level != "auto" {
 			effort = opts.Effort.Level
@@ -104,33 +105,36 @@ func writeEvent(w io.Writer, typ string, payload any) error {
 // metadata and persisted alongside session files.
 type RunMetadata struct {
 	ClnkrVersion string                     `json:"clnkr_version"`
-	Provider     providerconfig.Provider    `json:"provider"`
-	ProviderAPI  providerconfig.ProviderAPI `json:"provider_api"`
+	Provider     providerdomain.Provider    `json:"provider"`
+	ProviderAPI  providerdomain.ProviderAPI `json:"provider_api"`
 	Model        string                     `json:"model"`
 	PromptSHA256 string                     `json:"prompt_sha256"`
-	Requested    RequestedProviderOptions   `json:"requested"`
-	Effective    EffectiveProviderOptions   `json:"effective"`
+	Requested    ProviderRequestMetadata    `json:"requested"`
+	Effective    ProviderRequestMetadata    `json:"effective"`
 	Compaction   CompactionMetadata         `json:"compaction"`
 }
 
-type RequestedProviderOptions struct {
-	Effort                      *string `json:"effort,omitempty"`
-	EffortOmitted               bool    `json:"effort_omitted"`
-	MaxOutputTokens             *int    `json:"max_output_tokens,omitempty"`
-	MaxOutputTokensOmitted      bool    `json:"max_output_tokens_omitted"`
-	ThinkingBudgetTokens        *int    `json:"thinking_budget_tokens,omitempty"`
-	ThinkingBudgetTokensOmitted bool    `json:"thinking_budget_tokens_omitted"`
+type ProviderRequestMetadata struct {
+	Effort          EffortMetadata          `json:"effort"`
+	Output          OutputMetadata          `json:"output"`
+	AnthropicManual AnthropicManualMetadata `json:"anthropic_manual"`
 }
 
-type EffectiveProviderOptions struct {
-	EffortOmitted               bool    `json:"effort_omitted"`
-	Effort                      *string `json:"effort,omitempty"`
-	AnthropicThinkingMode       *string `json:"anthropic_thinking_mode,omitempty"`
-	MaxOutputTokens             *int    `json:"max_output_tokens,omitempty"`
-	MaxOutputTokensOmitted      bool    `json:"max_output_tokens_omitted"`
-	AnthropicMaxTokens          *int    `json:"anthropic_max_tokens,omitempty"`
-	ThinkingBudgetTokens        *int    `json:"thinking_budget_tokens,omitempty"`
-	ThinkingBudgetTokensOmitted bool    `json:"thinking_budget_tokens_omitted"`
+type EffortMetadata struct {
+	LevelOmitted          bool    `json:"level_omitted"`
+	Level                 *string `json:"level,omitempty"`
+	AnthropicThinkingMode *string `json:"anthropic_thinking_mode,omitempty"`
+}
+
+type OutputMetadata struct {
+	MaxOutputTokensOmitted bool `json:"max_output_tokens_omitted"`
+	MaxOutputTokens        *int `json:"max_output_tokens,omitempty"`
+	AnthropicMaxTokens     *int `json:"anthropic_max_tokens,omitempty"`
+}
+
+type AnthropicManualMetadata struct {
+	ThinkingBudgetTokensOmitted bool `json:"thinking_budget_tokens_omitted"`
+	ThinkingBudgetTokens        *int `json:"thinking_budget_tokens,omitempty"`
 }
 
 type CompactionMetadata struct {
@@ -140,11 +144,6 @@ type CompactionMetadata struct {
 
 func NewRunMetadata(version string, cfg providerconfig.ResolvedProviderConfig, systemPrompt string) RunMetadata {
 	opts := cfg.RequestOptions
-	effortOmitted := !opts.Effort.Set || opts.Effort.Level == "auto"
-	effortValue := opts.Effort.Level
-	if effortOmitted {
-		effortValue = ""
-	}
 
 	meta := RunMetadata{
 		ClnkrVersion: version,
@@ -152,43 +151,47 @@ func NewRunMetadata(version string, cfg providerconfig.ResolvedProviderConfig, s
 		ProviderAPI:  cfg.ProviderAPI,
 		Model:        cfg.Model,
 		PromptSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(systemPrompt))),
-		Requested: RequestedProviderOptions{
-			EffortOmitted:               effortOmitted,
-			Effort:                      effectiveIfSet(effortValue),
-			MaxOutputTokensOmitted:      !opts.Output.MaxOutputTokens.Set,
-			MaxOutputTokens:             optionalIntPtr(opts.Output.MaxOutputTokens),
-			ThinkingBudgetTokensOmitted: !opts.AnthropicManual.ThinkingBudgetTokens.Set,
-			ThinkingBudgetTokens:        optionalIntPtr(opts.AnthropicManual.ThinkingBudgetTokens),
-		},
-		Effective: EffectiveProviderOptions{
-			EffortOmitted:          effortOmitted,
-			Effort:                 effectiveIfSet(effortValue),
-			MaxOutputTokensOmitted: !opts.Output.MaxOutputTokens.Set,
-			MaxOutputTokens:        optionalIntPtr(opts.Output.MaxOutputTokens),
-		},
-		Compaction: CompactionMetadata{Policy: "manual", KeepRecentTurns: 2},
+		Requested:    providerRequestMetadata(opts, !opts.Effort.Set),
+		Effective:    providerRequestMetadata(opts, !opts.Effort.Set || opts.Effort.Level == "auto"),
+		Compaction:   CompactionMetadata{Policy: "manual", KeepRecentTurns: 2},
 	}
 
-	if cfg.Provider == providerconfig.ProviderAnthropic {
-		maxTokens := providerconfig.DefaultAnthropicMaxTokens
+	if cfg.Provider == providerdomain.ProviderAnthropic {
+		maxTokens := providerdomain.DefaultAnthropicMaxTokens
 		if opts.Output.MaxOutputTokens.Set {
 			maxTokens = opts.Output.MaxOutputTokens.Value
 		}
-		meta.Effective.AnthropicMaxTokens = &maxTokens
+		meta.Effective.Output.AnthropicMaxTokens = &maxTokens
 
-		// Determine effective Anthropic thinking mode
 		if opts.Effort.Set && opts.Effort.Level != "auto" {
-			// Non-auto effort: also enable adaptive thinking
 			adaptive := "adaptive"
-			meta.Effective.AnthropicThinkingMode = &adaptive
-			meta.Effective.Effort = &opts.Effort.Level
-			meta.Effective.EffortOmitted = false
+			meta.Effective.Effort.AnthropicThinkingMode = &adaptive
+			meta.Effective.Effort.Level = &opts.Effort.Level
+			meta.Effective.Effort.LevelOmitted = false
 		} else if opts.AnthropicManual.ThinkingBudgetTokens.Set {
 			enabled := "enabled"
-			meta.Effective.AnthropicThinkingMode = &enabled
+			meta.Effective.Effort.AnthropicThinkingMode = &enabled
 		}
 	}
 
+	return meta
+}
+
+func providerRequestMetadata(opts providerdomain.ProviderRequestOptions, effortOmitted bool) ProviderRequestMetadata {
+	meta := ProviderRequestMetadata{
+		Effort: EffortMetadata{LevelOmitted: effortOmitted},
+		Output: OutputMetadata{
+			MaxOutputTokensOmitted: !opts.Output.MaxOutputTokens.Set,
+			MaxOutputTokens:        optionalIntPtr(opts.Output.MaxOutputTokens),
+		},
+		AnthropicManual: AnthropicManualMetadata{
+			ThinkingBudgetTokensOmitted: !opts.AnthropicManual.ThinkingBudgetTokens.Set,
+			ThinkingBudgetTokens:        optionalIntPtr(opts.AnthropicManual.ThinkingBudgetTokens),
+		},
+	}
+	if !effortOmitted {
+		meta.Effort.Level = &opts.Effort.Level
+	}
 	return meta
 }
 
@@ -200,14 +203,7 @@ func RunMetadataDebugEvent(meta RunMetadata) (clnkr.EventDebug, error) {
 	return clnkr.EventDebug{Message: string(data)}, nil
 }
 
-func effectiveIfSet(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
-func optionalIntPtr(value providerconfig.OptionalInt) *int {
+func optionalIntPtr(value providerdomain.OptionalInt) *int {
 	if !value.Set {
 		return nil
 	}

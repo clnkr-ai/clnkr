@@ -11,6 +11,7 @@ import (
 
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
+	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
 )
 
 func anthropicWrappedDone(summary string) string {
@@ -76,15 +77,15 @@ func TestNewModelForConfigPassesOpenAIResponsesRequestOptions(t *testing.T) {
 	defer server.Close()
 
 	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
-		Provider:    providerconfig.ProviderOpenAI,
-		ProviderAPI: providerconfig.ProviderAPIOpenAIResponses,
+		Provider:    providerdomain.ProviderOpenAI,
+		ProviderAPI: providerdomain.ProviderAPIOpenAIResponses,
 		Model:       "gpt-5.1",
 		BaseURL:     server.URL,
 		APIKey:      "test-key",
-		RequestOptions: providerconfig.ProviderRequestOptions{
-			Effort: providerconfig.ProviderEffortOptions{Level: "high", Set: true},
-			Output: providerconfig.ProviderOutputOptions{
-				MaxOutputTokens: providerconfig.OptionalInt{Value: 8000, Set: true},
+		RequestOptions: providerdomain.ProviderRequestOptions{
+			Effort: providerdomain.ProviderEffortOptions{Level: "high", Set: true},
+			Output: providerdomain.ProviderOutputOptions{
+				MaxOutputTokens: providerdomain.OptionalInt{Value: 8000, Set: true},
 			},
 		},
 	}, "sys")
@@ -113,16 +114,16 @@ func TestNewModelForConfigPassesAnthropicRequestOptions(t *testing.T) {
 	defer server.Close()
 
 	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
-		Provider: providerconfig.ProviderAnthropic,
+		Provider: providerdomain.ProviderAnthropic,
 		Model:    "claude-sonnet-4-20250514",
 		BaseURL:  server.URL,
 		APIKey:   "test-key",
-		RequestOptions: providerconfig.ProviderRequestOptions{
-			AnthropicManual: providerconfig.AnthropicManualThinkingOptions{
-				ThinkingBudgetTokens: providerconfig.OptionalInt{Value: 2048, Set: true},
+		RequestOptions: providerdomain.ProviderRequestOptions{
+			AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
+				ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true},
 			},
-			Output: providerconfig.ProviderOutputOptions{
-				MaxOutputTokens: providerconfig.OptionalInt{Value: 8000, Set: true},
+			Output: providerdomain.ProviderOutputOptions{
+				MaxOutputTokens: providerdomain.OptionalInt{Value: 8000, Set: true},
 			},
 		},
 	}, "sys")
@@ -151,14 +152,14 @@ func TestNewModelForConfigPassesAnthropicEffortWithAdaptiveThinking(t *testing.T
 	defer server.Close()
 
 	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
-		Provider: providerconfig.ProviderAnthropic,
+		Provider: providerdomain.ProviderAnthropic,
 		Model:    "claude-sonnet-4-20250514",
 		BaseURL:  server.URL,
 		APIKey:   "test-key",
-		RequestOptions: providerconfig.ProviderRequestOptions{
-			Effort: providerconfig.ProviderEffortOptions{Level: "medium", Set: true},
-			Output: providerconfig.ProviderOutputOptions{
-				MaxOutputTokens: providerconfig.OptionalInt{Value: 4096, Set: true},
+		RequestOptions: providerdomain.ProviderRequestOptions{
+			Effort: providerdomain.ProviderEffortOptions{Level: "medium", Set: true},
+			Output: providerdomain.ProviderOutputOptions{
+				MaxOutputTokens: providerdomain.OptionalInt{Value: 4096, Set: true},
 			},
 		},
 	}, "sys")

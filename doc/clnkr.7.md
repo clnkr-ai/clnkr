@@ -12,7 +12,7 @@ them, append the result, and repeat.
 
 The user-facing command is documented in **clnkr**(1). This page documents
 clnkr's turn protocol, transcript structure, provider boundary, command
-execution model, and 12-factor-agent mapping.
+execution model, run metadata, and 12-factor-agent mapping.
 
 # ARCHITECTURE
 
@@ -28,6 +28,15 @@ and return a response.
 : The Anthropic, OpenAI Responses, or OpenAI-compatible Chat Completions path
 between a provider API and clnkr's canonical protocol.
 
+**CLI config resolver**
+: The frontend-owned resolver that applies flag and **CLNKR_** environment
+precedence, parses base URLs, finds the API key, selects provider semantics,
+and returns a **Resolved provider config**.
+
+**Provider request semantics**
+: The provider-domain vocabulary and validation for provider, provider API,
+request options, model capability checks, and request-option validation.
+
 **Executor**
 : The host component that runs one bash action and returns a structured command
 result.
@@ -38,6 +47,12 @@ result.
 The main boundary is **Step** versus **Run**. **Step** performs one model query
 and protocol parse. **Run** owns policy: retrying after protocol failures,
 executing act turns, stopping on clarify or done, and enforcing step limits.
+
+The configuration ownership boundary is **CLI config resolver** versus
+**Provider request semantics**. The CLI resolver owns app inputs and user-facing
+errors. Provider request semantics own the provider vocabulary and reject
+unsupported provider/model/request combinations before adapters serialize a
+request.
 
 # TURN PROTOCOL
 
@@ -60,6 +75,9 @@ A **canonical turn** is the internal JSON shape clnkr writes to the transcript
 after a provider adapter projects provider output into clnkr's turn space:
 **act**, **clarify**, or **done**. A **provider turn** is the provider-specific
 structured-output shape before that projection.
+
+Provider request options such as effort and output-token limits change provider
+wire fields. They do not add turn types or change the canonical turn shape.
 
 A **protocol failure** is a model response that cannot be accepted as exactly
 one valid turn. When that happens, clnkr appends a **protocol correction** to
@@ -92,11 +110,18 @@ During compaction, clnkr replaces an older transcript prefix with one compact
 block. It keeps a recent tail of user-authored turns and any host state the
 next model call still needs.
 
+Run metadata is not a transcript message. It is emitted as a debug event and
+persisted alongside session files so a run can be inspected without adding
+configuration values to the model transcript.
+
 # COMMAND EXECUTION
 
 The executor runs bash through the host shell. It captures stdout, stderr, exit
 code, the post-command working directory, the post-command environment, and
 optional command feedback.
+
+Provider request options affect model calls only. Once a model emits an
+accepted **act** turn, command execution sees the same bash batch shape.
 
 **Command result**
 : The structured outcome of one bash action.
@@ -122,12 +147,26 @@ not survive the shell command that started them.
 
 clnkr treats provider APIs as adapters around one internal protocol.
 
+Provider resolution is split. **cmd/internal/providerconfig** owns CLI
+inputs: flag/env precedence, **CLNKR_** names, API key lookup, base URL parsing,
+provider inference from an explicit base URL, and user-facing configuration
+errors. **internal/providers/providerconfig** owns provider-domain semantics:
+provider/API constants, provider request options, model capability predicates,
+and request-option validation.
+
 For OpenAI, clnkr can use the Responses API or an OpenAI-compatible Chat
-Completions API. OpenAI-compatible endpoints, including vLLM's compatible
-server, must support structured model outputs.
+Completions API. **provider-api=auto** selects Responses for known supported
+OpenAI model names and model names matching OpenAI model-name patterns, and
+keeps known non-OpenAI compatible names on Chat Completions. OpenAI-compatible
+endpoints, including vLLM's compatible server, must support structured model
+outputs.
 
 For Anthropic, clnkr uses the Messages API and asks for structured JSON output
 through the provider adapter.
+
+Provider adapters serialize validated provider request options. They do not
+resolve **CLNKR_** environment variables, choose API keys, or parse CLI base
+URLs.
 
 **Response**
 : One provider reply plus usage and any protocol failure.
@@ -144,6 +183,26 @@ through the provider adapter.
 **Structured output**
 : Provider-enforced JSON output intended to contain exactly one provider turn.
 
+# RUN METADATA
+
+**Run metadata** records run and provider request configuration. It is emitted
+once as an **EventDebug** payload and persisted with saved sessions.
+
+**Requested request metadata**
+: The provider request options as the user requested them, including explicit
+**--effort auto**.
+
+**Effective request metadata**
+: The provider request options clnkr will put on provider calls after
+validation and defaults.
+
+Requested and effective metadata use the same JSON fields:
+**effort**, **output**, and **anthropic_manual**. For effort, omitted and
+explicit **auto** are distinct in requested metadata. Effective metadata omits
+**auto** because clnkr sends no provider effort field for it. For Anthropic,
+effective metadata also records the Anthropic thinking mode and effective
+**max_tokens** when known.
+
 # GLOSSARY
 
 **Act turn**
@@ -159,14 +218,57 @@ through the provider adapter.
 : The internal JSON shape used by core code and persisted assistant transcript
 messages.
 
+**CLI config resolver**
+: The frontend-owned resolver that turns CLI inputs and **CLNKR_** environment
+variables into a **Resolved provider config**.
+
 **Clarify turn**
 : A turn that asks the user a non-empty question and stops the run.
 
 **Done turn**
 : A turn that summarizes completion and stops the run successfully.
 
+**Effective request metadata**
+: The provider request state after validation, defaults, and provider-specific
+mapping.
+
+**Effort level**
+: A provider-neutral effort request: **auto**, **low**, **medium**, **high**,
+**xhigh**, or **max**.
+
+**Manual thinking budget**
+: The Anthropic-only legacy request for **thinking.type=enabled** with an
+explicit token budget.
+
+**Max output tokens**
+: A provider request for the maximum response output token count.
+
+**Provider API**
+: The OpenAI API surface selected for an OpenAI run: **auto**,
+**openai-responses**, or **openai-chat-completions**.
+
+**Provider request options**
+: The provider-neutral request settings clnkr validates before constructing a
+provider adapter request.
+
+**Provider request semantics**
+: Provider-domain rules for provider/API names, model capability checks, and
+request-option validation.
+
 **Recent tail**
 : The un-compacted suffix of the transcript preserved during compaction.
+
+**Resolved provider config**
+: The app-facing result of config resolution: provider, provider API, model,
+base URL, API key, and validated provider request options.
+
+**Requested request metadata**
+: The provider request state exactly as requested by CLI inputs after
+normalization.
+
+**Run metadata**
+: The version, provider selection, prompt hash, requested and effective request
+metadata, and compaction policy for one run.
 
 **Step**
 : One model query plus protocol parsing cycle.
@@ -182,9 +284,9 @@ final summary.
 
 clnkr matches the local-agent parts of the 12-factor model: prompt
 construction, transcript state, the turn protocol, the control loop, session
-persistence, and recovery after invalid model output. Distributed state,
-external triggers, and Slack/email/SMS delivery are outside clnkr's local
-coding CLI boundary.
+persistence, provider request configuration, and recovery after invalid model
+output. Distributed state, external triggers, and Slack/email/SMS delivery are
+outside clnkr's local coding CLI boundary.
 
 **1. Natural language to tool calls**
 : clnkr turns natural-language tasks into **act**, **clarify**, or **done**
@@ -192,11 +294,13 @@ JSON. **act** carries bash actions; the executor runs them.
 
 **2. Own your prompts**
 : clnkr defines the base prompt, protocol examples, AGENTS.md layering, prompt
-omission, and prompt append behavior.
+omission, and prompt append behavior. Run metadata records the prompt hash for
+the run.
 
 **3. Own your context window**
 : clnkr appends state blocks, command result blocks, protocol corrections,
-canonical assistant turns, and compact blocks into the transcript.
+canonical assistant turns, and compact blocks into the transcript. Run metadata
+is stored beside the transcript, not inside the context window.
 
 **4. Tools are just structured outputs**
 : clnkr's **act** turn is structured output. **ExecuteTurn** interprets it and
@@ -205,13 +309,14 @@ calls the executor.
 **5. Unify execution state and business state**
 : clnkr keeps execution state in transcript messages and session files. The
 working tree, cwd, environment, and git feedback are the state the agent acts
-on.
+on. Run metadata records the provider request options used to construct model
+calls.
 
 **6. Launch/Pause/Resume with simple APIs**
 : clnkr starts from a prompt, stdin, or an interactive session. **--continue**,
 **--load-messages**, saved sessions, and single-task mode cover local resume
-flows. clnkr has no HTTP API, webhook entry point, or pause state outside local
-session files.
+flows. Saved sessions include run metadata for inspection. clnkr has no HTTP
+API, webhook entry point, or pause state outside local session files.
 
 **7. Contact humans with tool calls**
 : clnkr has **clarify** turns and approval mode. Human contact is local stdin
@@ -221,6 +326,8 @@ delivery.
 **8. Own your control flow**
 : **Run** and approval mode switch on accepted turn types, count protocol
 failures, enforce step limits, and decide when commands execute.
+Provider request validation happens before the control loop constructs the
+model.
 
 **9. Compact errors into context window**
 : Protocol failures become protocol correction blocks. Command stderr and exit
@@ -238,7 +345,8 @@ email, webhook, cron, or service integrations.
 **12. Make your agent a stateless reducer**
 : clnkr's transcript and sessions make state explicit. **Agent** still holds
 mutable state while **Step** and **ExecuteTurn** process a turn: messages, cwd,
-and environment.
+and environment. Provider request options live outside **Agent** and are
+passed to the model adapter before the run starts.
 
 # REFERENCES
 

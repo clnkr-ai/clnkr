@@ -605,11 +605,11 @@ func TestOpenAIResponsesHarnessFlagsReachRequestAndMetadata(t *testing.T) {
 	if err := json.Unmarshal([]byte(event.Payload.Message), &metadata); err != nil {
 		t.Fatalf("unmarshal metadata: %v", err)
 	}
-	if metadata.Effective.Effort == nil || *metadata.Effective.Effort != "high" {
-		t.Fatalf("metadata effort = %#v, want high", metadata.Effective.Effort)
+	if metadata.Effective.Effort.Level == nil || *metadata.Effective.Effort.Level != "high" {
+		t.Fatalf("metadata effort = %#v, want high", metadata.Effective.Effort.Level)
 	}
-	if metadata.Effective.MaxOutputTokens == nil || *metadata.Effective.MaxOutputTokens != 8000 {
-		t.Fatalf("metadata max output = %#v, want 8000", metadata.Effective.MaxOutputTokens)
+	if metadata.Effective.Output.MaxOutputTokens == nil || *metadata.Effective.Output.MaxOutputTokens != 8000 {
+		t.Fatalf("metadata max output = %#v, want 8000", metadata.Effective.Output.MaxOutputTokens)
 	}
 }
 
