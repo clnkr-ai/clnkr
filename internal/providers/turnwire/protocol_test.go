@@ -1,0 +1,233 @@
+package turnwire
+
+import (
+	"encoding/json"
+	"errors"
+	"reflect"
+	"testing"
+
+	"github.com/clnkr-ai/clnkr"
+)
+
+func TestRequestSchema(t *testing.T) {
+	tests := []struct {
+		name            string
+		includeMaxItems bool
+		wantMaxItems    bool
+	}{
+		{name: "openai", includeMaxItems: true, wantMaxItems: true},
+		{name: "anthropic", includeMaxItems: false, wantMaxItems: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schema := RequestSchema(tt.includeMaxItems)
+			want := map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"turn": map[string]any{
+						"anyOf": []any{
+							map[string]any{
+								"type":                 "object",
+								"additionalProperties": false,
+								"properties": map[string]any{
+									"type": map[string]any{
+										"type":  "string",
+										"const": "act",
+									},
+									"bash": map[string]any{
+										"type":                 "object",
+										"additionalProperties": false,
+										"properties": map[string]any{
+											"commands": commandArraySchema(tt.wantMaxItems),
+										},
+										"required": []string{"commands"},
+									},
+									"question":  map[string]any{"type": "null"},
+									"summary":   map[string]any{"type": "null"},
+									"reasoning": expectedNullableStringSchema(),
+								},
+								"required": []string{"type", "bash", "question", "summary", "reasoning"},
+							},
+							map[string]any{
+								"type":                 "object",
+								"additionalProperties": false,
+								"properties": map[string]any{
+									"type": map[string]any{
+										"type":  "string",
+										"const": "clarify",
+									},
+									"bash":      map[string]any{"type": "null"},
+									"question":  map[string]any{"type": "string"},
+									"summary":   map[string]any{"type": "null"},
+									"reasoning": expectedNullableStringSchema(),
+								},
+								"required": []string{"type", "bash", "question", "summary", "reasoning"},
+							},
+							map[string]any{
+								"type":                 "object",
+								"additionalProperties": false,
+								"properties": map[string]any{
+									"type": map[string]any{
+										"type":  "string",
+										"const": "done",
+									},
+									"bash":      map[string]any{"type": "null"},
+									"question":  map[string]any{"type": "null"},
+									"summary":   map[string]any{"type": "string"},
+									"reasoning": expectedNullableStringSchema(),
+								},
+								"required": []string{"type", "bash", "question", "summary", "reasoning"},
+							},
+						},
+					},
+				},
+				"required": []string{"turn"},
+			}
+
+			if !reflect.DeepEqual(schema, want) {
+				gotJSON := mustJSON(t, schema)
+				wantJSON := mustJSON(t, want)
+				t.Fatalf("schema mismatch\ngot:  %s\nwant: %s", gotJSON, wantJSON)
+			}
+		})
+	}
+}
+
+func TestParseProviderTurn(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    clnkr.Turn
+		wantErr error
+	}{
+		{
+			name: "act",
+			raw:  `{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":"/tmp"}]},"question":null,"summary":null,"reasoning":"inspect"}}`,
+			want: &clnkr.ActTurn{
+				Bash:      clnkr.BashBatch{Commands: []clnkr.BashAction{{Command: "pwd", Workdir: "/tmp"}}},
+				Reasoning: "inspect",
+			},
+		},
+		{
+			name: "clarify",
+			raw:  `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":null,"reasoning":"need target"}}`,
+			want: &clnkr.ClarifyTurn{Question: "Which repo?", Reasoning: "need target"},
+		},
+		{
+			name: "done",
+			raw:  `{"turn":{"type":"done","bash":null,"question":null,"summary":"complete","reasoning":"tests passed"}}`,
+			want: &clnkr.DoneTurn{Summary: "complete", Reasoning: "tests passed"},
+		},
+		{
+			name:    "malformed wrapped act shape",
+			raw:     `{"turn":{"type":"act","bash":{"command":"pwd","workdir":null},"question":null,"summary":null,"reasoning":null}}`,
+			wantErr: clnkr.ErrInvalidJSON,
+		},
+		{
+			name:    "semantic invalid act",
+			raw:     `{"turn":{"type":"act","bash":{"commands":[{"command":"","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`,
+			wantErr: clnkr.ErrMissingCommand,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseProviderTurn(tt.raw)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("turn = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeMessagesForProvider(t *testing.T) {
+	messages := []clnkr.Message{
+		{Role: "user", Content: `{"type":"done","summary":"leave users alone"}`},
+		{Role: "assistant", Content: `{"type":"done","summary":"canonical","reasoning":"ok"}`},
+		{Role: "assistant", Content: `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":null,"reasoning":null}}`},
+		{Role: "assistant", Content: "plain text"},
+	}
+
+	got := NormalizeMessagesForProvider(messages)
+
+	if !reflect.DeepEqual(messages[0], got[0]) {
+		t.Fatalf("user message changed: %#v", got[0])
+	}
+	if got[1].Content != `{"turn":{"type":"done","bash":null,"question":null,"summary":"canonical","reasoning":"ok"}}` {
+		t.Fatalf("canonical assistant content = %q", got[1].Content)
+	}
+	if got[2].Content != `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":null,"reasoning":null}}` {
+		t.Fatalf("provider assistant content = %q", got[2].Content)
+	}
+	if got[3].Content != "plain text" {
+		t.Fatalf("plain assistant content = %q", got[3].Content)
+	}
+}
+
+func TestParseProviderTurnNormalizesEscapedHumanText(t *testing.T) {
+	clarify, err := ParseProviderTurn(`{"turn":{"type":"clarify","bash":null,"question":"First\\n\\\\- escaped","summary":null,"reasoning":"Because\\n\\\\* escaped"}}`)
+	if err != nil {
+		t.Fatalf("parse clarify: %v", err)
+	}
+	if got := clarify.(*clnkr.ClarifyTurn); got.Question != "First\n- escaped" || got.Reasoning != "Because\n* escaped" {
+		t.Fatalf("clarify = %#v", got)
+	}
+
+	done, err := ParseProviderTurn(`{"turn":{"type":"done","bash":null,"question":null,"summary":"Fixed\\n\\\\- item","reasoning":"Reason\\n\\\\* item"}}`)
+	if err != nil {
+		t.Fatalf("parse done: %v", err)
+	}
+	if got := done.(*clnkr.DoneTurn); got.Summary != "Fixed\n- item" || got.Reasoning != "Reason\n* item" {
+		t.Fatalf("done = %#v", got)
+	}
+}
+
+func commandArraySchema(includeMaxItems bool) map[string]any {
+	schema := map[string]any{
+		"type":     "array",
+		"minItems": 1,
+		"items": map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"command": map[string]any{"type": "string"},
+				"workdir": expectedNullableStringSchema(),
+			},
+			"required": []string{"command", "workdir"},
+		},
+	}
+	if includeMaxItems {
+		schema["maxItems"] = 3
+	}
+	return schema
+}
+
+func expectedNullableStringSchema() map[string]any {
+	return map[string]any{
+		"anyOf": []any{
+			map[string]any{"type": "string"},
+			map[string]any{"type": "null"},
+		},
+	}
+}
+
+func mustJSON(t *testing.T, value any) string {
+	t.Helper()
+
+	body, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal schema: %v", err)
+	}
+	return string(body)
+}
