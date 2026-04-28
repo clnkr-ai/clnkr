@@ -239,6 +239,19 @@ func TestDumpSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
 	}
 }
 
+func TestDumpNativeSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t, "--turn-protocol", "native-bash-tools", "--dump-system-prompt")
+	if err != nil {
+		t.Fatalf("dump native system prompt: %v\nstderr: %s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "call the bash tool exactly once") {
+		t.Fatalf("stdout missing native prompt: %q", stdout.String())
+	}
+	if strings.Contains(stderr.String(), "provider is required") {
+		t.Fatalf("stderr = %q, provider validation ran first", stderr.String())
+	}
+}
+
 func TestTrajectoryRequiresPromptBeforeProviderConfig(t *testing.T) {
 	stdout, stderr, err := runMainHelper(t, "--trajectory", filepath.Join(t.TempDir(), "trajectory.json"))
 	if err == nil {
@@ -722,6 +735,24 @@ func TestSingleTaskRejectsNumericFullSendFalse(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "--full-send=false conflicts with -p") {
 		t.Fatalf("stderr = %q, want full-send conflict", stderr.String())
+	}
+}
+
+func TestNativeTurnProtocolRequiresFullSendBeforeProviderConfig(t *testing.T) {
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{
+		"CLNKR_API_KEY=test-key",
+	}, "--turn-protocol", "native-bash-tools")
+	if err == nil {
+		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "--turn-protocol native-bash-tools requires --full-send=true or -p") {
+		t.Fatalf("stderr = %q, want full-send requirement", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "provider is required") {
+		t.Fatalf("stderr = %q, provider config ran first", stderr.String())
 	}
 }
 

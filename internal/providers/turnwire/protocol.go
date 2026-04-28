@@ -37,6 +37,14 @@ func RequestSchema(includeMaxItems bool) map[string]any {
 	return structuredOutputSchema(includeMaxItems)
 }
 
+func FinalTurnSchema() map[string]any {
+	return finalTurnSchema(false)
+}
+
+func DoneOnlySchema() map[string]any {
+	return finalTurnSchema(true)
+}
+
 func structuredOutputSchema(includeMaxItems bool) map[string]any {
 	return map[string]any{
 		"type":                 "object",
@@ -48,6 +56,23 @@ func structuredOutputSchema(includeMaxItems bool) map[string]any {
 					clarifyTurnSchema(),
 					doneTurnSchema(),
 				},
+			},
+		},
+		"required": []string{"turn"},
+	}
+}
+
+func finalTurnSchema(doneOnly bool) map[string]any {
+	choices := []any{doneTurnSchema()}
+	if !doneOnly {
+		choices = append([]any{clarifyTurnSchema()}, choices...)
+	}
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"turn": map[string]any{
+				"anyOf": choices,
 			},
 		},
 		"required": []string{"turn"},

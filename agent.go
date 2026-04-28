@@ -24,10 +24,18 @@ type Agent struct {
 	started  bool
 	Notify   func(Event)
 	MaxSteps int
+	Protocol TurnProtocol
 }
 
 func NewAgent(model Model, executor Executor, cwd string) *Agent {
 	return &Agent{model: model, executor: executor, cwd: cwd, MaxSteps: DefaultMaxSteps}
+}
+
+func cloneProviderReplay(items []ProviderReplayItem) []ProviderReplayItem {
+	if len(items) == 0 {
+		return nil
+	}
+	return transcript.CloneMessage(Message{ProviderReplay: items}).ProviderReplay
 }
 
 func (a *Agent) notify(e Event) {
@@ -37,9 +45,7 @@ func (a *Agent) notify(e Event) {
 }
 
 func (a *Agent) Messages() []Message {
-	cp := make([]Message, len(a.messages))
-	copy(cp, a.messages)
-	return cp
+	return transcript.CloneMessages(a.messages)
 }
 
 func (a *Agent) Cwd() string { return a.cwd }
@@ -53,8 +59,8 @@ func (a *Agent) AddMessages(msgs []Message) error {
 		return nil
 	}
 	combined := make([]Message, len(msgs)+len(a.messages))
-	copy(combined, msgs)
-	copy(combined[len(msgs):], a.messages)
+	copy(combined, transcript.CloneMessages(msgs))
+	copy(combined[len(msgs):], transcript.CloneMessages(a.messages))
 	a.messages = combined
 	a.restoreExecutionStateFromMessages()
 	return nil
@@ -90,6 +96,11 @@ func (a *Agent) appendSuccessfulResponse(resp *Response) error {
 		return fmt.Errorf("canonicalize model turn: %w", err)
 	}
 	a.messages = append(a.messages, Message{Role: "assistant", Content: canonicalText})
+	if len(resp.BashToolCalls) > 0 || len(resp.ProviderReplay) > 0 {
+		msg := &a.messages[len(a.messages)-1]
+		msg.BashToolCalls = append([]BashToolCall(nil), resp.BashToolCalls...)
+		msg.ProviderReplay = cloneProviderReplay(resp.ProviderReplay)
+	}
 	a.notify(EventResponse{Turn: resp.Turn, Usage: resp.Usage, Raw: resp.Raw})
 	return nil
 }
@@ -98,7 +109,7 @@ func (a *Agent) appendProtocolFailure(resp Response, addCorrection bool) {
 	a.messages = append(a.messages, Message{Role: "assistant", Content: resp.Raw})
 	a.notify(EventProtocolFailure{Reason: errorToReason(resp.ProtocolErr), Raw: resp.Raw})
 	if addCorrection {
-		a.messages = append(a.messages, Message{Role: "user", Content: protocolCorrectionMessage(resp.ProtocolErr)})
+		a.messages = append(a.messages, Message{Role: "user", Content: protocolCorrectionMessageFor(resp.ProtocolErr, a.Protocol)})
 	}
 }
 
@@ -117,13 +128,13 @@ func (a *Agent) Compact(ctx context.Context, compactor Compactor, opts CompactOp
 		keepRecentTurns = 2
 	}
 
-	transcriptMessages := a.messages
+	transcriptMessages := transcript.CloneMessages(a.messages)
 	boundary, ok := transcript.FindCompactBoundary(transcriptMessages, keepRecentTurns)
 	if !ok {
 		return CompactStats{}, fmt.Errorf("compact transcript: not enough history to compact")
 	}
 
-	prefix := append([]Message{}, a.messages[:boundary]...)
+	prefix := transcript.CloneMessages(a.messages[:boundary])
 	summary, err := compactor.Summarize(ctx, prefix)
 	if err != nil {
 		return CompactStats{}, fmt.Errorf("compact transcript: summarize prefix: %w", err)
@@ -154,7 +165,7 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	a.started = true
 	a.appendStateMessageIfNeeded()
 	a.notify(EventDebug{Message: "querying model..."})
-	resp, err := a.model.Query(ctx, a.messages)
+	resp, err := a.model.Query(ctx, transcript.CloneMessages(a.messages))
 	if err != nil {
 		return StepResult{}, fmt.Errorf("query model: %w", err)
 	}
@@ -225,7 +236,11 @@ func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, erro
 			Err:      commandErr,
 		})
 
-		a.messages = append(a.messages, Message{Role: "user", Content: payload})
+		msg := Message{Role: "user", Content: payload}
+		if action.ID != "" {
+			msg.BashToolResult = &BashToolResult{ID: action.ID, Content: payload}
+		}
+		a.messages = append(a.messages, msg)
 		outputs = append(outputs, payload)
 		if execErr = commandErr; execErr != nil {
 			break
@@ -242,7 +257,12 @@ func (a *Agent) RequestStepLimitSummary(ctx context.Context) error {
 	a.notify(EventDebug{Message: "step limit reached, requesting summary"})
 	a.AppendUserMessage("Step limit reached. Respond with " + protocolDoneExample + " summarizing your progress.")
 
-	resp, err := a.model.Query(ctx, a.messages)
+	queryMessages := transcript.CloneMessages(a.messages)
+	query := a.model.Query
+	if finalModel, ok := a.model.(FinalSummaryModel); ok {
+		query = finalModel.QueryFinal
+	}
+	resp, err := query(ctx, queryMessages)
 	if err != nil {
 		return fmt.Errorf("query model (final): %w", err)
 	}

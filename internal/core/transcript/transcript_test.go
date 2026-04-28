@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -105,7 +106,7 @@ func TestRewriteForCompactionKeepsRecentTail(t *testing.T) {
 		t.Fatalf("got %d messages, want %d", len(got), len(want))
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Fatalf("message %d = %#v, want %#v", i, got[i], want[i])
 		}
 	}
@@ -142,7 +143,7 @@ func TestRewriteForCompactionPreservesLatestState(t *testing.T) {
 		t.Fatalf("got %d messages, want %d", len(got), len(want))
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Fatalf("message %d = %#v, want %#v", i, got[i], want[i])
 		}
 	}
@@ -215,10 +216,10 @@ func TestRewriteForCompactionIgnoresForeignStateBlocks(t *testing.T) {
 	if len(got) < 3 {
 		t.Fatalf("got %d messages, want at least 3", len(got))
 	}
-	if got[1] != (Message{Role: "user", Content: FormatStateMessage("/tmp/latest")}) {
+	if !reflect.DeepEqual(got[1], Message{Role: "user", Content: FormatStateMessage("/tmp/latest")}) {
 		t.Fatalf("preserved state = %#v, want latest clnkr state", got[1])
 	}
-	if got[2] != (Message{Role: "user", Content: foreignState}) {
+	if !reflect.DeepEqual(got[2], Message{Role: "user", Content: foreignState}) {
 		t.Fatalf("foreign state tail message = %#v, want %#v", got[2], Message{Role: "user", Content: foreignState})
 	}
 }
@@ -242,7 +243,7 @@ func TestRewriteForCompactionHandlesExistingCompactBlock(t *testing.T) {
 	if len(got) == 0 {
 		t.Fatal("expected rewritten transcript")
 	}
-	if got[0] != (Message{Role: "user", Content: FormatCompactMessage("fresh summary", "new instructions")}) {
+	if !reflect.DeepEqual(got[0], Message{Role: "user", Content: FormatCompactMessage("fresh summary", "new instructions")}) {
 		t.Fatalf("first message = %#v, want new compact block", got[0])
 	}
 

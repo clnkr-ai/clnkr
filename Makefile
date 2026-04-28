@@ -31,8 +31,8 @@ CLANKERVAL_PREFLIGHT = \
 	_hooks _check-docs _require-pandoc _site-sync _site-build
 
 PREFIX ?= /usr/local
-CORE_SLOC_LIMIT := 1300
-FRONTEND_SLOC_LIMIT := 1300
+CORE_SLOC_LIMIT := 1450
+FRONTEND_SLOC_LIMIT := 1325
 DOC_MAN_DIR := build/docs/man
 DOC_MAN_OUTPUTS := $(DOC_MAN_DIR)/clnkr.1 $(DOC_MAN_DIR)/clnkr.7
 DOC_CONTENT_DIR := site/content/docs

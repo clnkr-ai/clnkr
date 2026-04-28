@@ -39,6 +39,7 @@ func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt s
 			anthropicOpts.Effort = opts.Effort.Level
 			anthropicOpts.ThinkingMode = anthropic.ThinkingModeAdaptive
 		}
+		anthropicOpts.NativeBashTools = cfg.TurnProtocol == clnkr.TurnProtocolNativeBashTools
 		return anthropic.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, anthropicOpts)
 	case cfg.ProviderAPI == providerdomain.ProviderAPIOpenAIResponses:
 		var effort string
@@ -49,6 +50,7 @@ func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt s
 			ReasoningEffort:    effort,
 			MaxOutputTokens:    opts.Output.MaxOutputTokens.Value,
 			HasMaxOutputTokens: opts.Output.MaxOutputTokens.Set,
+			NativeBashTools:    cfg.TurnProtocol == clnkr.TurnProtocolNativeBashTools,
 		})
 	default:
 		return openai.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
@@ -102,6 +104,7 @@ type RunMetadata struct {
 	ProviderAPI  providerdomain.ProviderAPI `json:"provider_api"`
 	Model        string                     `json:"model"`
 	PromptSHA256 string                     `json:"prompt_sha256"`
+	TurnProtocol clnkr.TurnProtocol         `json:"turn_protocol"`
 	Requested    ProviderRequestMetadata    `json:"requested"`
 	Effective    ProviderRequestMetadata    `json:"effective"`
 	Compaction   CompactionMetadata         `json:"compaction"`
@@ -144,6 +147,7 @@ func NewRunMetadata(version string, cfg providerconfig.ResolvedProviderConfig, s
 		ProviderAPI:  cfg.ProviderAPI,
 		Model:        cfg.Model,
 		PromptSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(systemPrompt))),
+		TurnProtocol: cfg.TurnProtocol,
 		Requested:    providerRequestMetadata(opts, !opts.Effort.Set),
 		Effective:    providerRequestMetadata(opts, !opts.Effort.Set || opts.Effort.Level == "auto"),
 		Compaction:   CompactionMetadata{Policy: "manual", KeepRecentTurns: 2},

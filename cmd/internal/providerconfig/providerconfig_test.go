@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/clnkr-ai/clnkr"
 	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
 )
 
@@ -226,6 +227,44 @@ func TestResolveConfigKnownOpenAIResponsesModels(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveConfigTurnProtocol(t *testing.T) {
+	t.Run("defaults structured json", func(t *testing.T) {
+		cfg, err := ResolveConfig(Inputs{Provider: "anthropic", Model: "claude-sonnet-4-6"}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
+		if err != nil {
+			t.Fatalf("ResolveConfig: %v", err)
+		}
+		if cfg.TurnProtocol != clnkr.TurnProtocolStructuredJSON {
+			t.Fatalf("TurnProtocol = %q, want structured-json", cfg.TurnProtocol)
+		}
+	})
+
+	t.Run("accepts anthropic native bash tools", func(t *testing.T) {
+		cfg, err := ResolveConfig(Inputs{
+			Provider:     "anthropic",
+			Model:        "claude-sonnet-4-6",
+			TurnProtocol: clnkr.TurnProtocolNativeBashTools,
+		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
+		if err != nil {
+			t.Fatalf("ResolveConfig: %v", err)
+		}
+		if cfg.TurnProtocol != clnkr.TurnProtocolNativeBashTools {
+			t.Fatalf("TurnProtocol = %q, want native-bash-tools", cfg.TurnProtocol)
+		}
+	})
+
+	t.Run("rejects openai chat completions native bash tools", func(t *testing.T) {
+		_, err := ResolveConfig(Inputs{
+			Provider:     "openai",
+			ProviderAPI:  "openai-chat-completions",
+			Model:        "proxy-model",
+			TurnProtocol: clnkr.TurnProtocolNativeBashTools,
+		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
+		if err == nil || !strings.Contains(err.Error(), "native-bash-tools") {
+			t.Fatalf("ResolveConfig err = %v, want native rejection", err)
+		}
+	})
 }
 
 func TestResolveConfigOpenAIStyleModelsUseResponses(t *testing.T) {

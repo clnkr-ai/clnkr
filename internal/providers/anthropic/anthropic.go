@@ -34,6 +34,7 @@ type Model struct {
 	thinkingBudgetTokens int
 	thinkingMode         ThinkingMode
 	effort               string
+	nativeBashTools      bool
 	client               *http.Client
 }
 
@@ -44,6 +45,7 @@ type Options struct {
 	ThinkingBudgetTokens int
 	ThinkingMode         ThinkingMode
 	Effort               string
+	NativeBashTools      bool
 }
 
 // NewModel sets up an Anthropic adapter.
@@ -66,26 +68,33 @@ func NewModelWithOptions(baseURL, apiKey, model, systemPrompt string, opts Optio
 		thinkingBudgetTokens: opts.ThinkingBudgetTokens,
 		thinkingMode:         opts.ThinkingMode,
 		effort:               opts.Effort,
+		nativeBashTools:      opts.NativeBashTools,
 		client:               &http.Client{Timeout: 240 * time.Second},
 	}
 }
 
 type request struct {
-	Model        string           `json:"model"`
-	MaxTokens    int              `json:"max_tokens"`
-	System       string           `json:"system,omitempty"`
-	Messages     []clnkr.Message  `json:"messages"`
-	OutputConfig *outputConfig    `json:"output_config,omitempty"`
-	Thinking     *thinkingOptions `json:"thinking,omitempty"`
+	Model        string             `json:"model"`
+	MaxTokens    int                `json:"max_tokens"`
+	System       string             `json:"system,omitempty"`
+	Messages     []anthropicMessage `json:"messages"`
+	OutputConfig *outputConfig      `json:"output_config,omitempty"`
+	Thinking     *thinkingOptions   `json:"thinking,omitempty"`
+	Tools        []anthropicTool    `json:"tools,omitempty"`
 }
 
 type textRequest struct {
-	Model        string           `json:"model"`
-	MaxTokens    int              `json:"max_tokens"`
-	System       string           `json:"system,omitempty"`
-	Messages     []clnkr.Message  `json:"messages"`
-	OutputConfig *outputConfig    `json:"output_config,omitempty"`
-	Thinking     *thinkingOptions `json:"thinking,omitempty"`
+	Model        string             `json:"model"`
+	MaxTokens    int                `json:"max_tokens"`
+	System       string             `json:"system,omitempty"`
+	Messages     []anthropicMessage `json:"messages"`
+	OutputConfig *outputConfig      `json:"output_config,omitempty"`
+	Thinking     *thinkingOptions   `json:"thinking,omitempty"`
+}
+
+type anthropicMessage struct {
+	Role    string `json:"role"`
+	Content any    `json:"content"`
 }
 
 type outputConfig struct {
@@ -103,6 +112,12 @@ type thinkingOptions struct {
 	BudgetTokens int    `json:"budget_tokens,omitempty"`
 }
 
+type anthropicTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"input_schema"`
+}
+
 type response struct {
 	Content []contentBlock `json:"content"`
 	Usage   struct {
@@ -112,8 +127,11 @@ type response struct {
 }
 
 type contentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type  string          `json:"type"`
+	ID    string          `json:"id,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
+	Text  string          `json:"text,omitempty"`
 }
 
 const maxResponseBytes = 1 << 20 // 1MB
@@ -142,9 +160,16 @@ func extractErrorMessage(body []byte) string {
 }
 
 func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
-	messages = normalizeMessagesForProvider(messages)
+	var tools []anthropicTool
+	schema := requestSchema()
+	mappedMessages := mapTextMessages(messages)
+	if m.nativeBashTools {
+		tools = []anthropicTool{bashToolSchema()}
+		schema = finalTurnSchema()
+		mappedMessages = mapNativeMessages(messages)
+	}
 
-	outputCfg := &outputConfig{Format: &outputFormat{Type: "json_schema", Schema: requestSchema()}}
+	outputCfg := &outputConfig{Format: &outputFormat{Type: "json_schema", Schema: schema}}
 	if m.effort != "" {
 		outputCfg.Effort = m.effort
 	}
@@ -153,9 +178,10 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 		Model:        m.model,
 		MaxTokens:    m.maxTokens,
 		System:       m.systemPrompt,
-		Messages:     messages,
+		Messages:     mappedMessages,
 		OutputConfig: outputCfg,
 		Thinking:     m.thinkingOptions(),
+		Tools:        tools,
 	})
 	if err != nil {
 		return clnkr.Response{}, fmt.Errorf("marshal request: %w", err)
@@ -169,6 +195,10 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 	var apiResp response
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
 		return clnkr.Response{}, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	if m.nativeBashTools {
+		return parseNativeResponse(apiResp, respBody)
 	}
 
 	text, textBlocks := extractTextBlocks(apiResp.Content)
@@ -196,6 +226,136 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 	}, nil
 }
 
+func (m *Model) QueryFinal(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
+	outputCfg := &outputConfig{Format: &outputFormat{Type: "json_schema", Schema: doneOnlySchema()}}
+	if m.effort != "" {
+		outputCfg.Effort = m.effort
+	}
+	body, err := json.Marshal(request{
+		Model:        m.model,
+		MaxTokens:    m.maxTokens,
+		System:       m.systemPrompt,
+		Messages:     mapRawMessages(messages),
+		OutputConfig: outputCfg,
+		Thinking:     m.thinkingOptions(),
+	})
+	if err != nil {
+		return clnkr.Response{}, fmt.Errorf("marshal request: %w", err)
+	}
+
+	respBody, err := m.doRequest(ctx, body)
+	if err != nil {
+		return clnkr.Response{}, err
+	}
+
+	var apiResp response
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return clnkr.Response{}, fmt.Errorf("unmarshal response: %w", err)
+	}
+	return parseStructuredResponse(apiResp, "structured output response")
+}
+
+func parseStructuredResponse(apiResp response, context string) (clnkr.Response, error) {
+	text, textBlocks := extractTextBlocks(apiResp.Content)
+	if textBlocks != 1 {
+		return clnkr.Response{}, fmt.Errorf("%s: expected exactly one text block, got %d", context, textBlocks)
+	}
+	if strings.TrimSpace(text) == "" {
+		return clnkr.Response{}, fmt.Errorf("%s: empty text payload", context)
+	}
+	turn, err := parseProviderTurn(text)
+	if err != nil {
+		return clnkr.Response{
+			Raw:         text,
+			Usage:       clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens},
+			ProtocolErr: err,
+		}, nil
+	}
+	if _, err := clnkr.CanonicalTurnJSON(turn); err != nil {
+		return clnkr.Response{}, fmt.Errorf("%s: canonicalize turn payload: %w", context, err)
+	}
+	return clnkr.Response{
+		Turn:  turn,
+		Raw:   text,
+		Usage: clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens},
+	}, nil
+}
+
+func parseNativeResponse(apiResp response, raw []byte) (clnkr.Response, error) {
+	usage := clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens}
+	var toolUses []contentBlock
+	var text strings.Builder
+	for _, block := range apiResp.Content {
+		switch block.Type {
+		case "tool_use":
+			toolUses = append(toolUses, block)
+		case "text":
+			text.WriteString(block.Text)
+		}
+	}
+	outputText := text.String()
+	if len(toolUses) > 0 && strings.TrimSpace(outputText) != "" {
+		return clnkr.Response{Raw: string(raw), Usage: usage, ProtocolErr: fmt.Errorf("%w: mixed bash tool use and structured text", clnkr.ErrInvalidJSON)}, nil
+	}
+	if len(toolUses) > 1 {
+		return clnkr.Response{Raw: string(raw), Usage: usage, ProtocolErr: fmt.Errorf("%w: multiple bash tool calls", clnkr.ErrTooManyCommands)}, nil
+	}
+	if len(toolUses) == 1 {
+		turn, call, err := turnFromToolUse(toolUses[0])
+		if err != nil {
+			return clnkr.Response{Raw: string(raw), Usage: usage, ProtocolErr: err}, nil
+		}
+		return clnkr.Response{
+			Turn:          turn,
+			Raw:           string(raw),
+			Usage:         usage,
+			BashToolCalls: []clnkr.BashToolCall{call},
+		}, nil
+	}
+	if strings.TrimSpace(outputText) == "" {
+		return clnkr.Response{}, fmt.Errorf("native structured output response: missing text block or tool_use")
+	}
+	turn, err := parseProviderTurn(outputText)
+	if err != nil {
+		return clnkr.Response{Raw: outputText, Usage: usage, ProtocolErr: err}, nil
+	}
+	if _, ok := turn.(*clnkr.ActTurn); ok {
+		return clnkr.Response{Raw: outputText, Usage: usage, ProtocolErr: fmt.Errorf("%w: native bash tool mode does not accept text act turns", clnkr.ErrInvalidJSON)}, nil
+	}
+	if _, err := clnkr.CanonicalTurnJSON(turn); err != nil {
+		return clnkr.Response{}, fmt.Errorf("native structured output response: canonicalize turn payload: %w", err)
+	}
+	return clnkr.Response{Turn: turn, Raw: outputText, Usage: usage}, nil
+}
+
+func turnFromToolUse(block contentBlock) (clnkr.Turn, clnkr.BashToolCall, error) {
+	if strings.TrimSpace(block.ID) == "" {
+		return nil, clnkr.BashToolCall{}, fmt.Errorf("%w: bash tool use missing id", clnkr.ErrInvalidJSON)
+	}
+	if block.Name != "bash" {
+		return nil, clnkr.BashToolCall{}, fmt.Errorf("%w: unsupported tool %q", clnkr.ErrInvalidJSON, block.Name)
+	}
+	var input struct {
+		Command string  `json:"command"`
+		Workdir *string `json:"workdir"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(block.Input))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&input); err != nil {
+		return nil, clnkr.BashToolCall{}, fmt.Errorf("%w: malformed bash tool input: %v", clnkr.ErrInvalidJSON, err)
+	}
+	if strings.TrimSpace(input.Command) == "" {
+		return nil, clnkr.BashToolCall{}, clnkr.ErrMissingCommand
+	}
+	call := clnkr.BashToolCall{ID: block.ID, Command: input.Command}
+	action := clnkr.BashAction{ID: block.ID, Command: input.Command}
+	if input.Workdir != nil {
+		call.Workdir = *input.Workdir
+		action.Workdir = *input.Workdir
+	}
+	return &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: []clnkr.BashAction{action}}}, call, nil
+}
+
 func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string, error) {
 	var outputCfg *outputConfig
 	if m.effort != "" {
@@ -205,7 +365,7 @@ func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string
 		Model:        m.model,
 		MaxTokens:    m.maxTokens,
 		System:       m.systemPrompt,
-		Messages:     messages,
+		Messages:     mapRawMessages(messages),
 		OutputConfig: outputCfg,
 		Thinking:     m.thinkingOptions(),
 	})
@@ -230,6 +390,85 @@ func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string
 		return "", fmt.Errorf("free-form response: empty text payload")
 	}
 	return text, nil
+}
+
+func mapTextMessages(messages []clnkr.Message) []anthropicMessage {
+	normalized := normalizeMessagesForProvider(messages)
+	return mapRawMessages(normalized)
+}
+
+func mapRawMessages(messages []clnkr.Message) []anthropicMessage {
+	mapped := make([]anthropicMessage, 0, len(messages))
+	for _, msg := range messages {
+		mapped = append(mapped, anthropicMessage{Role: msg.Role, Content: msg.Content})
+	}
+	return mapped
+}
+
+func mapNativeMessages(messages []clnkr.Message) []anthropicMessage {
+	normalized := normalizeMessagesForProvider(messages)
+	mapped := make([]anthropicMessage, 0, len(normalized))
+	knownCalls := make(map[string]struct{})
+	for _, msg := range normalized {
+		if msg.Role == "assistant" && len(msg.BashToolCalls) > 0 {
+			blocks := make([]map[string]any, 0, len(msg.BashToolCalls))
+			for _, call := range msg.BashToolCalls {
+				knownCalls[call.ID] = struct{}{}
+				blocks = append(blocks, toolUseBlock(call))
+			}
+			mapped = append(mapped, anthropicMessage{Role: "assistant", Content: blocks})
+			continue
+		}
+		if msg.BashToolResult != nil {
+			if _, ok := knownCalls[msg.BashToolResult.ID]; ok {
+				mapped = append(mapped, anthropicMessage{
+					Role: "user",
+					Content: []map[string]any{{
+						"type":        "tool_result",
+						"tool_use_id": msg.BashToolResult.ID,
+						"content":     msg.BashToolResult.Content,
+					}},
+				})
+				continue
+			}
+		}
+		mapped = append(mapped, anthropicMessage{Role: msg.Role, Content: msg.Content})
+	}
+	return mapped
+}
+
+func toolUseBlock(call clnkr.BashToolCall) map[string]any {
+	input := map[string]any{"command": call.Command, "workdir": nil}
+	if call.Workdir != "" {
+		input["workdir"] = call.Workdir
+	}
+	return map[string]any{
+		"type":  "tool_use",
+		"id":    call.ID,
+		"name":  "bash",
+		"input": input,
+	}
+}
+
+func bashToolSchema() anthropicTool {
+	return anthropicTool{
+		Name:        "bash",
+		Description: "Run one bash command in the current clnkr shell session.",
+		InputSchema: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"command": map[string]any{"type": "string"},
+				"workdir": map[string]any{
+					"anyOf": []any{
+						map[string]any{"type": "string"},
+						map[string]any{"type": "null"},
+					},
+				},
+			},
+			"required": []string{"command", "workdir"},
+		},
+	}
 }
 
 func (m *Model) thinkingOptions() *thinkingOptions {

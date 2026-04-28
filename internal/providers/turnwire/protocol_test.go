@@ -95,6 +95,30 @@ func TestRequestSchema(t *testing.T) {
 	}
 }
 
+func TestFinalTurnSchemasExcludeAct(t *testing.T) {
+	schema := FinalTurnSchema()
+	choices := schema["properties"].(map[string]any)["turn"].(map[string]any)["anyOf"].([]any)
+	if len(choices) != 2 {
+		t.Fatalf("FinalTurnSchema choices = %d, want clarify and done", len(choices))
+	}
+	for _, choice := range choices {
+		typ := choice.(map[string]any)["properties"].(map[string]any)["type"].(map[string]any)["const"]
+		if typ == "act" {
+			t.Fatalf("FinalTurnSchema includes act: %#v", schema)
+		}
+	}
+
+	doneOnly := DoneOnlySchema()
+	doneChoices := doneOnly["properties"].(map[string]any)["turn"].(map[string]any)["anyOf"].([]any)
+	if len(doneChoices) != 1 {
+		t.Fatalf("DoneOnlySchema choices = %d, want done only", len(doneChoices))
+	}
+	typ := doneChoices[0].(map[string]any)["properties"].(map[string]any)["type"].(map[string]any)["const"]
+	if typ != "done" {
+		t.Fatalf("DoneOnlySchema turn type = %#v, want done", typ)
+	}
+}
+
 func TestParseProviderTurn(t *testing.T) {
 	tests := []struct {
 		name    string

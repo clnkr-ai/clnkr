@@ -549,6 +549,133 @@ func TestModelQueryErrorsOnMissingOutputText(t *testing.T) {
 	}
 }
 
+func TestModelQueryNativeBashTools(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": []map[string]any{
+				{"type": "reasoning", "id": "rs_1", "summary": []any{}},
+				{"type": "function_call", "call_id": "call_1", "name": "bash", "arguments": `{"command":"pwd","workdir":null}`, "status": "completed"},
+			},
+			"usage": map[string]any{"input_tokens": 3, "output_tokens": 4},
+		})
+	}))
+	defer server.Close()
+
+	model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{NativeBashTools: true})
+	resp, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "where"}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+
+	if gotBody["parallel_tool_calls"] != false {
+		t.Fatalf("parallel_tool_calls = %#v, want false", gotBody["parallel_tool_calls"])
+	}
+	tools, ok := gotBody["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("tools = %#v, want one bash tool", gotBody["tools"])
+	}
+	tool := tools[0].(map[string]any)
+	if tool["type"] != "function" || tool["name"] != "bash" || tool["strict"] != true {
+		t.Fatalf("tool = %#v, want strict bash function", tool)
+	}
+	params := tool["parameters"].(map[string]any)
+	if params["additionalProperties"] != false {
+		t.Fatalf("additionalProperties = %#v, want false", params["additionalProperties"])
+	}
+	required := params["required"].([]any)
+	if len(required) != 2 || required[0] != "command" || required[1] != "workdir" {
+		t.Fatalf("required = %#v, want command/workdir", required)
+	}
+
+	act, ok := resp.Turn.(*clnkr.ActTurn)
+	if !ok {
+		t.Fatalf("Turn = %T, want *ActTurn", resp.Turn)
+	}
+	if got := act.Bash.Commands[0]; got.ID != "call_1" || got.Command != "pwd" {
+		t.Fatalf("command = %#v, want native ID and command", got)
+	}
+	if len(resp.BashToolCalls) != 1 || resp.BashToolCalls[0].ID != "call_1" {
+		t.Fatalf("BashToolCalls = %#v", resp.BashToolCalls)
+	}
+	if len(resp.ProviderReplay) != 1 || resp.ProviderReplay[0].Type != "reasoning" {
+		t.Fatalf("ProviderReplay = %#v", resp.ProviderReplay)
+	}
+}
+
+func TestModelQueryNativeReplaysToolMessagesWithoutDuplicateText(t *testing.T) {
+	var gotInput []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		data, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(data, &body)
+		gotInput = body["input"].([]any)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": []map[string]any{{
+				"type": "message", "role": "assistant",
+				"content": []map[string]any{{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","reasoning":null}}`}},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{NativeBashTools: true})
+	_, err := model.Query(context.Background(), []clnkr.Message{
+		{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]}}`, BashToolCalls: []clnkr.BashToolCall{{ID: "call_1", Command: "pwd"}}, ProviderReplay: []clnkr.ProviderReplayItem{{
+			Provider: "openai", ProviderAPI: "openai-responses", Type: "reasoning", JSON: json.RawMessage(`{"type":"reasoning","id":"rs_1","summary":[]}`),
+		}}},
+		{Role: "user", Content: "payload", BashToolResult: &clnkr.BashToolResult{ID: "call_1", Content: "payload"}},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(gotInput) != 3 {
+		t.Fatalf("input = %#v, want reasoning, function call, and output only", gotInput)
+	}
+	first := gotInput[0].(map[string]any)
+	second := gotInput[1].(map[string]any)
+	third := gotInput[2].(map[string]any)
+	if first["type"] != "reasoning" || first["id"] != "rs_1" {
+		t.Fatalf("first input = %#v, want opaque reasoning replay", first)
+	}
+	if second["type"] != "function_call" || second["call_id"] != "call_1" {
+		t.Fatalf("second input = %#v, want function_call", second)
+	}
+	if third["type"] != "function_call_output" || third["output"] != "payload" {
+		t.Fatalf("third input = %#v, want function_call_output", third)
+	}
+}
+
+func TestModelQueryFinalOmitsNativeBashTool(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(data, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": []map[string]any{{
+				"type": "message", "role": "assistant",
+				"content": []map[string]any{{"type": "output_text", "text": `{"turn":{"type":"done","summary":"final","reasoning":null}}`}},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{NativeBashTools: true})
+	if _, err := model.QueryFinal(context.Background(), []clnkr.Message{{Role: "user", Content: "summarize"}}); err != nil {
+		t.Fatalf("QueryFinal: %v", err)
+	}
+	if _, ok := gotBody["tools"]; ok {
+		t.Fatalf("tools = %#v, want omitted", gotBody["tools"])
+	}
+	schema := gotBody["text"].(map[string]any)["format"].(map[string]any)["schema"].(map[string]any)
+	choices := schema["properties"].(map[string]any)["turn"].(map[string]any)["anyOf"].([]any)
+	if len(choices) != 1 {
+		t.Fatalf("final schema choices = %#v, want done only", choices)
+	}
+}
+
 func mustCanonicalTurn(t *testing.T, turn clnkr.Turn) string {
 	t.Helper()
 

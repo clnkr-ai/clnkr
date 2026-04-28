@@ -26,6 +26,7 @@ type Model struct {
 	reasoningEffort    string
 	maxOutputTokens    int
 	hasMaxOutputTokens bool
+	nativeBashTools    bool
 	client             *http.Client
 }
 
@@ -33,6 +34,7 @@ type Options struct {
 	ReasoningEffort    string
 	MaxOutputTokens    int
 	HasMaxOutputTokens bool
+	NativeBashTools    bool
 }
 
 // NewModel sets up an OpenAI Responses adapter.
@@ -50,6 +52,7 @@ func NewModelWithOptions(baseURL, apiKey, model, systemPrompt string, opts Optio
 		reasoningEffort:    opts.ReasoningEffort,
 		maxOutputTokens:    opts.MaxOutputTokens,
 		hasMaxOutputTokens: opts.HasMaxOutputTokens,
+		nativeBashTools:    opts.NativeBashTools,
 		client:             &http.Client{Timeout: 240 * time.Second},
 	}
 }
@@ -61,6 +64,8 @@ type request struct {
 	Text            *textOptions         `json:"text,omitempty"`
 	Reasoning       *reasoningOptions    `json:"reasoning,omitempty"`
 	MaxOutputTokens *int                 `json:"max_output_tokens,omitempty"`
+	Tools           []openAITool         `json:"tools,omitempty"`
+	ParallelTools   *bool                `json:"parallel_tool_calls,omitempty"`
 }
 
 type textOptions struct {
@@ -78,12 +83,33 @@ type responseFormat struct {
 	Schema map[string]any `json:"schema"`
 }
 
+type openAITool struct {
+	Type        string         `json:"type"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Strict      bool           `json:"strict"`
+	Parameters  map[string]any `json:"parameters"`
+}
+
 type responsesInputItem struct {
-	Type    string                 `json:"type,omitempty"`
-	ID      string                 `json:"id,omitempty"`
-	Role    string                 `json:"role"`
-	Status  string                 `json:"status,omitempty"`
-	Content []responsesContentItem `json:"content"`
+	Raw       json.RawMessage        `json:"-"`
+	Type      string                 `json:"type,omitempty"`
+	ID        string                 `json:"id,omitempty"`
+	CallID    string                 `json:"call_id,omitempty"`
+	Name      string                 `json:"name,omitempty"`
+	Arguments string                 `json:"arguments,omitempty"`
+	Output    string                 `json:"output,omitempty"`
+	Role      string                 `json:"role,omitempty"`
+	Status    string                 `json:"status,omitempty"`
+	Content   []responsesContentItem `json:"content,omitempty"`
+}
+
+func (i responsesInputItem) MarshalJSON() ([]byte, error) {
+	if len(i.Raw) > 0 {
+		return i.Raw, nil
+	}
+	type alias responsesInputItem
+	return json.Marshal(alias(i))
 }
 
 type responsesContentItem struct {
@@ -93,17 +119,23 @@ type responsesContentItem struct {
 }
 
 type response struct {
-	Output []outputItem `json:"output"`
-	Usage  struct {
+	Output    []outputItem      `json:"output"`
+	RawOutput []json.RawMessage `json:"-"`
+	Usage     struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage"`
 }
 
 type outputItem struct {
-	Type    string         `json:"type"`
-	Role    string         `json:"role"`
-	Content []responseItem `json:"content"`
+	Type      string         `json:"type"`
+	ID        string         `json:"id"`
+	CallID    string         `json:"call_id"`
+	Name      string         `json:"name"`
+	Arguments string         `json:"arguments"`
+	Status    string         `json:"status"`
+	Role      string         `json:"role"`
+	Content   []responseItem `json:"content"`
 }
 
 type responseItem struct {
@@ -113,24 +145,47 @@ type responseItem struct {
 }
 
 const (
-	maxResponseBytes = 1 << 20 // 1MB
-	maxAttempts      = 5
-	baseRetryDelay   = time.Second
+	maxResponseBytes  = 1 << 20 // 1MB
+	maxAttempts       = 5
+	baseRetryDelay    = time.Second
+	replayProvider    = "openai"
+	replayProviderAPI = "openai-responses"
 )
 
 func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
+	schema := openaiwire.RequestSchema()
+	input := mapMessages(messages)
+	var tools []openAITool
+	var parallelTools *bool
+	if m.nativeBashTools {
+		schema = openaiwire.FinalTurnSchema()
+		input = mapNativeMessages(messages)
+		noParallel := false
+		parallelTools = &noParallel
+		tools = []openAITool{bashToolSchema()}
+	}
+	return m.queryStructured(ctx, input, schema, tools, parallelTools)
+}
+
+func (m *Model) QueryFinal(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
+	return m.queryStructured(ctx, mapMessages(messages), openaiwire.DoneOnlySchema(), nil, nil)
+}
+
+func (m *Model) queryStructured(ctx context.Context, input []responsesInputItem, schema map[string]any, tools []openAITool, parallelTools *bool) (clnkr.Response, error) {
 	body, err := json.Marshal(request{
 		Model:           m.model,
 		Instructions:    m.systemPrompt,
-		Input:           mapMessages(messages),
+		Input:           input,
 		Reasoning:       m.reasoningOptions(),
 		MaxOutputTokens: m.maxOutputTokensValue(),
+		Tools:           tools,
+		ParallelTools:   parallelTools,
 		Text: &textOptions{
 			Format: &responseFormat{
 				Type:   "json_schema",
 				Name:   "agent_turn",
 				Strict: true,
-				Schema: openaiwire.RequestSchema(),
+				Schema: schema,
 			},
 		},
 	})
@@ -144,6 +199,9 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 			return clnkr.Response{}, err
 		}
 		if statusCode == http.StatusOK {
+			if m.nativeBashTools && len(tools) > 0 {
+				return parseNativeResponse(respBody)
+			}
 			return parseStructuredResponse(respBody)
 		}
 
@@ -240,6 +298,106 @@ func mapMessages(messages []clnkr.Message) []responsesInputItem {
 	return input
 }
 
+func mapNativeMessages(messages []clnkr.Message) []responsesInputItem {
+	normalized := openaiwire.NormalizeMessagesForProvider(messages)
+	input := make([]responsesInputItem, 0, len(normalized))
+	knownCalls := make(map[string]struct{})
+	assistantIndex := 0
+	for _, msg := range normalized {
+		if msg.Role == "assistant" && len(msg.BashToolCalls) > 0 {
+			for _, item := range msg.ProviderReplay {
+				if item.Provider == replayProvider && item.ProviderAPI == replayProviderAPI && len(item.JSON) > 0 {
+					input = append(input, responsesInputItem{Raw: append(json.RawMessage(nil), item.JSON...)})
+				}
+			}
+			for _, call := range msg.BashToolCalls {
+				knownCalls[call.ID] = struct{}{}
+				input = append(input, functionCallInput(call))
+			}
+			continue
+		}
+		if msg.BashToolResult != nil {
+			if _, ok := knownCalls[msg.BashToolResult.ID]; ok {
+				input = append(input, responsesInputItem{
+					Type:   "function_call_output",
+					CallID: msg.BashToolResult.ID,
+					Output: msg.BashToolResult.Content,
+				})
+				continue
+			}
+		}
+		if msg.Role == "assistant" {
+			assistantIndex++
+			annotations := []any{}
+			input = append(input, responsesInputItem{
+				Type:   "message",
+				ID:     fmt.Sprintf("msg_prev_%d", assistantIndex),
+				Role:   "assistant",
+				Status: "completed",
+				Content: []responsesContentItem{{
+					Type:        "output_text",
+					Text:        msg.Content,
+					Annotations: &annotations,
+				}},
+			})
+			continue
+		}
+		input = append(input, responsesInputItem{
+			Type: "message",
+			Role: msg.Role,
+			Content: []responsesContentItem{{
+				Type: "input_text",
+				Text: msg.Content,
+			}},
+		})
+	}
+	return input
+}
+
+func functionCallInput(call clnkr.BashToolCall) responsesInputItem {
+	args := struct {
+		Command string  `json:"command"`
+		Workdir *string `json:"workdir"`
+	}{Command: call.Command}
+	if call.Workdir != "" {
+		args.Workdir = &call.Workdir
+	}
+	body, err := json.Marshal(args)
+	if err != nil {
+		body = []byte(`{"command":"","workdir":null}`)
+	}
+	return responsesInputItem{
+		Type:      "function_call",
+		CallID:    call.ID,
+		Name:      "bash",
+		Arguments: string(body),
+		Status:    "completed",
+	}
+}
+
+func bashToolSchema() openAITool {
+	return openAITool{
+		Type:        "function",
+		Name:        "bash",
+		Description: "Run one bash command in the current clnkr shell session.",
+		Strict:      true,
+		Parameters: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"command": map[string]any{"type": "string"},
+				"workdir": map[string]any{
+					"anyOf": []any{
+						map[string]any{"type": "string"},
+						map[string]any{"type": "null"},
+					},
+				},
+			},
+			"required": []string{"command", "workdir"},
+		},
+	}
+}
+
 func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, int, string, error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", endpointURL(m.baseURL, "/responses"), bytes.NewReader(body))
 	if err != nil {
@@ -306,6 +464,132 @@ func parseStructuredResponse(respBody []byte) (clnkr.Response, error) {
 		Raw:   text,
 		Usage: usage,
 	}, nil
+}
+
+func parseNativeResponse(respBody []byte) (clnkr.Response, error) {
+	apiResp, err := unmarshalResponse(respBody)
+	if err != nil {
+		return clnkr.Response{}, err
+	}
+	usage := clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens}
+
+	var calls []outputItem
+	var text strings.Builder
+	replay := make([]clnkr.ProviderReplayItem, 0)
+	for i, item := range apiResp.Output {
+		switch item.Type {
+		case "function_call":
+			calls = append(calls, item)
+		case "message":
+			if item.Role != "assistant" {
+				continue
+			}
+			for _, content := range item.Content {
+				switch content.Type {
+				case "output_text":
+					text.WriteString(content.Text)
+				case "refusal":
+					if strings.TrimSpace(content.Refusal) != "" {
+						return clnkr.Response{}, fmt.Errorf("native structured output refusal: %s", content.Refusal)
+					}
+				}
+			}
+		default:
+			if i < len(apiResp.RawOutput) {
+				replay = append(replay, clnkr.ProviderReplayItem{
+					Provider:    replayProvider,
+					ProviderAPI: replayProviderAPI,
+					Type:        item.Type,
+					JSON:        append(json.RawMessage(nil), apiResp.RawOutput[i]...),
+				})
+			}
+		}
+	}
+
+	outputText := text.String()
+	if len(calls) > 0 && strings.TrimSpace(outputText) != "" {
+		return clnkr.Response{Raw: string(respBody), Usage: usage, ProtocolErr: fmt.Errorf("%w: mixed bash tool call and structured text", clnkr.ErrInvalidJSON)}, nil
+	}
+	if len(calls) > 1 {
+		return clnkr.Response{Raw: string(respBody), Usage: usage, ProtocolErr: fmt.Errorf("%w: multiple bash tool calls", clnkr.ErrTooManyCommands)}, nil
+	}
+	if len(calls) == 1 {
+		turn, call, err := turnFromFunctionCall(calls[0])
+		if err != nil {
+			return clnkr.Response{Raw: string(respBody), Usage: usage, ProtocolErr: err}, nil
+		}
+		return clnkr.Response{
+			Turn:           turn,
+			Raw:            string(respBody),
+			Usage:          usage,
+			BashToolCalls:  []clnkr.BashToolCall{call},
+			ProviderReplay: replay,
+		}, nil
+	}
+	if strings.TrimSpace(outputText) == "" {
+		return clnkr.Response{}, fmt.Errorf("native structured output response: no usable output_text or bash tool call")
+	}
+	turn, err := openaiwire.ParseProviderTurn(outputText)
+	if err != nil {
+		return clnkr.Response{Raw: outputText, Usage: usage, ProtocolErr: err}, nil
+	}
+	if _, ok := turn.(*clnkr.ActTurn); ok {
+		return clnkr.Response{Raw: outputText, Usage: usage, ProtocolErr: fmt.Errorf("%w: native bash tool mode does not accept text act turns", clnkr.ErrInvalidJSON)}, nil
+	}
+	if _, err := clnkr.CanonicalTurnJSON(turn); err != nil {
+		return clnkr.Response{}, fmt.Errorf("canonicalize native structured output payload: %w", err)
+	}
+	return clnkr.Response{Turn: turn, Raw: outputText, Usage: usage}, nil
+}
+
+func turnFromFunctionCall(item outputItem) (clnkr.Turn, clnkr.BashToolCall, error) {
+	if strings.TrimSpace(item.CallID) == "" {
+		return nil, clnkr.BashToolCall{}, fmt.Errorf("%w: bash tool call missing call_id", clnkr.ErrInvalidJSON)
+	}
+	if item.Name != "bash" {
+		return nil, clnkr.BashToolCall{}, fmt.Errorf("%w: unsupported tool %q", clnkr.ErrInvalidJSON, item.Name)
+	}
+	var args struct {
+		Command string  `json:"command"`
+		Workdir *string `json:"workdir"`
+	}
+	dec := json.NewDecoder(strings.NewReader(item.Arguments))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&args); err != nil {
+		return nil, clnkr.BashToolCall{}, fmt.Errorf("%w: malformed bash tool arguments: %v", clnkr.ErrInvalidJSON, err)
+	}
+	if strings.TrimSpace(args.Command) == "" {
+		return nil, clnkr.BashToolCall{}, clnkr.ErrMissingCommand
+	}
+	call := clnkr.BashToolCall{ID: item.CallID, Command: args.Command}
+	action := clnkr.BashAction{ID: item.CallID, Command: args.Command}
+	if args.Workdir != nil {
+		call.Workdir = *args.Workdir
+		action.Workdir = *args.Workdir
+	}
+	return &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: []clnkr.BashAction{action}}}, call, nil
+}
+
+func unmarshalResponse(respBody []byte) (response, error) {
+	var raw struct {
+		Output []json.RawMessage `json:"output"`
+		Usage  struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(respBody, &raw); err != nil {
+		return response{}, fmt.Errorf("unmarshal response: %w", err)
+	}
+	apiResp := response{RawOutput: raw.Output}
+	apiResp.Usage = raw.Usage
+	apiResp.Output = make([]outputItem, len(raw.Output))
+	for i, item := range raw.Output {
+		if err := json.Unmarshal(item, &apiResp.Output[i]); err != nil {
+			return response{}, fmt.Errorf("unmarshal response output item %d: %w", i, err)
+		}
+	}
+	return apiResp, nil
 }
 
 func parseTextResponse(respBody []byte) (string, error) {

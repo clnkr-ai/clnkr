@@ -3,6 +3,7 @@ package transcript
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -96,7 +97,7 @@ func RewriteForCompaction(messages []Message, summary, instructions string, keep
 		if IsCompactMessage(msg) {
 			continue
 		}
-		keptTail = append(keptTail, msg)
+		keptTail = append(keptTail, CloneMessage(msg))
 	}
 
 	rewritten := make([]Message, 0, len(keptTail)+2)
@@ -107,9 +108,9 @@ func RewriteForCompaction(messages []Message, summary, instructions string, keep
 		if messageKind(messages[i]) != "state" {
 			continue
 		}
-		stateMsg, present := messages[i], false
+		stateMsg, present := CloneMessage(messages[i]), false
 		for _, msg := range keptTail {
-			if msg == stateMsg {
+			if sameMessage(msg, stateMsg) {
 				present = true
 				break
 			}
@@ -127,6 +128,14 @@ func RewriteForCompaction(messages []Message, summary, instructions string, keep
 		CompactedMessages: boundary,
 		KeptMessages:      keptMessages,
 	}, nil
+}
+
+func sameMessage(a, b Message) bool {
+	return a.Role == b.Role &&
+		a.Content == b.Content &&
+		reflect.DeepEqual(a.BashToolCalls, b.BashToolCalls) &&
+		reflect.DeepEqual(a.BashToolResult, b.BashToolResult) &&
+		reflect.DeepEqual(a.ProviderReplay, b.ProviderReplay)
 }
 
 func compactMessage(content string) bool {
