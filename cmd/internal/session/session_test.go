@@ -2,6 +2,7 @@ package session_test
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -116,6 +117,49 @@ func TestSaveAndLoadSession(t *testing.T) {
 	}
 	if loaded[1].Role != "assistant" || loaded[1].Content != "hi there" {
 		t.Errorf("second message: got %+v", loaded[1])
+	}
+}
+
+func TestSaveSessionWithMetadataPreservesLoadCompatibility(t *testing.T) {
+	tmpdir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", tmpdir)
+
+	projectDir := "/tmp/test-project-save-metadata"
+	original := []clnkr.Message{{Role: "user", Content: "hello"}}
+	metadata := map[string]any{"provider": "openai", "max_output_tokens": 8000}
+	if err := session.SaveSessionWithMetadata(projectDir, original, metadata); err != nil {
+		t.Fatalf("SaveSessionWithMetadata: %v", err)
+	}
+
+	dir, err := session.SessionDir(projectDir)
+	if err != nil {
+		t.Fatalf("SessionDir: %v", err)
+	}
+	files, err := filepath.Glob(filepath.Join(dir, "*.json"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("expected 1 session file, got %d (err: %v)", len(files), err)
+	}
+	data, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var gotFile struct {
+		Metadata map[string]any  `json:"metadata"`
+		Messages []clnkr.Message `json:"messages"`
+	}
+	if err := json.Unmarshal(data, &gotFile); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if gotFile.Metadata["provider"] != "openai" || gotFile.Metadata["max_output_tokens"] != float64(8000) {
+		t.Fatalf("metadata = %#v, want provider and max_output_tokens", gotFile.Metadata)
+	}
+
+	loaded, err := session.LoadLatestSession(projectDir)
+	if err != nil {
+		t.Fatalf("LoadLatestSession: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0] != original[0] {
+		t.Fatalf("loaded = %#v, want %#v", loaded, original)
 	}
 }
 

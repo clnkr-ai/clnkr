@@ -6,7 +6,7 @@ clnkr - a minimal coding agent (plain CLI)
 
 # SYNOPSIS
 
-**clnkr** [**-p**|**--prompt** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--provider** *mode*] [**--provider-api** *surface*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
+**clnkr** [**-p**|**--prompt** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--provider** *mode*] [**--provider-api** *surface*] [**--reasoning-effort** *effort*] [**--thinking-budget-tokens** *n*] [**--max-output-tokens** *n*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
 
 # DESCRIPTION
 
@@ -47,6 +47,15 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 **--provider-api** *surface*
 : OpenAI-only API surface override: **auto**, **openai-chat-completions**, or **openai-responses**. With **provider=openai**, **auto** prefers **openai-responses** for known supported names and other OpenAI-looking model names such as **gpt-***, **o** followed by a digit, **codex**, **codex-***, names ending in **-codex**, and names containing **-codex-**. Names that do not look OpenAI-ish, such as **llama3**, **gemini-2.0-flash**, **orca-***, **olmo-***, **openhermes-***, and **chatgpt-***, stay on **openai-chat-completions**. This flag is rejected for **provider=anthropic**.
 
+**--reasoning-effort** *effort*
+: OpenAI Responses reasoning effort. Allowed values are **none**, **minimal**, **low**, **medium**, **high**, and **xhigh**. This flag requires **provider=openai** and **provider-api=openai-responses**. **gpt-5.1** rejects **minimal** and **xhigh**; pre-**gpt-5.1** reasoning models reject **none**; **gpt-5-pro** accepts only **high**; **xhigh** is accepted only for known codex-max-or-newer model families.
+
+**--thinking-budget-tokens** *n*
+: Anthropic extended thinking budget. This flag requires **provider=anthropic** and a Claude model family that supports extended thinking. The value must be at least 1024 and less than the effective Anthropic **max_tokens** value.
+
+**--max-output-tokens** *n*
+: Provider output-token limit. This flag is supported for Anthropic Messages and OpenAI Responses. For Anthropic it overrides the existing **max_tokens** request field; the default remains 4096 when this flag is unset. Anthropic values above 21333 are rejected while **clnkr** uses non-streaming requests. OpenAI Chat Completions rejects this flag.
+
 **--max-steps** *n*
 : Maximum executed commands before requesting a final summary. 0 uses the default of 100. If an **act** batch exceeds the remaining budget, clnkr executes only the commands that fit and then requests a final summary.
 
@@ -69,13 +78,13 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : Print the composed system prompt and exit.
 
 **--load-messages** *file*
-: Read a JSON array of messages from *file* and prepend them to the conversation before starting. The format matches **--trajectory** output, so one agent's trajectory can seed another agent's context. Host-generated JSON **[state]** messages in that transcript restore the current working directory.
+: Read a JSON message array, or a compatible envelope with a **messages** field, from *file* and prepend the messages to the conversation before starting. Host-generated JSON **[state]** messages in that transcript restore the current working directory.
 
 **--event-log** *file*
 : Write every agent event as a JSONL line to *file*. Each line is a JSON object with "type" and "payload" fields. Uses O_APPEND for atomic writes, safe to tail from another process.
 
 **--trajectory** *file*
-: After the task finishes, write the full message history as pretty-printed JSON to *file*. Written before exit, even on error. Only applies to single-task mode (**-p**), not the REPL. Mutually exclusive with **--continue**.
+: After the task finishes, write the full message history as a pretty-printed JSON array to *file*. Written before exit, even on error. Only applies to single-task mode (**-p**), not the REPL. Mutually exclusive with **--continue**.
 
 **-v**, **--verbose**
 : Show internal decisions (queries, parsing, working directory).

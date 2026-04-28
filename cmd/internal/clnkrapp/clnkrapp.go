@@ -2,6 +2,7 @@ package clnkrapp
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,9 +29,20 @@ func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt s
 func newModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt string) model {
 	switch {
 	case cfg.Provider == providerconfig.ProviderAnthropic:
-		return anthropic.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
+		opts := anthropic.Options{}
+		if cfg.HarnessOptions.MaxOutputTokens.Set {
+			opts.MaxTokens = cfg.HarnessOptions.MaxOutputTokens.Value
+		}
+		if cfg.HarnessOptions.ThinkingBudgetTokens.Set {
+			opts.ThinkingBudgetTokens = cfg.HarnessOptions.ThinkingBudgetTokens.Value
+		}
+		return anthropic.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, opts)
 	case cfg.ProviderAPI == providerconfig.ProviderAPIOpenAIResponses:
-		return openairesponses.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
+		return openairesponses.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, openairesponses.Options{
+			ReasoningEffort:    cfg.HarnessOptions.ReasoningEffort,
+			MaxOutputTokens:    cfg.HarnessOptions.MaxOutputTokens.Value,
+			HasMaxOutputTokens: cfg.HarnessOptions.MaxOutputTokens.Set,
+		})
 	default:
 		return openai.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
 	}
@@ -78,6 +90,100 @@ func writeEvent(w io.Writer, typ string, payload any) error {
 	}{typ, payload})
 }
 
+type HarnessMetadata struct {
+	ClnkrVersion string                     `json:"clnkr_version"`
+	Provider     providerconfig.Provider    `json:"provider"`
+	ProviderAPI  providerconfig.ProviderAPI `json:"provider_api"`
+	Model        string                     `json:"model"`
+	PromptSHA256 string                     `json:"prompt_sha256"`
+	Requested    HarnessRequestedMetadata   `json:"requested"`
+	Effective    HarnessEffectiveMetadata   `json:"effective"`
+	Compaction   CompactionMetadata         `json:"compaction"`
+}
+
+type HarnessRequestedMetadata struct {
+	ReasoningEffort      *string `json:"reasoning_effort"`
+	ThinkingBudgetTokens *int    `json:"thinking_budget_tokens"`
+	MaxOutputTokens      *int    `json:"max_output_tokens"`
+}
+
+type HarnessEffectiveMetadata struct {
+	ReasoningEffortOmitted      bool    `json:"reasoning_effort_omitted"`
+	ReasoningEffort             *string `json:"reasoning_effort"`
+	ThinkingBudgetTokensOmitted bool    `json:"thinking_budget_tokens_omitted"`
+	ThinkingBudgetTokens        *int    `json:"thinking_budget_tokens"`
+	MaxOutputTokensOmitted      bool    `json:"max_output_tokens_omitted"`
+	MaxOutputTokens             *int    `json:"max_output_tokens"`
+	AnthropicMaxTokens          *int    `json:"anthropic_max_tokens"`
+}
+
+type CompactionMetadata struct {
+	Policy          string `json:"policy"`
+	KeepRecentTurns int    `json:"keep_recent_turns"`
+}
+
+func NewHarnessMetadata(version string, cfg providerconfig.ResolvedProviderConfig, systemPrompt string) HarnessMetadata {
+	opts := cfg.HarnessOptions
+	meta := HarnessMetadata{
+		ClnkrVersion: version,
+		Provider:     cfg.Provider,
+		ProviderAPI:  cfg.ProviderAPI,
+		Model:        cfg.Model,
+		PromptSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(systemPrompt))),
+		Requested: HarnessRequestedMetadata{
+			ReasoningEffort:      stringPtr(opts.ReasoningEffort),
+			ThinkingBudgetTokens: optionalIntPtr(opts.ThinkingBudgetTokens),
+			MaxOutputTokens:      optionalIntPtr(opts.MaxOutputTokens),
+		},
+		Effective: HarnessEffectiveMetadata{
+			ReasoningEffortOmitted:      opts.ReasoningEffort == "",
+			ReasoningEffort:             effectiveReasoningEffort(cfg),
+			ThinkingBudgetTokensOmitted: !opts.ThinkingBudgetTokens.Set,
+			ThinkingBudgetTokens:        optionalIntPtr(opts.ThinkingBudgetTokens),
+			MaxOutputTokensOmitted:      !opts.MaxOutputTokens.Set,
+			MaxOutputTokens:             optionalIntPtr(opts.MaxOutputTokens),
+		},
+		Compaction: CompactionMetadata{Policy: "manual", KeepRecentTurns: 2},
+	}
+	if cfg.Provider == providerconfig.ProviderAnthropic {
+		maxTokens := providerconfig.DefaultAnthropicMaxTokens
+		if opts.MaxOutputTokens.Set {
+			maxTokens = opts.MaxOutputTokens.Value
+		}
+		meta.Effective.AnthropicMaxTokens = &maxTokens
+	}
+	return meta
+}
+
+func HarnessMetadataDebugEvent(meta HarnessMetadata) (clnkr.EventDebug, error) {
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return clnkr.EventDebug{}, fmt.Errorf("marshal harness metadata: %w", err)
+	}
+	return clnkr.EventDebug{Message: string(data)}, nil
+}
+
+func effectiveReasoningEffort(cfg providerconfig.ResolvedProviderConfig) *string {
+	if cfg.ProviderAPI != providerconfig.ProviderAPIOpenAIResponses || cfg.HarnessOptions.ReasoningEffort == "" {
+		return nil
+	}
+	return &cfg.HarnessOptions.ReasoningEffort
+}
+
+func stringPtr(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func optionalIntPtr(value providerconfig.OptionalInt) *int {
+	if !value.Set {
+		return nil
+	}
+	return &value.Value
+}
+
 func WriteTrajectory(path string, messages []clnkr.Message) error {
 	data, err := json.MarshalIndent(messages, "", "  ")
 	if err != nil {
@@ -87,6 +193,23 @@ func WriteTrajectory(path string, messages []clnkr.Message) error {
 		return fmt.Errorf("cannot write trajectory %q: %w", path, err)
 	}
 	return nil
+}
+
+func LoadMessages(data []byte) ([]clnkr.Message, error) {
+	var messages []clnkr.Message
+	if err := json.Unmarshal(data, &messages); err == nil {
+		return messages, nil
+	}
+	var envelope struct {
+		Messages *[]clnkr.Message `json:"messages"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return nil, fmt.Errorf("parse messages: %w", err)
+	}
+	if envelope.Messages == nil {
+		return nil, fmt.Errorf("parse messages: missing messages")
+	}
+	return *envelope.Messages, nil
 }
 
 func ParseCompactCommand(input string) (instructions string, ok bool) {

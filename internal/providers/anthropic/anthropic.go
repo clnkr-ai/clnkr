@@ -15,39 +15,59 @@ import (
 
 // Model talks to the Anthropic Messages API.
 type Model struct {
-	baseURL      string
-	apiKey       string
-	model        string
-	systemPrompt string
-	maxTokens    int
-	client       *http.Client
+	baseURL              string
+	apiKey               string
+	model                string
+	systemPrompt         string
+	maxTokens            int
+	thinkingBudgetTokens int
+	client               *http.Client
+}
+
+const DefaultMaxTokens = 4096
+
+type Options struct {
+	MaxTokens            int
+	ThinkingBudgetTokens int
 }
 
 // NewModel sets up an Anthropic adapter.
 func NewModel(baseURL, apiKey, model, systemPrompt string) *Model {
+	return NewModelWithOptions(baseURL, apiKey, model, systemPrompt, Options{})
+}
+
+// NewModelWithOptions sets up an Anthropic adapter with request options.
+func NewModelWithOptions(baseURL, apiKey, model, systemPrompt string, opts Options) *Model {
+	maxTokens := DefaultMaxTokens
+	if opts.MaxTokens > 0 {
+		maxTokens = opts.MaxTokens
+	}
 	return &Model{
-		baseURL:      baseURL,
-		apiKey:       apiKey,
-		model:        model,
-		systemPrompt: systemPrompt,
-		maxTokens:    4096,
-		client:       &http.Client{Timeout: 240 * time.Second},
+		baseURL:              baseURL,
+		apiKey:               apiKey,
+		model:                model,
+		systemPrompt:         systemPrompt,
+		maxTokens:            maxTokens,
+		thinkingBudgetTokens: opts.ThinkingBudgetTokens,
+		client:               &http.Client{Timeout: 240 * time.Second},
 	}
 }
 
 type request struct {
-	Model        string          `json:"model"`
-	MaxTokens    int             `json:"max_tokens"`
-	System       string          `json:"system,omitempty"`
-	Messages     []clnkr.Message `json:"messages"`
-	OutputConfig outputConfig    `json:"output_config"`
+	Model        string           `json:"model"`
+	MaxTokens    int              `json:"max_tokens"`
+	System       string           `json:"system,omitempty"`
+	Messages     []clnkr.Message  `json:"messages"`
+	OutputConfig outputConfig     `json:"output_config"`
+	Thinking     *thinkingOptions `json:"thinking,omitempty"`
 }
 
 type textRequest struct {
-	Model     string          `json:"model"`
-	MaxTokens int             `json:"max_tokens"`
-	System    string          `json:"system,omitempty"`
-	Messages  []clnkr.Message `json:"messages"`
+	Model     string           `json:"model"`
+	MaxTokens int              `json:"max_tokens"`
+	System    string           `json:"system,omitempty"`
+	Messages  []clnkr.Message  `json:"messages"`
+	Thinking  *thinkingOptions `json:"thinking,omitempty"`
 }
 
 type outputConfig struct {
@@ -57,6 +77,11 @@ type outputConfig struct {
 type outputFormat struct {
 	Type   string         `json:"type"`
 	Schema map[string]any `json:"schema"`
+}
+
+type thinkingOptions struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
 }
 
 type response struct {
@@ -104,6 +129,7 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 		MaxTokens: m.maxTokens,
 		System:    m.systemPrompt,
 		Messages:  messages,
+		Thinking:  m.thinkingOptions(),
 		OutputConfig: outputConfig{
 			Format: outputFormat{
 				Type:   "json_schema",
@@ -156,6 +182,7 @@ func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string
 		MaxTokens: m.maxTokens,
 		System:    m.systemPrompt,
 		Messages:  messages,
+		Thinking:  m.thinkingOptions(),
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
@@ -178,6 +205,13 @@ func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string
 		return "", fmt.Errorf("free-form response: empty text payload")
 	}
 	return text, nil
+}
+
+func (m *Model) thinkingOptions() *thinkingOptions {
+	if m.thinkingBudgetTokens == 0 {
+		return nil
+	}
+	return &thinkingOptions{Type: "enabled", BudgetTokens: m.thinkingBudgetTokens}
 }
 
 func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, error) {

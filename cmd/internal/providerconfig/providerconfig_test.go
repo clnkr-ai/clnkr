@@ -436,6 +436,257 @@ func TestResolveConfigOpenAIStyleFallbackAndDatedSnapshots(t *testing.T) {
 	}
 }
 
+func TestResolveConfigAcceptsHarnessOptions(t *testing.T) {
+	t.Run("openai responses reasoning and max output", func(t *testing.T) {
+		cfg, err := ResolveConfig(Inputs{
+			Provider:    "openai",
+			ProviderAPI: "openai-responses",
+			Model:       "gpt-5.1-codex-max",
+			HarnessOptions: HarnessOptions{
+				ReasoningEffort: "xhigh",
+				MaxOutputTokens: OptionalInt{Value: 8000, Set: true},
+			},
+		}, envMap(map[string]string{"CLNKR_API_KEY": "test-key"}))
+		if err != nil {
+			t.Fatalf("ResolveConfig(): %v", err)
+		}
+		if cfg.HarnessOptions.ReasoningEffort != "xhigh" {
+			t.Fatalf("ReasoningEffort = %q, want xhigh", cfg.HarnessOptions.ReasoningEffort)
+		}
+		if cfg.HarnessOptions.MaxOutputTokens != (OptionalInt{Value: 8000, Set: true}) {
+			t.Fatalf("MaxOutputTokens = %#v, want set 8000", cfg.HarnessOptions.MaxOutputTokens)
+		}
+	})
+
+	t.Run("anthropic thinking and max output", func(t *testing.T) {
+		cfg, err := ResolveConfig(Inputs{
+			Provider: "anthropic",
+			Model:    "claude-sonnet-4-20250514",
+			HarnessOptions: HarnessOptions{
+				ThinkingBudgetTokens: OptionalInt{Value: 2048, Set: true},
+				MaxOutputTokens:      OptionalInt{Value: 4096, Set: true},
+			},
+		}, envMap(map[string]string{"CLNKR_API_KEY": "test-key"}))
+		if err != nil {
+			t.Fatalf("ResolveConfig(): %v", err)
+		}
+		if cfg.HarnessOptions.ThinkingBudgetTokens != (OptionalInt{Value: 2048, Set: true}) {
+			t.Fatalf("ThinkingBudgetTokens = %#v, want set 2048", cfg.HarnessOptions.ThinkingBudgetTokens)
+		}
+		if cfg.HarnessOptions.MaxOutputTokens != (OptionalInt{Value: 4096, Set: true}) {
+			t.Fatalf("MaxOutputTokens = %#v, want set 4096", cfg.HarnessOptions.MaxOutputTokens)
+		}
+	})
+}
+
+func TestResolveConfigRejectsUnsupportedHarnessOptions(t *testing.T) {
+	tests := []struct {
+		name string
+		in   Inputs
+		want string
+	}{
+		{
+			name: "invalid reasoning effort",
+			in: Inputs{
+				Provider: "openai",
+				Model:    "gpt-5.1",
+				HarnessOptions: HarnessOptions{
+					ReasoningEffort: "extreme",
+				},
+			},
+			want: "invalid reasoning-effort",
+		},
+		{
+			name: "reasoning effort rejects chat completions",
+			in: Inputs{
+				Provider:    "openai",
+				ProviderAPI: "openai-chat-completions",
+				Model:       "gpt-5.1",
+				HarnessOptions: HarnessOptions{
+					ReasoningEffort: "high",
+				},
+			},
+			want: "reasoning-effort requires provider openai with provider-api openai-responses",
+		},
+		{
+			name: "reasoning effort rejects anthropic",
+			in: Inputs{
+				Provider: "anthropic",
+				Model:    "claude-sonnet-4-20250514",
+				HarnessOptions: HarnessOptions{
+					ReasoningEffort: "high",
+				},
+			},
+			want: "reasoning-effort requires provider openai with provider-api openai-responses",
+		},
+		{
+			name: "gpt-5.1 rejects minimal",
+			in: Inputs{
+				Provider: "openai",
+				Model:    "gpt-5.1",
+				HarnessOptions: HarnessOptions{
+					ReasoningEffort: "minimal",
+				},
+			},
+			want: `reasoning-effort "minimal" is not supported`,
+		},
+		{
+			name: "gpt-5 rejects none",
+			in: Inputs{
+				Provider: "openai",
+				Model:    "gpt-5",
+				HarnessOptions: HarnessOptions{
+					ReasoningEffort: "none",
+				},
+			},
+			want: `reasoning-effort "none" is not supported`,
+		},
+		{
+			name: "gpt-5-pro rejects low",
+			in: Inputs{
+				Provider: "openai",
+				Model:    "gpt-5-pro",
+				HarnessOptions: HarnessOptions{
+					ReasoningEffort: "low",
+				},
+			},
+			want: "gpt-5-pro only supports high",
+		},
+		{
+			name: "gpt-5-pro snapshot rejects low",
+			in: Inputs{
+				Provider: "openai",
+				Model:    "gpt-5-pro-2026-03-05",
+				HarnessOptions: HarnessOptions{
+					ReasoningEffort: "low",
+				},
+			},
+			want: "gpt-5-pro only supports high",
+		},
+		{
+			name: "xhigh requires codex max",
+			in: Inputs{
+				Provider: "openai",
+				Model:    "gpt-5.1",
+				HarnessOptions: HarnessOptions{
+					ReasoningEffort: "xhigh",
+				},
+			},
+			want: `reasoning-effort "xhigh" is not supported`,
+		},
+		{
+			name: "reasoning requires reasoning model",
+			in: Inputs{
+				Provider: "openai",
+				Model:    "gpt-4.1",
+				HarnessOptions: HarnessOptions{
+					ReasoningEffort: "high",
+				},
+			},
+			want: "reasoning-effort requires an OpenAI reasoning-capable model",
+		},
+		{
+			name: "max output requires positive",
+			in: Inputs{
+				Provider: "openai",
+				Model:    "gpt-5",
+				HarnessOptions: HarnessOptions{
+					MaxOutputTokens: OptionalInt{Value: 0, Set: true},
+				},
+			},
+			want: "max-output-tokens must be at least 1",
+		},
+		{
+			name: "max output rejects chat completions",
+			in: Inputs{
+				Provider:    "openai",
+				ProviderAPI: "openai-chat-completions",
+				Model:       "gpt-5",
+				HarnessOptions: HarnessOptions{
+					MaxOutputTokens: OptionalInt{Value: 1000, Set: true},
+				},
+			},
+			want: `max-output-tokens is not supported for provider-api "openai-chat-completions"`,
+		},
+		{
+			name: "anthropic max output rejects streaming-sized value",
+			in: Inputs{
+				Provider: "anthropic",
+				Model:    "claude-sonnet-4-20250514",
+				HarnessOptions: HarnessOptions{
+					MaxOutputTokens: OptionalInt{Value: MaxAnthropicNonStreamingTokens + 1, Set: true},
+				},
+			},
+			want: "while streaming is unsupported",
+		},
+		{
+			name: "thinking budget rejects openai",
+			in: Inputs{
+				Provider: "openai",
+				Model:    "gpt-5",
+				HarnessOptions: HarnessOptions{
+					ThinkingBudgetTokens: OptionalInt{Value: 2048, Set: true},
+				},
+			},
+			want: "thinking-budget-tokens requires provider anthropic",
+		},
+		{
+			name: "thinking budget rejects small value",
+			in: Inputs{
+				Provider: "anthropic",
+				Model:    "claude-sonnet-4-20250514",
+				HarnessOptions: HarnessOptions{
+					ThinkingBudgetTokens: OptionalInt{Value: 1023, Set: true},
+				},
+			},
+			want: "thinking-budget-tokens must be at least 1024",
+		},
+		{
+			name: "thinking budget rejects unsupported model",
+			in: Inputs{
+				Provider: "anthropic",
+				Model:    "claude-3-5-sonnet-20241022",
+				HarnessOptions: HarnessOptions{
+					ThinkingBudgetTokens: OptionalInt{Value: 2048, Set: true},
+				},
+			},
+			want: "thinking-budget-tokens requires an Anthropic extended-thinking-capable model",
+		},
+		{
+			name: "thinking budget must be less than default max tokens",
+			in: Inputs{
+				Provider: "anthropic",
+				Model:    "claude-sonnet-4-20250514",
+				HarnessOptions: HarnessOptions{
+					ThinkingBudgetTokens: OptionalInt{Value: DefaultAnthropicMaxTokens, Set: true},
+				},
+			},
+			want: "thinking-budget-tokens must be less than effective anthropic max_tokens (4096)",
+		},
+		{
+			name: "thinking budget must be less than requested max tokens",
+			in: Inputs{
+				Provider: "anthropic",
+				Model:    "claude-sonnet-4-20250514",
+				HarnessOptions: HarnessOptions{
+					ThinkingBudgetTokens: OptionalInt{Value: 4096, Set: true},
+					MaxOutputTokens:      OptionalInt{Value: 4096, Set: true},
+				},
+			},
+			want: "thinking-budget-tokens must be less than effective anthropic max_tokens (4096)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ResolveConfig(tt.in, envMap(map[string]string{"CLNKR_API_KEY": "test-key"}))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ResolveConfig() err = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func envMap(values map[string]string) func(string) string {
 	return func(key string) string {
 		return values[key]

@@ -135,7 +135,7 @@ func TestUsageMentionsProviderAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("help command: %v\nstderr: %s", err, stderr.String())
 	}
-	for _, want := range []string{"provider-api", "Limit executed commands", "before summary (default: 100)", "infers provider when provider is unset", "anthropic base URL  https://api.anthropic.com"} {
+	for _, want := range []string{"provider-api", "reasoning-effort", "thinking-budget-tokens", "max-output-tokens", "Limit executed commands", "before summary (default: 100)", "infers provider when provider is unset", "anthropic base URL  https://api.anthropic.com"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("usage output missing %q, got %q", want, stdout.String())
 		}
@@ -536,6 +536,98 @@ func TestSingleTaskPromptImpliesFullSend(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("model calls = %d, want 1", calls)
+	}
+}
+
+func TestOpenAIResponsesHarnessFlagsReachRequestAndMetadata(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": []map[string]any{
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]any{
+						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"done","reasoning":null}}`},
+					},
+				},
+			},
+			"usage": map[string]int{"input_tokens": 1, "output_tokens": 1},
+		})
+	}))
+	defer server.Close()
+
+	eventLogPath := filepath.Join(t.TempDir(), "events.jsonl")
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
+		"--provider", "openai",
+		"--provider-api", "openai-responses",
+		"--base-url", server.URL,
+		"--model", "gpt-5.1",
+		"--reasoning-effort", "high",
+		"--max-output-tokens", "8000",
+		"--event-log", eventLogPath,
+		"-p", "hi",
+	)
+	if err != nil {
+		t.Fatalf("run main: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+	}
+	if stdout.String() != "done\n" {
+		t.Fatalf("stdout = %q, want summary", stdout.String())
+	}
+	reasoning, ok := gotBody["reasoning"].(map[string]any)
+	if !ok || reasoning["effort"] != "high" {
+		t.Fatalf("reasoning = %#v, want high", gotBody["reasoning"])
+	}
+	if got := gotBody["max_output_tokens"]; got != float64(8000) {
+		t.Fatalf("max_output_tokens = %#v, want 8000", got)
+	}
+
+	data, err := os.ReadFile(eventLogPath)
+	if err != nil {
+		t.Fatalf("ReadFile event log: %v", err)
+	}
+	firstLine, _, _ := strings.Cut(string(data), "\n")
+	var event struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Message string `json:"message"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(firstLine), &event); err != nil {
+		t.Fatalf("unmarshal first event: %v\n%s", err, firstLine)
+	}
+	if event.Type != "debug" {
+		t.Fatalf("first event type = %q, want debug", event.Type)
+	}
+	var metadata clnkrapp.HarnessMetadata
+	if err := json.Unmarshal([]byte(event.Payload.Message), &metadata); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if metadata.Effective.ReasoningEffort == nil || *metadata.Effective.ReasoningEffort != "high" {
+		t.Fatalf("metadata reasoning = %#v, want high", metadata.Effective.ReasoningEffort)
+	}
+	if metadata.Effective.MaxOutputTokens == nil || *metadata.Effective.MaxOutputTokens != 8000 {
+		t.Fatalf("metadata max output = %#v, want 8000", metadata.Effective.MaxOutputTokens)
+	}
+}
+
+func TestMaxOutputTokensZeroIsRejectedWhenFlagSet(t *testing.T) {
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
+		"--provider", "openai",
+		"--model", "gpt-5",
+		"--max-output-tokens", "0",
+		"-p", "hi",
+	)
+	if err == nil {
+		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "max-output-tokens must be at least 1") {
+		t.Fatalf("stderr = %q, want max output validation", stderr.String())
 	}
 }
 
