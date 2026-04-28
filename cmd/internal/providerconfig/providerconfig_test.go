@@ -436,25 +436,27 @@ func TestResolveConfigOpenAIStyleFallbackAndDatedSnapshots(t *testing.T) {
 	}
 }
 
-func TestResolveConfigAcceptsHarnessOptions(t *testing.T) {
-	t.Run("openai responses reasoning and max output", func(t *testing.T) {
+func TestResolveConfigAcceptsRequestOptions(t *testing.T) {
+	t.Run("openai responses effort and max output", func(t *testing.T) {
 		cfg, err := ResolveConfig(Inputs{
 			Provider:    "openai",
 			ProviderAPI: "openai-responses",
 			Model:       "gpt-5.1-codex-max",
-			HarnessOptions: HarnessOptions{
-				ReasoningEffort: "xhigh",
-				MaxOutputTokens: OptionalInt{Value: 8000, Set: true},
+			RequestOptions: ProviderRequestOptions{
+				Effort: ProviderEffortOptions{Level: "high", Set: true},
+				Output: ProviderOutputOptions{
+					MaxOutputTokens: OptionalInt{Value: 8000, Set: true},
+				},
 			},
 		}, envMap(map[string]string{"CLNKR_API_KEY": "test-key"}))
 		if err != nil {
 			t.Fatalf("ResolveConfig(): %v", err)
 		}
-		if cfg.HarnessOptions.ReasoningEffort != "xhigh" {
-			t.Fatalf("ReasoningEffort = %q, want xhigh", cfg.HarnessOptions.ReasoningEffort)
+		if !cfg.RequestOptions.Effort.Set || cfg.RequestOptions.Effort.Level != "high" {
+			t.Fatalf("Effort = %#v, want high", cfg.RequestOptions.Effort)
 		}
-		if cfg.HarnessOptions.MaxOutputTokens != (OptionalInt{Value: 8000, Set: true}) {
-			t.Fatalf("MaxOutputTokens = %#v, want set 8000", cfg.HarnessOptions.MaxOutputTokens)
+		if cfg.RequestOptions.Output.MaxOutputTokens != (OptionalInt{Value: 8000, Set: true}) {
+			t.Fatalf("Output.MaxOutputTokens = %#v, want set 8000", cfg.RequestOptions.Output.MaxOutputTokens)
 		}
 	})
 
@@ -462,92 +464,74 @@ func TestResolveConfigAcceptsHarnessOptions(t *testing.T) {
 		cfg, err := ResolveConfig(Inputs{
 			Provider: "anthropic",
 			Model:    "claude-sonnet-4-20250514",
-			HarnessOptions: HarnessOptions{
-				ThinkingBudgetTokens: OptionalInt{Value: 2048, Set: true},
-				MaxOutputTokens:      OptionalInt{Value: 4096, Set: true},
+			RequestOptions: ProviderRequestOptions{
+				AnthropicManual: AnthropicManualThinkingOptions{
+					ThinkingBudgetTokens: OptionalInt{Value: 2048, Set: true},
+				},
+				Output: ProviderOutputOptions{
+					MaxOutputTokens: OptionalInt{Value: 4096, Set: true},
+				},
 			},
 		}, envMap(map[string]string{"CLNKR_API_KEY": "test-key"}))
 		if err != nil {
 			t.Fatalf("ResolveConfig(): %v", err)
 		}
-		if cfg.HarnessOptions.ThinkingBudgetTokens != (OptionalInt{Value: 2048, Set: true}) {
-			t.Fatalf("ThinkingBudgetTokens = %#v, want set 2048", cfg.HarnessOptions.ThinkingBudgetTokens)
+		if cfg.RequestOptions.AnthropicManual.ThinkingBudgetTokens != (OptionalInt{Value: 2048, Set: true}) {
+			t.Fatalf("ThinkingBudgetTokens = %#v, want set 2048", cfg.RequestOptions.AnthropicManual.ThinkingBudgetTokens)
 		}
-		if cfg.HarnessOptions.MaxOutputTokens != (OptionalInt{Value: 4096, Set: true}) {
-			t.Fatalf("MaxOutputTokens = %#v, want set 4096", cfg.HarnessOptions.MaxOutputTokens)
+		if cfg.RequestOptions.Output.MaxOutputTokens != (OptionalInt{Value: 4096, Set: true}) {
+			t.Fatalf("Output.MaxOutputTokens = %#v, want set 4096", cfg.RequestOptions.Output.MaxOutputTokens)
 		}
 	})
 }
 
-func TestResolveConfigRejectsUnsupportedHarnessOptions(t *testing.T) {
+func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 	tests := []struct {
 		name string
 		in   Inputs
 		want string
 	}{
 		{
-			name: "invalid reasoning effort",
+			name: "invalid effort",
 			in: Inputs{
 				Provider: "openai",
 				Model:    "gpt-5.1",
-				HarnessOptions: HarnessOptions{
-					ReasoningEffort: "extreme",
+				RequestOptions: ProviderRequestOptions{
+					Effort: ProviderEffortOptions{Level: "extreme", Set: true},
 				},
 			},
-			want: "invalid reasoning-effort",
+			want: "invalid effort",
 		},
 		{
-			name: "reasoning effort rejects chat completions",
+			name: "effort rejects chat completions",
 			in: Inputs{
 				Provider:    "openai",
 				ProviderAPI: "openai-chat-completions",
 				Model:       "gpt-5.1",
-				HarnessOptions: HarnessOptions{
-					ReasoningEffort: "high",
+				RequestOptions: ProviderRequestOptions{
+					Effort: ProviderEffortOptions{Level: "high", Set: true},
 				},
 			},
-			want: "reasoning-effort requires provider openai with provider-api openai-responses",
+			want: `effort is not supported for provider-api "openai-chat-completions"`,
 		},
 		{
-			name: "reasoning effort rejects anthropic",
+			name: "effort rejects anthropic max",
 			in: Inputs{
 				Provider: "anthropic",
 				Model:    "claude-sonnet-4-20250514",
-				HarnessOptions: HarnessOptions{
-					ReasoningEffort: "high",
+				RequestOptions: ProviderRequestOptions{
+					Effort: ProviderEffortOptions{Level: "xhigh", Set: true},
 				},
 			},
-			want: "reasoning-effort requires provider openai with provider-api openai-responses",
-		},
-		{
-			name: "gpt-5.1 rejects minimal",
-			in: Inputs{
-				Provider: "openai",
-				Model:    "gpt-5.1",
-				HarnessOptions: HarnessOptions{
-					ReasoningEffort: "minimal",
-				},
-			},
-			want: `reasoning-effort "minimal" is not supported`,
-		},
-		{
-			name: "gpt-5 rejects none",
-			in: Inputs{
-				Provider: "openai",
-				Model:    "gpt-5",
-				HarnessOptions: HarnessOptions{
-					ReasoningEffort: "none",
-				},
-			},
-			want: `reasoning-effort "none" is not supported`,
+			want: `effort "xhigh" is not supported for provider anthropic`,
 		},
 		{
 			name: "gpt-5-pro rejects low",
 			in: Inputs{
 				Provider: "openai",
 				Model:    "gpt-5-pro",
-				HarnessOptions: HarnessOptions{
-					ReasoningEffort: "low",
+				RequestOptions: ProviderRequestOptions{
+					Effort: ProviderEffortOptions{Level: "low", Set: true},
 				},
 			},
 			want: "gpt-5-pro only supports high",
@@ -557,8 +541,8 @@ func TestResolveConfigRejectsUnsupportedHarnessOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "openai",
 				Model:    "gpt-5-pro-2026-03-05",
-				HarnessOptions: HarnessOptions{
-					ReasoningEffort: "low",
+				RequestOptions: ProviderRequestOptions{
+					Effort: ProviderEffortOptions{Level: "low", Set: true},
 				},
 			},
 			want: "gpt-5-pro only supports high",
@@ -568,30 +552,32 @@ func TestResolveConfigRejectsUnsupportedHarnessOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "openai",
 				Model:    "gpt-5.1",
-				HarnessOptions: HarnessOptions{
-					ReasoningEffort: "xhigh",
+				RequestOptions: ProviderRequestOptions{
+					Effort: ProviderEffortOptions{Level: "xhigh", Set: true},
 				},
 			},
-			want: `reasoning-effort "xhigh" is not supported`,
+			want: `effort "xhigh" is not supported for model "gpt-5.1"`,
 		},
 		{
-			name: "reasoning requires reasoning model",
+			name: "effort requires reasoning model",
 			in: Inputs{
 				Provider: "openai",
 				Model:    "gpt-4.1",
-				HarnessOptions: HarnessOptions{
-					ReasoningEffort: "high",
+				RequestOptions: ProviderRequestOptions{
+					Effort: ProviderEffortOptions{Level: "high", Set: true},
 				},
 			},
-			want: "reasoning-effort requires an OpenAI reasoning-capable model",
+			want: "effort requires an OpenAI reasoning-capable model",
 		},
 		{
 			name: "max output requires positive",
 			in: Inputs{
 				Provider: "openai",
 				Model:    "gpt-5",
-				HarnessOptions: HarnessOptions{
-					MaxOutputTokens: OptionalInt{Value: 0, Set: true},
+				RequestOptions: ProviderRequestOptions{
+					Output: ProviderOutputOptions{
+						MaxOutputTokens: OptionalInt{Value: 0, Set: true},
+					},
 				},
 			},
 			want: "max-output-tokens must be at least 1",
@@ -602,8 +588,10 @@ func TestResolveConfigRejectsUnsupportedHarnessOptions(t *testing.T) {
 				Provider:    "openai",
 				ProviderAPI: "openai-chat-completions",
 				Model:       "gpt-5",
-				HarnessOptions: HarnessOptions{
-					MaxOutputTokens: OptionalInt{Value: 1000, Set: true},
+				RequestOptions: ProviderRequestOptions{
+					Output: ProviderOutputOptions{
+						MaxOutputTokens: OptionalInt{Value: 1000, Set: true},
+					},
 				},
 			},
 			want: `max-output-tokens is not supported for provider-api "openai-chat-completions"`,
@@ -613,8 +601,10 @@ func TestResolveConfigRejectsUnsupportedHarnessOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "anthropic",
 				Model:    "claude-sonnet-4-20250514",
-				HarnessOptions: HarnessOptions{
-					MaxOutputTokens: OptionalInt{Value: MaxAnthropicNonStreamingTokens + 1, Set: true},
+				RequestOptions: ProviderRequestOptions{
+					Output: ProviderOutputOptions{
+						MaxOutputTokens: OptionalInt{Value: MaxAnthropicNonStreamingTokens + 1, Set: true},
+					},
 				},
 			},
 			want: "while streaming is unsupported",
@@ -624,8 +614,10 @@ func TestResolveConfigRejectsUnsupportedHarnessOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "openai",
 				Model:    "gpt-5",
-				HarnessOptions: HarnessOptions{
-					ThinkingBudgetTokens: OptionalInt{Value: 2048, Set: true},
+				RequestOptions: ProviderRequestOptions{
+					AnthropicManual: AnthropicManualThinkingOptions{
+						ThinkingBudgetTokens: OptionalInt{Value: 2048, Set: true},
+					},
 				},
 			},
 			want: "thinking-budget-tokens requires provider anthropic",
@@ -635,8 +627,10 @@ func TestResolveConfigRejectsUnsupportedHarnessOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "anthropic",
 				Model:    "claude-sonnet-4-20250514",
-				HarnessOptions: HarnessOptions{
-					ThinkingBudgetTokens: OptionalInt{Value: 1023, Set: true},
+				RequestOptions: ProviderRequestOptions{
+					AnthropicManual: AnthropicManualThinkingOptions{
+						ThinkingBudgetTokens: OptionalInt{Value: 1023, Set: true},
+					},
 				},
 			},
 			want: "thinking-budget-tokens must be at least 1024",
@@ -646,8 +640,10 @@ func TestResolveConfigRejectsUnsupportedHarnessOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "anthropic",
 				Model:    "claude-3-5-sonnet-20241022",
-				HarnessOptions: HarnessOptions{
-					ThinkingBudgetTokens: OptionalInt{Value: 2048, Set: true},
+				RequestOptions: ProviderRequestOptions{
+					AnthropicManual: AnthropicManualThinkingOptions{
+						ThinkingBudgetTokens: OptionalInt{Value: 2048, Set: true},
+					},
 				},
 			},
 			want: "thinking-budget-tokens requires an Anthropic extended-thinking-capable model",
@@ -657,8 +653,10 @@ func TestResolveConfigRejectsUnsupportedHarnessOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "anthropic",
 				Model:    "claude-sonnet-4-20250514",
-				HarnessOptions: HarnessOptions{
-					ThinkingBudgetTokens: OptionalInt{Value: DefaultAnthropicMaxTokens, Set: true},
+				RequestOptions: ProviderRequestOptions{
+					AnthropicManual: AnthropicManualThinkingOptions{
+						ThinkingBudgetTokens: OptionalInt{Value: DefaultAnthropicMaxTokens, Set: true},
+					},
 				},
 			},
 			want: "thinking-budget-tokens must be less than effective anthropic max_tokens (4096)",
@@ -668,12 +666,43 @@ func TestResolveConfigRejectsUnsupportedHarnessOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "anthropic",
 				Model:    "claude-sonnet-4-20250514",
-				HarnessOptions: HarnessOptions{
-					ThinkingBudgetTokens: OptionalInt{Value: 4096, Set: true},
-					MaxOutputTokens:      OptionalInt{Value: 4096, Set: true},
+				RequestOptions: ProviderRequestOptions{
+					AnthropicManual: AnthropicManualThinkingOptions{
+						ThinkingBudgetTokens: OptionalInt{Value: 4096, Set: true},
+					},
+					Output: ProviderOutputOptions{
+						MaxOutputTokens: OptionalInt{Value: 4096, Set: true},
+					},
 				},
 			},
 			want: "thinking-budget-tokens must be less than effective anthropic max_tokens (4096)",
+		},
+		{
+			name: "thinking budget rejects non-auto effort",
+			in: Inputs{
+				Provider: "anthropic",
+				Model:    "claude-sonnet-4-20250514",
+				RequestOptions: ProviderRequestOptions{
+					Effort: ProviderEffortOptions{Level: "high", Set: true},
+					AnthropicManual: AnthropicManualThinkingOptions{
+						ThinkingBudgetTokens: OptionalInt{Value: 2048, Set: true},
+					},
+				},
+			},
+			want: "thinking-budget-tokens requires either no --effort flag or --effort auto",
+		},
+		{
+			name: "thinking budget rejects Opus 4.7+",
+			in: Inputs{
+				Provider: "anthropic",
+				Model:    "claude-opus-4-20250514-7",
+				RequestOptions: ProviderRequestOptions{
+					AnthropicManual: AnthropicManualThinkingOptions{
+						ThinkingBudgetTokens: OptionalInt{Value: 2048, Set: true},
+					},
+				},
+			},
+			want: "thinking-budget-tokens is not supported for model",
 		},
 	}
 

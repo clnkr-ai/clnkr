@@ -27,21 +27,31 @@ func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt s
 }
 
 func newModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt string) model {
+	opts := cfg.RequestOptions
 	switch {
 	case cfg.Provider == providerconfig.ProviderAnthropic:
-		opts := anthropic.Options{}
-		if cfg.HarnessOptions.MaxOutputTokens.Set {
-			opts.MaxTokens = cfg.HarnessOptions.MaxOutputTokens.Value
+		anthropicOpts := anthropic.Options{}
+		if opts.Output.MaxOutputTokens.Set {
+			anthropicOpts.MaxTokens = opts.Output.MaxOutputTokens.Value
 		}
-		if cfg.HarnessOptions.ThinkingBudgetTokens.Set {
-			opts.ThinkingBudgetTokens = cfg.HarnessOptions.ThinkingBudgetTokens.Value
+		if opts.AnthropicManual.ThinkingBudgetTokens.Set {
+			anthropicOpts.ThinkingBudgetTokens = opts.AnthropicManual.ThinkingBudgetTokens.Value
+			anthropicOpts.ThinkingMode = anthropic.ThinkingModeManual
 		}
-		return anthropic.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, opts)
+		if opts.Effort.Set && opts.Effort.Level != "auto" {
+			anthropicOpts.Effort = opts.Effort.Level
+			anthropicOpts.ThinkingMode = anthropic.ThinkingModeAdaptive
+		}
+		return anthropic.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, anthropicOpts)
 	case cfg.ProviderAPI == providerconfig.ProviderAPIOpenAIResponses:
+		var effort string
+		if opts.Effort.Set && opts.Effort.Level != "auto" {
+			effort = opts.Effort.Level
+		}
 		return openairesponses.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, openairesponses.Options{
-			ReasoningEffort:    cfg.HarnessOptions.ReasoningEffort,
-			MaxOutputTokens:    cfg.HarnessOptions.MaxOutputTokens.Value,
-			HasMaxOutputTokens: cfg.HarnessOptions.MaxOutputTokens.Set,
+			ReasoningEffort:    effort,
+			MaxOutputTokens:    opts.Output.MaxOutputTokens.Value,
+			HasMaxOutputTokens: opts.Output.MaxOutputTokens.Set,
 		})
 	default:
 		return openai.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
@@ -90,31 +100,37 @@ func writeEvent(w io.Writer, typ string, payload any) error {
 	}{typ, payload})
 }
 
-type HarnessMetadata struct {
+// RunMetadata describes the configuration for a clnkr run, recorded as debug
+// metadata and persisted alongside session files.
+type RunMetadata struct {
 	ClnkrVersion string                     `json:"clnkr_version"`
 	Provider     providerconfig.Provider    `json:"provider"`
 	ProviderAPI  providerconfig.ProviderAPI `json:"provider_api"`
 	Model        string                     `json:"model"`
 	PromptSHA256 string                     `json:"prompt_sha256"`
-	Requested    HarnessRequestedMetadata   `json:"requested"`
-	Effective    HarnessEffectiveMetadata   `json:"effective"`
+	Requested    RequestedProviderOptions   `json:"requested"`
+	Effective    EffectiveProviderOptions   `json:"effective"`
 	Compaction   CompactionMetadata         `json:"compaction"`
 }
 
-type HarnessRequestedMetadata struct {
-	ReasoningEffort      *string `json:"reasoning_effort"`
-	ThinkingBudgetTokens *int    `json:"thinking_budget_tokens"`
-	MaxOutputTokens      *int    `json:"max_output_tokens"`
+type RequestedProviderOptions struct {
+	Effort                      *string `json:"effort,omitempty"`
+	EffortOmitted               bool    `json:"effort_omitted"`
+	MaxOutputTokens             *int    `json:"max_output_tokens,omitempty"`
+	MaxOutputTokensOmitted      bool    `json:"max_output_tokens_omitted"`
+	ThinkingBudgetTokens        *int    `json:"thinking_budget_tokens,omitempty"`
+	ThinkingBudgetTokensOmitted bool    `json:"thinking_budget_tokens_omitted"`
 }
 
-type HarnessEffectiveMetadata struct {
-	ReasoningEffortOmitted      bool    `json:"reasoning_effort_omitted"`
-	ReasoningEffort             *string `json:"reasoning_effort"`
-	ThinkingBudgetTokensOmitted bool    `json:"thinking_budget_tokens_omitted"`
-	ThinkingBudgetTokens        *int    `json:"thinking_budget_tokens"`
+type EffectiveProviderOptions struct {
+	EffortOmitted               bool    `json:"effort_omitted"`
+	Effort                      *string `json:"effort,omitempty"`
+	AnthropicThinkingMode       *string `json:"anthropic_thinking_mode,omitempty"`
+	MaxOutputTokens             *int    `json:"max_output_tokens,omitempty"`
 	MaxOutputTokensOmitted      bool    `json:"max_output_tokens_omitted"`
-	MaxOutputTokens             *int    `json:"max_output_tokens"`
-	AnthropicMaxTokens          *int    `json:"anthropic_max_tokens"`
+	AnthropicMaxTokens          *int    `json:"anthropic_max_tokens,omitempty"`
+	ThinkingBudgetTokens        *int    `json:"thinking_budget_tokens,omitempty"`
+	ThinkingBudgetTokensOmitted bool    `json:"thinking_budget_tokens_omitted"`
 }
 
 type CompactionMetadata struct {
@@ -122,59 +138,73 @@ type CompactionMetadata struct {
 	KeepRecentTurns int    `json:"keep_recent_turns"`
 }
 
-func NewHarnessMetadata(version string, cfg providerconfig.ResolvedProviderConfig, systemPrompt string) HarnessMetadata {
-	opts := cfg.HarnessOptions
-	meta := HarnessMetadata{
+func NewRunMetadata(version string, cfg providerconfig.ResolvedProviderConfig, systemPrompt string) RunMetadata {
+	opts := cfg.RequestOptions
+	effortOmitted := !opts.Effort.Set || opts.Effort.Level == "auto"
+	effortValue := opts.Effort.Level
+	if effortOmitted {
+		effortValue = ""
+	}
+
+	meta := RunMetadata{
 		ClnkrVersion: version,
 		Provider:     cfg.Provider,
 		ProviderAPI:  cfg.ProviderAPI,
 		Model:        cfg.Model,
 		PromptSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(systemPrompt))),
-		Requested: HarnessRequestedMetadata{
-			ReasoningEffort:      stringPtr(opts.ReasoningEffort),
-			ThinkingBudgetTokens: optionalIntPtr(opts.ThinkingBudgetTokens),
-			MaxOutputTokens:      optionalIntPtr(opts.MaxOutputTokens),
+		Requested: RequestedProviderOptions{
+			EffortOmitted:               effortOmitted,
+			Effort:                      effectiveIfSet(effortValue),
+			MaxOutputTokensOmitted:      !opts.Output.MaxOutputTokens.Set,
+			MaxOutputTokens:             optionalIntPtr(opts.Output.MaxOutputTokens),
+			ThinkingBudgetTokensOmitted: !opts.AnthropicManual.ThinkingBudgetTokens.Set,
+			ThinkingBudgetTokens:        optionalIntPtr(opts.AnthropicManual.ThinkingBudgetTokens),
 		},
-		Effective: HarnessEffectiveMetadata{
-			ReasoningEffortOmitted:      opts.ReasoningEffort == "",
-			ReasoningEffort:             effectiveReasoningEffort(cfg),
-			ThinkingBudgetTokensOmitted: !opts.ThinkingBudgetTokens.Set,
-			ThinkingBudgetTokens:        optionalIntPtr(opts.ThinkingBudgetTokens),
-			MaxOutputTokensOmitted:      !opts.MaxOutputTokens.Set,
-			MaxOutputTokens:             optionalIntPtr(opts.MaxOutputTokens),
+		Effective: EffectiveProviderOptions{
+			EffortOmitted:          effortOmitted,
+			Effort:                 effectiveIfSet(effortValue),
+			MaxOutputTokensOmitted: !opts.Output.MaxOutputTokens.Set,
+			MaxOutputTokens:        optionalIntPtr(opts.Output.MaxOutputTokens),
 		},
 		Compaction: CompactionMetadata{Policy: "manual", KeepRecentTurns: 2},
 	}
+
 	if cfg.Provider == providerconfig.ProviderAnthropic {
 		maxTokens := providerconfig.DefaultAnthropicMaxTokens
-		if opts.MaxOutputTokens.Set {
-			maxTokens = opts.MaxOutputTokens.Value
+		if opts.Output.MaxOutputTokens.Set {
+			maxTokens = opts.Output.MaxOutputTokens.Value
 		}
 		meta.Effective.AnthropicMaxTokens = &maxTokens
+
+		// Determine effective Anthropic thinking mode
+		if opts.Effort.Set && opts.Effort.Level != "auto" {
+			// Non-auto effort: also enable adaptive thinking
+			adaptive := "adaptive"
+			meta.Effective.AnthropicThinkingMode = &adaptive
+			meta.Effective.Effort = &opts.Effort.Level
+			meta.Effective.EffortOmitted = false
+		} else if opts.AnthropicManual.ThinkingBudgetTokens.Set {
+			enabled := "enabled"
+			meta.Effective.AnthropicThinkingMode = &enabled
+		}
 	}
+
 	return meta
 }
 
-func HarnessMetadataDebugEvent(meta HarnessMetadata) (clnkr.EventDebug, error) {
+func RunMetadataDebugEvent(meta RunMetadata) (clnkr.EventDebug, error) {
 	data, err := json.Marshal(meta)
 	if err != nil {
-		return clnkr.EventDebug{}, fmt.Errorf("marshal harness metadata: %w", err)
+		return clnkr.EventDebug{}, fmt.Errorf("marshal run metadata: %w", err)
 	}
 	return clnkr.EventDebug{Message: string(data)}, nil
 }
 
-func effectiveReasoningEffort(cfg providerconfig.ResolvedProviderConfig) *string {
-	if cfg.ProviderAPI != providerconfig.ProviderAPIOpenAIResponses || cfg.HarnessOptions.ReasoningEffort == "" {
+func effectiveIfSet(s string) *string {
+	if s == "" {
 		return nil
 	}
-	return &cfg.HarnessOptions.ReasoningEffort
-}
-
-func stringPtr(value string) *string {
-	if value == "" {
-		return nil
-	}
-	return &value
+	return &s
 }
 
 func optionalIntPtr(value providerconfig.OptionalInt) *int {

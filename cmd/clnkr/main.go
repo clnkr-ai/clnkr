@@ -32,12 +32,11 @@ Usage:
   -u, --base-url string     LLM endpoint transport URL (env: $CLNKR_BASE_URL)
       --provider string     Provider adapter: anthropic|openai
       --provider-api string OpenAI-only override
-      --reasoning-effort string
-                            OpenAI Responses reasoning effort
-      --thinking-budget-tokens int
-                            Anthropic extended thinking budget
+      --effort string       Provider effort: auto|low|medium|high|xhigh|max
       --max-output-tokens int
-                            Provider output-token limit
+                            Maximum response output tokens
+      --thinking-budget-tokens int
+                            Anthropic manual thinking budget; legacy/debug
       --max-steps int       Limit executed commands
                             before summary (default: 100)
       --full-send           Execute every act batch without approval
@@ -200,7 +199,7 @@ func main() {
 	baseURLShort := flags.String("u", "", "")
 	providerFlag := flags.String("provider", "", "")
 	providerAPIFlag := flags.String("provider-api", "", "")
-	reasoningEffort := flags.String("reasoning-effort", "", "")
+	effortFlag := flags.String("effort", "", "")
 	thinkingBudgetTokens := flags.Int("thinking-budget-tokens", 0, "")
 	maxOutputTokens := flags.Int("max-output-tokens", 0, "")
 	maxSteps := flags.Int("max-steps", 0, "")
@@ -302,15 +301,22 @@ func main() {
 		ProviderAPI: *providerAPIFlag,
 		Model:       aliasedString(*modelShort, *modelFlag),
 		BaseURL:     aliasedString(*baseURLShort, *baseURLFlag),
-		HarnessOptions: providerconfig.HarnessOptions{
-			ReasoningEffort: *reasoningEffort,
-			ThinkingBudgetTokens: providerconfig.OptionalInt{
-				Value: *thinkingBudgetTokens,
-				Set:   thinkingBudgetTokensSet,
+		RequestOptions: providerconfig.ProviderRequestOptions{
+			Effort: providerconfig.ProviderEffortOptions{
+				Level: *effortFlag,
+				Set:   *effortFlag != "",
 			},
-			MaxOutputTokens: providerconfig.OptionalInt{
-				Value: *maxOutputTokens,
-				Set:   maxOutputTokensSet,
+			Output: providerconfig.ProviderOutputOptions{
+				MaxOutputTokens: providerconfig.OptionalInt{
+					Value: *maxOutputTokens,
+					Set:   maxOutputTokensSet,
+				},
+			},
+			AnthropicManual: providerconfig.AnthropicManualThinkingOptions{
+				ThinkingBudgetTokens: providerconfig.OptionalInt{
+					Value: *thinkingBudgetTokens,
+					Set:   thinkingBudgetTokensSet,
+				},
 			},
 		},
 	}, os.Getenv)
@@ -321,7 +327,7 @@ func main() {
 		}
 		fatalf("%v", err)
 	}
-	harnessMetadata := clnkrapp.NewHarnessMetadata(version, cfg, systemPrompt)
+	runMetadata := clnkrapp.NewRunMetadata(version, cfg, systemPrompt)
 
 	var eventLogFile *os.File
 	if *eventLog != "" {
@@ -386,7 +392,7 @@ func main() {
 			_ = clnkrapp.WriteEventLog(eventLogFile, e)
 		}
 	}
-	if event, err := clnkrapp.HarnessMetadataDebugEvent(harnessMetadata); err != nil {
+	if event, err := clnkrapp.RunMetadataDebugEvent(runMetadata); err != nil {
 		fatalf("%v", err)
 	} else {
 		agent.Notify(event)
@@ -486,7 +492,7 @@ func main() {
 	}
 	// Auto-save session on exit (conversational mode)
 	if msgs := agent.Messages(); len(msgs) > 0 {
-		if err := session.SaveSessionWithMetadata(cwd, msgs, harnessMetadata); err != nil {
+		if err := session.SaveSessionWithMetadata(cwd, msgs, runMetadata); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", err)
 		} else {
 			dir, _ := session.SessionDir(cwd)

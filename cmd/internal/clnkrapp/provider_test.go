@@ -56,7 +56,7 @@ func TestNewModelForConfigUsesOpenAIResponsesWhenConfigured(t *testing.T) {
 	}
 }
 
-func TestNewModelForConfigPassesOpenAIResponsesHarnessOptions(t *testing.T) {
+func TestNewModelForConfigPassesOpenAIResponsesRequestOptions(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -81,9 +81,11 @@ func TestNewModelForConfigPassesOpenAIResponsesHarnessOptions(t *testing.T) {
 		Model:       "gpt-5.1",
 		BaseURL:     server.URL,
 		APIKey:      "test-key",
-		HarnessOptions: providerconfig.HarnessOptions{
-			ReasoningEffort: "high",
-			MaxOutputTokens: providerconfig.OptionalInt{Value: 8000, Set: true},
+		RequestOptions: providerconfig.ProviderRequestOptions{
+			Effort: providerconfig.ProviderEffortOptions{Level: "high", Set: true},
+			Output: providerconfig.ProviderOutputOptions{
+				MaxOutputTokens: providerconfig.OptionalInt{Value: 8000, Set: true},
+			},
 		},
 	}, "sys")
 	if _, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}}); err != nil {
@@ -98,7 +100,7 @@ func TestNewModelForConfigPassesOpenAIResponsesHarnessOptions(t *testing.T) {
 	}
 }
 
-func TestNewModelForConfigPassesAnthropicHarnessOptions(t *testing.T) {
+func TestNewModelForConfigPassesAnthropicRequestOptions(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -115,9 +117,13 @@ func TestNewModelForConfigPassesAnthropicHarnessOptions(t *testing.T) {
 		Model:    "claude-sonnet-4-20250514",
 		BaseURL:  server.URL,
 		APIKey:   "test-key",
-		HarnessOptions: providerconfig.HarnessOptions{
-			ThinkingBudgetTokens: providerconfig.OptionalInt{Value: 2048, Set: true},
-			MaxOutputTokens:      providerconfig.OptionalInt{Value: 8000, Set: true},
+		RequestOptions: providerconfig.ProviderRequestOptions{
+			AnthropicManual: providerconfig.AnthropicManualThinkingOptions{
+				ThinkingBudgetTokens: providerconfig.OptionalInt{Value: 2048, Set: true},
+			},
+			Output: providerconfig.ProviderOutputOptions{
+				MaxOutputTokens: providerconfig.OptionalInt{Value: 8000, Set: true},
+			},
 		},
 	}, "sys")
 	if _, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}}); err != nil {
@@ -129,6 +135,51 @@ func TestNewModelForConfigPassesAnthropicHarnessOptions(t *testing.T) {
 	thinking, ok := gotBody["thinking"].(map[string]any)
 	if !ok || thinking["type"] != "enabled" || thinking["budget_tokens"] != float64(2048) {
 		t.Fatalf("thinking = %#v, want enabled budget 2048", gotBody["thinking"])
+	}
+}
+
+func TestNewModelForConfigPassesAnthropicEffortWithAdaptiveThinking(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]string{{"type": "text", "text": anthropicWrappedDone("ok")}},
+			"usage":   map[string]int{"input_tokens": 1, "output_tokens": 1},
+		})
+	}))
+	defer server.Close()
+
+	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
+		Provider: providerconfig.ProviderAnthropic,
+		Model:    "claude-sonnet-4-20250514",
+		BaseURL:  server.URL,
+		APIKey:   "test-key",
+		RequestOptions: providerconfig.ProviderRequestOptions{
+			Effort: providerconfig.ProviderEffortOptions{Level: "medium", Set: true},
+			Output: providerconfig.ProviderOutputOptions{
+				MaxOutputTokens: providerconfig.OptionalInt{Value: 4096, Set: true},
+			},
+		},
+	}, "sys")
+	if _, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}}); err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+
+	outputConfig, ok := gotBody["output_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("output_config = %#v, want object", gotBody["output_config"])
+	}
+	if outputConfig["effort"] != "medium" {
+		t.Fatalf("output_config.effort = %#v, want medium", gotBody["output_config"])
+	}
+
+	thinking, ok := gotBody["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("thinking = %#v, want object", gotBody["thinking"])
+	}
+	if thinking["type"] != "adaptive" {
+		t.Fatalf("thinking.type = %#v, want adaptive", gotBody["thinking"])
 	}
 }
 

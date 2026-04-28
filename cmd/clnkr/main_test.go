@@ -135,7 +135,7 @@ func TestUsageMentionsProviderAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("help command: %v\nstderr: %s", err, stderr.String())
 	}
-	for _, want := range []string{"provider-api", "reasoning-effort", "thinking-budget-tokens", "max-output-tokens", "Limit executed commands", "before summary (default: 100)", "infers provider when provider is unset", "anthropic base URL  https://api.anthropic.com"} {
+	for _, want := range []string{"provider-api", "--effort", "thinking-budget-tokens", "max-output-tokens", "Limit executed commands", "before summary (default: 100)", "infers provider when provider is unset", "anthropic base URL  https://api.anthropic.com"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("usage output missing %q, got %q", want, stdout.String())
 		}
@@ -565,7 +565,7 @@ func TestOpenAIResponsesHarnessFlagsReachRequestAndMetadata(t *testing.T) {
 		"--provider-api", "openai-responses",
 		"--base-url", server.URL,
 		"--model", "gpt-5.1",
-		"--reasoning-effort", "high",
+		"--effort", "high",
 		"--max-output-tokens", "8000",
 		"--event-log", eventLogPath,
 		"-p", "hi",
@@ -601,12 +601,12 @@ func TestOpenAIResponsesHarnessFlagsReachRequestAndMetadata(t *testing.T) {
 	if event.Type != "debug" {
 		t.Fatalf("first event type = %q, want debug", event.Type)
 	}
-	var metadata clnkrapp.HarnessMetadata
+	var metadata clnkrapp.RunMetadata
 	if err := json.Unmarshal([]byte(event.Payload.Message), &metadata); err != nil {
 		t.Fatalf("unmarshal metadata: %v", err)
 	}
-	if metadata.Effective.ReasoningEffort == nil || *metadata.Effective.ReasoningEffort != "high" {
-		t.Fatalf("metadata reasoning = %#v, want high", metadata.Effective.ReasoningEffort)
+	if metadata.Effective.Effort == nil || *metadata.Effective.Effort != "high" {
+		t.Fatalf("metadata effort = %#v, want high", metadata.Effective.Effort)
 	}
 	if metadata.Effective.MaxOutputTokens == nil || *metadata.Effective.MaxOutputTokens != 8000 {
 		t.Fatalf("metadata max output = %#v, want 8000", metadata.Effective.MaxOutputTokens)

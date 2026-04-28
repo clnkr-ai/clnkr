@@ -37,22 +37,24 @@ func TestWriteTrajectoryWritesIndentedMessages(t *testing.T) {
 	}
 }
 
-func TestHarnessMetadataDebugEventFormatsJSON(t *testing.T) {
-	meta := NewHarnessMetadata("test-version", providerconfig.ResolvedProviderConfig{
+func TestRunMetadataDebugEventFormatsJSON(t *testing.T) {
+	meta := NewRunMetadata("test-version", providerconfig.ResolvedProviderConfig{
 		Provider:    providerconfig.ProviderOpenAI,
 		ProviderAPI: providerconfig.ProviderAPIOpenAIResponses,
 		Model:       "gpt-5.1",
-		HarnessOptions: providerconfig.HarnessOptions{
-			ReasoningEffort: "high",
-			MaxOutputTokens: providerconfig.OptionalInt{Value: 8000, Set: true},
+		RequestOptions: providerconfig.ProviderRequestOptions{
+			Effort: providerconfig.ProviderEffortOptions{Level: "high", Set: true},
+			Output: providerconfig.ProviderOutputOptions{
+				MaxOutputTokens: providerconfig.OptionalInt{Value: 8000, Set: true},
+			},
 		},
 	}, "system prompt")
 
-	event, err := HarnessMetadataDebugEvent(meta)
+	event, err := RunMetadataDebugEvent(meta)
 	if err != nil {
-		t.Fatalf("HarnessMetadataDebugEvent: %v", err)
+		t.Fatalf("RunMetadataDebugEvent: %v", err)
 	}
-	var got HarnessMetadata
+	var got RunMetadata
 	if err := json.Unmarshal([]byte(event.Message), &got); err != nil {
 		t.Fatalf("debug message is not JSON metadata: %v", err)
 	}
@@ -62,8 +64,8 @@ func TestHarnessMetadataDebugEventFormatsJSON(t *testing.T) {
 	if got.PromptSHA256 != "e16202309c92180728dd7fd1c59f16004a6d5ee245538c28d2a9a22edf2dd2ab" {
 		t.Fatalf("PromptSHA256 = %q, want sha256(system prompt)", got.PromptSHA256)
 	}
-	if got.Effective.ReasoningEffort == nil || *got.Effective.ReasoningEffort != "high" {
-		t.Fatalf("Effective.ReasoningEffort = %#v, want high", got.Effective.ReasoningEffort)
+	if got.Effective.Effort == nil || *got.Effective.Effort != "high" {
+		t.Fatalf("Effective.Effort = %#v, want high", got.Effective.Effort)
 	}
 }
 

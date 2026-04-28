@@ -127,7 +127,7 @@ func TestModelQueryUsesResponsesStructuredRequest(t *testing.T) {
 	}
 }
 
-func TestModelQuerySerializesHarnessOptions(t *testing.T) {
+func TestModelQuerySerializesProviderRequestOptions(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)

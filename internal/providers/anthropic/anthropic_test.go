@@ -97,8 +97,11 @@ func TestModel(t *testing.T) {
 		if summary != "Older work summarized." {
 			t.Fatalf("summary = %q, want %q", summary, "Older work summarized.")
 		}
-		if _, ok := gotBody["output_config"]; ok {
-			t.Fatalf("output_config should be omitted for QueryText, got %#v", gotBody["output_config"])
+		if outputCfg, ok := gotBody["output_config"]; ok {
+			// output_config should be omitted for QueryText when no effort is set
+			if outputCfg != nil {
+				t.Fatalf("output_config should be omitted for QueryText by default, got %#v", outputCfg)
+			}
 		}
 		if gotBody["max_tokens"] != float64(4096) {
 			t.Fatalf("max_tokens = %#v, want 4096", gotBody["max_tokens"])

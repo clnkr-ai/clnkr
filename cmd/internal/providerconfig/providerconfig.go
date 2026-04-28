@@ -3,12 +3,15 @@ package providerconfig
 import core "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
 
 type (
-	Provider               = core.Provider
-	ProviderAPI            = core.ProviderAPI
-	OptionalInt            = core.OptionalInt
-	HarnessOptions         = core.HarnessOptions
-	Inputs                 = core.Inputs
-	ResolvedProviderConfig = core.ResolvedProviderConfig
+	Provider                       = core.Provider
+	ProviderAPI                    = core.ProviderAPI
+	OptionalInt                    = core.OptionalInt
+	ProviderRequestOptions         = core.ProviderRequestOptions
+	ProviderEffortOptions          = core.ProviderEffortOptions
+	ProviderOutputOptions          = core.ProviderOutputOptions
+	AnthropicManualThinkingOptions = core.AnthropicManualThinkingOptions
+	Inputs                         = core.Inputs
+	ResolvedProviderConfig         = core.ResolvedProviderConfig
 )
 
 const (

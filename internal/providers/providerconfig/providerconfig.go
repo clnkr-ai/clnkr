@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -38,10 +39,31 @@ type OptionalInt struct {
 	Set   bool
 }
 
-type HarnessOptions struct {
-	ReasoningEffort      string
+// ProviderRequestOptions holds provider-agnostic request configuration.
+type ProviderRequestOptions struct {
+	Effort          ProviderEffortOptions
+	Output          ProviderOutputOptions
+	AnthropicManual AnthropicManualThinkingOptions
+}
+
+// ProviderEffortOptions describes the user-requested effort level.
+type ProviderEffortOptions struct {
+	// Level is "auto", "low", "medium", "high", "xhigh", or "max".
+	// "auto" means omit provider-specific effort fields.
+	Level string
+	// Set distinguishes omitted effort from explicit --effort auto.
+	Set bool
+}
+
+// ProviderOutputOptions describes the user-requested output token cap.
+type ProviderOutputOptions struct {
+	MaxOutputTokens OptionalInt
+}
+
+// AnthropicManualThinkingOptions is an advanced legacy escape hatch for
+// manual thinking budget (not the normal UX).
+type AnthropicManualThinkingOptions struct {
 	ThinkingBudgetTokens OptionalInt
-	MaxOutputTokens      OptionalInt
 }
 
 type Inputs struct {
@@ -49,7 +71,7 @@ type Inputs struct {
 	ProviderAPI    string
 	Model          string
 	BaseURL        string
-	HarnessOptions HarnessOptions
+	RequestOptions ProviderRequestOptions
 }
 
 type ResolvedProviderConfig struct {
@@ -58,7 +80,7 @@ type ResolvedProviderConfig struct {
 	Model          string
 	BaseURL        string
 	APIKey         string
-	HarnessOptions HarnessOptions
+	RequestOptions ProviderRequestOptions
 }
 
 var datedSnapshotSuffix = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`)
@@ -156,7 +178,7 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 		providerAPI = resolveOpenAIProviderAPI(normalizedModel, providerAPI)
 	}
 
-	harnessOptions, err := validateHarnessOptions(provider, providerAPI, model, inputs.HarnessOptions)
+	requestOptions, err := validateRequestOptions(provider, providerAPI, model, inputs.RequestOptions)
 	if err != nil {
 		return ResolvedProviderConfig{}, err
 	}
@@ -167,85 +189,107 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 		Model:          model,
 		BaseURL:        baseURL,
 		APIKey:         apiKey,
-		HarnessOptions: harnessOptions,
+		RequestOptions: requestOptions,
 	}, nil
 }
 
-func validateHarnessOptions(provider Provider, providerAPI ProviderAPI, model string, opts HarnessOptions) (HarnessOptions, error) {
-	opts.ReasoningEffort = strings.ToLower(strings.TrimSpace(opts.ReasoningEffort))
-	if opts.ReasoningEffort != "" {
-		if err := validateReasoningEffort(provider, providerAPI, model, opts.ReasoningEffort); err != nil {
-			return HarnessOptions{}, err
+func validateRequestOptions(provider Provider, providerAPI ProviderAPI, model string, opts ProviderRequestOptions) (ProviderRequestOptions, error) {
+	opts.Effort.Level = strings.ToLower(strings.TrimSpace(opts.Effort.Level))
+	if opts.Effort.Set {
+		if err := validateEffort(provider, providerAPI, model, opts.Effort.Level); err != nil {
+			return ProviderRequestOptions{}, err
 		}
 	}
-	if opts.MaxOutputTokens.Set {
-		if opts.MaxOutputTokens.Value < 1 {
-			return HarnessOptions{}, fmt.Errorf("max-output-tokens must be at least 1")
+	if opts.Output.MaxOutputTokens.Set {
+		if opts.Output.MaxOutputTokens.Value < 1 {
+			return ProviderRequestOptions{}, fmt.Errorf("max-output-tokens must be at least 1")
 		}
 		if provider == ProviderOpenAI && providerAPI != ProviderAPIOpenAIResponses {
-			return HarnessOptions{}, fmt.Errorf("max-output-tokens is not supported for provider-api %q", providerAPI)
+			return ProviderRequestOptions{}, fmt.Errorf("max-output-tokens is not supported for provider-api %q", providerAPI)
 		}
-		if provider == ProviderAnthropic && opts.MaxOutputTokens.Value > MaxAnthropicNonStreamingTokens {
-			return HarnessOptions{}, fmt.Errorf("max-output-tokens for anthropic must be at most %d while streaming is unsupported", MaxAnthropicNonStreamingTokens)
+		if provider == ProviderAnthropic && opts.Output.MaxOutputTokens.Value > MaxAnthropicNonStreamingTokens {
+			return ProviderRequestOptions{}, fmt.Errorf("max-output-tokens for anthropic must be at most %d while streaming is unsupported", MaxAnthropicNonStreamingTokens)
 		}
 	}
-	if opts.ThinkingBudgetTokens.Set {
+	if opts.AnthropicManual.ThinkingBudgetTokens.Set {
 		if err := validateThinkingBudgetTokens(provider, model, opts); err != nil {
-			return HarnessOptions{}, err
+			return ProviderRequestOptions{}, err
 		}
 	}
 	return opts, nil
 }
 
-func validateReasoningEffort(provider Provider, providerAPI ProviderAPI, model, effort string) error {
-	if !allowedReasoningEffort(effort) {
-		return fmt.Errorf(`invalid reasoning-effort %q (allowed: none, minimal, low, medium, high, xhigh)`, effort)
+func validateEffort(provider Provider, providerAPI ProviderAPI, model, effort string) error {
+	if !allowedEffort(effort) {
+		return fmt.Errorf(`invalid effort %q (allowed: auto, low, medium, high, xhigh, max)`, effort)
 	}
-	if provider != ProviderOpenAI || providerAPI != ProviderAPIOpenAIResponses {
-		return fmt.Errorf("reasoning-effort requires provider openai with provider-api openai-responses")
-	}
-	normalizedModel := strings.ToLower(strings.TrimSpace(model))
-	baseModel := stripDatedSnapshotSuffix(normalizedModel)
-	switch {
-	case baseModel == "gpt-5-pro" && effort != "high":
-		return fmt.Errorf(`reasoning-effort %q is not supported for model %q; gpt-5-pro only supports high`, effort, model)
-	case isGPT51Model(normalizedModel) && effort == "minimal":
-		return fmt.Errorf(`reasoning-effort %q is not supported for model %q`, effort, model)
-	case effort == "none" && !isGPT51OrNewerModel(normalizedModel):
-		return fmt.Errorf(`reasoning-effort "none" is not supported for model %q`, model)
-	case effort == "xhigh" && !isCodexMaxOrNewerModel(normalizedModel):
-		return fmt.Errorf(`reasoning-effort "xhigh" is not supported for model %q`, model)
-	case !isReasoningCapableOpenAIModel(normalizedModel):
-		return fmt.Errorf("reasoning-effort requires an OpenAI reasoning-capable model")
-	default:
+	if effort == "auto" {
 		return nil
 	}
+	// Non-auto effort
+	if provider == ProviderAnthropic {
+		switch effort {
+		case "low", "medium", "high":
+			return nil
+		default:
+			return fmt.Errorf(`effort %q is not supported for provider anthropic (allowed: low, medium, high)`, effort)
+		}
+	}
+	if provider == ProviderOpenAI {
+		if providerAPI == ProviderAPIOpenAIChatCompletions {
+			return fmt.Errorf(`effort is not supported for provider-api %q`, providerAPI)
+		}
+		normalizedModel := strings.ToLower(strings.TrimSpace(model))
+		baseModel := stripDatedSnapshotSuffix(normalizedModel)
+		switch effort {
+		case "max":
+			return fmt.Errorf(`effort %q is not supported for OpenAI Responses`, effort)
+		case "xhigh":
+			if !isCodexMaxOrNewerModel(normalizedModel) {
+				return fmt.Errorf(`effort %q is not supported for model %q; xhigh requires codex-max-or-newer`, effort, model)
+			}
+		case "low", "medium", "high":
+			switch {
+			case baseModel == "gpt-5-pro" && effort != "high":
+				return fmt.Errorf(`effort %q is not supported for model %q; gpt-5-pro only supports high`, effort, model)
+			case !isReasoningCapableOpenAIModel(normalizedModel):
+				return fmt.Errorf("effort requires an OpenAI reasoning-capable model")
+			}
+		}
+	}
+	return nil
 }
 
-func allowedReasoningEffort(effort string) bool {
+func allowedEffort(effort string) bool {
 	switch effort {
-	case "none", "minimal", "low", "medium", "high", "xhigh":
+	case "auto", "low", "medium", "high", "xhigh", "max":
 		return true
 	default:
 		return false
 	}
 }
 
-func validateThinkingBudgetTokens(provider Provider, model string, opts HarnessOptions) error {
+func validateThinkingBudgetTokens(provider Provider, model string, opts ProviderRequestOptions) error {
 	if provider != ProviderAnthropic {
 		return fmt.Errorf("thinking-budget-tokens requires provider anthropic")
-	}
-	if opts.ThinkingBudgetTokens.Value < MinAnthropicThinkingBudgetTokens {
-		return fmt.Errorf("thinking-budget-tokens must be at least %d", MinAnthropicThinkingBudgetTokens)
 	}
 	if !isAnthropicExtendedThinkingModel(strings.ToLower(strings.TrimSpace(model))) {
 		return fmt.Errorf("thinking-budget-tokens requires an Anthropic extended-thinking-capable model")
 	}
-	maxTokens := DefaultAnthropicMaxTokens
-	if opts.MaxOutputTokens.Set {
-		maxTokens = opts.MaxOutputTokens.Value
+	if isAnthropicOpus47Plus(model) {
+		return fmt.Errorf("thinking-budget-tokens is not supported for model %q (Opus 4.7+ does not support manual thinking budget)", model)
 	}
-	if opts.ThinkingBudgetTokens.Value >= maxTokens {
+	if opts.Effort.Set && opts.Effort.Level != "auto" {
+		return fmt.Errorf("thinking-budget-tokens requires either no --effort flag or --effort auto; non-auto effort is incompatible with manual thinking budget")
+	}
+	if opts.AnthropicManual.ThinkingBudgetTokens.Value < MinAnthropicThinkingBudgetTokens {
+		return fmt.Errorf("thinking-budget-tokens must be at least %d", MinAnthropicThinkingBudgetTokens)
+	}
+	maxTokens := DefaultAnthropicMaxTokens
+	if opts.Output.MaxOutputTokens.Set {
+		maxTokens = opts.Output.MaxOutputTokens.Value
+	}
+	if opts.AnthropicManual.ThinkingBudgetTokens.Value >= maxTokens {
 		return fmt.Errorf("thinking-budget-tokens must be less than effective anthropic max_tokens (%d)", maxTokens)
 	}
 	return nil
@@ -371,6 +415,23 @@ func isAnthropicExtendedThinkingModel(model string) bool {
 	return strings.Contains(model, "claude-3-7-sonnet") ||
 		strings.Contains(model, "claude-sonnet-4") ||
 		strings.Contains(model, "claude-opus-4")
+}
+
+func isAnthropicOpus47Plus(model string) bool {
+	model = stripDatedSnapshotSuffix(model)
+	idx := strings.Index(model, "claude-opus-4-")
+	if idx < 0 {
+		return false
+	}
+	after := model[idx+len("claude-opus-4-"):]
+	end := strings.IndexByte(after, '-')
+	if end > 0 {
+		after = after[:end]
+	}
+	if v, err := strconv.Atoi(after); err == nil {
+		return v >= 7
+	}
+	return false
 }
 
 // Keep this matcher intentionally conservative: exact names plus dated snapshots only.
