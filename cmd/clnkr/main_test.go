@@ -142,6 +142,52 @@ func TestUsageMentionsProviderAPI(t *testing.T) {
 	}
 }
 
+func TestHelpSeparatesProviderOverrides(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t, "--help")
+	if err != nil {
+		t.Fatalf("help command: %v\nstderr: %s", err, stderr.String())
+	}
+	usage := stdout.String()
+	generalStart := strings.Index(usage, "Options:\n")
+	overridesStart := strings.Index(usage, "Provider overrides:\n")
+	sessionsStart := strings.Index(usage, "Sessions:\n")
+	if generalStart == -1 || overridesStart == -1 || sessionsStart == -1 {
+		t.Fatalf("usage missing expected sections:\n%s", usage)
+	}
+	if generalStart >= overridesStart || overridesStart >= sessionsStart {
+		t.Fatalf("section order wrong:\n%s", usage)
+	}
+
+	generalOptions := usage[generalStart:overridesStart]
+	for _, commonProviderFlag := range []string{"--provider", "--effort", "--max-output-tokens"} {
+		if !strings.Contains(generalOptions, commonProviderFlag) {
+			t.Fatalf("general options missing %q:\n%s", commonProviderFlag, usage)
+		}
+	}
+	for _, overrideFlag := range []string{"--provider-api", "--thinking-budget-tokens"} {
+		if strings.Contains(generalOptions, overrideFlag) {
+			t.Fatalf("general options include provider override %q:\n%s", overrideFlag, usage)
+		}
+	}
+
+	providerOverrides := usage[overridesStart:sessionsStart]
+	for _, overrideFlag := range []string{"--provider-api", "--thinking-budget-tokens"} {
+		if !strings.Contains(providerOverrides, overrideFlag) {
+			t.Fatalf("provider overrides missing %q:\n%s", overrideFlag, usage)
+		}
+	}
+	for _, commonProviderFlag := range []string{"--provider string", "--effort", "--max-output-tokens"} {
+		if strings.Contains(providerOverrides, commonProviderFlag) {
+			t.Fatalf("provider overrides include common option %q:\n%s", commonProviderFlag, usage)
+		}
+	}
+	for _, want := range []string{"OpenAI", "Anthropic", "legacy/debug"} {
+		if !strings.Contains(providerOverrides, want) {
+			t.Fatalf("provider overrides missing %q label:\n%s", want, usage)
+		}
+	}
+}
+
 func TestHelpWritesUsageToStdout(t *testing.T) {
 	stdout, stderr, err := runMainHelper(t, "--help")
 	if err != nil {

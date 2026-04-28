@@ -28,21 +28,23 @@ func usageText() string {
 Usage:
   clnkr                     Start conversational mode
 
+Options:
   -p, --prompt string       Task to run unattended and exit
   -m, --model string        Model identifier (required; env: $CLNKR_MODEL)
   -u, --base-url string     LLM endpoint transport URL (env: $CLNKR_BASE_URL)
       --provider string     Provider adapter: anthropic|openai
-      --provider-api string OpenAI-only override
       --effort string       Provider effort: auto|low|medium|high|xhigh|max
-      --max-output-tokens int
-                            Maximum response output tokens
-      --thinking-budget-tokens int
-                            Anthropic manual thinking budget; legacy/debug
+      --max-output-tokens int Maximum response output tokens
       --max-steps int       Limit executed commands
                             before summary (default: 100)
       --full-send           Execute every act batch without approval
                             (implied by -p)
   -v, --verbose             Show internal decisions
+
+Provider overrides:
+      --provider-api string OpenAI API override
+      --thinking-budget-tokens int
+                            Anthropic legacy/debug thinking budget override
 
 Sessions:
   -c, --continue            Resume most recent session for this project
