@@ -23,11 +23,7 @@ type model interface {
 	compaction.FreeformModel
 }
 
-func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt string) clnkr.Model {
-	return newModelForConfig(cfg, systemPrompt)
-}
-
-func newModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt string) model {
+func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt string) model {
 	opts := cfg.RequestOptions
 	switch {
 	case cfg.Provider == providerdomain.ProviderAnthropic:
@@ -61,7 +57,7 @@ func newModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt s
 
 func MakeCompactorFactory(cfg providerconfig.ResolvedProviderConfig) compaction.Factory {
 	return compaction.NewFactory(func(instructions string) compaction.FreeformModel {
-		return newModelForConfig(cfg, compaction.LoadCompactionPrompt(instructions))
+		return NewModelForConfig(cfg, compaction.LoadCompactionPrompt(instructions))
 	})
 }
 
@@ -95,10 +91,7 @@ func WriteEventLog(w io.Writer, e clnkr.Event) error {
 }
 
 func writeEvent(w io.Writer, typ string, payload any) error {
-	return json.NewEncoder(w).Encode(struct {
-		Type    string `json:"type"`
-		Payload any    `json:"payload"`
-	}{typ, payload})
+	return json.NewEncoder(w).Encode(map[string]any{"type": typ, "payload": payload})
 }
 
 // RunMetadata describes the configuration for a clnkr run, recorded as debug
@@ -303,6 +296,12 @@ func RunApprovalTask(ctx context.Context, agent *clnkr.Agent, task string, promp
 			}
 			agent.AppendUserMessage(reply)
 		case *clnkr.ActTurn:
+			if remaining := agent.MaxSteps - steps; agent.MaxSteps > 0 && remaining <= 0 {
+				return agent.RequestStepLimitSummary(ctx)
+			}
+			if remaining := agent.MaxSteps - steps; agent.MaxSteps > 0 && len(turn.Bash.Commands) > remaining {
+				turn = &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: turn.Bash.Commands[:remaining]}, Reasoning: turn.Reasoning}
+			}
 			reply, err := waitForReply(ctx, prompter.ActReply, FormatActProposal(turn.Bash.Commands), reportRejected)
 			if err != nil {
 				return err
