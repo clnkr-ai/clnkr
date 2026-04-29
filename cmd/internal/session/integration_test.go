@@ -225,7 +225,7 @@ func TestSessionRoundTripWithCompactionState(t *testing.T) {
 			t.Fatalf("loaded %d messages, want %d", len(loaded), len(compacted))
 		}
 		for i := range compacted {
-			if loaded[i] != compacted[i] {
+			if !reflect.DeepEqual(loaded[i], compacted[i]) {
 				t.Fatalf("loaded[%d] = %#v, want %#v", i, loaded[i], compacted[i])
 			}
 		}

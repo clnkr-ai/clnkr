@@ -10,18 +10,11 @@ import (
 )
 
 func TestRequestSchema(t *testing.T) {
-	tests := []struct {
-		name            string
-		includeMaxItems bool
-		wantMaxItems    bool
-	}{
-		{name: "openai", includeMaxItems: true, wantMaxItems: true},
-		{name: "anthropic", includeMaxItems: false, wantMaxItems: false},
-	}
+	tests := []string{"openai", "anthropic"}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			schema := RequestSchema(tt.includeMaxItems)
+	for _, name := range tests {
+		t.Run(name, func(t *testing.T) {
+			schema := RequestSchema()
 			want := map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
@@ -40,7 +33,7 @@ func TestRequestSchema(t *testing.T) {
 										"type":                 "object",
 										"additionalProperties": false,
 										"properties": map[string]any{
-											"commands": commandArraySchema(tt.wantMaxItems),
+											"commands": commandArraySchema(),
 										},
 										"required": []string{"commands"},
 									},
@@ -95,6 +88,30 @@ func TestRequestSchema(t *testing.T) {
 	}
 }
 
+func TestFinalTurnSchemasExcludeAct(t *testing.T) {
+	schema := FinalTurnSchema()
+	choices := schema["properties"].(map[string]any)["turn"].(map[string]any)["anyOf"].([]any)
+	if len(choices) != 2 {
+		t.Fatalf("FinalTurnSchema choices = %d, want clarify and done", len(choices))
+	}
+	for _, choice := range choices {
+		typ := choice.(map[string]any)["properties"].(map[string]any)["type"].(map[string]any)["const"]
+		if typ == "act" {
+			t.Fatalf("FinalTurnSchema includes act: %#v", schema)
+		}
+	}
+
+	doneOnly := DoneOnlySchema()
+	doneChoices := doneOnly["properties"].(map[string]any)["turn"].(map[string]any)["anyOf"].([]any)
+	if len(doneChoices) != 1 {
+		t.Fatalf("DoneOnlySchema choices = %d, want done only", len(doneChoices))
+	}
+	typ := doneChoices[0].(map[string]any)["properties"].(map[string]any)["type"].(map[string]any)["const"]
+	if typ != "done" {
+		t.Fatalf("DoneOnlySchema turn type = %#v, want done", typ)
+	}
+}
+
 func TestParseProviderTurn(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -108,6 +125,19 @@ func TestParseProviderTurn(t *testing.T) {
 			want: &clnkr.ActTurn{
 				Bash:      clnkr.BashBatch{Commands: []clnkr.BashAction{{Command: "pwd", Workdir: "/tmp"}}},
 				Reasoning: "inspect",
+			},
+		},
+		{
+			name: "act with more than three commands",
+			raw:  `{"turn":{"type":"act","bash":{"commands":[{"command":"one","workdir":null},{"command":"two","workdir":null},{"command":"three","workdir":null},{"command":"four","workdir":null}]},"question":null,"summary":null,"reasoning":"batch"}}`,
+			want: &clnkr.ActTurn{
+				Bash: clnkr.BashBatch{Commands: []clnkr.BashAction{
+					{Command: "one"},
+					{Command: "two"},
+					{Command: "three"},
+					{Command: "four"},
+				}},
+				Reasoning: "batch",
 			},
 		},
 		{
@@ -193,8 +223,8 @@ func TestParseProviderTurnNormalizesEscapedHumanText(t *testing.T) {
 	}
 }
 
-func commandArraySchema(includeMaxItems bool) map[string]any {
-	schema := map[string]any{
+func commandArraySchema() map[string]any {
+	return map[string]any{
 		"type":     "array",
 		"minItems": 1,
 		"items": map[string]any{
@@ -207,10 +237,6 @@ func commandArraySchema(includeMaxItems bool) map[string]any {
 			"required": []string{"command", "workdir"},
 		},
 	}
-	if includeMaxItems {
-		schema["maxItems"] = 3
-	}
-	return schema
 }
 
 func expectedNullableStringSchema() map[string]any {

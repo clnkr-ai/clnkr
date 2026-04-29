@@ -83,7 +83,6 @@ func TestErrorToReason(t *testing.T) {
 	}{
 		{ErrInvalidJSON, "invalid_json"},
 		{ErrMissingCommand, "missing_command"},
-		{ErrTooManyCommands, "too_many_commands"},
 		{ErrEmptyClarify, "empty_clarify"},
 		{ErrEmptySummary, "empty_summary"},
 		{ErrUnknownTurnType, "unknown_turn_type"},

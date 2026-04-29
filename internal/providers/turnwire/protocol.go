@@ -33,18 +33,26 @@ type wireCommand struct {
 	Workdir *string `json:"workdir"`
 }
 
-func RequestSchema(includeMaxItems bool) map[string]any {
-	return structuredOutputSchema(includeMaxItems)
+func RequestSchema() map[string]any {
+	return structuredOutputSchema()
 }
 
-func structuredOutputSchema(includeMaxItems bool) map[string]any {
+func FinalTurnSchema() map[string]any {
+	return finalTurnSchema(false)
+}
+
+func DoneOnlySchema() map[string]any {
+	return finalTurnSchema(true)
+}
+
+func structuredOutputSchema() map[string]any {
 	return map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
 		"properties": map[string]any{
 			"turn": map[string]any{
 				"anyOf": []any{
-					actTurnSchema(includeMaxItems),
+					actTurnSchema(),
 					clarifyTurnSchema(),
 					doneTurnSchema(),
 				},
@@ -54,7 +62,24 @@ func structuredOutputSchema(includeMaxItems bool) map[string]any {
 	}
 }
 
-func actTurnSchema(includeMaxItems bool) map[string]any {
+func finalTurnSchema(doneOnly bool) map[string]any {
+	choices := []any{doneTurnSchema()}
+	if !doneOnly {
+		choices = append([]any{clarifyTurnSchema()}, choices...)
+	}
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"turn": map[string]any{
+				"anyOf": choices,
+			},
+		},
+		"required": []string{"turn"},
+	}
+}
+
+func actTurnSchema() map[string]any {
 	commands := map[string]any{
 		"type":     "array",
 		"minItems": 1,
@@ -67,9 +92,6 @@ func actTurnSchema(includeMaxItems bool) map[string]any {
 			},
 			"required": []string{"command", "workdir"},
 		},
-	}
-	if includeMaxItems {
-		commands["maxItems"] = 3
 	}
 
 	return map[string]any{
@@ -269,9 +291,6 @@ func validateWrappedTurnShape(raw string) error {
 		if len(commands) == 0 {
 			return fmt.Errorf("%w: structured output field %q must contain at least 1 item", clnkr.ErrInvalidJSON, "bash.commands")
 		}
-		if len(commands) > 3 {
-			return fmt.Errorf("%w: structured output field %q must contain at most 3 items", clnkr.ErrInvalidJSON, "bash.commands")
-		}
 		for i, rawCommand := range commands {
 			var commandFields map[string]json.RawMessage
 			if err := json.Unmarshal(rawCommand, &commandFields); err != nil {
@@ -333,9 +352,6 @@ func turnFromProviderPayload(payload wireTurnPayload) (clnkr.Turn, error) {
 	case "act":
 		if payload.Bash == nil || len(payload.Bash.Commands) == 0 {
 			return nil, clnkr.ErrMissingCommand
-		}
-		if len(payload.Bash.Commands) > 3 {
-			return nil, clnkr.ErrTooManyCommands
 		}
 		actions := make([]clnkr.BashAction, 0, len(payload.Bash.Commands))
 		for _, command := range payload.Bash.Commands {

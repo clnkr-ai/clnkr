@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -20,13 +21,40 @@ type fakeModel struct {
 }
 
 func (m *fakeModel) Query(_ context.Context, messages []Message) (Response, error) {
-	m.got = append(m.got, append([]Message{}, messages...))
+	m.got = append(m.got, transcript.CloneMessages(messages))
 	if m.calls >= len(m.responses) {
 		return Response{}, fmt.Errorf("no more responses")
 	}
 	resp := m.responses[m.calls]
 	m.calls++
 	return resp, nil
+}
+
+type fakeFinalModel struct {
+	fakeModel
+	finalCalled bool
+	mutateFinal bool
+}
+
+func (m *fakeFinalModel) QueryFinal(_ context.Context, messages []Message) (Response, error) {
+	m.finalCalled = true
+	m.got = append(m.got, transcript.CloneMessages(messages))
+	if m.mutateFinal && len(messages) > 0 && len(messages[0].BashToolCalls) > 0 {
+		messages[0].BashToolCalls[0].Command = "mutated"
+	}
+	return Response{Turn: &DoneTurn{Summary: "final"}}, nil
+}
+
+type mutatingModel struct{}
+
+func (m mutatingModel) Query(_ context.Context, messages []Message) (Response, error) {
+	if len(messages) > 0 && len(messages[0].BashToolCalls) > 0 {
+		messages[0].BashToolCalls[0].Command = "mutated"
+	}
+	if len(messages) > 0 && len(messages[0].ProviderReplay) > 0 && len(messages[0].ProviderReplay[0].JSON) > 0 {
+		messages[0].ProviderReplay[0].JSON[0] = '{'
+	}
+	return Response{Turn: &DoneTurn{Summary: "done"}}, nil
 }
 
 type fakeExecutor struct {
@@ -45,8 +73,7 @@ type fakeCompactor struct {
 }
 
 func (c *fakeCompactor) Summarize(_ context.Context, messages []Message) (string, error) {
-	cp := append([]Message{}, messages...)
-	c.got = append(c.got, cp)
+	c.got = append(c.got, transcript.CloneMessages(messages))
 	if c.err != nil {
 		return "", c.err
 	}
@@ -88,6 +115,31 @@ func mustCommandPayload(t *testing.T, result CommandResult) string {
 		ExitCode: result.ExitCode,
 		Feedback: result.Feedback,
 	})
+}
+
+func mustShellResultPayload(t *testing.T, raw string) struct {
+	Stdout  string `json:"stdout"`
+	Stderr  string `json:"stderr"`
+	Outcome struct {
+		Type     string `json:"type"`
+		ExitCode int    `json:"exit_code,omitempty"`
+		Reason   string `json:"reason,omitempty"`
+	} `json:"outcome"`
+} {
+	t.Helper()
+	var payload struct {
+		Stdout  string `json:"stdout"`
+		Stderr  string `json:"stderr"`
+		Outcome struct {
+			Type     string `json:"type"`
+			ExitCode int    `json:"exit_code,omitempty"`
+			Reason   string `json:"reason,omitempty"`
+		} `json:"outcome"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("payload is not JSON: %v\n%s", err, raw)
+	}
+	return payload
 }
 
 func mustStepAct(t *testing.T, agent *Agent) *ActTurn {
@@ -337,7 +389,7 @@ func TestStep(t *testing.T) {
 		if !errors.Is(result.ParseErr, ErrInvalidJSON) {
 			t.Fatalf("expected ErrInvalidJSON, got %v", result.ParseErr)
 		}
-		if got := agent.messages[len(agent.messages)-2]; got != (Message{Role: "assistant", Content: raw}) {
+		if got := agent.messages[len(agent.messages)-2]; !reflect.DeepEqual(got, Message{Role: "assistant", Content: raw}) {
 			t.Fatalf("assistant message = %#v, want raw payload", got)
 		}
 		if last := agent.messages[len(agent.messages)-1]; !strings.Contains(last.Content, "[protocol_error]") {
@@ -476,7 +528,7 @@ func TestStepStoresCanonicalAssistantSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Step: %v", err)
 	}
-	if got := agent.messages[len(agent.messages)-1]; got != (Message{Role: "assistant", Content: `{"type":"done","summary":"wrapped summary"}`}) {
+	if got := agent.messages[len(agent.messages)-1]; !reflect.DeepEqual(got, Message{Role: "assistant", Content: `{"type":"done","summary":"wrapped summary"}`}) {
 		t.Fatalf("assistant message = %#v", got)
 	}
 	if result.Turn == nil {
@@ -484,6 +536,52 @@ func TestStepStoresCanonicalAssistantSuccess(t *testing.T) {
 	}
 	if result.Response.Raw != raw {
 		t.Fatalf("response raw = %q, want %q", result.Response.Raw, raw)
+	}
+}
+
+func TestStepStoresToolCallMetadata(t *testing.T) {
+	replayJSON := json.RawMessage(`{"type":"reasoning","id":"rs_1"}`)
+	model := &fakeModel{responses: []Response{{
+		Turn:          &ActTurn{Bash: bashBatch(BashAction{ID: "call_1", Command: "pwd"})},
+		BashToolCalls: []BashToolCall{{ID: "call_1", Command: "pwd"}},
+		ProviderReplay: []ProviderReplayItem{{
+			Provider: "openai", ProviderAPI: "openai-responses", Type: "reasoning", JSON: replayJSON,
+		}},
+	}}}
+	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+	agent.AppendUserMessage("inspect")
+
+	if _, err := agent.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	msg := agent.messages[len(agent.messages)-1]
+	if len(msg.BashToolCalls) != 1 || msg.BashToolCalls[0].ID != "call_1" || msg.BashToolCalls[0].Command != "pwd" {
+		t.Fatalf("BashToolCalls = %#v", msg.BashToolCalls)
+	}
+	if len(msg.ProviderReplay) != 1 || string(msg.ProviderReplay[0].JSON) != string(replayJSON) {
+		t.Fatalf("ProviderReplay = %#v", msg.ProviderReplay)
+	}
+}
+
+func TestStepClonesMessagesBeforeQuery(t *testing.T) {
+	agent := NewAgent(mutatingModel{}, &fakeExecutor{}, "/tmp")
+	agent.messages = []Message{{
+		Role:          "assistant",
+		Content:       `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]}}`,
+		BashToolCalls: []BashToolCall{{ID: "call_1", Command: "pwd"}},
+		ProviderReplay: []ProviderReplayItem{{
+			Provider: "openai", ProviderAPI: "openai-responses", Type: "reasoning", JSON: json.RawMessage(`["x"]`),
+		}},
+	}}
+
+	if _, err := agent.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if got := agent.messages[0].BashToolCalls[0].Command; got != "pwd" {
+		t.Fatalf("stored call command = %q, want pwd", got)
+	}
+	if got := string(agent.messages[0].ProviderReplay[0].JSON); got != `["x"]` {
+		t.Fatalf("stored replay JSON = %q, want original", got)
 	}
 }
 
@@ -502,7 +600,7 @@ func TestStepStoresRawInvalidProviderResponse(t *testing.T) {
 	if result.Turn != nil {
 		t.Fatalf("expected nil turn, got %T", result.Turn)
 	}
-	if got := agent.messages[len(agent.messages)-2]; got != (Message{Role: "assistant", Content: raw}) {
+	if got := agent.messages[len(agent.messages)-2]; !reflect.DeepEqual(got, Message{Role: "assistant", Content: raw}) {
 		t.Fatalf("assistant message = %#v, want raw provider text", got)
 	}
 	if last := agent.messages[len(agent.messages)-1]; !strings.Contains(last.Content, "[protocol_error]") {
@@ -576,8 +674,97 @@ func TestExecuteTurn(t *testing.T) {
 			t.Errorf("output should use command payload, got %q", payloadMsg.Content)
 		}
 		stateMsg := agent.messages[len(agent.messages)-1]
-		if stateMsg != (Message{Role: "user", Content: transcript.FormatStateMessage("/tmp")}) {
+		if !reflect.DeepEqual(stateMsg, Message{Role: "user", Content: transcript.FormatStateMessage("/tmp")}) {
 			t.Errorf("unexpected trailing state message: %#v", stateMsg)
+		}
+	})
+
+	t.Run("stores tool-call result metadata", func(t *testing.T) {
+		executor := &fakeExecutor{results: []CommandResult{{Stdout: "/tmp\n", ExitCode: 0}}}
+		agent := NewAgent(&fakeModel{}, executor, "/tmp")
+
+		_, err := agent.ExecuteTurn(context.Background(), &ActTurn{Bash: bashBatch(BashAction{ID: "call_1", Command: "pwd"})})
+		if err != nil {
+			t.Fatalf("ExecuteTurn: %v", err)
+		}
+		msg := agent.messages[len(agent.messages)-2]
+		if msg.BashToolResult == nil {
+			t.Fatal("missing BashToolResult")
+		}
+		if msg.BashToolResult.ID != "call_1" {
+			t.Fatalf("tool result ID = %q, want call_1", msg.BashToolResult.ID)
+		}
+		if msg.BashToolResult.Content != msg.Content {
+			t.Fatalf("tool result content = %q, want exact payload %q", msg.BashToolResult.Content, msg.Content)
+		}
+		payload := mustShellResultPayload(t, msg.BashToolResult.Content)
+		if payload.Stdout != "/tmp\n" || payload.Outcome.Type != "exit" || payload.Outcome.ExitCode != 0 {
+			t.Fatalf("tool result payload = %#v", payload)
+		}
+		if msg.BashToolResult.IsError {
+			t.Fatal("zero exit tool-call result should not be marked as error")
+		}
+	})
+
+	t.Run("marks nonzero tool-call result as error", func(t *testing.T) {
+		executor := &fakeExecutor{
+			results: []CommandResult{{Stderr: "nope\n", ExitCode: 2}},
+			errs:    []error{errors.New("run command: exit status 2")},
+		}
+		agent := NewAgent(&fakeModel{}, executor, "/tmp")
+
+		result, err := agent.ExecuteTurn(context.Background(), &ActTurn{Bash: bashBatch(BashAction{ID: "call_1", Command: "false"})})
+		if err != nil {
+			t.Fatalf("ExecuteTurn returned unexpected API error: %v", err)
+		}
+		if result.ExecErr == nil {
+			t.Fatal("ExecuteTurn ExecErr is nil, want nonzero command error")
+		}
+		msg := agent.messages[len(agent.messages)-2]
+		if msg.BashToolResult == nil {
+			t.Fatal("missing BashToolResult")
+		}
+		if !msg.BashToolResult.IsError {
+			t.Fatal("nonzero tool-call result should be marked as error")
+		}
+		payload := mustShellResultPayload(t, msg.BashToolResult.Content)
+		if payload.Stderr != "nope\n" || payload.Outcome.Type != "exit" || payload.Outcome.ExitCode != 2 {
+			t.Fatalf("tool result payload = %#v", payload)
+		}
+	})
+
+	t.Run("completes later tool calls after command failure", func(t *testing.T) {
+		executor := &fakeExecutor{
+			results: []CommandResult{{Stderr: "nope\n", ExitCode: 2}},
+			errs:    []error{errors.New("run command: exit status 2")},
+		}
+		agent := NewAgent(&fakeModel{}, executor, "/tmp")
+
+		result, err := agent.ExecuteTurn(context.Background(), &ActTurn{Bash: bashBatch(
+			BashAction{ID: "call_1", Command: "false"},
+			BashAction{ID: "call_2", Command: "echo later"},
+		)})
+		if err != nil {
+			t.Fatalf("ExecuteTurn returned unexpected API error: %v", err)
+		}
+		if result.ExecErr == nil {
+			t.Fatal("ExecuteTurn ExecErr is nil, want nonzero command error")
+		}
+		var results []BashToolResult
+		for _, msg := range agent.messages {
+			if msg.BashToolResult != nil {
+				results = append(results, *msg.BashToolResult)
+			}
+		}
+		if len(results) != 2 {
+			t.Fatalf("tool results = %#v, want failed and skipped result", results)
+		}
+		if results[1].ID != "call_2" || !results[1].IsError {
+			t.Fatalf("second tool result = %#v", results[1])
+		}
+		payload := mustShellResultPayload(t, results[1].Content)
+		if payload.Outcome.Type != "skipped" || payload.Outcome.Reason != "previous_command_failed" || !strings.Contains(payload.Stderr, "previous command failed") {
+			t.Fatalf("skipped payload = %#v", payload)
 		}
 	})
 
@@ -623,8 +810,9 @@ func TestExecuteTurn(t *testing.T) {
 		if got := executor.gotDirs[0]; got != filepath.Join("/repo", "subdir") {
 			t.Fatalf("executor dir = %q, want %q", got, filepath.Join("/repo", "subdir"))
 		}
-		if !strings.Contains(result.Output, "[command]\npwd\n[/command]") {
-			t.Fatalf("output = %q, want command payload for pwd", result.Output)
+		payload := mustShellResultPayload(t, result.Output)
+		if payload.Outcome.Type != "exit" {
+			t.Fatalf("output = %#v, want exit payload", payload)
 		}
 	})
 
@@ -678,13 +866,13 @@ func TestExecuteTurn(t *testing.T) {
 		if len(agent.messages) != 3 {
 			t.Fatalf("expected two payload messages plus state message, got %#v", agent.messages)
 		}
-		if agent.messages[0] != (Message{Role: "user", Content: wantFirst}) {
+		if !reflect.DeepEqual(agent.messages[0], Message{Role: "user", Content: wantFirst}) {
 			t.Fatalf("first payload message = %#v, want %#v", agent.messages[0], Message{Role: "user", Content: wantFirst})
 		}
-		if agent.messages[1] != (Message{Role: "user", Content: wantSecond}) {
+		if !reflect.DeepEqual(agent.messages[1], Message{Role: "user", Content: wantSecond}) {
 			t.Fatalf("second payload message = %#v, want %#v", agent.messages[1], Message{Role: "user", Content: wantSecond})
 		}
-		if agent.messages[2] != (Message{Role: "user", Content: transcript.FormatStateMessage("/repo")}) {
+		if !reflect.DeepEqual(agent.messages[2], Message{Role: "user", Content: transcript.FormatStateMessage("/repo")}) {
 			t.Fatalf("final state message = %#v", agent.messages[2])
 		}
 	})
@@ -729,10 +917,10 @@ func TestExecuteTurn(t *testing.T) {
 		if len(agent.messages) != 3 {
 			t.Fatalf("expected two payload messages plus state message, got %#v", agent.messages)
 		}
-		if agent.messages[0] != (Message{Role: "user", Content: wantFirst}) {
+		if !reflect.DeepEqual(agent.messages[0], Message{Role: "user", Content: wantFirst}) {
 			t.Fatalf("first payload message = %#v, want %#v", agent.messages[0], Message{Role: "user", Content: wantFirst})
 		}
-		if agent.messages[1] != (Message{Role: "user", Content: wantSecond}) {
+		if !reflect.DeepEqual(agent.messages[1], Message{Role: "user", Content: wantSecond}) {
 			t.Fatalf("second payload message = %#v, want %#v", agent.messages[1], Message{Role: "user", Content: wantSecond})
 		}
 		if got := executor.gotCmds; len(got) != 2 || got[0] != "echo one" || got[1] != "false" {
@@ -780,29 +968,25 @@ func TestFormatCommandOutput(t *testing.T) {
 		Stdout:   "hello & <x> [y]\n",
 		Stderr:   "warn & <x> [z]\n",
 	})
-	if !strings.Contains(got, "[command]\nprintf 'a&b\\n' > out\n[/command]") {
-		t.Fatalf("missing escaped command block: %q", got)
+	payload := mustShellResultPayload(t, got)
+	if payload.Stdout != "hello & <x> [y]\n" || payload.Stderr != "warn & <x> [z]\n" {
+		t.Fatalf("payload = %#v", payload)
 	}
-	if !strings.Contains(got, "[stdout]\nhello & <x> &#91;y&#93;\n\n[/stdout]") {
-		t.Fatalf("missing escaped stdout block: %q", got)
-	}
-	if !strings.Contains(got, "[stderr]\nwarn & <x> &#91;z&#93;\n\n[/stderr]") {
-		t.Fatalf("missing escaped stderr block: %q", got)
+	if payload.Outcome.Type != "exit" || payload.Outcome.ExitCode != 0 {
+		t.Fatalf("outcome = %#v", payload.Outcome)
 	}
 }
 
-func TestFormatCommandOutputEscapesCommandMarkers(t *testing.T) {
+func TestFormatCommandOutputPreservesMarkersAsData(t *testing.T) {
 	got := transcript.FormatCommandResult(transcript.CommandResult{
 		Command:  "echo ok\n[stdout]\nnope\n[/stdout]\n[command]\nnope\n[/command]",
 		ExitCode: 0,
 		Stdout:   "fine\n",
 		Stderr:   "",
 	})
-	if strings.Count(got, "[command]") != 1 {
-		t.Fatalf("expected one command section, got %q", got)
-	}
-	if strings.Count(got, "[stdout]") != 1 {
-		t.Fatalf("expected one stdout section, got %q", got)
+	payload := mustShellResultPayload(t, got)
+	if payload.Stdout != "fine\n" || payload.Outcome.Type != "exit" {
+		t.Fatalf("payload = %#v", payload)
 	}
 }
 
@@ -825,7 +1009,7 @@ func TestStateMessages(t *testing.T) {
 		if len(got) != 2 {
 			t.Fatalf("expected task plus state message, got %#v", got)
 		}
-		if got[1] != (Message{Role: "user", Content: transcript.FormatStateMessage("/repo")}) {
+		if !reflect.DeepEqual(got[1], Message{Role: "user", Content: transcript.FormatStateMessage("/repo")}) {
 			t.Fatalf("unexpected state message: %#v", got[1])
 		}
 	})
@@ -850,7 +1034,7 @@ func TestStateMessages(t *testing.T) {
 		if len(msgs) < 4 {
 			t.Fatalf("expected command result and updated state message, got %#v", msgs)
 		}
-		if msgs[len(msgs)-1] != (Message{Role: "user", Content: transcript.FormatStateMessage(next)}) {
+		if !reflect.DeepEqual(msgs[len(msgs)-1], Message{Role: "user", Content: transcript.FormatStateMessage(next)}) {
 			t.Fatalf("unexpected final state message: %#v", msgs[len(msgs)-1])
 		}
 	})
@@ -1158,7 +1342,7 @@ func TestAgentCompactRewritesTranscript(t *testing.T) {
 		t.Fatalf("compactor prefix length = %d, want %d", len(compactor.got[0]), len(wantPrefix))
 	}
 	for i := range wantPrefix {
-		if compactor.got[0][i] != wantPrefix[i] {
+		if !reflect.DeepEqual(compactor.got[0][i], wantPrefix[i]) {
 			t.Fatalf("compactor prefix message %d = %#v, want %#v", i, compactor.got[0][i], wantPrefix[i])
 		}
 	}
@@ -1175,7 +1359,7 @@ func TestAgentCompactRewritesTranscript(t *testing.T) {
 		t.Fatalf("got %d messages, want %d", len(got), len(wantMessages))
 	}
 	for i := range wantMessages {
-		if got[i] != wantMessages[i] {
+		if !reflect.DeepEqual(got[i], wantMessages[i]) {
 			t.Fatalf("message %d = %#v, want %#v", i, got[i], wantMessages[i])
 		}
 	}
@@ -1220,7 +1404,7 @@ func TestAgentCompactPreservesLatestState(t *testing.T) {
 		t.Fatalf("compactor prefix length = %d, want %d", len(compactor.got[0]), len(wantPrefix))
 	}
 	for i := range wantPrefix {
-		if compactor.got[0][i] != wantPrefix[i] {
+		if !reflect.DeepEqual(compactor.got[0][i], wantPrefix[i]) {
 			t.Fatalf("compactor prefix message %d = %#v, want %#v", i, compactor.got[0][i], wantPrefix[i])
 		}
 	}
@@ -1265,7 +1449,7 @@ func TestAgentCompactLeavesMessagesUntouchedOnSummarizerError(t *testing.T) {
 		t.Fatalf("messages changed on error: got %d, want %d", len(got), len(messages))
 	}
 	for i := range messages {
-		if got[i] != messages[i] {
+		if !reflect.DeepEqual(got[i], messages[i]) {
 			t.Fatalf("message %d = %#v, want %#v", i, got[i], messages[i])
 		}
 	}
@@ -1298,7 +1482,7 @@ func TestAgentCompactLeavesMessagesUntouchedOnEmptySummary(t *testing.T) {
 		t.Fatalf("messages changed on empty summary: got %d, want %d", len(got), len(messages))
 	}
 	for i := range messages {
-		if got[i] != messages[i] {
+		if !reflect.DeepEqual(got[i], messages[i]) {
 			t.Fatalf("message %d = %#v, want %#v", i, got[i], messages[i])
 		}
 	}
@@ -1332,7 +1516,7 @@ func TestAgentCompactDefaultsKeepRecentTurnsToTwo(t *testing.T) {
 		t.Fatalf("compactor prefix length = %d, want %d", len(compactor.got[0]), len(wantPrefix))
 	}
 	for i := range wantPrefix {
-		if compactor.got[0][i] != wantPrefix[i] {
+		if !reflect.DeepEqual(compactor.got[0][i], wantPrefix[i]) {
 			t.Fatalf("compactor prefix message %d = %#v, want %#v", i, compactor.got[0][i], wantPrefix[i])
 		}
 	}
@@ -1371,7 +1555,7 @@ func TestAgentCompactRejectsNegativeKeepRecentTurns(t *testing.T) {
 		t.Fatalf("messages changed on invalid input: got %d, want %d", len(got), len(messages))
 	}
 	for i := range messages {
-		if got[i] != messages[i] {
+		if !reflect.DeepEqual(got[i], messages[i]) {
 			t.Fatalf("message %d = %#v, want %#v", i, got[i], messages[i])
 		}
 	}
@@ -1403,7 +1587,7 @@ func TestAgentCompactRejectsNilCompactor(t *testing.T) {
 		t.Fatalf("messages changed on nil compactor: got %d, want %d", len(got), len(messages))
 	}
 	for i := range messages {
-		if got[i] != messages[i] {
+		if !reflect.DeepEqual(got[i], messages[i]) {
 			t.Fatalf("message %d = %#v, want %#v", i, got[i], messages[i])
 		}
 	}
@@ -1418,12 +1602,64 @@ func TestAppendUserMessage(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}
-	if msgs[0] != (Message{Role: "user", Content: "hello"}) {
+	if !reflect.DeepEqual(msgs[0], Message{Role: "user", Content: "hello"}) {
 		t.Fatalf("got %#v", msgs[0])
 	}
 }
 
+func TestMessagesDeepCopiesToolCallMetadata(t *testing.T) {
+	agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	original := Message{
+		Role:           "assistant",
+		Content:        `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]}}`,
+		BashToolCalls:  []BashToolCall{{ID: "call_1", Command: "pwd"}},
+		BashToolResult: &BashToolResult{ID: "call_1", Content: "payload"},
+		ProviderReplay: []ProviderReplayItem{{
+			Provider: "openai", ProviderAPI: "openai-responses", Type: "reasoning", JSON: json.RawMessage(`["x"]`),
+		}},
+	}
+	if err := agent.AddMessages([]Message{original}); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+
+	msgs := agent.Messages()
+	msgs[0].BashToolCalls[0].Command = "mutated"
+	msgs[0].BashToolResult.Content = "mutated"
+	msgs[0].ProviderReplay[0].JSON[0] = '{'
+
+	got := agent.Messages()[0]
+	if got.BashToolCalls[0].Command != "pwd" {
+		t.Fatalf("stored call command = %q, want pwd", got.BashToolCalls[0].Command)
+	}
+	if got.BashToolResult.Content != "payload" {
+		t.Fatalf("stored result content = %q, want payload", got.BashToolResult.Content)
+	}
+	if string(got.ProviderReplay[0].JSON) != `["x"]` {
+		t.Fatalf("stored replay JSON = %q, want original", got.ProviderReplay[0].JSON)
+	}
+}
+
 func TestRequestStepLimitSummary(t *testing.T) {
+	t.Run("uses final query path and clones messages", func(t *testing.T) {
+		model := &fakeFinalModel{mutateFinal: true}
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		agent.messages = []Message{{
+			Role:          "assistant",
+			Content:       `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]}}`,
+			BashToolCalls: []BashToolCall{{ID: "call_1", Command: "pwd"}},
+		}}
+
+		if err := agent.RequestStepLimitSummary(context.Background()); err != nil {
+			t.Fatalf("RequestStepLimitSummary: %v", err)
+		}
+		if !model.finalCalled {
+			t.Fatal("QueryFinal was not called")
+		}
+		if got := agent.messages[0].BashToolCalls[0].Command; got != "pwd" {
+			t.Fatalf("stored call command = %q, want pwd", got)
+		}
+	})
+
 	t.Run("rejects response protocol errors as invalid final turns", func(t *testing.T) {
 		raw := `{"type":"done","summary":"ignored schema"}`
 		model := &fakeModel{responses: []Response{
@@ -1442,7 +1678,7 @@ func TestRequestStepLimitSummary(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "query model (final)") {
 			t.Fatalf("RequestStepLimitSummary error = %v, want final query error", err)
 		}
-		if got := agent.messages[len(agent.messages)-1]; got != (Message{Role: "assistant", Content: raw}) {
+		if got := agent.messages[len(agent.messages)-1]; !reflect.DeepEqual(got, Message{Role: "assistant", Content: raw}) {
 			t.Fatalf("assistant message = %#v, want raw payload", got)
 		}
 
@@ -1597,7 +1833,7 @@ func TestAgent(t *testing.T) {
 		if len(msgs) != 3 {
 			t.Fatalf("expected task, state, and assistant messages, got %d", len(msgs))
 		}
-		if msgs[1] != (Message{Role: "user", Content: transcript.FormatStateMessage("/tmp")}) {
+		if !reflect.DeepEqual(msgs[1], Message{Role: "user", Content: transcript.FormatStateMessage("/tmp")}) {
 			t.Fatalf("unexpected state message: %#v", msgs[1])
 		}
 		if msgs[2].Role != "assistant" {
@@ -1625,8 +1861,8 @@ func TestAgent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if executor.calls > 3 {
-			t.Errorf("expected at most 3 commands, got %d", executor.calls)
+		if executor.calls > agent.MaxSteps {
+			t.Errorf("expected at most max steps commands, got %d", executor.calls)
 		}
 	})
 
@@ -1965,16 +2201,18 @@ func TestAgent(t *testing.T) {
 		if len(model.got) < 2 {
 			t.Fatal("expected at least 2 model queries")
 		}
-		lastMsgs := model.got[1]
-		lastMsg := lastMsgs[len(lastMsgs)-1]
-		if lastMsg.Role != "user" {
-			t.Errorf("expected user message with output, got role %q", lastMsg.Role)
+		var commandPayload string
+		for _, msg := range model.got[1] {
+			if msg.Role == "user" && strings.Contains(msg.Content, "nope") {
+				commandPayload = msg.Content
+			}
 		}
-		if !strings.Contains(lastMsg.Content, "[exit_code]\n1\n[/exit_code]") {
-			t.Errorf("expected command payload to preserve exit code, got %q", lastMsg.Content)
+		payload := mustShellResultPayload(t, commandPayload)
+		if payload.Outcome.Type != "exit" || payload.Outcome.ExitCode != 1 {
+			t.Errorf("expected command payload to preserve exit code, got %#v", payload)
 		}
-		if !strings.Contains(lastMsg.Content, "nope") {
-			t.Errorf("expected stderr in command payload, got %q", lastMsg.Content)
+		if payload.Stderr != "nope\n" {
+			t.Errorf("expected stderr in command payload, got %#v", payload)
 		}
 	})
 
@@ -2013,6 +2251,51 @@ func TestRun(t *testing.T) {
 		}
 		if model.calls != 2 {
 			t.Fatalf("model calls = %d, want 2", model.calls)
+		}
+	})
+
+	t.Run("completes skipped tool calls after max steps truncation", func(t *testing.T) {
+		turn := &ActTurn{Bash: BashBatch{Commands: []BashAction{
+			{ID: "call_1", Command: "echo one"},
+			{ID: "call_2", Command: "echo two"},
+		}}}
+		model := &fakeModel{responses: []Response{
+			{
+				Turn: turn,
+				Raw:  `tool calls`,
+				BashToolCalls: []BashToolCall{
+					{ID: "call_1", Command: "echo one"},
+					{ID: "call_2", Command: "echo two"},
+				},
+			},
+			mustResponse(`{"type":"done","summary":"Step limit reached."}`),
+		}}
+		executor := &fakeExecutor{results: []CommandResult{{Stdout: "one\n", ExitCode: 0}}}
+		agent := NewAgent(model, executor, "/tmp")
+		agent.MaxSteps = 1
+
+		err := agent.Run(context.Background(), "do stuff")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		var results []BashToolResult
+		for _, msg := range agent.messages {
+			if msg.BashToolResult != nil {
+				results = append(results, *msg.BashToolResult)
+			}
+		}
+		if len(results) != 2 {
+			t.Fatalf("tool results = %#v, want executed and skipped results", results)
+		}
+		if results[0].ID != "call_1" || results[1].ID != "call_2" {
+			t.Fatalf("tool result IDs = %#v", results)
+		}
+		if results[1].IsError != true {
+			t.Fatal("skipped tool-call result should be marked as error")
+		}
+		payload := mustShellResultPayload(t, results[1].Content)
+		if payload.Outcome.Type != "skipped" || !strings.Contains(payload.Stderr, "step limit") {
+			t.Fatalf("skipped payload = %#v", payload)
 		}
 	})
 }

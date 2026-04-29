@@ -55,8 +55,8 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, "The host may require approval before running commands.") {
 			t.Error("prompt should mention host approval mode")
 		}
-		if !strings.Contains(prompt, "Use 1 or 2 commands in each act turn.") {
-			t.Error("prompt should bound act turns to 1 or 2 commands")
+		if strings.Contains(prompt, "Use 1 or 2 commands in each act turn.") {
+			t.Error("prompt should not impose an arbitrary command-count cap")
 		}
 		if !strings.Contains(prompt, "Batch only mechanical follow-up steps that do not require interpreting earlier command output.") {
 			t.Error("prompt should limit batching to mechanical follow-up steps")
@@ -76,8 +76,11 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, "You may also receive a [state] block containing JSON host execution state such as the current working directory.") {
 			t.Error("prompt should explain host state messages")
 		}
-		if !strings.Contains(prompt, "[command_feedback]") {
-			t.Error("prompt should mention command feedback")
+		if strings.Contains(prompt, "[command]") || strings.Contains(prompt, "[stdout]") || strings.Contains(prompt, "[command_feedback]") {
+			t.Error("prompt should not describe bracketed command-result sections")
+		}
+		if !strings.Contains(prompt, `"stdout"`) || !strings.Contains(prompt, `"stderr"`) || !strings.Contains(prompt, `"outcome"`) {
+			t.Error("prompt should describe structured command-result JSON")
 		}
 		if !strings.Contains(prompt, "clean pre-command git baseline") {
 			t.Error("prompt should explain feedback scope")

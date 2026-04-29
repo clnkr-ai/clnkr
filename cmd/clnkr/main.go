@@ -33,6 +33,7 @@ Options:
   -m, --model string        Model identifier (required; env: $CLNKR_MODEL)
   -u, --base-url string     LLM endpoint transport URL (env: $CLNKR_BASE_URL)
       --provider string     Provider adapter: anthropic|openai
+      --act-protocol string Act protocol: clnkr-inline|tool-calls
       --effort string       Provider effort: auto|low|medium|high|xhigh|max
       --max-output-tokens int Maximum response output tokens
       --max-steps int       Limit executed commands
@@ -202,6 +203,7 @@ func main() {
 	baseURLShort := flags.String("u", "", "")
 	providerFlag := flags.String("provider", "", "")
 	providerAPIFlag := flags.String("provider-api", "", "")
+	actProtocolFlag := flags.String("act-protocol", "clnkr-inline", "")
 	effortFlag := flags.String("effort", "", "")
 	thinkingBudgetTokens := flags.Int("thinking-budget-tokens", 0, "")
 	maxOutputTokens := flags.Int("max-output-tokens", 0, "")
@@ -282,9 +284,15 @@ func main() {
 		*fullSend = true
 	}
 
+	actProtocol, err := clnkr.ParseActProtocol(*actProtocolFlag)
+	if err != nil {
+		fatalf("%v", err)
+	}
+
 	systemPrompt := clnkr.LoadPromptWithOptions(cwd, clnkr.PromptOptions{
 		OmitSystemPrompt:   *noSystemPrompt || *noSystemPromptShort,
 		SystemPromptAppend: *systemPromptAppend,
+		ActProtocol:        actProtocol,
 	})
 
 	if *dumpSystemPrompt {
@@ -304,6 +312,7 @@ func main() {
 		ProviderAPI: *providerAPIFlag,
 		Model:       aliasedString(*modelShort, *modelFlag),
 		BaseURL:     aliasedString(*baseURLShort, *baseURLFlag),
+		ActProtocol: actProtocol,
 		RequestOptions: providerdomain.ProviderRequestOptions{
 			Effort: providerdomain.ProviderEffortOptions{
 				Level: *effortFlag,
@@ -347,6 +356,7 @@ func main() {
 	executor := &clnkr.CommandExecutor{}
 
 	agent := clnkr.NewAgent(model, executor, cwd)
+	agent.ActProtocol = cfg.ActProtocol
 
 	showDebug := *verbose || *verboseShort
 	agent.Notify = func(e clnkr.Event) {

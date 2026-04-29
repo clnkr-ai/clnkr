@@ -32,6 +32,21 @@ func TestParseTurn(t *testing.T) {
 		}
 	})
 
+	t.Run("accepts more than three commands", func(t *testing.T) {
+		raw := `{"type":"act","bash":{"commands":[{"command":"one","workdir":null},{"command":"two","workdir":null},{"command":"three","workdir":null},{"command":"four","workdir":null}]},"reasoning":"batch"}`
+		turn, err := clnkr.ParseTurn(raw)
+		if err != nil {
+			t.Fatalf("ParseTurn(%q) error = %v", raw, err)
+		}
+		act, ok := turn.(*clnkr.ActTurn)
+		if !ok {
+			t.Fatalf("turn = %T, want *ActTurn", turn)
+		}
+		if got := len(act.Bash.Commands); got != 4 {
+			t.Fatalf("commands = %d, want 4", got)
+		}
+	})
+
 	t.Run("rejects prose wrapped json", func(t *testing.T) {
 		raw := "Here is the turn:\n{\"type\":\"act\",\"bash\":{\"commands\":[{\"command\":\"pwd\",\"workdir\":null}]}}\nThanks."
 		_, err := clnkr.ParseTurn(raw)
@@ -147,5 +162,28 @@ func TestCanonicalRoundTrip(t *testing.T) {
 		if roundTrip != raw {
 			t.Fatalf("round trip = %q, want %q", roundTrip, raw)
 		}
+	}
+}
+
+func TestCanonicalTurnJSONAllowsMoreThanThreeCommands(t *testing.T) {
+	raw, err := clnkr.CanonicalTurnJSON(&clnkr.ActTurn{
+		Bash: clnkr.BashBatch{Commands: []clnkr.BashAction{
+			{Command: "one"},
+			{Command: "two"},
+			{Command: "three"},
+			{Command: "four"},
+		}},
+		Reasoning: "batch",
+	})
+	if err != nil {
+		t.Fatalf("CanonicalTurnJSON error = %v", err)
+	}
+	parsed, err := clnkr.ParseTurn(raw)
+	if err != nil {
+		t.Fatalf("ParseTurn(%q) error = %v", raw, err)
+	}
+	act := parsed.(*clnkr.ActTurn)
+	if got := len(act.Bash.Commands); got != 4 {
+		t.Fatalf("commands = %d, want 4", got)
 	}
 }

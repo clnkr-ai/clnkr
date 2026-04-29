@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/clnkr-ai/clnkr"
 )
 
 type Provider string
@@ -54,6 +56,7 @@ type ProviderRequestOptions struct {
 	Effort          ProviderEffortOptions
 	Output          ProviderOutputOptions
 	AnthropicManual AnthropicManualThinkingOptions
+	ActProtocol     clnkr.ActProtocol
 }
 
 // ProviderEffortOptions describes the user-requested effort level.
@@ -118,6 +121,17 @@ func ResolveProviderAPI(provider Provider, providerAPI ProviderAPI, model string
 }
 
 func ValidateRequestOptions(provider Provider, providerAPI ProviderAPI, model string, opts ProviderRequestOptions) (ProviderRequestOptions, error) {
+	if opts.ActProtocol == "" {
+		opts.ActProtocol = clnkr.ActProtocolClnkrInline
+	}
+	if _, err := clnkr.ParseActProtocol(string(opts.ActProtocol)); err != nil {
+		return ProviderRequestOptions{}, err
+	}
+	if opts.ActProtocol == clnkr.ActProtocolToolCalls {
+		if provider == ProviderOpenAI && providerAPI != ProviderAPIOpenAIResponses {
+			return ProviderRequestOptions{}, fmt.Errorf("act-protocol %q requires provider-api %q for provider openai", opts.ActProtocol, ProviderAPIOpenAIResponses)
+		}
+	}
 	opts.Effort.Level = strings.ToLower(strings.TrimSpace(opts.Effort.Level))
 	if opts.Effort.Set {
 		if err := validateEffort(provider, providerAPI, model, opts.Effort.Level); err != nil {

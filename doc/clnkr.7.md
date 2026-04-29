@@ -11,7 +11,7 @@ a model, parse one structured turn, run host commands when the turn asks for
 them, append the result, and repeat.
 
 The user-facing command is documented in **clnkr**(1). This page documents
-clnkr's turn protocol, transcript structure, provider boundary, command
+clnkr's act protocol, transcript structure, provider boundary, command
 execution model, run metadata, and 12-factor-agent mapping.
 
 # ARCHITECTURE
@@ -54,7 +54,7 @@ errors. Provider request semantics own the provider vocabulary and reject
 unsupported provider/model/request combinations before adapters serialize a
 request.
 
-# TURN PROTOCOL
+# ACT PROTOCOL
 
 Every accepted model instruction is a **turn**. There are three turn types:
 
@@ -68,13 +68,20 @@ Every accepted model instruction is a **turn**. There are three turn types:
 : Summarize completion and stop the run successfully.
 
 An **act** turn contains a **bash batch**. Each **bash action** contains a shell
-command and an optional working directory. A batch is intentionally small: the
-prompt asks for one or two commands, and the parser rejects more than three.
+command and an optional working directory. **Max steps** is the execution cap;
+if a batch exceeds the remaining command budget, clnkr runs only the commands
+that fit and then asks for a final summary.
 
 A **canonical turn** is the internal JSON shape clnkr writes to the transcript
 after a provider adapter projects provider output into clnkr's turn space:
 **act**, **clarify**, or **done**. A **provider turn** is the provider-specific
 structured-output shape before that projection.
+
+The default act protocol is **clnkr-inline**. In that mode all accepted
+act turns arrive as provider-portable clnkr act JSON in assistant text.
+**tool-calls** is an explicit fail-closed protocol for Anthropic
+Messages and OpenAI Responses. In that mode provider-native **bash** tool calls
+become an **act** turn, while **clarify** and **done** remain text JSON.
 
 Provider request options such as effort and output-token limits change provider
 wire fields. They do not add turn types or change the canonical turn shape.
@@ -94,11 +101,20 @@ conversation sent to the model, but they are not user-authored text.
 : A transcript message whose content came from the human user.
 
 **Host block**
-: A clnkr-authored tagged transcript message.
+: A clnkr-authored transcript message.
 
 **Command result block**
-: A host block containing command, exit code, stdout, stderr, and optional
-command feedback.
+: A host block containing a JSON object with **stdout**, **stderr**,
+**outcome**, and optional **feedback**. Exit outcomes include **exit_code**.
+Other outcomes include **timeout**, **cancelled**, **denied**, **skipped**, and
+**error**.
+
+**Bash tool metadata**
+: Optional transcript metadata that records provider tool calls,
+matching bash tool results, and provider/API-scoped replay items. The text
+content remains canonical clnkr transcript text; adapters use the metadata to
+serialize provider tool-call history without duplicating the same exchange as
+plain text.
 
 **State block**
 : A host block containing the current working directory.
@@ -130,6 +146,10 @@ overlay on top of the parent process environment.
 
 **Command result**
 : The structured outcome of one bash action.
+
+**Command outcome**
+: The normalized completion state of a command: exit, timeout, cancelled,
+denied, skipped, or error.
 
 **Post-command state**
 : The current working directory and environment snapshot captured after a
@@ -172,9 +192,15 @@ outputs.
 For Anthropic, clnkr uses the Messages API and asks for structured JSON output
 through the provider adapter.
 
+**tool-calls** requires a provider API that can accept tools, return
+tool calls with IDs, accept tool results, and let the adapter map calls/results
+without prompt parsing. Anthropic Messages uses a custom **bash** tool. OpenAI
+Responses uses a strict function tool named **bash**. OpenAI Chat Completions
+is rejected for tool-call mode.
+
 Provider adapters serialize validated provider request options. They do not
 resolve **CLNKR_** environment variables, choose API keys, or parse CLI base
-URLs. They do join provider endpoint paths against the configured base URL so
+URLs. They still join provider endpoint paths against the configured base URL so
 direct adapter construction and CLI config resolution follow the same request
 path rules.
 
@@ -206,8 +232,9 @@ once as an **EventDebug** payload and persisted with saved sessions.
 : The provider request options clnkr will put on provider calls after
 validation and defaults.
 
-Requested and effective metadata use the same JSON fields:
-**effort**, **output**, and **anthropic_manual**. For effort, omitted and
+Run metadata includes the selected **act_protocol**. Requested and effective
+request metadata use the same JSON fields: **effort**, **output**, and
+**anthropic_manual**. For effort, omitted and
 explicit **auto** are distinct in requested metadata. Effective metadata omits
 **auto** because clnkr sends no provider effort field for it. For Anthropic,
 effective metadata also records the Anthropic thinking mode and effective
@@ -230,6 +257,18 @@ effective metadata also records the Anthropic thinking mode and effective
 **Bash batch**
 : The ordered list of bash actions in a single act turn.
 
+**Bash tool call**
+: A provider-native request to run the bash tool, projected into one bash
+action.
+
+**Bash tool call ID**
+: The opaque provider ID attached to a bash tool call and its matching
+tool result.
+
+**Bash tool result**
+: The provider-native result paired with a bash tool call ID after execution,
+denial, or skipping.
+
 **Base environment snapshot**
 : The complete environment map used as the base for command execution.
 
@@ -240,6 +279,10 @@ messages.
 **CLI config resolver**
 : The frontend-owned resolver that turns CLI inputs and **CLNKR_** environment
 variables into a **Resolved provider config**.
+
+**Command outcome**
+: The normalized completion state of a command result: exit, timeout,
+cancelled, denied, skipped, or error.
 
 **Clarify turn**
 : A turn that asks the user a non-empty question and stops the run.
@@ -262,6 +305,9 @@ explicit token budget.
 **Max output tokens**
 : A provider request for the maximum response output token count.
 
+**Final summary query**
+: The done-only model query clnkr sends after the step limit is reached.
+
 **Provider API**
 : The OpenAI API surface selected for an OpenAI run: **auto**,
 **openai-responses**, or **openai-chat-completions**.
@@ -270,6 +316,10 @@ explicit token budget.
 : The provider-neutral request settings clnkr validates before constructing a
 provider adapter request.
 
+**Act protocol**
+: How the model proposes command execution: **clnkr-inline** or
+**tool-calls**.
+
 **Provider base URL**
 : The configured provider API root that provider adapters join with their API
 endpoint paths.
@@ -277,6 +327,10 @@ endpoint paths.
 **Provider request semantics**
 : Provider-domain rules for provider/API names, model capability checks, and
 request-option validation.
+
+**Provider replay item**
+: Provider/API-scoped data that must be sent back with later tool-call
+history, such as an OpenAI Responses reasoning item.
 
 **Recent tail**
 : The un-compacted suffix of the transcript preserved during compaction.
@@ -309,14 +363,16 @@ final summary.
 # 12-FACTOR AGENTS
 
 clnkr matches the local-agent parts of the 12-factor model: prompt
-construction, transcript state, the turn protocol, the control loop, session
+construction, transcript state, the act protocol, the control loop, session
 persistence, provider request configuration, and recovery after invalid model
 output. Distributed state, external triggers, and Slack/email/SMS delivery are
 outside clnkr's local coding CLI boundary.
 
 **1. Natural language to tool calls**
-: clnkr turns natural-language tasks into **act**, **clarify**, or **done**
-JSON. **act** carries bash actions; the executor runs them.
+: clnkr turns natural-language tasks into **act**, **clarify**, or **done**.
+In **clnkr-inline** mode, **act** carries bash actions in assistant text. In
+**tool-calls** mode, provider tool calls are projected into **act**. The
+executor runs the resulting bash actions in both modes.
 
 **2. Own your prompts**
 : clnkr defines the base prompt, protocol examples, AGENTS.md layering, prompt
@@ -329,8 +385,9 @@ canonical assistant turns, and compact blocks into the transcript. Run metadata
 is stored beside the transcript, not inside the context window.
 
 **4. Tools are just structured outputs**
-: clnkr's **act** turn is structured output. **ExecuteTurn** interprets it and
-calls the executor.
+: clnkr's core sees a typed **act** turn regardless of provider wire shape.
+**clnkr-inline** act turns and provider bash tool calls both become the
+same executor input.
 
 **5. Unify execution state and business state**
 : clnkr keeps execution state in transcript messages and session files. The
@@ -412,4 +469,4 @@ vLLM OpenAI-compatible server:
 
 # SEE ALSO
 
-**clnkr**(1)
+**clnkr**(1), **clnkr**(3)

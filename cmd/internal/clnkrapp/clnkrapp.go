@@ -39,6 +39,7 @@ func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt s
 			anthropicOpts.Effort = opts.Effort.Level
 			anthropicOpts.ThinkingMode = anthropic.ThinkingModeAdaptive
 		}
+		anthropicOpts.UseBashToolCalls = cfg.ActProtocol == clnkr.ActProtocolToolCalls
 		return anthropic.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, anthropicOpts)
 	case cfg.ProviderAPI == providerdomain.ProviderAPIOpenAIResponses:
 		var effort string
@@ -49,6 +50,7 @@ func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt s
 			ReasoningEffort:    effort,
 			MaxOutputTokens:    opts.Output.MaxOutputTokens.Value,
 			HasMaxOutputTokens: opts.Output.MaxOutputTokens.Set,
+			UseBashToolCalls:   cfg.ActProtocol == clnkr.ActProtocolToolCalls,
 		})
 	default:
 		return openai.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
@@ -102,6 +104,7 @@ type RunMetadata struct {
 	ProviderAPI  providerdomain.ProviderAPI `json:"provider_api"`
 	Model        string                     `json:"model"`
 	PromptSHA256 string                     `json:"prompt_sha256"`
+	ActProtocol  clnkr.ActProtocol          `json:"act_protocol"`
 	Requested    ProviderRequestMetadata    `json:"requested"`
 	Effective    ProviderRequestMetadata    `json:"effective"`
 	Compaction   CompactionMetadata         `json:"compaction"`
@@ -144,6 +147,7 @@ func NewRunMetadata(version string, cfg providerconfig.ResolvedProviderConfig, s
 		ProviderAPI:  cfg.ProviderAPI,
 		Model:        cfg.Model,
 		PromptSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(systemPrompt))),
+		ActProtocol:  cfg.ActProtocol,
 		Requested:    providerRequestMetadata(opts, !opts.Effort.Set),
 		Effective:    providerRequestMetadata(opts, !opts.Effort.Set || opts.Effort.Level == "auto"),
 		Compaction:   CompactionMetadata{Policy: "manual", KeepRecentTurns: 2},
@@ -299,7 +303,9 @@ func RunApprovalTask(ctx context.Context, agent *clnkr.Agent, task string, promp
 			if remaining := agent.MaxSteps - steps; agent.MaxSteps > 0 && remaining <= 0 {
 				return agent.RequestStepLimitSummary(ctx)
 			}
+			var skipped []clnkr.BashAction
 			if remaining := agent.MaxSteps - steps; agent.MaxSteps > 0 && len(turn.Bash.Commands) > remaining {
+				skipped = append([]clnkr.BashAction(nil), turn.Bash.Commands[remaining:]...)
 				turn = &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: turn.Bash.Commands[:remaining]}, Reasoning: turn.Reasoning}
 			}
 			reply, err := waitForReply(ctx, prompter.ActReply, FormatActProposal(turn.Bash.Commands), reportRejected)
@@ -307,10 +313,12 @@ func RunApprovalTask(ctx context.Context, agent *clnkr.Agent, task string, promp
 				return err
 			}
 			if strings.TrimSpace(reply) != "y" {
-				agent.AppendUserMessage(reply)
+				allCommands := append([]clnkr.BashAction(nil), turn.Bash.Commands...)
+				allCommands = append(allCommands, skipped...)
+				agent.RejectTurn(&clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: allCommands}, Reasoning: turn.Reasoning}, reply)
 				continue
 			}
-			result, err := agent.ExecuteTurn(ctx, turn)
+			result, err := agent.ExecuteTurnWithSkipped(ctx, turn, skipped)
 			if err != nil {
 				return err
 			}

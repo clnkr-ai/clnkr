@@ -57,8 +57,8 @@ func TestModel(t *testing.T) {
 		if !ok {
 			t.Fatalf("response_format.json_schema.schema = %T, want map[string]interface{}", jsonSchema["schema"])
 		}
-		if schemaContainsKey(schema, "maxItems") != true {
-			t.Fatal("response_format.json_schema.schema should include maxItems")
+		if schemaContainsKey(schema, "maxItems") {
+			t.Fatal("response_format.json_schema.schema unexpectedly includes maxItems")
 		}
 		if !schemaContainsKey(schema, "minItems") {
 			t.Fatal("response_format.json_schema.schema unexpectedly omits minItems")

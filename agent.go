@@ -16,18 +16,26 @@ var ErrClarificationNeeded = errors.New("clarification needed")
 
 // Agent coordinates model turns and command execution.
 type Agent struct {
-	model    Model
-	executor Executor
-	messages []Message
-	cwd      string
-	env      map[string]string
-	started  bool
-	Notify   func(Event)
-	MaxSteps int
+	model       Model
+	executor    Executor
+	messages    []Message
+	cwd         string
+	env         map[string]string
+	started     bool
+	Notify      func(Event)
+	MaxSteps    int
+	ActProtocol ActProtocol
 }
 
 func NewAgent(model Model, executor Executor, cwd string) *Agent {
 	return &Agent{model: model, executor: executor, cwd: cwd, MaxSteps: DefaultMaxSteps}
+}
+
+func cloneProviderReplay(items []ProviderReplayItem) []ProviderReplayItem {
+	if len(items) == 0 {
+		return nil
+	}
+	return transcript.CloneMessage(Message{ProviderReplay: items}).ProviderReplay
 }
 
 func (a *Agent) notify(e Event) {
@@ -37,9 +45,7 @@ func (a *Agent) notify(e Event) {
 }
 
 func (a *Agent) Messages() []Message {
-	cp := make([]Message, len(a.messages))
-	copy(cp, a.messages)
-	return cp
+	return transcript.CloneMessages(a.messages)
 }
 
 func (a *Agent) Cwd() string { return a.cwd }
@@ -53,8 +59,8 @@ func (a *Agent) AddMessages(msgs []Message) error {
 		return nil
 	}
 	combined := make([]Message, len(msgs)+len(a.messages))
-	copy(combined, msgs)
-	copy(combined[len(msgs):], a.messages)
+	copy(combined, transcript.CloneMessages(msgs))
+	copy(combined[len(msgs):], transcript.CloneMessages(a.messages))
 	a.messages = combined
 	a.restoreExecutionStateFromMessages()
 	return nil
@@ -90,6 +96,11 @@ func (a *Agent) appendSuccessfulResponse(resp *Response) error {
 		return fmt.Errorf("canonicalize model turn: %w", err)
 	}
 	a.messages = append(a.messages, Message{Role: "assistant", Content: canonicalText})
+	if len(resp.BashToolCalls) > 0 || len(resp.ProviderReplay) > 0 {
+		msg := &a.messages[len(a.messages)-1]
+		msg.BashToolCalls = append([]BashToolCall(nil), resp.BashToolCalls...)
+		msg.ProviderReplay = cloneProviderReplay(resp.ProviderReplay)
+	}
 	a.notify(EventResponse{Turn: resp.Turn, Usage: resp.Usage, Raw: resp.Raw})
 	return nil
 }
@@ -98,7 +109,7 @@ func (a *Agent) appendProtocolFailure(resp Response, addCorrection bool) {
 	a.messages = append(a.messages, Message{Role: "assistant", Content: resp.Raw})
 	a.notify(EventProtocolFailure{Reason: errorToReason(resp.ProtocolErr), Raw: resp.Raw})
 	if addCorrection {
-		a.messages = append(a.messages, Message{Role: "user", Content: protocolCorrectionMessage(resp.ProtocolErr)})
+		a.messages = append(a.messages, Message{Role: "user", Content: protocolCorrectionMessageFor(resp.ProtocolErr, a.ActProtocol)})
 	}
 }
 
@@ -117,13 +128,13 @@ func (a *Agent) Compact(ctx context.Context, compactor Compactor, opts CompactOp
 		keepRecentTurns = 2
 	}
 
-	transcriptMessages := a.messages
+	transcriptMessages := transcript.CloneMessages(a.messages)
 	boundary, ok := transcript.FindCompactBoundary(transcriptMessages, keepRecentTurns)
 	if !ok {
 		return CompactStats{}, fmt.Errorf("compact transcript: not enough history to compact")
 	}
 
-	prefix := append([]Message{}, a.messages[:boundary]...)
+	prefix := transcript.CloneMessages(a.messages[:boundary])
 	summary, err := compactor.Summarize(ctx, prefix)
 	if err != nil {
 		return CompactStats{}, fmt.Errorf("compact transcript: summarize prefix: %w", err)
@@ -154,7 +165,7 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	a.started = true
 	a.appendStateMessageIfNeeded()
 	a.notify(EventDebug{Message: "querying model..."})
-	resp, err := a.model.Query(ctx, a.messages)
+	resp, err := a.model.Query(ctx, transcript.CloneMessages(a.messages))
 	if err != nil {
 		return StepResult{}, fmt.Errorf("query model: %w", err)
 	}
@@ -174,6 +185,16 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 
 // ExecuteTurn runs an act turn and appends the command result payload.
 func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, error) {
+	return a.executeTurn(ctx, act, nil)
+}
+
+// ExecuteTurnWithSkipped runs an act turn and records bash tool calls that
+// were skipped before execution, for example by MaxSteps truncation.
+func (a *Agent) ExecuteTurnWithSkipped(ctx context.Context, act *ActTurn, skipped []BashAction) (StepResult, error) {
+	return a.executeTurn(ctx, act, skipped)
+}
+
+func (a *Agent) executeTurn(ctx context.Context, act *ActTurn, skipped []BashAction) (StepResult, error) {
 	if act == nil || len(act.Bash.Commands) == 0 {
 		return StepResult{Turn: act}, fmt.Errorf("execute act turn: %w", ErrMissingCommand)
 	}
@@ -181,7 +202,7 @@ func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, erro
 	outputs, execCount := make([]string, 0, len(act.Bash.Commands)), 0
 	var execErr error
 
-	for _, action := range act.Bash.Commands {
+	for i, action := range act.Bash.Commands {
 		if setter, ok := a.executor.(ExecutorStateSetter); ok {
 			setter.SetEnv(a.env)
 		}
@@ -211,6 +232,7 @@ func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, erro
 			Stdout:   execResult.Stdout,
 			Stderr:   execResult.Stderr,
 			ExitCode: execResult.ExitCode,
+			Outcome:  execResult.Outcome,
 			Feedback: execResult.Feedback,
 		})
 		if commandErr != nil {
@@ -225,15 +247,80 @@ func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, erro
 			Err:      commandErr,
 		})
 
-		a.messages = append(a.messages, Message{Role: "user", Content: payload})
+		msg := Message{Role: "user", Content: payload}
+		if action.ID != "" {
+			msg.BashToolResult = &BashToolResult{ID: action.ID, Content: payload, IsError: commandResultIsError(execResult)}
+		}
+		a.messages = append(a.messages, msg)
 		outputs = append(outputs, payload)
 		if execErr = commandErr; execErr != nil {
+			for _, notRun := range act.Bash.Commands[i+1:] {
+				if payload, ok := a.appendSkippedToolResult(notRun, "previous command failed"); ok {
+					outputs = append(outputs, payload)
+				}
+			}
 			break
 		}
 	}
 
+	for _, action := range skipped {
+		if payload, ok := a.appendSkippedToolResult(action, "max steps"); ok {
+			outputs = append(outputs, payload)
+		}
+	}
 	a.appendStateMessageIfNeeded()
 	return StepResult{Turn: act, Output: strings.Join(outputs, "\n\n"), ExecErr: execErr, ExecCount: execCount}, nil
+}
+
+// RejectTurn records that an approval-mode act turn was not executed.
+func (a *Agent) RejectTurn(act *ActTurn, reply string) {
+	if act == nil || len(act.Bash.Commands) == 0 {
+		a.AppendUserMessage(reply)
+		return
+	}
+	toolCallResults := 0
+	for _, action := range act.Bash.Commands {
+		if action.ID == "" {
+			continue
+		}
+		content := transcript.FormatDeniedCommandResult(reply)
+		a.messages = append(a.messages, Message{
+			Role:           "user",
+			Content:        content,
+			BashToolResult: &BashToolResult{ID: action.ID, Content: content, IsError: true},
+		})
+		toolCallResults++
+	}
+	if toolCallResults == 0 {
+		a.AppendUserMessage(reply)
+	}
+}
+
+func (a *Agent) appendSkippedToolResult(action BashAction, reason string) (string, bool) {
+	if action.ID == "" {
+		return "", false
+	}
+	content := transcript.FormatSkippedCommandResult(reason)
+	a.messages = append(a.messages, Message{
+		Role:           "user",
+		Content:        content,
+		BashToolResult: &BashToolResult{ID: action.ID, Content: content, IsError: true},
+	})
+	return content, true
+}
+
+func commandResultIsError(result CommandResult) bool {
+	outcome := result.Outcome
+	if outcome.Type == "" {
+		outcome = CommandOutcome{Type: CommandOutcomeExit, ExitCode: &result.ExitCode}
+	}
+	if outcome.Type != CommandOutcomeExit {
+		return true
+	}
+	if outcome.ExitCode != nil {
+		return *outcome.ExitCode != 0
+	}
+	return result.ExitCode != 0
 }
 
 // RequestStepLimitSummary asks the model for a final done summary after the
@@ -242,7 +329,12 @@ func (a *Agent) RequestStepLimitSummary(ctx context.Context) error {
 	a.notify(EventDebug{Message: "step limit reached, requesting summary"})
 	a.AppendUserMessage("Step limit reached. Respond with " + protocolDoneExample + " summarizing your progress.")
 
-	resp, err := a.model.Query(ctx, a.messages)
+	queryMessages := transcript.CloneMessages(a.messages)
+	query := a.model.Query
+	if finalModel, ok := a.model.(FinalSummaryModel); ok {
+		query = finalModel.QueryFinal
+	}
+	resp, err := query(ctx, queryMessages)
 	if err != nil {
 		return fmt.Errorf("query model (final): %w", err)
 	}
@@ -291,10 +383,12 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 		case *ClarifyTurn:
 			return ErrClarificationNeeded
 		case *ActTurn:
+			var skipped []BashAction
 			if remaining := a.MaxSteps - steps; a.MaxSteps > 0 && len(turn.Bash.Commands) > remaining {
+				skipped = append([]BashAction(nil), turn.Bash.Commands[remaining:]...)
 				turn = &ActTurn{Bash: BashBatch{Commands: turn.Bash.Commands[:remaining]}, Reasoning: turn.Reasoning}
 			}
-			execResult, err := a.ExecuteTurn(ctx, turn)
+			execResult, err := a.ExecuteTurnWithSkipped(ctx, turn, skipped)
 			if err != nil {
 				return err
 			}

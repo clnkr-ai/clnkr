@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/clnkr-ai/clnkr"
 	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
 )
 
@@ -226,6 +227,44 @@ func TestResolveConfigKnownOpenAIResponsesModels(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveConfigActProtocol(t *testing.T) {
+	t.Run("defaults clnkr inline", func(t *testing.T) {
+		cfg, err := ResolveConfig(Inputs{Provider: "anthropic", Model: "claude-sonnet-4-6"}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
+		if err != nil {
+			t.Fatalf("ResolveConfig: %v", err)
+		}
+		if cfg.ActProtocol != clnkr.ActProtocolClnkrInline {
+			t.Fatalf("ActProtocol = %q, want clnkr-inline", cfg.ActProtocol)
+		}
+	})
+
+	t.Run("accepts anthropic tool calls", func(t *testing.T) {
+		cfg, err := ResolveConfig(Inputs{
+			Provider:    "anthropic",
+			Model:       "claude-sonnet-4-6",
+			ActProtocol: clnkr.ActProtocolToolCalls,
+		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
+		if err != nil {
+			t.Fatalf("ResolveConfig: %v", err)
+		}
+		if cfg.ActProtocol != clnkr.ActProtocolToolCalls {
+			t.Fatalf("ActProtocol = %q, want tool-calls", cfg.ActProtocol)
+		}
+	})
+
+	t.Run("rejects openai chat completions tool calls", func(t *testing.T) {
+		_, err := ResolveConfig(Inputs{
+			Provider:    "openai",
+			ProviderAPI: "openai-chat-completions",
+			Model:       "proxy-model",
+			ActProtocol: clnkr.ActProtocolToolCalls,
+		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
+		if err == nil || !strings.Contains(err.Error(), "tool-calls") {
+			t.Fatalf("ResolveConfig err = %v, want tool-calls rejection", err)
+		}
+	})
 }
 
 func TestResolveConfigOpenAIStyleModelsUseResponses(t *testing.T) {

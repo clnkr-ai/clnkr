@@ -3,6 +3,7 @@ package transcript
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -23,7 +24,7 @@ func messageKind(msg Message) string {
 		return "compact"
 	case stateMessage(content):
 		return "state"
-	case strings.HasPrefix(content, "[command]\n") && strings.Contains(content, "\n[/command]\n[exit_code]\n") && strings.Contains(content, "\n[/exit_code]\n[stdout]\n") && strings.Contains(content, "\n[/stdout]\n[stderr]\n") && (strings.HasSuffix(content, "\n[/stderr]") || strings.Contains(content, "\n[/stderr]\n[command_feedback]\n") && strings.HasSuffix(content, "\n[/command_feedback]")):
+	case commandResultMessage(content):
 		return "command"
 	case strings.HasPrefix(content, "[protocol_error]") &&
 		strings.HasSuffix(content, "[/protocol_error]"):
@@ -31,6 +32,18 @@ func messageKind(msg Message) string {
 	default:
 		return "authored"
 	}
+}
+
+func commandResultMessage(content string) bool {
+	var payload struct {
+		Stdout  *string         `json:"stdout"`
+		Stderr  *string         `json:"stderr"`
+		Outcome *CommandOutcome `json:"outcome"`
+	}
+	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+		return false
+	}
+	return payload.Stdout != nil && payload.Stderr != nil && payload.Outcome != nil && payload.Outcome.Type != ""
 }
 
 // IsCompactMessage reports whether the message is a clnkr compact block.
@@ -96,7 +109,7 @@ func RewriteForCompaction(messages []Message, summary, instructions string, keep
 		if IsCompactMessage(msg) {
 			continue
 		}
-		keptTail = append(keptTail, msg)
+		keptTail = append(keptTail, CloneMessage(msg))
 	}
 
 	rewritten := make([]Message, 0, len(keptTail)+2)
@@ -107,9 +120,9 @@ func RewriteForCompaction(messages []Message, summary, instructions string, keep
 		if messageKind(messages[i]) != "state" {
 			continue
 		}
-		stateMsg, present := messages[i], false
+		stateMsg, present := CloneMessage(messages[i]), false
 		for _, msg := range keptTail {
-			if msg == stateMsg {
+			if sameMessage(msg, stateMsg) {
 				present = true
 				break
 			}
@@ -127,6 +140,14 @@ func RewriteForCompaction(messages []Message, summary, instructions string, keep
 		CompactedMessages: boundary,
 		KeptMessages:      keptMessages,
 	}, nil
+}
+
+func sameMessage(a, b Message) bool {
+	return a.Role == b.Role &&
+		a.Content == b.Content &&
+		reflect.DeepEqual(a.BashToolCalls, b.BashToolCalls) &&
+		reflect.DeepEqual(a.BashToolResult, b.BashToolResult) &&
+		reflect.DeepEqual(a.ProviderReplay, b.ProviderReplay)
 }
 
 func compactMessage(content string) bool {

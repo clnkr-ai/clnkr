@@ -31,10 +31,10 @@ CLANKERVAL_PREFLIGHT = \
 	_hooks _check-docs _require-pandoc _site-sync _site-build
 
 PREFIX ?= /usr/local
-CORE_SLOC_LIMIT := 1300
-FRONTEND_SLOC_LIMIT := 1300
+CORE_SLOC_LIMIT := 1625
+FRONTEND_SLOC_LIMIT := 1325
 DOC_MAN_DIR := build/docs/man
-DOC_MAN_OUTPUTS := $(DOC_MAN_DIR)/clnkr.1 $(DOC_MAN_DIR)/clnkr.7
+DOC_MAN_OUTPUTS := $(DOC_MAN_DIR)/clnkr.1 $(DOC_MAN_DIR)/clnkr.3 $(DOC_MAN_DIR)/clnkr.7
 DOC_CONTENT_DIR := site/content/docs
 DOC_PAGE_TEMPLATE := site/pandoc/doc-page.md
 GENERATED_SITE_DOCS := \
@@ -152,6 +152,10 @@ _site-build: _site-sync
 	HUGO_CLNKR_LATEST_TAG='$(LATEST_TAG)' $(HUGO) --source site
 
 $(DOC_MAN_DIR)/%.1: doc/%.1.md | _require-pandoc
+	mkdir -p "$(DOC_MAN_DIR)"
+	"$(PANDOC)" --from=markdown-smart --to=man --standalone "$<" -o "$@"
+
+$(DOC_MAN_DIR)/%.3: doc/%.3.md | _require-pandoc
 	mkdir -p "$(DOC_MAN_DIR)"
 	"$(PANDOC)" --from=markdown-smart --to=man --standalone "$<" -o "$@"
 

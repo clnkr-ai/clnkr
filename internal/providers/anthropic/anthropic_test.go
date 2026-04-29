@@ -417,6 +417,196 @@ func anthropicWrappedDone(summary string) string {
 	return `{"turn":{"type":"done","bash":null,"question":null,"summary":"` + summary + `","reasoning":null}}`
 }
 
+func TestModelToolCalls(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]any{{
+				"type":  "tool_use",
+				"id":    "toolu_1",
+				"name":  "bash",
+				"input": map[string]any{"command": "pwd", "workdir": nil},
+			}, {
+				"type":  "tool_use",
+				"id":    "toolu_2",
+				"name":  "bash",
+				"input": map[string]any{"command": "git status", "workdir": nil},
+			}},
+			"usage": map[string]int{"input_tokens": 3, "output_tokens": 4},
+		})
+	}))
+	defer server.Close()
+
+	m := anthropic.NewModelWithOptions(server.URL, "test-key", "claude-test", "sys prompt", anthropic.Options{UseBashToolCalls: true})
+	resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "where"}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	tools, ok := gotBody["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("tools = %#v, want one bash tool", gotBody["tools"])
+	}
+	tool := tools[0].(map[string]any)
+	if tool["name"] != "bash" {
+		t.Fatalf("tool = %#v, want bash", tool)
+	}
+	schema := tool["input_schema"].(map[string]any)
+	if schema["additionalProperties"] != false {
+		t.Fatalf("additionalProperties = %#v, want false", schema["additionalProperties"])
+	}
+	turn, ok := resp.Turn.(*clnkr.ActTurn)
+	if !ok {
+		t.Fatalf("Turn = %T, want *ActTurn", resp.Turn)
+	}
+	if got := len(turn.Bash.Commands); got != 2 {
+		t.Fatalf("commands = %d, want 2", got)
+	}
+	if got := turn.Bash.Commands[0]; got.ID != "toolu_1" || got.Command != "pwd" {
+		t.Fatalf("first command = %#v, want provider ID and command", got)
+	}
+	if got := turn.Bash.Commands[1]; got.ID != "toolu_2" || got.Command != "git status" {
+		t.Fatalf("second command = %#v, want provider ID and command", got)
+	}
+	if len(resp.BashToolCalls) != 2 || resp.BashToolCalls[0].ID != "toolu_1" || resp.BashToolCalls[1].ID != "toolu_2" {
+		t.Fatalf("BashToolCalls = %#v", resp.BashToolCalls)
+	}
+}
+
+func TestModelToolCallsReplayToolMessagesWithoutDuplicateText(t *testing.T) {
+	var gotMessages []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		data, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(data, &body)
+		gotMessages = body["messages"].([]any)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]string{{"type": "text", "text": anthropicWrappedDone("ok")}},
+		})
+	}))
+	defer server.Close()
+
+	m := anthropic.NewModelWithOptions(server.URL, "test-key", "claude-test", "sys prompt", anthropic.Options{UseBashToolCalls: true})
+	_, err := m.Query(context.Background(), []clnkr.Message{
+		{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]}}`, BashToolCalls: []clnkr.BashToolCall{{ID: "toolu_1", Command: "pwd"}}},
+		{Role: "user", Content: "payload", BashToolResult: &clnkr.BashToolResult{ID: "toolu_1", Content: "payload"}},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(gotMessages) != 2 {
+		t.Fatalf("messages = %#v, want tool_use and tool_result", gotMessages)
+	}
+	firstContent := gotMessages[0].(map[string]any)["content"].([]any)
+	secondContent := gotMessages[1].(map[string]any)["content"].([]any)
+	if firstContent[0].(map[string]any)["type"] != "tool_use" {
+		t.Fatalf("first content = %#v, want tool_use", firstContent)
+	}
+	if secondContent[0].(map[string]any)["type"] != "tool_result" || secondContent[0].(map[string]any)["content"] != "payload" {
+		t.Fatalf("second content = %#v, want tool_result payload", secondContent)
+	}
+}
+
+func TestModelToolCallsReplayErroredToolResult(t *testing.T) {
+	var gotMessages []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		data, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(data, &body)
+		gotMessages = body["messages"].([]any)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]string{{"type": "text", "text": anthropicWrappedDone("ok")}},
+		})
+	}))
+	defer server.Close()
+
+	m := anthropic.NewModelWithOptions(server.URL, "test-key", "claude-test", "sys prompt", anthropic.Options{UseBashToolCalls: true})
+	_, err := m.Query(context.Background(), []clnkr.Message{
+		{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"command":"false","workdir":null}]}}`, BashToolCalls: []clnkr.BashToolCall{{ID: "toolu_1", Command: "false"}}},
+		{Role: "user", Content: "payload", BashToolResult: &clnkr.BashToolResult{ID: "toolu_1", Content: "payload", IsError: true}},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	secondContent := gotMessages[1].(map[string]any)["content"].([]any)
+	result := secondContent[0].(map[string]any)
+	if result["type"] != "tool_result" || result["is_error"] != true {
+		t.Fatalf("tool result = %#v, want is_error", result)
+	}
+}
+
+func TestModelToolCallsReplayConsecutiveToolResultsTogether(t *testing.T) {
+	var gotMessages []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		data, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(data, &body)
+		gotMessages = body["messages"].([]any)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]string{{"type": "text", "text": anthropicWrappedDone("ok")}},
+		})
+	}))
+	defer server.Close()
+
+	m := anthropic.NewModelWithOptions(server.URL, "test-key", "claude-test", "sys prompt", anthropic.Options{UseBashToolCalls: true})
+	_, err := m.Query(context.Background(), []clnkr.Message{
+		{
+			Role:    "assistant",
+			Content: `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null},{"command":"false","workdir":null}]}}`,
+			BashToolCalls: []clnkr.BashToolCall{
+				{ID: "toolu_1", Command: "pwd"},
+				{ID: "toolu_2", Command: "false"},
+			},
+		},
+		{Role: "user", Content: "payload 1", BashToolResult: &clnkr.BashToolResult{ID: "toolu_1", Content: "payload 1"}},
+		{Role: "user", Content: "payload 2", BashToolResult: &clnkr.BashToolResult{ID: "toolu_2", Content: "payload 2", IsError: true}},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(gotMessages) != 2 {
+		t.Fatalf("messages = %#v, want assistant tool_use and one user tool_result message", gotMessages)
+	}
+	secondContent := gotMessages[1].(map[string]any)["content"].([]any)
+	if len(secondContent) != 2 {
+		t.Fatalf("second content = %#v, want two tool_result blocks", secondContent)
+	}
+	first := secondContent[0].(map[string]any)
+	second := secondContent[1].(map[string]any)
+	if first["tool_use_id"] != "toolu_1" || first["content"] != "payload 1" {
+		t.Fatalf("first tool result = %#v", first)
+	}
+	if second["tool_use_id"] != "toolu_2" || second["content"] != "payload 2" || second["is_error"] != true {
+		t.Fatalf("second tool result = %#v", second)
+	}
+}
+
+func TestModelQueryFinalOmitsBashTool(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(data, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]string{{"type": "text", "text": anthropicWrappedDone("final")}},
+		})
+	}))
+	defer server.Close()
+
+	m := anthropic.NewModelWithOptions(server.URL, "test-key", "claude-test", "sys prompt", anthropic.Options{UseBashToolCalls: true})
+	if _, err := m.QueryFinal(context.Background(), []clnkr.Message{{Role: "user", Content: "summarize"}}); err != nil {
+		t.Fatalf("QueryFinal: %v", err)
+	}
+	if _, ok := gotBody["tools"]; ok {
+		t.Fatalf("tools = %#v, want omitted", gotBody["tools"])
+	}
+	schema := gotBody["output_config"].(map[string]any)["format"].(map[string]any)["schema"].(map[string]any)
+	choices := schema["properties"].(map[string]any)["turn"].(map[string]any)["anyOf"].([]any)
+	if len(choices) != 1 {
+		t.Fatalf("final schema choices = %#v, want done only", choices)
+	}
+}
+
 func mustCanonicalTurn(t *testing.T, turn clnkr.Turn) string {
 	t.Helper()
 	raw, err := clnkr.CanonicalTurnJSON(turn)

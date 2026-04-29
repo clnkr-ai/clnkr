@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/clnkr-ai/clnkr"
 	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
 )
 
@@ -18,6 +19,7 @@ type Inputs struct {
 	ProviderAPI    string
 	Model          string
 	BaseURL        string
+	ActProtocol    clnkr.ActProtocol
 	RequestOptions providerdomain.ProviderRequestOptions
 }
 
@@ -27,6 +29,7 @@ type ResolvedProviderConfig struct {
 	Model          string
 	BaseURL        string
 	APIKey         string
+	ActProtocol    clnkr.ActProtocol
 	RequestOptions providerdomain.ProviderRequestOptions
 }
 
@@ -89,12 +92,14 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 	if err != nil {
 		return ResolvedProviderConfig{}, err
 	}
-	requestOptions, err := providerdomain.ValidateRequestOptions(provider, providerAPI, model, inputs.RequestOptions)
+	requestInputs := inputs.RequestOptions
+	requestInputs.ActProtocol = inputs.ActProtocol
+	requestOptions, err := providerdomain.ValidateRequestOptions(provider, providerAPI, model, requestInputs)
 	if err != nil {
 		return ResolvedProviderConfig{}, err
 	}
 
-	return ResolvedProviderConfig{Provider: provider, ProviderAPI: providerAPI, Model: model, BaseURL: baseURL, APIKey: apiKey, RequestOptions: requestOptions}, nil
+	return ResolvedProviderConfig{Provider: provider, ProviderAPI: providerAPI, Model: model, BaseURL: baseURL, APIKey: apiKey, ActProtocol: requestOptions.ActProtocol, RequestOptions: requestOptions}, nil
 }
 
 func chooseValue(flagValue, envValue, flagSource, envSource string) (string, string, bool) {

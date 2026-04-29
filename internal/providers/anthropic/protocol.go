@@ -6,7 +6,15 @@ import (
 )
 
 func requestSchema() map[string]any {
-	return turnwire.RequestSchema(false)
+	return turnwire.RequestSchema()
+}
+
+func finalTurnSchema() map[string]any {
+	return turnwire.FinalTurnSchema()
+}
+
+func doneOnlySchema() map[string]any {
+	return turnwire.DoneOnlySchema()
 }
 
 func normalizeMessagesForProvider(messages []clnkr.Message) []clnkr.Message {

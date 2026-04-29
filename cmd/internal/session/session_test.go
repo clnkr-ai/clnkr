@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -158,7 +159,7 @@ func TestSaveSessionWithMetadataPreservesLoadCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLatestSession: %v", err)
 	}
-	if len(loaded) != 1 || loaded[0] != original[0] {
+	if len(loaded) != 1 || !reflect.DeepEqual(loaded[0], original[0]) {
 		t.Fatalf("loaded = %#v, want %#v", loaded, original)
 	}
 }
