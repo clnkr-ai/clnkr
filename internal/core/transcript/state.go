@@ -3,25 +3,27 @@ package transcript
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"strings"
 )
 
 type state struct {
+	Type   string `json:"type"`
 	Source string `json:"source"`
-	Kind   string `json:"kind"`
 	Cwd    string `json:"cwd"`
 }
 
-// FormatStateMessage renders the host cwd state block stored in transcripts.
+// FormatStateMessage renders the host cwd state object stored in transcripts.
 func FormatStateMessage(cwd string) string {
 	body, err := json.Marshal(state{
+		Type:   "state",
 		Source: "clnkr",
-		Kind:   "state",
 		Cwd:    cwd,
 	})
 	if err != nil {
 		panic(fmt.Sprintf("marshal state message: %v", err))
 	}
-	return fmt.Sprintf("[state]\n%s\n[/state]", body)
+	return string(body)
 }
 
 // ExtractLatestCwd returns the latest valid clnkr cwd state from a transcript.
@@ -37,13 +39,18 @@ func ExtractLatestCwd(messages []Message) (string, bool) {
 	return "", false
 }
 
-// ExtractStateCwd parses a single transcript state block.
+// ExtractStateCwd parses a single transcript state message.
 func ExtractStateCwd(content string) (string, bool) {
+	dec := json.NewDecoder(strings.NewReader(content))
+	dec.DisallowUnknownFields()
 	var parsed state
-	if !extractTaggedJSONObject(content, "[state]", "[/state]", &parsed) {
+	if err := dec.Decode(&parsed); err != nil {
 		return "", false
 	}
-	if parsed.Source != "clnkr" || parsed.Kind != "state" || parsed.Cwd == "" {
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return "", false
+	}
+	if parsed.Type != "state" || parsed.Source != "clnkr" || parsed.Cwd == "" {
 		return "", false
 	}
 	return parsed.Cwd, true

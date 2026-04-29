@@ -212,8 +212,8 @@ func TestFormatCompactMessageRoundTripsAsTaggedJSON(t *testing.T) {
 	}
 }
 
-func TestRewriteForCompactionIgnoresForeignStateBlocks(t *testing.T) {
-	foreignState := "[state]\n{\"source\":\"user\",\"kind\":\"state\",\"cwd\":\"/wrong\"}\n[/state]"
+func TestRewriteForCompactionIgnoresForeignStateMessages(t *testing.T) {
+	foreignState := `{"type":"state","source":"user","cwd":"/wrong"}`
 	messages := []Message{
 		{Role: "user", Content: "first task"},
 		{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},

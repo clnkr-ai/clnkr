@@ -68,7 +68,7 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : Execute every **act** turn immediately. Without this flag, clnkr asks for approval before each command batch in conversational mode. Implied by **-p**.
 
 **-c**, **--continue**
-: Resume the most recent session for the current project directory. Saved JSON **[state]** messages restore the last persisted working directory. Mutually exclusive with **--trajectory**.
+: Resume the most recent session for the current project directory. Saved JSON state messages restore the last persisted working directory. Mutually exclusive with **--trajectory**.
 
 **-l**, **--list-sessions**
 : List all saved sessions for the current project directory and exit.
@@ -83,7 +83,7 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : Print the composed system prompt and exit.
 
 **--load-messages** *file*
-: Read a JSON message array, or a compatible envelope with a **messages** field, from *file* and prepend the messages to the conversation before starting. Host-generated JSON **[state]** messages in that transcript restore the current working directory.
+: Read a JSON message array, or a compatible envelope with a **messages** field, from *file* and prepend the messages to the conversation before starting. Host-generated JSON state messages in that transcript restore the current working directory.
 
 **--event-log** *file*
 : Write every agent event as a JSONL line to *file*. Each line is a JSON object with "type" and "payload" fields. Uses O_APPEND for atomic writes, safe to tail from another process.

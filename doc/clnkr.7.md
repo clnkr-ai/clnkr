@@ -116,8 +116,9 @@ content remains canonical clnkr transcript text; adapters use the metadata to
 serialize provider tool-call history without duplicating the same exchange as
 plain text.
 
-**State block**
-: A host block containing the current working directory.
+**State message**
+: A host message containing strict JSON current working directory state, for
+example **{"type":"state","source":"clnkr","cwd":"/repo"}**.
 
 **Compact block**
 : A host block containing a summary of older transcript history.
@@ -380,7 +381,7 @@ omission, and prompt append behavior. Run metadata records the prompt hash for
 the run.
 
 **3. Own your context window**
-: clnkr appends state blocks, command result blocks, protocol corrections,
+: clnkr appends state messages, command result blocks, protocol corrections,
 canonical assistant turns, and compact blocks into the transcript. Run metadata
 is stored beside the transcript, not inside the context window.
 

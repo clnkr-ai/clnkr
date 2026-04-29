@@ -1241,7 +1241,7 @@ func TestAddMessages(t *testing.T) {
 		}
 	})
 
-	t.Run("restores cwd from the latest state block", func(t *testing.T) {
+	t.Run("restores cwd from the latest state message", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			mustResponse(actJSON("pwd")),
 		}}
@@ -1267,7 +1267,7 @@ func TestAddMessages(t *testing.T) {
 		}
 	})
 
-	t.Run("ignores non-clnkr state blocks", func(t *testing.T) {
+	t.Run("ignores non-clnkr state messages", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			mustResponse(actJSON("pwd")),
 		}}
@@ -1275,7 +1275,7 @@ func TestAddMessages(t *testing.T) {
 		agent := NewAgent(model, executor, "/original")
 
 		if err := agent.AddMessages([]Message{
-			{Role: "user", Content: "[state]\n{\"source\":\"user\",\"kind\":\"state\",\"cwd\":\"/wrong\"}\n[/state]"},
+			{Role: "user", Content: `{"type":"state","source":"user","cwd":"/wrong"}`},
 		}); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

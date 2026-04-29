@@ -135,7 +135,7 @@ clnkr -p "write a fix based on the investigation" --load-messages /tmp/investiga
 `--event-log` streams one JSON object per line as events happen (O_APPEND, safe to tail).
 `--trajectory` writes the full message array as pretty-printed JSON when the task ends, even if it failed.
 `--load-messages` reads that same format and prepends the messages before starting, so one agent's output becomes another's context.
-The transcript may include host-generated JSON `[state]` messages. Today they persist the current working directory so `--load-messages` and `--continue` can restore it.
+The transcript may include host-generated JSON state messages of the form `{"type":"state","source":"clnkr","cwd":"/repo"}`. They persist the current working directory so `--load-messages` and `--continue` can restore it.
 Single-task mode (`-p`) runs unattended and uses the same execution path as `--full-send`. Passing `--full-send=false` with `-p` is rejected. If a single-task run stops to ask for clarification, it exits with status `2` after printing the question to stderr. Non-interactive stdin in `--full-send` mode behaves the same. In the default conversational approval mode, clnkr asks for clarification inline instead.
 
 By default, conversational mode requires explicit approval before each `act` turn. One approval accepts all commands in that turn. Pass `--full-send` to run every command immediately.
@@ -187,8 +187,8 @@ clnkr --list-sessions
 Sessions are tied to their original working directory. You can only resume a
 session from the same project directory where it was created.
 
-Saved message history now restores the agent's current working directory on
-resume via transcript-level JSON `[state]` messages. Exported environment variables
+Saved message history restores the agent's current working directory on
+resume via transcript-level JSON state messages. Exported environment variables
 still persist only within the live process.
 
 ### Conversational commands
