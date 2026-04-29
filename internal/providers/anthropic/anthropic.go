@@ -34,7 +34,7 @@ type Model struct {
 	thinkingBudgetTokens int
 	thinkingMode         ThinkingMode
 	effort               string
-	nativeBashTools      bool
+	useBashToolCalls     bool
 	client               *http.Client
 }
 
@@ -45,7 +45,7 @@ type Options struct {
 	ThinkingBudgetTokens int
 	ThinkingMode         ThinkingMode
 	Effort               string
-	NativeBashTools      bool
+	UseBashToolCalls     bool
 }
 
 // NewModel sets up an Anthropic adapter.
@@ -68,7 +68,7 @@ func NewModelWithOptions(baseURL, apiKey, model, systemPrompt string, opts Optio
 		thinkingBudgetTokens: opts.ThinkingBudgetTokens,
 		thinkingMode:         opts.ThinkingMode,
 		effort:               opts.Effort,
-		nativeBashTools:      opts.NativeBashTools,
+		useBashToolCalls:     opts.UseBashToolCalls,
 		client:               &http.Client{Timeout: 240 * time.Second},
 	}
 }
@@ -163,10 +163,10 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 	var tools []anthropicTool
 	schema := requestSchema()
 	mappedMessages := mapTextMessages(messages)
-	if m.nativeBashTools {
+	if m.useBashToolCalls {
 		tools = []anthropicTool{bashToolSchema()}
 		schema = finalTurnSchema()
-		mappedMessages = mapNativeMessages(messages)
+		mappedMessages = mapToolCallMessages(messages)
 	}
 
 	outputCfg := &outputConfig{Format: &outputFormat{Type: "json_schema", Schema: schema}}
@@ -197,8 +197,8 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 		return clnkr.Response{}, fmt.Errorf("unmarshal response: %w", err)
 	}
 
-	if m.nativeBashTools {
-		return parseNativeResponse(apiResp, respBody)
+	if m.useBashToolCalls {
+		return parseToolCallResponse(apiResp, respBody)
 	}
 
 	text, textBlocks := extractTextBlocks(apiResp.Content)
@@ -281,7 +281,7 @@ func parseStructuredResponse(apiResp response, context string) (clnkr.Response, 
 	}, nil
 }
 
-func parseNativeResponse(apiResp response, raw []byte) (clnkr.Response, error) {
+func parseToolCallResponse(apiResp response, raw []byte) (clnkr.Response, error) {
 	usage := clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens}
 	var toolUses []contentBlock
 	var text strings.Builder
@@ -307,7 +307,7 @@ func parseNativeResponse(apiResp response, raw []byte) (clnkr.Response, error) {
 			}
 			act, ok := turn.(*clnkr.ActTurn)
 			if !ok || len(act.Bash.Commands) != 1 {
-				return clnkr.Response{}, fmt.Errorf("native structured output response: expected one command from tool use")
+				return clnkr.Response{}, fmt.Errorf("tool-call response: expected one command from tool use")
 			}
 			actions = append(actions, act.Bash.Commands[0])
 			calls = append(calls, call)
@@ -320,17 +320,17 @@ func parseNativeResponse(apiResp response, raw []byte) (clnkr.Response, error) {
 		}, nil
 	}
 	if strings.TrimSpace(outputText) == "" {
-		return clnkr.Response{}, fmt.Errorf("native structured output response: missing text block or tool_use")
+		return clnkr.Response{}, fmt.Errorf("tool-call response: missing text block or tool_use")
 	}
 	turn, err := parseProviderTurn(outputText)
 	if err != nil {
 		return clnkr.Response{Raw: outputText, Usage: usage, ProtocolErr: err}, nil
 	}
 	if _, ok := turn.(*clnkr.ActTurn); ok {
-		return clnkr.Response{Raw: outputText, Usage: usage, ProtocolErr: fmt.Errorf("%w: native bash tool mode does not accept text act turns", clnkr.ErrInvalidJSON)}, nil
+		return clnkr.Response{Raw: outputText, Usage: usage, ProtocolErr: fmt.Errorf("%w: tool-call mode does not accept text act turns", clnkr.ErrInvalidJSON)}, nil
 	}
 	if _, err := clnkr.CanonicalTurnJSON(turn); err != nil {
-		return clnkr.Response{}, fmt.Errorf("native structured output response: canonicalize turn payload: %w", err)
+		return clnkr.Response{}, fmt.Errorf("tool-call response: canonicalize turn payload: %w", err)
 	}
 	return clnkr.Response{Turn: turn, Raw: outputText, Usage: usage}, nil
 }
@@ -412,7 +412,7 @@ func mapRawMessages(messages []clnkr.Message) []anthropicMessage {
 	return mapped
 }
 
-func mapNativeMessages(messages []clnkr.Message) []anthropicMessage {
+func mapToolCallMessages(messages []clnkr.Message) []anthropicMessage {
 	normalized := normalizeMessagesForProvider(messages)
 	mapped := make([]anthropicMessage, 0, len(normalized))
 	knownCalls := make(map[string]struct{})

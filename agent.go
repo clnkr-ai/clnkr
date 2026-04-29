@@ -16,15 +16,15 @@ var ErrClarificationNeeded = errors.New("clarification needed")
 
 // Agent coordinates model turns and command execution.
 type Agent struct {
-	model    Model
-	executor Executor
-	messages []Message
-	cwd      string
-	env      map[string]string
-	started  bool
-	Notify   func(Event)
-	MaxSteps int
-	Protocol TurnProtocol
+	model       Model
+	executor    Executor
+	messages    []Message
+	cwd         string
+	env         map[string]string
+	started     bool
+	Notify      func(Event)
+	MaxSteps    int
+	ActProtocol ActProtocol
 }
 
 func NewAgent(model Model, executor Executor, cwd string) *Agent {
@@ -109,7 +109,7 @@ func (a *Agent) appendProtocolFailure(resp Response, addCorrection bool) {
 	a.messages = append(a.messages, Message{Role: "assistant", Content: resp.Raw})
 	a.notify(EventProtocolFailure{Reason: errorToReason(resp.ProtocolErr), Raw: resp.Raw})
 	if addCorrection {
-		a.messages = append(a.messages, Message{Role: "user", Content: protocolCorrectionMessageFor(resp.ProtocolErr, a.Protocol)})
+		a.messages = append(a.messages, Message{Role: "user", Content: protocolCorrectionMessageFor(resp.ProtocolErr, a.ActProtocol)})
 	}
 }
 
@@ -188,7 +188,7 @@ func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, erro
 	return a.executeTurn(ctx, act, nil)
 }
 
-// ExecuteTurnWithSkipped runs an act turn and records native tool calls that
+// ExecuteTurnWithSkipped runs an act turn and records bash tool calls that
 // were skipped before execution, for example by MaxSteps truncation.
 func (a *Agent) ExecuteTurnWithSkipped(ctx context.Context, act *ActTurn, skipped []BashAction) (StepResult, error) {
 	return a.executeTurn(ctx, act, skipped)
@@ -278,7 +278,7 @@ func (a *Agent) RejectTurn(act *ActTurn, reply string) {
 		a.AppendUserMessage(reply)
 		return
 	}
-	nativeResults := 0
+	toolCallResults := 0
 	for _, action := range act.Bash.Commands {
 		if action.ID == "" {
 			continue
@@ -289,9 +289,9 @@ func (a *Agent) RejectTurn(act *ActTurn, reply string) {
 			Content:        content,
 			BashToolResult: &BashToolResult{ID: action.ID, Content: content, IsError: true},
 		})
-		nativeResults++
+		toolCallResults++
 	}
-	if nativeResults == 0 {
+	if toolCallResults == 0 {
 		a.AppendUserMessage(reply)
 	}
 }

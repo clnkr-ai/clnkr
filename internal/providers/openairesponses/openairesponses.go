@@ -26,7 +26,7 @@ type Model struct {
 	reasoningEffort    string
 	maxOutputTokens    int
 	hasMaxOutputTokens bool
-	nativeBashTools    bool
+	useBashToolCalls   bool
 	client             *http.Client
 }
 
@@ -34,7 +34,7 @@ type Options struct {
 	ReasoningEffort    string
 	MaxOutputTokens    int
 	HasMaxOutputTokens bool
-	NativeBashTools    bool
+	UseBashToolCalls   bool
 }
 
 // NewModel sets up an OpenAI Responses adapter.
@@ -52,7 +52,7 @@ func NewModelWithOptions(baseURL, apiKey, model, systemPrompt string, opts Optio
 		reasoningEffort:    opts.ReasoningEffort,
 		maxOutputTokens:    opts.MaxOutputTokens,
 		hasMaxOutputTokens: opts.HasMaxOutputTokens,
-		nativeBashTools:    opts.NativeBashTools,
+		useBashToolCalls:   opts.UseBashToolCalls,
 		client:             &http.Client{Timeout: 240 * time.Second},
 	}
 }
@@ -157,9 +157,9 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 	input := mapMessages(messages)
 	var tools []openAITool
 	var parallelTools *bool
-	if m.nativeBashTools {
+	if m.useBashToolCalls {
 		schema = openaiwire.FinalTurnSchema()
-		input = mapNativeMessages(messages)
+		input = mapToolCallMessages(messages)
 		tools = []openAITool{bashToolSchema()}
 	}
 	return m.queryStructured(ctx, input, schema, tools, parallelTools)
@@ -197,8 +197,8 @@ func (m *Model) queryStructured(ctx context.Context, input []responsesInputItem,
 			return clnkr.Response{}, err
 		}
 		if statusCode == http.StatusOK {
-			if m.nativeBashTools && len(tools) > 0 {
-				return parseNativeResponse(respBody)
+			if m.useBashToolCalls && len(tools) > 0 {
+				return parseToolCallResponse(respBody)
 			}
 			return parseStructuredResponse(respBody)
 		}
@@ -296,7 +296,7 @@ func mapMessages(messages []clnkr.Message) []responsesInputItem {
 	return input
 }
 
-func mapNativeMessages(messages []clnkr.Message) []responsesInputItem {
+func mapToolCallMessages(messages []clnkr.Message) []responsesInputItem {
 	normalized := openaiwire.NormalizeMessagesForProvider(messages)
 	input := make([]responsesInputItem, 0, len(normalized))
 	knownCalls := make(map[string]struct{})
@@ -464,7 +464,7 @@ func parseStructuredResponse(respBody []byte) (clnkr.Response, error) {
 	}, nil
 }
 
-func parseNativeResponse(respBody []byte) (clnkr.Response, error) {
+func parseToolCallResponse(respBody []byte) (clnkr.Response, error) {
 	apiResp, err := unmarshalResponse(respBody)
 	if err != nil {
 		return clnkr.Response{}, err
@@ -488,7 +488,7 @@ func parseNativeResponse(respBody []byte) (clnkr.Response, error) {
 					text.WriteString(content.Text)
 				case "refusal":
 					if strings.TrimSpace(content.Refusal) != "" {
-						return clnkr.Response{}, fmt.Errorf("native structured output refusal: %s", content.Refusal)
+						return clnkr.Response{}, fmt.Errorf("tool-call refusal: %s", content.Refusal)
 					}
 				}
 			}
@@ -518,7 +518,7 @@ func parseNativeResponse(respBody []byte) (clnkr.Response, error) {
 			}
 			act, ok := turn.(*clnkr.ActTurn)
 			if !ok || len(act.Bash.Commands) != 1 {
-				return clnkr.Response{}, fmt.Errorf("native structured output response: expected one command from function call")
+				return clnkr.Response{}, fmt.Errorf("tool-call response: expected one command from function call")
 			}
 			actions = append(actions, act.Bash.Commands[0])
 			toolCalls = append(toolCalls, call)
@@ -532,17 +532,17 @@ func parseNativeResponse(respBody []byte) (clnkr.Response, error) {
 		}, nil
 	}
 	if strings.TrimSpace(outputText) == "" {
-		return clnkr.Response{}, fmt.Errorf("native structured output response: no usable output_text or bash tool call")
+		return clnkr.Response{}, fmt.Errorf("tool-call response: no usable output_text or bash tool call")
 	}
 	turn, err := openaiwire.ParseProviderTurn(outputText)
 	if err != nil {
 		return clnkr.Response{Raw: outputText, Usage: usage, ProtocolErr: err}, nil
 	}
 	if _, ok := turn.(*clnkr.ActTurn); ok {
-		return clnkr.Response{Raw: outputText, Usage: usage, ProtocolErr: fmt.Errorf("%w: native bash tool mode does not accept text act turns", clnkr.ErrInvalidJSON)}, nil
+		return clnkr.Response{Raw: outputText, Usage: usage, ProtocolErr: fmt.Errorf("%w: tool-call mode does not accept text act turns", clnkr.ErrInvalidJSON)}, nil
 	}
 	if _, err := clnkr.CanonicalTurnJSON(turn); err != nil {
-		return clnkr.Response{}, fmt.Errorf("canonicalize native structured output payload: %w", err)
+		return clnkr.Response{}, fmt.Errorf("canonicalize tool-call payload: %w", err)
 	}
 	return clnkr.Response{Turn: turn, Raw: outputText, Usage: usage}, nil
 }

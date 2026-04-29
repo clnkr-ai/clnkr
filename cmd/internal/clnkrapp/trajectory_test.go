@@ -75,8 +75,10 @@ func TestRunMetadataMirrorsProviderRequestShape(t *testing.T) {
 		Provider:    providerdomain.ProviderOpenAI,
 		ProviderAPI: providerdomain.ProviderAPIOpenAIResponses,
 		Model:       "gpt-5.1",
+		ActProtocol: clnkr.ActProtocolToolCalls,
 		RequestOptions: providerdomain.ProviderRequestOptions{
-			Effort: providerdomain.ProviderEffortOptions{Level: "auto", Set: true},
+			ActProtocol: clnkr.ActProtocolToolCalls,
+			Effort:      providerdomain.ProviderEffortOptions{Level: "auto", Set: true},
 			Output: providerdomain.ProviderOutputOptions{
 				MaxOutputTokens: providerdomain.OptionalInt{Value: 8000, Set: true},
 			},
@@ -88,7 +90,9 @@ func TestRunMetadataMirrorsProviderRequestShape(t *testing.T) {
 		t.Fatalf("Marshal: %v", err)
 	}
 	var got struct {
-		Requested struct {
+		ActProtocol  string          `json:"act_protocol"`
+		TurnProtocol json.RawMessage `json:"turn_protocol"`
+		Requested    struct {
 			Effort struct {
 				LevelOmitted bool    `json:"level_omitted"`
 				Level        *string `json:"level"`
@@ -107,6 +111,12 @@ func TestRunMetadataMirrorsProviderRequestShape(t *testing.T) {
 	}
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got.ActProtocol != "tool-calls" {
+		t.Fatalf("act_protocol = %q, want tool-calls", got.ActProtocol)
+	}
+	if got.TurnProtocol != nil {
+		t.Fatalf("turn_protocol = %s, want omitted", got.TurnProtocol)
 	}
 	if got.Requested.Effort.LevelOmitted {
 		t.Fatalf("requested.effort.level_omitted = true, want false for explicit auto")

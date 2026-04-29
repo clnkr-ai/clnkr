@@ -90,8 +90,8 @@ Structured outputs are a hard requirement for agent turns. clnkr rejects `gpt-5.
                                (required in normal use; env: CLNKR_PROVIDER)
 --provider-api string          OpenAI-only override
                                (auto|openai-chat-completions|openai-responses)
---turn-protocol string         Turn protocol
-                               (structured-json|native-bash-tools)
+--act-protocol string          Act protocol
+                               (clnkr-inline|tool-calls)
 --max-steps int                Limit executed commands
                                before summary (default: 100)
 --full-send                    Execute every act batch without approval
@@ -197,7 +197,7 @@ At the main idle conversational prompt, run `/compact` to summarize older transc
 
 ## How it works
 
-clnkr runs a loop using a structured JSON turn protocol:
+clnkr runs a loop using an act protocol:
 
 1. Send conversation history to the LLM
 2. The selected provider adapter owns the provider-facing structured-output schema, any provider wire wrapper such as `{"turn": ...}`, and the translation from provider response text into a typed turn (`clarify`, `act`, or `done`).

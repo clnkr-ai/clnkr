@@ -33,7 +33,7 @@ Options:
   -m, --model string        Model identifier (required; env: $CLNKR_MODEL)
   -u, --base-url string     LLM endpoint transport URL (env: $CLNKR_BASE_URL)
       --provider string     Provider adapter: anthropic|openai
-      --turn-protocol string Turn protocol: structured-json|native-bash-tools
+      --act-protocol string Act protocol: clnkr-inline|tool-calls
       --effort string       Provider effort: auto|low|medium|high|xhigh|max
       --max-output-tokens int Maximum response output tokens
       --max-steps int       Limit executed commands
@@ -203,7 +203,7 @@ func main() {
 	baseURLShort := flags.String("u", "", "")
 	providerFlag := flags.String("provider", "", "")
 	providerAPIFlag := flags.String("provider-api", "", "")
-	turnProtocolFlag := flags.String("turn-protocol", "structured-json", "")
+	actProtocolFlag := flags.String("act-protocol", "clnkr-inline", "")
 	effortFlag := flags.String("effort", "", "")
 	thinkingBudgetTokens := flags.Int("thinking-budget-tokens", 0, "")
 	maxOutputTokens := flags.Int("max-output-tokens", 0, "")
@@ -284,7 +284,7 @@ func main() {
 		*fullSend = true
 	}
 
-	turnProtocol, err := clnkr.ParseTurnProtocol(*turnProtocolFlag)
+	actProtocol, err := clnkr.ParseActProtocol(*actProtocolFlag)
 	if err != nil {
 		fatalf("%v", err)
 	}
@@ -292,7 +292,7 @@ func main() {
 	systemPrompt := clnkr.LoadPromptWithOptions(cwd, clnkr.PromptOptions{
 		OmitSystemPrompt:   *noSystemPrompt || *noSystemPromptShort,
 		SystemPromptAppend: *systemPromptAppend,
-		TurnProtocol:       turnProtocol,
+		ActProtocol:        actProtocol,
 	})
 
 	if *dumpSystemPrompt {
@@ -308,11 +308,11 @@ func main() {
 	}
 
 	cfg, err := providerconfig.ResolveConfig(providerconfig.Inputs{
-		Provider:     *providerFlag,
-		ProviderAPI:  *providerAPIFlag,
-		Model:        aliasedString(*modelShort, *modelFlag),
-		BaseURL:      aliasedString(*baseURLShort, *baseURLFlag),
-		TurnProtocol: turnProtocol,
+		Provider:    *providerFlag,
+		ProviderAPI: *providerAPIFlag,
+		Model:       aliasedString(*modelShort, *modelFlag),
+		BaseURL:     aliasedString(*baseURLShort, *baseURLFlag),
+		ActProtocol: actProtocol,
 		RequestOptions: providerdomain.ProviderRequestOptions{
 			Effort: providerdomain.ProviderEffortOptions{
 				Level: *effortFlag,
@@ -356,7 +356,7 @@ func main() {
 	executor := &clnkr.CommandExecutor{}
 
 	agent := clnkr.NewAgent(model, executor, cwd)
-	agent.Protocol = cfg.TurnProtocol
+	agent.ActProtocol = cfg.ActProtocol
 
 	showDebug := *verbose || *verboseShort
 	agent.Notify = func(e clnkr.Event) {

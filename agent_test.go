@@ -539,7 +539,7 @@ func TestStepStoresCanonicalAssistantSuccess(t *testing.T) {
 	}
 }
 
-func TestStepStoresNativeMetadata(t *testing.T) {
+func TestStepStoresToolCallMetadata(t *testing.T) {
 	replayJSON := json.RawMessage(`{"type":"reasoning","id":"rs_1"}`)
 	model := &fakeModel{responses: []Response{{
 		Turn:          &ActTurn{Bash: bashBatch(BashAction{ID: "call_1", Command: "pwd"})},
@@ -679,7 +679,7 @@ func TestExecuteTurn(t *testing.T) {
 		}
 	})
 
-	t.Run("stores native bash tool result metadata", func(t *testing.T) {
+	t.Run("stores tool-call result metadata", func(t *testing.T) {
 		executor := &fakeExecutor{results: []CommandResult{{Stdout: "/tmp\n", ExitCode: 0}}}
 		agent := NewAgent(&fakeModel{}, executor, "/tmp")
 
@@ -702,11 +702,11 @@ func TestExecuteTurn(t *testing.T) {
 			t.Fatalf("tool result payload = %#v", payload)
 		}
 		if msg.BashToolResult.IsError {
-			t.Fatal("zero exit native result should not be marked as error")
+			t.Fatal("zero exit tool-call result should not be marked as error")
 		}
 	})
 
-	t.Run("marks nonzero native bash tool result as error", func(t *testing.T) {
+	t.Run("marks nonzero tool-call result as error", func(t *testing.T) {
 		executor := &fakeExecutor{
 			results: []CommandResult{{Stderr: "nope\n", ExitCode: 2}},
 			errs:    []error{errors.New("run command: exit status 2")},
@@ -725,7 +725,7 @@ func TestExecuteTurn(t *testing.T) {
 			t.Fatal("missing BashToolResult")
 		}
 		if !msg.BashToolResult.IsError {
-			t.Fatal("nonzero native result should be marked as error")
+			t.Fatal("nonzero tool-call result should be marked as error")
 		}
 		payload := mustShellResultPayload(t, msg.BashToolResult.Content)
 		if payload.Stderr != "nope\n" || payload.Outcome.Type != "exit" || payload.Outcome.ExitCode != 2 {
@@ -733,7 +733,7 @@ func TestExecuteTurn(t *testing.T) {
 		}
 	})
 
-	t.Run("completes later native calls after command failure", func(t *testing.T) {
+	t.Run("completes later tool calls after command failure", func(t *testing.T) {
 		executor := &fakeExecutor{
 			results: []CommandResult{{Stderr: "nope\n", ExitCode: 2}},
 			errs:    []error{errors.New("run command: exit status 2")},
@@ -1607,7 +1607,7 @@ func TestAppendUserMessage(t *testing.T) {
 	}
 }
 
-func TestMessagesDeepCopiesNativeMetadata(t *testing.T) {
+func TestMessagesDeepCopiesToolCallMetadata(t *testing.T) {
 	agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
 	original := Message{
 		Role:           "assistant",
@@ -2254,7 +2254,7 @@ func TestRun(t *testing.T) {
 		}
 	})
 
-	t.Run("completes skipped native calls after max steps truncation", func(t *testing.T) {
+	t.Run("completes skipped tool calls after max steps truncation", func(t *testing.T) {
 		turn := &ActTurn{Bash: BashBatch{Commands: []BashAction{
 			{ID: "call_1", Command: "echo one"},
 			{ID: "call_2", Command: "echo two"},
@@ -2262,7 +2262,7 @@ func TestRun(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{
 				Turn: turn,
-				Raw:  `native calls`,
+				Raw:  `tool calls`,
 				BashToolCalls: []BashToolCall{
 					{ID: "call_1", Command: "echo one"},
 					{ID: "call_2", Command: "echo two"},
@@ -2291,7 +2291,7 @@ func TestRun(t *testing.T) {
 			t.Fatalf("tool result IDs = %#v", results)
 		}
 		if results[1].IsError != true {
-			t.Fatal("skipped native result should be marked as error")
+			t.Fatal("skipped tool-call result should be marked as error")
 		}
 		payload := mustShellResultPayload(t, results[1].Content)
 		if payload.Outcome.Type != "skipped" || !strings.Contains(payload.Stderr, "step limit") {

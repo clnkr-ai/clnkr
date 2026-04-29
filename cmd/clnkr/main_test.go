@@ -222,6 +222,22 @@ func TestInvalidFlagKeepsUsageOffStdout(t *testing.T) {
 	}
 }
 
+func TestTurnProtocolFlagIsRemoved(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t, "--turn-protocol", "structured-json")
+	if err == nil {
+		t.Fatal("removed legacy protocol flag succeeded, want failure")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "flag provided but not defined: -turn-protocol") {
+		t.Fatalf("stderr = %q, want removed flag error", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "Run 'clnkr --help'") {
+		t.Fatalf("stderr = %q, want help hint", stderr.String())
+	}
+}
+
 func TestDumpSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
 	stdout, stderr, err := runMainHelper(t,
 		"--no-system-prompt",
@@ -239,16 +255,16 @@ func TestDumpSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
 	}
 }
 
-func TestDumpNativeSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
-	stdout, stderr, err := runMainHelper(t, "--turn-protocol", "native-bash-tools", "--dump-system-prompt")
+func TestDumpToolCallsSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t, "--act-protocol", "tool-calls", "--dump-system-prompt")
 	if err != nil {
-		t.Fatalf("dump native system prompt: %v\nstderr: %s", err, stderr.String())
+		t.Fatalf("dump tool-calls system prompt: %v\nstderr: %s", err, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "call the bash tool") {
-		t.Fatalf("stdout missing native prompt: %q", stdout.String())
+		t.Fatalf("stdout missing tool-calls prompt: %q", stdout.String())
 	}
 	if strings.Contains(stdout.String(), "exactly once") {
-		t.Fatalf("stdout imposes one native tool call: %q", stdout.String())
+		t.Fatalf("stdout imposes one tool call: %q", stdout.String())
 	}
 	if strings.Contains(stderr.String(), "provider is required") {
 		t.Fatalf("stderr = %q, provider validation ran first", stderr.String())
@@ -741,21 +757,21 @@ func TestSingleTaskRejectsNumericFullSendFalse(t *testing.T) {
 	}
 }
 
-func TestNativeTurnProtocolDoesNotRequireFullSendBeforeProviderConfig(t *testing.T) {
+func TestToolCallsActProtocolDoesNotRequireFullSendBeforeProviderConfig(t *testing.T) {
 	stdout, stderr, err := runMainHelperWithEnv(t, []string{
 		"CLNKR_API_KEY=test-key",
-	}, "--turn-protocol", "native-bash-tools")
+	}, "--act-protocol", "tool-calls")
 	if err == nil {
 		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
 	}
 	if stdout.String() != "" {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
-	if strings.Contains(stderr.String(), "--turn-protocol native-bash-tools requires --full-send") {
-		t.Fatalf("stderr = %q, native mode should not require full-send", stderr.String())
+	if strings.Contains(stderr.String(), "--act-protocol tool-calls requires --full-send") {
+		t.Fatalf("stderr = %q, tool-calls mode should not require full-send", stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "provider") {
-		t.Fatalf("stderr = %q, want provider config error after native protocol parse", stderr.String())
+		t.Fatalf("stderr = %q, want provider config error after act protocol parse", stderr.String())
 	}
 }
 

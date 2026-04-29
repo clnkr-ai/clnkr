@@ -229,40 +229,40 @@ func TestResolveConfigKnownOpenAIResponsesModels(t *testing.T) {
 	}
 }
 
-func TestResolveConfigTurnProtocol(t *testing.T) {
-	t.Run("defaults structured json", func(t *testing.T) {
+func TestResolveConfigActProtocol(t *testing.T) {
+	t.Run("defaults clnkr inline", func(t *testing.T) {
 		cfg, err := ResolveConfig(Inputs{Provider: "anthropic", Model: "claude-sonnet-4-6"}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
 		if err != nil {
 			t.Fatalf("ResolveConfig: %v", err)
 		}
-		if cfg.TurnProtocol != clnkr.TurnProtocolStructuredJSON {
-			t.Fatalf("TurnProtocol = %q, want structured-json", cfg.TurnProtocol)
+		if cfg.ActProtocol != clnkr.ActProtocolClnkrInline {
+			t.Fatalf("ActProtocol = %q, want clnkr-inline", cfg.ActProtocol)
 		}
 	})
 
-	t.Run("accepts anthropic native bash tools", func(t *testing.T) {
+	t.Run("accepts anthropic tool calls", func(t *testing.T) {
 		cfg, err := ResolveConfig(Inputs{
-			Provider:     "anthropic",
-			Model:        "claude-sonnet-4-6",
-			TurnProtocol: clnkr.TurnProtocolNativeBashTools,
+			Provider:    "anthropic",
+			Model:       "claude-sonnet-4-6",
+			ActProtocol: clnkr.ActProtocolToolCalls,
 		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
 		if err != nil {
 			t.Fatalf("ResolveConfig: %v", err)
 		}
-		if cfg.TurnProtocol != clnkr.TurnProtocolNativeBashTools {
-			t.Fatalf("TurnProtocol = %q, want native-bash-tools", cfg.TurnProtocol)
+		if cfg.ActProtocol != clnkr.ActProtocolToolCalls {
+			t.Fatalf("ActProtocol = %q, want tool-calls", cfg.ActProtocol)
 		}
 	})
 
-	t.Run("rejects openai chat completions native bash tools", func(t *testing.T) {
+	t.Run("rejects openai chat completions tool calls", func(t *testing.T) {
 		_, err := ResolveConfig(Inputs{
-			Provider:     "openai",
-			ProviderAPI:  "openai-chat-completions",
-			Model:        "proxy-model",
-			TurnProtocol: clnkr.TurnProtocolNativeBashTools,
+			Provider:    "openai",
+			ProviderAPI: "openai-chat-completions",
+			Model:       "proxy-model",
+			ActProtocol: clnkr.ActProtocolToolCalls,
 		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
-		if err == nil || !strings.Contains(err.Error(), "native-bash-tools") {
-			t.Fatalf("ResolveConfig err = %v, want native rejection", err)
+		if err == nil || !strings.Contains(err.Error(), "tool-calls") {
+			t.Fatalf("ResolveConfig err = %v, want tool-calls rejection", err)
 		}
 	})
 }

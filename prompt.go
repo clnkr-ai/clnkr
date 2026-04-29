@@ -52,12 +52,12 @@ Do not emit invalid JSON escapes like backslash-pipe or backslash-backtick.
 - Never claim to have created, modified, or verified something unless that happened through a prior command result in this conversation. If a verification command shows the result does not match the request exactly, issue another "act" turn to fix it instead of emitting "done". Never rm -rf or force-push without being asked.
 </finishing>`
 
-const nativePromptTemplate = `You are an expert software engineer that solves problems using the bash tool. Be concise.
+const toolCallsPromptTemplate = `You are an expert software engineer that solves problems using the bash tool. Be concise.
 
 <protocol>
 For command execution, call the bash tool. The bash tool input is an object with command and workdir fields. Use workdir null unless a different directory is required.
 For clarification or completion, respond with exactly one JSON object. Set type to exactly one of "clarify" or "done". If type is "clarify", question must be a non-empty string. If type is "done", summary must be a non-empty string. Include reasoning in every response; use a string when it helps and null when you have nothing to add.
-Do not emit JSON act turns in native bash tool mode. Do not emit multiple JSON objects in one response. Do not emit a tool call and a done turn together. If you receive a [protocol_error] block, fix your format and respond with a valid tool call or final JSON object.
+Do not emit JSON act turns in tool-call mode. Do not emit multiple JSON objects in one response. Do not emit a tool call and a done turn together. If you receive a [protocol_error] block, fix your format and respond with a valid tool call or final JSON object.
 </protocol>
 
 <command-results> After each command you will see a JSON object with "stdout", "stderr", and "outcome". The outcome object has a "type" such as "exit", "timeout", "cancelled", "denied", "skipped", or "error"; exit outcomes include "exit_code". Stderr warnings do not necessarily mean failure, so read the whole object before deciding your next step.
@@ -90,7 +90,7 @@ You may also receive a "feedback" object with changed_files and diff. Read it be
 type PromptOptions struct {
 	OmitSystemPrompt   bool   // skip the entire system prompt
 	SystemPromptAppend string // appended after all AGENTS.md layers
-	TurnProtocol       TurnProtocol
+	ActProtocol        ActProtocol
 }
 
 // LoadPromptWithOptions builds the system prompt with optional AGENTS.md layers.
@@ -99,8 +99,8 @@ func LoadPromptWithOptions(dir string, opts PromptOptions) string {
 		return opts.SystemPromptAppend
 	}
 
-	prompt := nativePromptTemplate
-	if normalizeTurnProtocol(opts.TurnProtocol) == TurnProtocolStructuredJSON {
+	prompt := toolCallsPromptTemplate
+	if normalizeActProtocol(opts.ActProtocol) == ActProtocolClnkrInline {
 		prompt = fmt.Sprintf(
 			basePromptTemplate,
 			canonicalPromptActExample,

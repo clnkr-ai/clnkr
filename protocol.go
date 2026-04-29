@@ -98,14 +98,14 @@ func errorToReason(err error) string {
 
 // protocolCorrectionMessage returns a tagged-text correction message for the model.
 func protocolCorrectionMessage(err error) string {
-	return protocolCorrectionMessageFor(err, TurnProtocolStructuredJSON)
+	return protocolCorrectionMessageFor(err, ActProtocolClnkrInline)
 }
 
-func protocolCorrectionMessageFor(err error, protocol TurnProtocol) string {
+func protocolCorrectionMessageFor(err error, protocol ActProtocol) string {
 	detail := err.Error()
 	var hint string
-	if normalizeTurnProtocol(protocol) == TurnProtocolNativeBashTools {
-		hint = "Your previous response was ignored and no command ran. For command execution, call the bash tool instead of emitting JSON. For clarification or completion, respond with exactly one JSON object whose type is \"clarify\" or \"done\". Do not emit a JSON act turn in native bash tool mode. Do not jump to done unless prior command results in this conversation already prove the task is complete."
+	if normalizeActProtocol(protocol) == ActProtocolToolCalls {
+		hint = "Your previous response was ignored and no command ran. For command execution, call the bash tool instead of emitting JSON. For clarification or completion, respond with exactly one JSON object whose type is \"clarify\" or \"done\". Do not emit a JSON act turn in tool-call mode. Do not jump to done unless prior command results in this conversation already prove the task is complete."
 	} else {
 		hint = fmt.Sprintf(
 			"Your previous response was ignored and no command ran. Respond with exactly one JSON object for the next turn from the current state. Use this act example as the shape guide: %s. Set type to exactly one of \"act\", \"clarify\", or \"done\". If type is \"act\", include bash. If type is \"clarify\", include question. If type is \"done\", include summary. When a field does not apply, omit it or set it to null. Include reasoning in every response; use null if you have nothing to add. Do not emit multiple JSON objects in one response. Do not emit an act turn and a done turn together. If you intended to run commands, resend only that act turn. Do not jump to done unless prior command results in this conversation already prove the task is complete.",

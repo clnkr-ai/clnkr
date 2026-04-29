@@ -56,7 +56,7 @@ type ProviderRequestOptions struct {
 	Effort          ProviderEffortOptions
 	Output          ProviderOutputOptions
 	AnthropicManual AnthropicManualThinkingOptions
-	TurnProtocol    clnkr.TurnProtocol
+	ActProtocol     clnkr.ActProtocol
 }
 
 // ProviderEffortOptions describes the user-requested effort level.
@@ -121,15 +121,15 @@ func ResolveProviderAPI(provider Provider, providerAPI ProviderAPI, model string
 }
 
 func ValidateRequestOptions(provider Provider, providerAPI ProviderAPI, model string, opts ProviderRequestOptions) (ProviderRequestOptions, error) {
-	if opts.TurnProtocol == "" {
-		opts.TurnProtocol = clnkr.TurnProtocolStructuredJSON
+	if opts.ActProtocol == "" {
+		opts.ActProtocol = clnkr.ActProtocolClnkrInline
 	}
-	if _, err := clnkr.ParseTurnProtocol(string(opts.TurnProtocol)); err != nil {
+	if _, err := clnkr.ParseActProtocol(string(opts.ActProtocol)); err != nil {
 		return ProviderRequestOptions{}, err
 	}
-	if opts.TurnProtocol == clnkr.TurnProtocolNativeBashTools {
+	if opts.ActProtocol == clnkr.ActProtocolToolCalls {
 		if provider == ProviderOpenAI && providerAPI != ProviderAPIOpenAIResponses {
-			return ProviderRequestOptions{}, fmt.Errorf("turn-protocol %q requires provider-api %q for provider openai", opts.TurnProtocol, ProviderAPIOpenAIResponses)
+			return ProviderRequestOptions{}, fmt.Errorf("act-protocol %q requires provider-api %q for provider openai", opts.ActProtocol, ProviderAPIOpenAIResponses)
 		}
 	}
 	opts.Effort.Level = strings.ToLower(strings.TrimSpace(opts.Effort.Level))

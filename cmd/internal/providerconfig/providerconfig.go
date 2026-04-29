@@ -19,7 +19,7 @@ type Inputs struct {
 	ProviderAPI    string
 	Model          string
 	BaseURL        string
-	TurnProtocol   clnkr.TurnProtocol
+	ActProtocol    clnkr.ActProtocol
 	RequestOptions providerdomain.ProviderRequestOptions
 }
 
@@ -29,7 +29,7 @@ type ResolvedProviderConfig struct {
 	Model          string
 	BaseURL        string
 	APIKey         string
-	TurnProtocol   clnkr.TurnProtocol
+	ActProtocol    clnkr.ActProtocol
 	RequestOptions providerdomain.ProviderRequestOptions
 }
 
@@ -93,13 +93,13 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 		return ResolvedProviderConfig{}, err
 	}
 	requestInputs := inputs.RequestOptions
-	requestInputs.TurnProtocol = inputs.TurnProtocol
+	requestInputs.ActProtocol = inputs.ActProtocol
 	requestOptions, err := providerdomain.ValidateRequestOptions(provider, providerAPI, model, requestInputs)
 	if err != nil {
 		return ResolvedProviderConfig{}, err
 	}
 
-	return ResolvedProviderConfig{Provider: provider, ProviderAPI: providerAPI, Model: model, BaseURL: baseURL, APIKey: apiKey, TurnProtocol: requestOptions.TurnProtocol, RequestOptions: requestOptions}, nil
+	return ResolvedProviderConfig{Provider: provider, ProviderAPI: providerAPI, Model: model, BaseURL: baseURL, APIKey: apiKey, ActProtocol: requestOptions.ActProtocol, RequestOptions: requestOptions}, nil
 }
 
 func chooseValue(flagValue, envValue, flagSource, envSource string) (string, string, bool) {

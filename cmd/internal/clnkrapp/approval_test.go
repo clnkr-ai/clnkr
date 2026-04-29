@@ -157,14 +157,14 @@ func TestRunApprovalTaskNonApprovalReplyBecomesGuidance(t *testing.T) {
 	}
 }
 
-func TestRunApprovalTaskNativeNonApprovalCompletesToolResults(t *testing.T) {
+func TestRunApprovalTaskToolCallsNonApprovalCompletesToolResults(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
 		{
 			Turn: &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: []clnkr.BashAction{
 				{ID: "call_1", Command: "rm important.txt"},
 				{ID: "call_2", Command: "git status"},
 			}}},
-			Raw: `native calls`,
+			Raw: `tool calls`,
 			BashToolCalls: []clnkr.BashToolCall{
 				{ID: "call_1", Command: "rm important.txt"},
 				{ID: "call_2", Command: "git status"},
@@ -174,7 +174,7 @@ func TestRunApprovalTaskNativeNonApprovalCompletesToolResults(t *testing.T) {
 	}}
 	executor := &fakeExecutor{}
 	agent := clnkr.NewAgent(model, executor, "/tmp")
-	agent.Protocol = clnkr.TurnProtocolNativeBashTools
+	agent.ActProtocol = clnkr.ActProtocolToolCalls
 	prompter := &scriptPrompter{
 		actReplies: []clarifyReply{{text: "list files instead"}},
 	}
@@ -193,7 +193,7 @@ func TestRunApprovalTaskNativeNonApprovalCompletesToolResults(t *testing.T) {
 		}
 	}
 	if len(results) != 2 {
-		t.Fatalf("tool results = %#v, want one denial result per native call", results)
+		t.Fatalf("tool results = %#v, want one denial result per tool call", results)
 	}
 	if results[0].ID != "call_1" || results[1].ID != "call_2" {
 		t.Fatalf("tool result IDs = %#v", results)
@@ -218,14 +218,14 @@ func TestRunApprovalTaskNativeNonApprovalCompletesToolResults(t *testing.T) {
 	}
 }
 
-func TestRunApprovalTaskNativeMaxStepsCompletesSkippedToolResults(t *testing.T) {
+func TestRunApprovalTaskToolCallsMaxStepsCompletesSkippedToolResults(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
 		{
 			Turn: &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: []clnkr.BashAction{
 				{ID: "call_1", Command: "echo one"},
 				{ID: "call_2", Command: "echo two"},
 			}}},
-			Raw: `native calls`,
+			Raw: `tool calls`,
 			BashToolCalls: []clnkr.BashToolCall{
 				{ID: "call_1", Command: "echo one"},
 				{ID: "call_2", Command: "echo two"},
@@ -235,7 +235,7 @@ func TestRunApprovalTaskNativeMaxStepsCompletesSkippedToolResults(t *testing.T) 
 	}}
 	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "one\n", ExitCode: 0}}}
 	agent := clnkr.NewAgent(model, executor, "/tmp")
-	agent.Protocol = clnkr.TurnProtocolNativeBashTools
+	agent.ActProtocol = clnkr.ActProtocolToolCalls
 	agent.MaxSteps = 1
 	prompter := &scriptPrompter{actReplies: []clarifyReply{{text: "y"}}}
 

@@ -549,7 +549,7 @@ func TestModelQueryErrorsOnMissingOutputText(t *testing.T) {
 	}
 }
 
-func TestModelQueryNativeBashTools(t *testing.T) {
+func TestModelQueryToolCalls(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -565,7 +565,7 @@ func TestModelQueryNativeBashTools(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{NativeBashTools: true})
+	model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{UseBashToolCalls: true})
 	resp, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "where"}})
 	if err != nil {
 		t.Fatalf("Query: %v", err)
@@ -599,10 +599,10 @@ func TestModelQueryNativeBashTools(t *testing.T) {
 		t.Fatalf("commands = %d, want 2", got)
 	}
 	if got := act.Bash.Commands[0]; got.ID != "call_1" || got.Command != "pwd" {
-		t.Fatalf("first command = %#v, want native ID and command", got)
+		t.Fatalf("first command = %#v, want provider ID and command", got)
 	}
 	if got := act.Bash.Commands[1]; got.ID != "call_2" || got.Command != "git status" {
-		t.Fatalf("second command = %#v, want native ID and command", got)
+		t.Fatalf("second command = %#v, want provider ID and command", got)
 	}
 	if len(resp.BashToolCalls) != 2 || resp.BashToolCalls[0].ID != "call_1" || resp.BashToolCalls[1].ID != "call_2" {
 		t.Fatalf("BashToolCalls = %#v", resp.BashToolCalls)
@@ -612,7 +612,7 @@ func TestModelQueryNativeBashTools(t *testing.T) {
 	}
 }
 
-func TestModelQueryNativeReplaysToolMessagesWithoutDuplicateText(t *testing.T) {
+func TestModelQueryToolCallsReplayToolMessagesWithoutDuplicateText(t *testing.T) {
 	var gotInput []any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -628,7 +628,7 @@ func TestModelQueryNativeReplaysToolMessagesWithoutDuplicateText(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{NativeBashTools: true})
+	model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{UseBashToolCalls: true})
 	_, err := model.Query(context.Background(), []clnkr.Message{
 		{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]}}`, BashToolCalls: []clnkr.BashToolCall{{ID: "call_1", Command: "pwd"}}, ProviderReplay: []clnkr.ProviderReplayItem{{
 			Provider: "openai", ProviderAPI: "openai-responses", Type: "reasoning", JSON: json.RawMessage(`{"type":"reasoning","id":"rs_1","summary":[]}`),
@@ -655,7 +655,7 @@ func TestModelQueryNativeReplaysToolMessagesWithoutDuplicateText(t *testing.T) {
 	}
 }
 
-func TestModelQueryFinalOmitsNativeBashTool(t *testing.T) {
+func TestModelQueryFinalOmitsBashTool(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, _ := io.ReadAll(r.Body)
@@ -669,7 +669,7 @@ func TestModelQueryFinalOmitsNativeBashTool(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{NativeBashTools: true})
+	model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{UseBashToolCalls: true})
 	if _, err := model.QueryFinal(context.Background(), []clnkr.Message{{Role: "user", Content: "summarize"}}); err != nil {
 		t.Fatalf("QueryFinal: %v", err)
 	}
