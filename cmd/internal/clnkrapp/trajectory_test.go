@@ -77,8 +77,7 @@ func TestRunMetadataMirrorsProviderRequestShape(t *testing.T) {
 		Model:       "gpt-5.1",
 		ActProtocol: clnkr.ActProtocolToolCalls,
 		RequestOptions: providerdomain.ProviderRequestOptions{
-			ActProtocol: clnkr.ActProtocolToolCalls,
-			Effort:      providerdomain.ProviderEffortOptions{Level: "auto", Set: true},
+			Effort: providerdomain.ProviderEffortOptions{Level: "auto", Set: true},
 			Output: providerdomain.ProviderOutputOptions{
 				MaxOutputTokens: providerdomain.OptionalInt{Value: 8000, Set: true},
 			},

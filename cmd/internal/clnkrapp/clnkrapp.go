@@ -327,7 +327,7 @@ func RunApprovalTask(ctx context.Context, agent *clnkr.Agent, task string, promp
 				return agent.RequestStepLimitSummary(ctx)
 			}
 		default:
-			return fmt.Errorf("unexpected turn type %T", turn)
+			return fmt.Errorf("unhandled turn type %T", turn)
 		}
 	}
 }

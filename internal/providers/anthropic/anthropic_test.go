@@ -474,6 +474,43 @@ func TestModelToolCalls(t *testing.T) {
 	}
 }
 
+func TestModelToolCallsAllowsTextAlongsideToolUse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]any{{
+				"type": "text",
+				"text": "I will inspect the working directory first.",
+			}, {
+				"type":  "tool_use",
+				"id":    "toolu_1",
+				"name":  "bash",
+				"input": map[string]any{"command": "pwd", "workdir": nil},
+			}},
+			"usage": map[string]int{"input_tokens": 3, "output_tokens": 4},
+		})
+	}))
+	defer server.Close()
+
+	m := anthropic.NewModelWithOptions(server.URL, "test-key", "claude-test", "sys prompt", anthropic.Options{UseBashToolCalls: true})
+	resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "where"}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if resp.ProtocolErr != nil {
+		t.Fatalf("ProtocolErr = %v, want nil", resp.ProtocolErr)
+	}
+	turn, ok := resp.Turn.(*clnkr.ActTurn)
+	if !ok {
+		t.Fatalf("Turn = %T, want *ActTurn", resp.Turn)
+	}
+	if got := turn.Reasoning; got != "I will inspect the working directory first." {
+		t.Fatalf("Reasoning = %q, want text block", got)
+	}
+	if got := turn.Bash.Commands[0]; got.ID != "toolu_1" || got.Command != "pwd" {
+		t.Fatalf("command = %#v, want provider ID and command", got)
+	}
+}
+
 func TestModelToolCallsReplayToolMessagesWithoutDuplicateText(t *testing.T) {
 	var gotMessages []any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

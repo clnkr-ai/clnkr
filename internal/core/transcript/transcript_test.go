@@ -285,6 +285,7 @@ func TestFormatCommandResultUsesStructuredShellPayload(t *testing.T) {
 		Stderr:   "warn & <x> [z]\n",
 	})
 	var payload struct {
+		Command string `json:"command"`
 		Stdout  string `json:"stdout"`
 		Stderr  string `json:"stderr"`
 		Outcome struct {
@@ -294,6 +295,9 @@ func TestFormatCommandResultUsesStructuredShellPayload(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(got), &payload); err != nil {
 		t.Fatalf("FormatCommandResult() returned invalid JSON: %v\n%s", err, got)
+	}
+	if payload.Command != "printf 'a&b\\n' > out" {
+		t.Fatalf("command = %q, want serialized command", payload.Command)
 	}
 	if payload.Stdout != "hello & <x> [y]\n" || payload.Stderr != "warn & <x> [z]\n" {
 		t.Fatalf("payload streams = %#v", payload)

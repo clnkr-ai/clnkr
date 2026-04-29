@@ -92,14 +92,18 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 	if err != nil {
 		return ResolvedProviderConfig{}, err
 	}
+	actProtocol, err := clnkr.ParseActProtocol(string(inputs.ActProtocol))
+	if err != nil {
+		return ResolvedProviderConfig{}, err
+	}
 	requestInputs := inputs.RequestOptions
-	requestInputs.ActProtocol = inputs.ActProtocol
-	requestOptions, err := providerdomain.ValidateRequestOptions(provider, providerAPI, model, requestInputs)
+	useBashToolCalls := actProtocol == clnkr.ActProtocolToolCalls
+	requestOptions, err := providerdomain.ValidateRequestOptions(provider, providerAPI, model, useBashToolCalls, requestInputs)
 	if err != nil {
 		return ResolvedProviderConfig{}, err
 	}
 
-	return ResolvedProviderConfig{Provider: provider, ProviderAPI: providerAPI, Model: model, BaseURL: baseURL, APIKey: apiKey, ActProtocol: requestOptions.ActProtocol, RequestOptions: requestOptions}, nil
+	return ResolvedProviderConfig{Provider: provider, ProviderAPI: providerAPI, Model: model, BaseURL: baseURL, APIKey: apiKey, ActProtocol: actProtocol, RequestOptions: requestOptions}, nil
 }
 
 func chooseValue(flagValue, envValue, flagSource, envSource string) (string, string, bool) {
