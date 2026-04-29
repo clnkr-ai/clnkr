@@ -5,13 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
-	"github.com/clnkr-ai/clnkr/internal/core/gitfeedback"
-	"github.com/clnkr-ai/clnkr/internal/core/shellstate"
 	"os"
 	"os/exec"
 	"syscall"
 	"time"
+
+	"github.com/clnkr-ai/clnkr/internal/core/gitfeedback"
+	"github.com/clnkr-ai/clnkr/internal/core/shellstate"
 )
 
 // CommandExecutor runs bash commands, captures post-command shell state, and

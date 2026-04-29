@@ -67,6 +67,22 @@ func TestFindCompactBoundaryIgnoresHostBlocks(t *testing.T) {
 			wantBoundary:    2,
 			wantOK:          true,
 		},
+		{
+			name: "counts user json with outcome but no command streams",
+			messages: []Message{
+				{Role: "user", Content: "first task"},
+				{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+				{Role: "user", Content: `{"outcome":{"type":"exit"}}`},
+				{Role: "assistant", Content: `{"type":"done","summary":"json noted"}`},
+				{Role: "user", Content: "second task"},
+				{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
+				{Role: "user", Content: "third task"},
+				{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+			},
+			keepRecentTurns: 2,
+			wantBoundary:    4,
+			wantOK:          true,
+		},
 	}
 
 	for _, tt := range tests {

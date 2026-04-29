@@ -90,6 +90,8 @@ Structured outputs are a hard requirement for agent turns. clnkr rejects `gpt-5.
                                (required in normal use; env: CLNKR_PROVIDER)
 --provider-api string          OpenAI-only override
                                (auto|openai-chat-completions|openai-responses)
+--turn-protocol string         Turn protocol
+                               (structured-json|native-bash-tools)
 --max-steps int                Limit executed commands
                                before summary (default: 100)
 --full-send                    Execute every act batch without approval

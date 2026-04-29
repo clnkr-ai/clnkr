@@ -24,7 +24,7 @@ With **--turn-protocol native-bash-tools**, command execution uses provider-nati
 
 By default, **clnkr** asks for approval before each **act** turn in conversational mode. One approval accepts the whole command batch. Approval prompts show each requested command and any explicit workdir override. Pass **--full-send** to execute commands immediately without approval. Single-task mode (**-p**) implies **--full-send**.
 
-For Anthropic runs, **clnkr** requests Anthropic's native structured output format on every turn. Keep **--model** on a model Anthropic documents as supporting structured output.
+For Anthropic runs, **clnkr** requests Anthropic's native structured output format on every turn. Use **--model** with a model Anthropic documents as supporting structured output.
 
 On OpenAI-compatible backends, the selected model path must support structured outputs. If a backend rejects the resolved OpenAI API surface, **clnkr** returns the provider error. When a proxy or gateway expects a different OpenAI surface, override with **--provider-api** or **CLNKR_PROVIDER_API**.
 

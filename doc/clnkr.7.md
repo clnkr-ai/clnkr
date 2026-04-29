@@ -110,8 +110,8 @@ Other outcomes include **timeout**, **cancelled**, **denied**, **skipped**, and
 **error**.
 
 **Bash tool metadata**
-: Optional transcript metadata that records provider tool call IDs, native bash
-tool arguments, tool results, and provider/API-scoped replay items. The text
+: Optional transcript metadata that records provider-native bash tool calls,
+matching bash tool results, and provider/API-scoped replay items. The text
 content remains canonical clnkr transcript text; adapters use the metadata to
 serialize native provider tool history without duplicating the same exchange as
 plain text.
@@ -146,6 +146,10 @@ overlay on top of the parent process environment.
 
 **Command result**
 : The structured outcome of one bash action.
+
+**Command outcome**
+: The normalized completion state of a command: exit, timeout, cancelled,
+denied, skipped, or error.
 
 **Post-command state**
 : The current working directory and environment snapshot captured after a
@@ -196,7 +200,7 @@ is rejected for native mode.
 
 Provider adapters serialize validated provider request options. They do not
 resolve **CLNKR_** environment variables, choose API keys, or parse CLI base
-URLs. They do join provider endpoint paths against the configured base URL so
+URLs. They still join provider endpoint paths against the configured base URL so
 direct adapter construction and CLI config resolution follow the same request
 path rules.
 
@@ -250,12 +254,20 @@ effective metadata also records the Anthropic thinking mode and effective
 **Bash action**
 : One shell command plus an optional working directory.
 
+**Bash batch**
+: The ordered list of bash actions in a single act turn.
+
+**Bash tool call**
+: A provider-native request to run the bash tool, projected into one bash
+action.
+
 **Bash tool call ID**
 : The opaque provider ID attached to a native bash tool call and its matching
 tool result.
 
-**Bash batch**
-: The ordered list of bash actions in a single act turn.
+**Bash tool result**
+: The provider-native result paired with a bash tool call ID after execution,
+denial, or skipping.
 
 **Base environment snapshot**
 : The complete environment map used as the base for command execution.
@@ -267,6 +279,10 @@ messages.
 **CLI config resolver**
 : The frontend-owned resolver that turns CLI inputs and **CLNKR_** environment
 variables into a **Resolved provider config**.
+
+**Command outcome**
+: The normalized completion state of a command result: exit, timeout,
+cancelled, denied, skipped, or error.
 
 **Clarify turn**
 : A turn that asks the user a non-empty question and stops the run.
@@ -289,6 +305,9 @@ explicit token budget.
 **Max output tokens**
 : A provider request for the maximum response output token count.
 
+**Final summary query**
+: The done-only model query clnkr sends after the step limit is reached.
+
 **Provider API**
 : The OpenAI API surface selected for an OpenAI run: **auto**,
 **openai-responses**, or **openai-chat-completions**.
@@ -308,6 +327,10 @@ endpoint paths.
 **Provider request semantics**
 : Provider-domain rules for provider/API names, model capability checks, and
 request-option validation.
+
+**Provider replay item**
+: Provider/API-scoped data that must be sent back with later native-tool
+history, such as an OpenAI Responses reasoning item.
 
 **Recent tail**
 : The un-compacted suffix of the transcript preserved during compaction.

@@ -36,14 +36,14 @@ func messageKind(msg Message) string {
 
 func commandResultMessage(content string) bool {
 	var payload struct {
-		Stdout  string          `json:"stdout"`
-		Stderr  string          `json:"stderr"`
+		Stdout  *string         `json:"stdout"`
+		Stderr  *string         `json:"stderr"`
 		Outcome *CommandOutcome `json:"outcome"`
 	}
 	if err := json.Unmarshal([]byte(content), &payload); err != nil {
 		return false
 	}
-	return payload.Outcome != nil && payload.Outcome.Type != ""
+	return payload.Stdout != nil && payload.Stderr != nil && payload.Outcome != nil && payload.Outcome.Type != ""
 }
 
 // IsCompactMessage reports whether the message is a clnkr compact block.
