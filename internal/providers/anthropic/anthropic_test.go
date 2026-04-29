@@ -428,6 +428,11 @@ func TestModelNativeBashTools(t *testing.T) {
 				"id":    "toolu_1",
 				"name":  "bash",
 				"input": map[string]any{"command": "pwd", "workdir": nil},
+			}, {
+				"type":  "tool_use",
+				"id":    "toolu_2",
+				"name":  "bash",
+				"input": map[string]any{"command": "git status", "workdir": nil},
 			}},
 			"usage": map[string]int{"input_tokens": 3, "output_tokens": 4},
 		})
@@ -455,10 +460,16 @@ func TestModelNativeBashTools(t *testing.T) {
 	if !ok {
 		t.Fatalf("Turn = %T, want *ActTurn", resp.Turn)
 	}
-	if got := turn.Bash.Commands[0]; got.ID != "toolu_1" || got.Command != "pwd" {
-		t.Fatalf("command = %#v, want native ID and command", got)
+	if got := len(turn.Bash.Commands); got != 2 {
+		t.Fatalf("commands = %d, want 2", got)
 	}
-	if len(resp.BashToolCalls) != 1 || resp.BashToolCalls[0].ID != "toolu_1" {
+	if got := turn.Bash.Commands[0]; got.ID != "toolu_1" || got.Command != "pwd" {
+		t.Fatalf("first command = %#v, want native ID and command", got)
+	}
+	if got := turn.Bash.Commands[1]; got.ID != "toolu_2" || got.Command != "git status" {
+		t.Fatalf("second command = %#v, want native ID and command", got)
+	}
+	if len(resp.BashToolCalls) != 2 || resp.BashToolCalls[0].ID != "toolu_1" || resp.BashToolCalls[1].ID != "toolu_2" {
 		t.Fatalf("BashToolCalls = %#v", resp.BashToolCalls)
 	}
 }
@@ -494,6 +505,80 @@ func TestModelNativeReplaysToolMessagesWithoutDuplicateText(t *testing.T) {
 	}
 	if secondContent[0].(map[string]any)["type"] != "tool_result" || secondContent[0].(map[string]any)["content"] != "payload" {
 		t.Fatalf("second content = %#v, want tool_result payload", secondContent)
+	}
+}
+
+func TestModelNativeReplaysErroredToolResult(t *testing.T) {
+	var gotMessages []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		data, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(data, &body)
+		gotMessages = body["messages"].([]any)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]string{{"type": "text", "text": anthropicWrappedDone("ok")}},
+		})
+	}))
+	defer server.Close()
+
+	m := anthropic.NewModelWithOptions(server.URL, "test-key", "claude-test", "sys prompt", anthropic.Options{NativeBashTools: true})
+	_, err := m.Query(context.Background(), []clnkr.Message{
+		{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"command":"false","workdir":null}]}}`, BashToolCalls: []clnkr.BashToolCall{{ID: "toolu_1", Command: "false"}}},
+		{Role: "user", Content: "payload", BashToolResult: &clnkr.BashToolResult{ID: "toolu_1", Content: "payload", IsError: true}},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	secondContent := gotMessages[1].(map[string]any)["content"].([]any)
+	result := secondContent[0].(map[string]any)
+	if result["type"] != "tool_result" || result["is_error"] != true {
+		t.Fatalf("tool result = %#v, want is_error", result)
+	}
+}
+
+func TestModelNativeReplaysConsecutiveToolResultsTogether(t *testing.T) {
+	var gotMessages []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		data, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(data, &body)
+		gotMessages = body["messages"].([]any)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]string{{"type": "text", "text": anthropicWrappedDone("ok")}},
+		})
+	}))
+	defer server.Close()
+
+	m := anthropic.NewModelWithOptions(server.URL, "test-key", "claude-test", "sys prompt", anthropic.Options{NativeBashTools: true})
+	_, err := m.Query(context.Background(), []clnkr.Message{
+		{
+			Role:    "assistant",
+			Content: `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null},{"command":"false","workdir":null}]}}`,
+			BashToolCalls: []clnkr.BashToolCall{
+				{ID: "toolu_1", Command: "pwd"},
+				{ID: "toolu_2", Command: "false"},
+			},
+		},
+		{Role: "user", Content: "payload 1", BashToolResult: &clnkr.BashToolResult{ID: "toolu_1", Content: "payload 1"}},
+		{Role: "user", Content: "payload 2", BashToolResult: &clnkr.BashToolResult{ID: "toolu_2", Content: "payload 2", IsError: true}},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(gotMessages) != 2 {
+		t.Fatalf("messages = %#v, want assistant tool_use and one user tool_result message", gotMessages)
+	}
+	secondContent := gotMessages[1].(map[string]any)["content"].([]any)
+	if len(secondContent) != 2 {
+		t.Fatalf("second content = %#v, want two tool_result blocks", secondContent)
+	}
+	first := secondContent[0].(map[string]any)
+	second := secondContent[1].(map[string]any)
+	if first["tool_use_id"] != "toolu_1" || first["content"] != "payload 1" {
+		t.Fatalf("first tool result = %#v", first)
+	}
+	if second["tool_use_id"] != "toolu_2" || second["content"] != "payload 2" || second["is_error"] != true {
+		t.Fatalf("second tool result = %#v", second)
 	}
 }
 

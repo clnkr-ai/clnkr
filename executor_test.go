@@ -61,6 +61,9 @@ func TestCommandExecutor(t *testing.T) {
 		if out.ExitCode != 0 {
 			t.Errorf("expected exit code 0, got %d", out.ExitCode)
 		}
+		if out.Outcome.Type != CommandOutcomeExit || out.Outcome.ExitCode == nil || *out.Outcome.ExitCode != 0 {
+			t.Fatalf("outcome = %#v, want exit 0", out.Outcome)
+		}
 	})
 
 	t.Run("respects working directory", func(t *testing.T) {
@@ -109,21 +112,51 @@ func TestCommandExecutor(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 
-		_, err := exec.Execute(ctx, "sleep 1", "/tmp")
+		out, err := exec.Execute(ctx, "sleep 1", "/tmp")
 		if err == nil {
 			t.Fatal("expected error from expired context, got nil")
 		}
 		if ctx.Err() != context.DeadlineExceeded {
 			t.Fatalf("expected caller context deadline exceeded, got %v (err=%v)", ctx.Err(), err)
 		}
+		if out.Outcome.Type != CommandOutcomeTimeout {
+			t.Fatalf("outcome = %#v, want timeout", out.Outcome)
+		}
 	})
 
 	t.Run("respects context cancellation", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, err := exec.Execute(ctx, "echo hello", "/tmp")
+		out, err := exec.Execute(ctx, "echo hello", "/tmp")
 		if err == nil {
 			t.Error("expected error from cancelled context, got nil")
+		}
+		if out.Outcome.Type != CommandOutcomeCancelled {
+			t.Fatalf("outcome = %#v, want cancelled", out.Outcome)
+		}
+	})
+
+	t.Run("records nonzero exit outcome", func(t *testing.T) {
+		out, err := exec.Execute(ctx, "exit 7", "/tmp")
+		if err == nil {
+			t.Fatal("expected exit error, got nil")
+		}
+		if out.Outcome.Type != CommandOutcomeExit || out.Outcome.ExitCode == nil || *out.Outcome.ExitCode != 7 {
+			t.Fatalf("outcome = %#v, want exit 7", out.Outcome)
+		}
+	})
+
+	t.Run("records host execution error outcome", func(t *testing.T) {
+		missingDir := filepath.Join(t.TempDir(), "missing")
+		out, err := exec.Execute(ctx, "pwd", missingDir)
+		if err == nil {
+			t.Fatal("expected host execution error, got nil")
+		}
+		if out.Outcome.Type != CommandOutcomeError {
+			t.Fatalf("outcome = %#v, want error", out.Outcome)
+		}
+		if out.Outcome.Message == "" {
+			t.Fatal("outcome message is empty, want host error detail")
 		}
 	})
 

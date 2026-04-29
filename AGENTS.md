@@ -49,7 +49,7 @@ clnkr/                  # core: types, Agent, events (stdlib only)
 
 **Events:** Sealed interface, five types: `EventResponse`, `EventCommandStart`, `EventCommandDone`, `EventProtocolFailure`, `EventDebug`. Nil `Notify` = silent.
 
-**Command results (host→model):** Flat tagged text with `[command]`, `[exit_code]`, `[stdout]`, `[stderr]` sections. `[`/`]` escaped inside sections. Not XML. Intentionally flat for model readability.
+**Command results (host→model):** JSON with `stdout`, `stderr`, `outcome`, and optional `feedback`. Exit outcomes include `exit_code`; non-exit outcomes include timeout, cancelled, denied, skipped, and error.
 
 ## Release
 Tag-driven. Push feature to `main`, wait for CI/evals/site to go green, then push the plain semantic version tag. Release workflow triggers from semver tags, updates `debian/main`, and generates Debian changelog. Remote `main` may move. Fetch and rebase before follow-up pushes.

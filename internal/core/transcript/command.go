@@ -2,26 +2,75 @@ package transcript
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 )
 
-// Escape only transcript delimiters inside section bodies. Literal shell and
-// file content should stay readable to the model.
-var sectionEscaper = strings.NewReplacer("[", "&#91;", "]", "&#93;")
-
-// FormatCommandResult renders a command result using the host transcript envelope.
+// FormatCommandResult renders a command result as structured shell output.
 func FormatCommandResult(result CommandResult) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "[command]\n%s\n[/command]\n", sectionEscaper.Replace(result.Command))
-	fmt.Fprintf(&b, "[exit_code]\n%d\n[/exit_code]\n", result.ExitCode)
-	fmt.Fprintf(&b, "[stdout]\n%s\n[/stdout]\n", sectionEscaper.Replace(result.Stdout))
-	fmt.Fprintf(&b, "[stderr]\n%s\n[/stderr]", sectionEscaper.Replace(result.Stderr))
-	if len(result.Feedback.ChangedFiles) > 0 || result.Feedback.Diff != "" {
-		body, err := json.Marshal(result.Feedback)
-		if err == nil {
-			fmt.Fprintf(&b, "\n[command_feedback]\n%s\n[/command_feedback]", sectionEscaper.Replace(string(body)))
-		}
+	payload := struct {
+		Stdout   string           `json:"stdout"`
+		Stderr   string           `json:"stderr"`
+		Outcome  CommandOutcome   `json:"outcome"`
+		Feedback *CommandFeedback `json:"feedback,omitempty"`
+	}{
+		Stdout:  result.Stdout,
+		Stderr:  result.Stderr,
+		Outcome: normalizedOutcome(result.Outcome, result.ExitCode),
 	}
-	return b.String()
+	if len(result.Feedback.ChangedFiles) > 0 || result.Feedback.Diff != "" {
+		payload.Feedback = &result.Feedback
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return `{"stdout":"","stderr":"failed to marshal command result","outcome":{"type":"error","message":"failed to marshal command result"}}`
+	}
+	return string(body)
+}
+
+func FormatDeniedCommandResult(reply string) string {
+	stderr := "Command was not run because the user denied approval."
+	if trimmed := strings.TrimSpace(reply); trimmed != "" {
+		stderr += "\nUser guidance: " + trimmed
+	}
+	return formatUnexecutedCommandResult(stderr, CommandOutcome{Type: CommandOutcomeDenied})
+}
+
+func FormatSkippedCommandResult(reason string) string {
+	reason = strings.TrimSpace(reason)
+	outcomeReason := "skipped"
+	stderr := "Command was not run."
+	switch reason {
+	case "max steps":
+		outcomeReason = "max_steps"
+		stderr = "Command was not run because the step limit was reached."
+	case "previous command failed":
+		outcomeReason = "previous_command_failed"
+		stderr = "Command was not run because a previous command failed."
+	case "":
+	default:
+		stderr += "\nReason: " + reason
+	}
+	return formatUnexecutedCommandResult(stderr, CommandOutcome{Type: CommandOutcomeSkipped, Reason: outcomeReason})
+}
+
+func formatUnexecutedCommandResult(stderr string, outcome CommandOutcome) string {
+	return FormatCommandResult(CommandResult{
+		Stderr:  stderr,
+		Outcome: outcome,
+	})
+}
+
+func normalizedOutcome(outcome CommandOutcome, fallbackExitCode int) CommandOutcome {
+	if outcome.Type == "" {
+		return exitOutcome(fallbackExitCode)
+	}
+	if outcome.Type == CommandOutcomeExit && outcome.ExitCode == nil {
+		code := fallbackExitCode
+		outcome.ExitCode = &code
+	}
+	return outcome
+}
+
+func exitOutcome(code int) CommandOutcome {
+	return CommandOutcome{Type: CommandOutcomeExit, ExitCode: &code}
 }

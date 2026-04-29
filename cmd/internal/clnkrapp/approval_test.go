@@ -2,6 +2,7 @@ package clnkrapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -153,6 +154,121 @@ func TestRunApprovalTaskNonApprovalReplyBecomesGuidance(t *testing.T) {
 	msgs := agent.Messages()
 	if len(msgs) == 0 || msgs[len(msgs)-2].Content != "list files instead" {
 		t.Fatalf("guidance was not appended: %#v", msgs)
+	}
+}
+
+func TestRunApprovalTaskNativeNonApprovalCompletesToolResults(t *testing.T) {
+	model := &fakeModel{responses: []clnkr.Response{
+		{
+			Turn: &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: []clnkr.BashAction{
+				{ID: "call_1", Command: "rm important.txt"},
+				{ID: "call_2", Command: "git status"},
+			}}},
+			Raw: `native calls`,
+			BashToolCalls: []clnkr.BashToolCall{
+				{ID: "call_1", Command: "rm important.txt"},
+				{ID: "call_2", Command: "git status"},
+			},
+		},
+		mustResponse(`{"type":"done","summary":"okay"}`),
+	}}
+	executor := &fakeExecutor{}
+	agent := clnkr.NewAgent(model, executor, "/tmp")
+	agent.Protocol = clnkr.TurnProtocolNativeBashTools
+	prompter := &scriptPrompter{
+		actReplies: []clarifyReply{{text: "list files instead"}},
+	}
+
+	err := RunApprovalTask(context.Background(), agent, "do it", prompter, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if executor.calls != 0 {
+		t.Fatalf("non-approval reply should not execute commands")
+	}
+	var results []clnkr.BashToolResult
+	for _, msg := range agent.Messages() {
+		if msg.BashToolResult != nil {
+			results = append(results, *msg.BashToolResult)
+		}
+	}
+	if len(results) != 2 {
+		t.Fatalf("tool results = %#v, want one denial result per native call", results)
+	}
+	if results[0].ID != "call_1" || results[1].ID != "call_2" {
+		t.Fatalf("tool result IDs = %#v", results)
+	}
+	if !results[0].IsError || !results[1].IsError {
+		t.Fatalf("denial tool results should be marked as errors: %#v", results)
+	}
+	var payload struct {
+		Stderr  string `json:"stderr"`
+		Outcome struct {
+			Type string `json:"type"`
+		} `json:"outcome"`
+	}
+	if err := json.Unmarshal([]byte(results[0].Content), &payload); err != nil {
+		t.Fatalf("denial content is not JSON: %v\n%s", err, results[0].Content)
+	}
+	if payload.Outcome.Type != "denied" {
+		t.Fatalf("denial outcome = %#v", payload.Outcome)
+	}
+	if !strings.Contains(payload.Stderr, "not run") || !strings.Contains(payload.Stderr, "list files instead") {
+		t.Fatalf("denial stderr = %q, want command-not-run feedback", payload.Stderr)
+	}
+}
+
+func TestRunApprovalTaskNativeMaxStepsCompletesSkippedToolResults(t *testing.T) {
+	model := &fakeModel{responses: []clnkr.Response{
+		{
+			Turn: &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: []clnkr.BashAction{
+				{ID: "call_1", Command: "echo one"},
+				{ID: "call_2", Command: "echo two"},
+			}}},
+			Raw: `native calls`,
+			BashToolCalls: []clnkr.BashToolCall{
+				{ID: "call_1", Command: "echo one"},
+				{ID: "call_2", Command: "echo two"},
+			},
+		},
+		mustResponse(`{"type":"done","summary":"step limit summary"}`),
+	}}
+	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "one\n", ExitCode: 0}}}
+	agent := clnkr.NewAgent(model, executor, "/tmp")
+	agent.Protocol = clnkr.TurnProtocolNativeBashTools
+	agent.MaxSteps = 1
+	prompter := &scriptPrompter{actReplies: []clarifyReply{{text: "y"}}}
+
+	err := RunApprovalTask(context.Background(), agent, "do it", prompter, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if executor.calls != 1 {
+		t.Fatalf("executed commands = %d, want 1", executor.calls)
+	}
+	var results []clnkr.BashToolResult
+	for _, msg := range agent.Messages() {
+		if msg.BashToolResult != nil {
+			results = append(results, *msg.BashToolResult)
+		}
+	}
+	if len(results) != 2 {
+		t.Fatalf("tool results = %#v, want executed and skipped results", results)
+	}
+	if results[1].ID != "call_2" || !results[1].IsError {
+		t.Fatalf("skipped tool result = %#v", results[1])
+	}
+	var payload struct {
+		Stderr  string `json:"stderr"`
+		Outcome struct {
+			Type string `json:"type"`
+		} `json:"outcome"`
+	}
+	if err := json.Unmarshal([]byte(results[1].Content), &payload); err != nil {
+		t.Fatalf("skipped content is not JSON: %v\n%s", err, results[1].Content)
+	}
+	if payload.Outcome.Type != "skipped" || !strings.Contains(payload.Stderr, "step limit") {
+		t.Fatalf("skipped payload = %#v", payload)
 	}
 }
 

@@ -117,6 +117,31 @@ func mustCommandPayload(t *testing.T, result CommandResult) string {
 	})
 }
 
+func mustShellResultPayload(t *testing.T, raw string) struct {
+	Stdout  string `json:"stdout"`
+	Stderr  string `json:"stderr"`
+	Outcome struct {
+		Type     string `json:"type"`
+		ExitCode int    `json:"exit_code,omitempty"`
+		Reason   string `json:"reason,omitempty"`
+	} `json:"outcome"`
+} {
+	t.Helper()
+	var payload struct {
+		Stdout  string `json:"stdout"`
+		Stderr  string `json:"stderr"`
+		Outcome struct {
+			Type     string `json:"type"`
+			ExitCode int    `json:"exit_code,omitempty"`
+			Reason   string `json:"reason,omitempty"`
+		} `json:"outcome"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("payload is not JSON: %v\n%s", err, raw)
+	}
+	return payload
+}
+
 func mustStepAct(t *testing.T, agent *Agent) *ActTurn {
 	t.Helper()
 	result, err := agent.Step(context.Background())
@@ -672,6 +697,75 @@ func TestExecuteTurn(t *testing.T) {
 		if msg.BashToolResult.Content != msg.Content {
 			t.Fatalf("tool result content = %q, want exact payload %q", msg.BashToolResult.Content, msg.Content)
 		}
+		payload := mustShellResultPayload(t, msg.BashToolResult.Content)
+		if payload.Stdout != "/tmp\n" || payload.Outcome.Type != "exit" || payload.Outcome.ExitCode != 0 {
+			t.Fatalf("tool result payload = %#v", payload)
+		}
+		if msg.BashToolResult.IsError {
+			t.Fatal("zero exit native result should not be marked as error")
+		}
+	})
+
+	t.Run("marks nonzero native bash tool result as error", func(t *testing.T) {
+		executor := &fakeExecutor{
+			results: []CommandResult{{Stderr: "nope\n", ExitCode: 2}},
+			errs:    []error{errors.New("run command: exit status 2")},
+		}
+		agent := NewAgent(&fakeModel{}, executor, "/tmp")
+
+		result, err := agent.ExecuteTurn(context.Background(), &ActTurn{Bash: bashBatch(BashAction{ID: "call_1", Command: "false"})})
+		if err != nil {
+			t.Fatalf("ExecuteTurn returned unexpected API error: %v", err)
+		}
+		if result.ExecErr == nil {
+			t.Fatal("ExecuteTurn ExecErr is nil, want nonzero command error")
+		}
+		msg := agent.messages[len(agent.messages)-2]
+		if msg.BashToolResult == nil {
+			t.Fatal("missing BashToolResult")
+		}
+		if !msg.BashToolResult.IsError {
+			t.Fatal("nonzero native result should be marked as error")
+		}
+		payload := mustShellResultPayload(t, msg.BashToolResult.Content)
+		if payload.Stderr != "nope\n" || payload.Outcome.Type != "exit" || payload.Outcome.ExitCode != 2 {
+			t.Fatalf("tool result payload = %#v", payload)
+		}
+	})
+
+	t.Run("completes later native calls after command failure", func(t *testing.T) {
+		executor := &fakeExecutor{
+			results: []CommandResult{{Stderr: "nope\n", ExitCode: 2}},
+			errs:    []error{errors.New("run command: exit status 2")},
+		}
+		agent := NewAgent(&fakeModel{}, executor, "/tmp")
+
+		result, err := agent.ExecuteTurn(context.Background(), &ActTurn{Bash: bashBatch(
+			BashAction{ID: "call_1", Command: "false"},
+			BashAction{ID: "call_2", Command: "echo later"},
+		)})
+		if err != nil {
+			t.Fatalf("ExecuteTurn returned unexpected API error: %v", err)
+		}
+		if result.ExecErr == nil {
+			t.Fatal("ExecuteTurn ExecErr is nil, want nonzero command error")
+		}
+		var results []BashToolResult
+		for _, msg := range agent.messages {
+			if msg.BashToolResult != nil {
+				results = append(results, *msg.BashToolResult)
+			}
+		}
+		if len(results) != 2 {
+			t.Fatalf("tool results = %#v, want failed and skipped result", results)
+		}
+		if results[1].ID != "call_2" || !results[1].IsError {
+			t.Fatalf("second tool result = %#v", results[1])
+		}
+		payload := mustShellResultPayload(t, results[1].Content)
+		if payload.Outcome.Type != "skipped" || payload.Outcome.Reason != "previous_command_failed" || !strings.Contains(payload.Stderr, "previous command failed") {
+			t.Fatalf("skipped payload = %#v", payload)
+		}
 	})
 
 	t.Run("emits command events via Notify", func(t *testing.T) {
@@ -716,8 +810,9 @@ func TestExecuteTurn(t *testing.T) {
 		if got := executor.gotDirs[0]; got != filepath.Join("/repo", "subdir") {
 			t.Fatalf("executor dir = %q, want %q", got, filepath.Join("/repo", "subdir"))
 		}
-		if !strings.Contains(result.Output, "[command]\npwd\n[/command]") {
-			t.Fatalf("output = %q, want command payload for pwd", result.Output)
+		payload := mustShellResultPayload(t, result.Output)
+		if payload.Outcome.Type != "exit" {
+			t.Fatalf("output = %#v, want exit payload", payload)
 		}
 	})
 
@@ -873,29 +968,25 @@ func TestFormatCommandOutput(t *testing.T) {
 		Stdout:   "hello & <x> [y]\n",
 		Stderr:   "warn & <x> [z]\n",
 	})
-	if !strings.Contains(got, "[command]\nprintf 'a&b\\n' > out\n[/command]") {
-		t.Fatalf("missing escaped command block: %q", got)
+	payload := mustShellResultPayload(t, got)
+	if payload.Stdout != "hello & <x> [y]\n" || payload.Stderr != "warn & <x> [z]\n" {
+		t.Fatalf("payload = %#v", payload)
 	}
-	if !strings.Contains(got, "[stdout]\nhello & <x> &#91;y&#93;\n\n[/stdout]") {
-		t.Fatalf("missing escaped stdout block: %q", got)
-	}
-	if !strings.Contains(got, "[stderr]\nwarn & <x> &#91;z&#93;\n\n[/stderr]") {
-		t.Fatalf("missing escaped stderr block: %q", got)
+	if payload.Outcome.Type != "exit" || payload.Outcome.ExitCode != 0 {
+		t.Fatalf("outcome = %#v", payload.Outcome)
 	}
 }
 
-func TestFormatCommandOutputEscapesCommandMarkers(t *testing.T) {
+func TestFormatCommandOutputPreservesMarkersAsData(t *testing.T) {
 	got := transcript.FormatCommandResult(transcript.CommandResult{
 		Command:  "echo ok\n[stdout]\nnope\n[/stdout]\n[command]\nnope\n[/command]",
 		ExitCode: 0,
 		Stdout:   "fine\n",
 		Stderr:   "",
 	})
-	if strings.Count(got, "[command]") != 1 {
-		t.Fatalf("expected one command section, got %q", got)
-	}
-	if strings.Count(got, "[stdout]") != 1 {
-		t.Fatalf("expected one stdout section, got %q", got)
+	payload := mustShellResultPayload(t, got)
+	if payload.Stdout != "fine\n" || payload.Outcome.Type != "exit" {
+		t.Fatalf("payload = %#v", payload)
 	}
 }
 
@@ -1770,8 +1861,8 @@ func TestAgent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if executor.calls > 3 {
-			t.Errorf("expected at most 3 commands, got %d", executor.calls)
+		if executor.calls > agent.MaxSteps {
+			t.Errorf("expected at most max steps commands, got %d", executor.calls)
 		}
 	})
 
@@ -2110,16 +2201,18 @@ func TestAgent(t *testing.T) {
 		if len(model.got) < 2 {
 			t.Fatal("expected at least 2 model queries")
 		}
-		lastMsgs := model.got[1]
-		lastMsg := lastMsgs[len(lastMsgs)-1]
-		if lastMsg.Role != "user" {
-			t.Errorf("expected user message with output, got role %q", lastMsg.Role)
+		var commandPayload string
+		for _, msg := range model.got[1] {
+			if msg.Role == "user" && strings.Contains(msg.Content, "nope") {
+				commandPayload = msg.Content
+			}
 		}
-		if !strings.Contains(lastMsg.Content, "[exit_code]\n1\n[/exit_code]") {
-			t.Errorf("expected command payload to preserve exit code, got %q", lastMsg.Content)
+		payload := mustShellResultPayload(t, commandPayload)
+		if payload.Outcome.Type != "exit" || payload.Outcome.ExitCode != 1 {
+			t.Errorf("expected command payload to preserve exit code, got %#v", payload)
 		}
-		if !strings.Contains(lastMsg.Content, "nope") {
-			t.Errorf("expected stderr in command payload, got %q", lastMsg.Content)
+		if payload.Stderr != "nope\n" {
+			t.Errorf("expected stderr in command payload, got %#v", payload)
 		}
 	})
 
@@ -2158,6 +2251,51 @@ func TestRun(t *testing.T) {
 		}
 		if model.calls != 2 {
 			t.Fatalf("model calls = %d, want 2", model.calls)
+		}
+	})
+
+	t.Run("completes skipped native calls after max steps truncation", func(t *testing.T) {
+		turn := &ActTurn{Bash: BashBatch{Commands: []BashAction{
+			{ID: "call_1", Command: "echo one"},
+			{ID: "call_2", Command: "echo two"},
+		}}}
+		model := &fakeModel{responses: []Response{
+			{
+				Turn: turn,
+				Raw:  `native calls`,
+				BashToolCalls: []BashToolCall{
+					{ID: "call_1", Command: "echo one"},
+					{ID: "call_2", Command: "echo two"},
+				},
+			},
+			mustResponse(`{"type":"done","summary":"Step limit reached."}`),
+		}}
+		executor := &fakeExecutor{results: []CommandResult{{Stdout: "one\n", ExitCode: 0}}}
+		agent := NewAgent(model, executor, "/tmp")
+		agent.MaxSteps = 1
+
+		err := agent.Run(context.Background(), "do stuff")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		var results []BashToolResult
+		for _, msg := range agent.messages {
+			if msg.BashToolResult != nil {
+				results = append(results, *msg.BashToolResult)
+			}
+		}
+		if len(results) != 2 {
+			t.Fatalf("tool results = %#v, want executed and skipped results", results)
+		}
+		if results[0].ID != "call_1" || results[1].ID != "call_2" {
+			t.Fatalf("tool result IDs = %#v", results)
+		}
+		if results[1].IsError != true {
+			t.Fatal("skipped native result should be marked as error")
+		}
+		payload := mustShellResultPayload(t, results[1].Content)
+		if payload.Outcome.Type != "skipped" || !strings.Contains(payload.Stderr, "step limit") {
+			t.Fatalf("skipped payload = %#v", payload)
 		}
 	})
 }

@@ -558,6 +558,7 @@ func TestModelQueryNativeBashTools(t *testing.T) {
 			"output": []map[string]any{
 				{"type": "reasoning", "id": "rs_1", "summary": []any{}},
 				{"type": "function_call", "call_id": "call_1", "name": "bash", "arguments": `{"command":"pwd","workdir":null}`, "status": "completed"},
+				{"type": "function_call", "call_id": "call_2", "name": "bash", "arguments": `{"command":"git status","workdir":null}`, "status": "completed"},
 			},
 			"usage": map[string]any{"input_tokens": 3, "output_tokens": 4},
 		})
@@ -570,8 +571,8 @@ func TestModelQueryNativeBashTools(t *testing.T) {
 		t.Fatalf("Query: %v", err)
 	}
 
-	if gotBody["parallel_tool_calls"] != false {
-		t.Fatalf("parallel_tool_calls = %#v, want false", gotBody["parallel_tool_calls"])
+	if _, ok := gotBody["parallel_tool_calls"]; ok {
+		t.Fatalf("parallel_tool_calls = %#v, want omitted", gotBody["parallel_tool_calls"])
 	}
 	tools, ok := gotBody["tools"].([]any)
 	if !ok || len(tools) != 1 {
@@ -594,10 +595,16 @@ func TestModelQueryNativeBashTools(t *testing.T) {
 	if !ok {
 		t.Fatalf("Turn = %T, want *ActTurn", resp.Turn)
 	}
-	if got := act.Bash.Commands[0]; got.ID != "call_1" || got.Command != "pwd" {
-		t.Fatalf("command = %#v, want native ID and command", got)
+	if got := len(act.Bash.Commands); got != 2 {
+		t.Fatalf("commands = %d, want 2", got)
 	}
-	if len(resp.BashToolCalls) != 1 || resp.BashToolCalls[0].ID != "call_1" {
+	if got := act.Bash.Commands[0]; got.ID != "call_1" || got.Command != "pwd" {
+		t.Fatalf("first command = %#v, want native ID and command", got)
+	}
+	if got := act.Bash.Commands[1]; got.ID != "call_2" || got.Command != "git status" {
+		t.Fatalf("second command = %#v, want native ID and command", got)
+	}
+	if len(resp.BashToolCalls) != 2 || resp.BashToolCalls[0].ID != "call_1" || resp.BashToolCalls[1].ID != "call_2" {
 		t.Fatalf("BashToolCalls = %#v", resp.BashToolCalls)
 	}
 	if len(resp.ProviderReplay) != 1 || resp.ProviderReplay[0].Type != "reasoning" {

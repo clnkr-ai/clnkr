@@ -20,7 +20,7 @@ At the main idle conversational prompt, **/compact** summarizes older transcript
 
 The agent communicates through JSON turns: **act** (execute one or more `bash.commands[]` entries with `command` and nullable `workdir`), **clarify** (ask the user), and **done** (signal completion).
 
-With **--turn-protocol native-bash-tools**, command execution uses one provider-native **bash** tool call per act turn. **clarify** and **done** remain structured JSON. Native bash tools require **--full-send** or **-p** and are rejected for OpenAI Chat Completions and OpenAI-compatible endpoints.
+With **--turn-protocol native-bash-tools**, command execution uses provider-native **bash** tool calls. **clarify** and **done** remain structured JSON. Native bash tools are rejected for OpenAI Chat Completions and OpenAI-compatible endpoints.
 
 By default, **clnkr** asks for approval before each **act** turn in conversational mode. One approval accepts the whole command batch. Approval prompts show each requested command and any explicit workdir override. Pass **--full-send** to execute commands immediately without approval. Single-task mode (**-p**) implies **--full-send**.
 
@@ -50,7 +50,7 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : OpenAI-only API surface override: **auto**, **openai-chat-completions**, or **openai-responses**. With **provider=openai**, **auto** prefers **openai-responses** for known supported names and other OpenAI-looking model names such as **gpt-***, **o** followed by a digit, **codex**, **codex-***, names ending in **-codex**, and names containing **-codex-**. Names that do not look OpenAI-ish, such as **llama3**, **gemini-2.0-flash**, **orca-***, **olmo-***, **openhermes-***, and **chatgpt-***, stay on **openai-chat-completions**. This flag is rejected for **provider=anthropic**.
 
 **--turn-protocol** *protocol*
-: Turn protocol. Accepted values are **structured-json** and **native-bash-tools**. The default is **structured-json**. **native-bash-tools** is supported for **provider=anthropic** and **provider=openai** with **provider-api=openai-responses**. It requires **--full-send** in conversational mode; **-p** implies **--full-send**.
+: Turn protocol. Accepted values are **structured-json** and **native-bash-tools**. The default is **structured-json**. **native-bash-tools** is supported for **provider=anthropic** and **provider=openai** with **provider-api=openai-responses**.
 
 **--effort** *level*
 : Provider effort level. Accepted values are **auto**, **low**, **medium**, **high**, **xhigh**, and **max**. Provider/model validation rejects levels that are not supported. For OpenAI Responses, maps to reasoning effort; **gpt-5-pro** accepts only **high**, and **xhigh** is accepted only for known codex-max-or-newer model families. For Anthropic, **low**, **medium**, and **high** send both `output_config.effort` and `thinking.type=adaptive` to the API. **auto** omits both fields. **max** is accepted only where supported and is otherwise rejected.

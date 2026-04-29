@@ -71,7 +71,6 @@ type jsonCommand struct {
 var (
 	ErrInvalidJSON     = errors.New("invalid JSON")
 	ErrMissingCommand  = errors.New("act turn requires at least one command")
-	ErrTooManyCommands = errors.New("act turn allows at most 3 commands")
 	ErrEmptyClarify    = errors.New("clarify turn requires non-empty question")
 	ErrEmptySummary    = errors.New("done turn requires non-empty summary")
 	ErrUnknownTurnType = errors.New("unknown turn type")
@@ -86,8 +85,6 @@ func errorToReason(err error) string {
 		return "invalid_json"
 	case errors.Is(err, ErrMissingCommand):
 		return "missing_command"
-	case errors.Is(err, ErrTooManyCommands):
-		return "too_many_commands"
 	case errors.Is(err, ErrEmptyClarify):
 		return "empty_clarify"
 	case errors.Is(err, ErrEmptySummary):
@@ -108,7 +105,7 @@ func protocolCorrectionMessageFor(err error, protocol TurnProtocol) string {
 	detail := err.Error()
 	var hint string
 	if normalizeTurnProtocol(protocol) == TurnProtocolNativeBashTools {
-		hint = "Your previous response was ignored and no command ran. For command execution, call the bash tool exactly once instead of emitting JSON. For clarification or completion, respond with exactly one JSON object whose type is \"clarify\" or \"done\". Do not emit a JSON act turn in native bash tool mode. Do not jump to done unless prior command results in this conversation already prove the task is complete."
+		hint = "Your previous response was ignored and no command ran. For command execution, call the bash tool instead of emitting JSON. For clarification or completion, respond with exactly one JSON object whose type is \"clarify\" or \"done\". Do not emit a JSON act turn in native bash tool mode. Do not jump to done unless prior command results in this conversation already prove the task is complete."
 	} else {
 		hint = fmt.Sprintf(
 			"Your previous response was ignored and no command ran. Respond with exactly one JSON object for the next turn from the current state. Use this act example as the shape guide: %s. Set type to exactly one of \"act\", \"clarify\", or \"done\". If type is \"act\", include bash. If type is \"clarify\", include question. If type is \"done\", include summary. When a field does not apply, omit it or set it to null. Include reasoning in every response; use null if you have nothing to add. Do not emit multiple JSON objects in one response. Do not emit an act turn and a done turn together. If you intended to run commands, resend only that act turn. Do not jump to done unless prior command results in this conversation already prove the task is complete.",

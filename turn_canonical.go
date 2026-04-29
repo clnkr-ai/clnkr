@@ -18,9 +18,6 @@ func CanonicalTurnJSON(turn Turn) (string, error) {
 		if len(v.Bash.Commands) == 0 {
 			return "", ErrMissingCommand
 		}
-		if len(v.Bash.Commands) > 3 {
-			return "", ErrTooManyCommands
-		}
 		commands := make([]jsonCommand, 0, len(v.Bash.Commands))
 		for _, command := range v.Bash.Commands {
 			if strings.TrimSpace(command.Command) == "" {

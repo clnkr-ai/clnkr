@@ -140,24 +140,13 @@ By default, conversational mode requires explicit approval before each `act` tur
 
 ### Command result format
 
-clnkr executes commands with structured results in the core: command text, exit code, stdout, and stderr are captured separately. When those results are fed back into the model, clnkr uses a flat tagged text format:
+clnkr feeds command results back to the model as JSON with separated streams and a structured outcome:
 
-```text
-[command]
-...
-[/command]
-[exit_code]
-...
-[/exit_code]
-[stdout]
-...
-[/stdout]
-[stderr]
-...
-[/stderr]
+```json
+{"stdout":"...","stderr":"...","outcome":{"type":"exit","exit_code":0}}
 ```
 
-This is intentional. The only downstream machine consumer is clnkr, so the protocol is optimized for model readability rather than external XML tooling. In practice, weaker models follow explicit flat delimiters more reliably than nested structure, while the frontend still receives fully structured events.
+Non-exit outcomes include `timeout`, `cancelled`, `denied`, `skipped`, and `error`. When git feedback is available, clnkr adds a `feedback` object with changed files and diff.
 
 ### Prompt customization
 
@@ -211,7 +200,7 @@ clnkr runs a loop using a structured JSON turn protocol:
 1. Send conversation history to the LLM
 2. The selected provider adapter owns the provider-facing structured-output schema, any provider wire wrapper such as `{"turn": ...}`, and the translation from provider response text into a typed turn (`clarify`, `act`, or `done`).
 3. If `clarify`: return control to the frontend for more input
-4. If `act`: either ask the user to approve the command batch or execute the bash commands sequentially, then append structured output to the conversation for each executed command, including optional `[command_feedback]` when the host started from a clean git worktree
+4. If `act`: either ask the user to approve the command batch or execute the bash commands sequentially, then append structured command-result JSON to the conversation for each executed command, including optional `feedback` when the host started from a clean git worktree
 5. If `done`: exit with the model's summary
 6. Successful assistant turns are stored in canonical internal JSON for replay and resume. Invalid provider responses are stored raw alongside protocol error metadata.
 7. Repeat until done, or until the executed-command limit triggers a final `done` summary request

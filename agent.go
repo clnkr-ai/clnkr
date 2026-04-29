@@ -185,6 +185,16 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 
 // ExecuteTurn runs an act turn and appends the command result payload.
 func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, error) {
+	return a.executeTurn(ctx, act, nil)
+}
+
+// ExecuteTurnWithSkipped runs an act turn and records native tool calls that
+// were skipped before execution, for example by MaxSteps truncation.
+func (a *Agent) ExecuteTurnWithSkipped(ctx context.Context, act *ActTurn, skipped []BashAction) (StepResult, error) {
+	return a.executeTurn(ctx, act, skipped)
+}
+
+func (a *Agent) executeTurn(ctx context.Context, act *ActTurn, skipped []BashAction) (StepResult, error) {
 	if act == nil || len(act.Bash.Commands) == 0 {
 		return StepResult{Turn: act}, fmt.Errorf("execute act turn: %w", ErrMissingCommand)
 	}
@@ -192,7 +202,7 @@ func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, erro
 	outputs, execCount := make([]string, 0, len(act.Bash.Commands)), 0
 	var execErr error
 
-	for _, action := range act.Bash.Commands {
+	for i, action := range act.Bash.Commands {
 		if setter, ok := a.executor.(ExecutorStateSetter); ok {
 			setter.SetEnv(a.env)
 		}
@@ -222,6 +232,7 @@ func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, erro
 			Stdout:   execResult.Stdout,
 			Stderr:   execResult.Stderr,
 			ExitCode: execResult.ExitCode,
+			Outcome:  execResult.Outcome,
 			Feedback: execResult.Feedback,
 		})
 		if commandErr != nil {
@@ -238,17 +249,78 @@ func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, erro
 
 		msg := Message{Role: "user", Content: payload}
 		if action.ID != "" {
-			msg.BashToolResult = &BashToolResult{ID: action.ID, Content: payload}
+			msg.BashToolResult = &BashToolResult{ID: action.ID, Content: payload, IsError: commandResultIsError(execResult)}
 		}
 		a.messages = append(a.messages, msg)
 		outputs = append(outputs, payload)
 		if execErr = commandErr; execErr != nil {
+			for _, notRun := range act.Bash.Commands[i+1:] {
+				if payload, ok := a.appendSkippedToolResult(notRun, "previous command failed"); ok {
+					outputs = append(outputs, payload)
+				}
+			}
 			break
 		}
 	}
 
+	for _, action := range skipped {
+		if payload, ok := a.appendSkippedToolResult(action, "max steps"); ok {
+			outputs = append(outputs, payload)
+		}
+	}
 	a.appendStateMessageIfNeeded()
 	return StepResult{Turn: act, Output: strings.Join(outputs, "\n\n"), ExecErr: execErr, ExecCount: execCount}, nil
+}
+
+// RejectTurn records that an approval-mode act turn was not executed.
+func (a *Agent) RejectTurn(act *ActTurn, reply string) {
+	if act == nil || len(act.Bash.Commands) == 0 {
+		a.AppendUserMessage(reply)
+		return
+	}
+	nativeResults := 0
+	for _, action := range act.Bash.Commands {
+		if action.ID == "" {
+			continue
+		}
+		content := transcript.FormatDeniedCommandResult(reply)
+		a.messages = append(a.messages, Message{
+			Role:           "user",
+			Content:        content,
+			BashToolResult: &BashToolResult{ID: action.ID, Content: content, IsError: true},
+		})
+		nativeResults++
+	}
+	if nativeResults == 0 {
+		a.AppendUserMessage(reply)
+	}
+}
+
+func (a *Agent) appendSkippedToolResult(action BashAction, reason string) (string, bool) {
+	if action.ID == "" {
+		return "", false
+	}
+	content := transcript.FormatSkippedCommandResult(reason)
+	a.messages = append(a.messages, Message{
+		Role:           "user",
+		Content:        content,
+		BashToolResult: &BashToolResult{ID: action.ID, Content: content, IsError: true},
+	})
+	return content, true
+}
+
+func commandResultIsError(result CommandResult) bool {
+	outcome := result.Outcome
+	if outcome.Type == "" {
+		outcome = CommandOutcome{Type: CommandOutcomeExit, ExitCode: &result.ExitCode}
+	}
+	if outcome.Type != CommandOutcomeExit {
+		return true
+	}
+	if outcome.ExitCode != nil {
+		return *outcome.ExitCode != 0
+	}
+	return result.ExitCode != 0
 }
 
 // RequestStepLimitSummary asks the model for a final done summary after the
@@ -311,10 +383,12 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 		case *ClarifyTurn:
 			return ErrClarificationNeeded
 		case *ActTurn:
+			var skipped []BashAction
 			if remaining := a.MaxSteps - steps; a.MaxSteps > 0 && len(turn.Bash.Commands) > remaining {
+				skipped = append([]BashAction(nil), turn.Bash.Commands[remaining:]...)
 				turn = &ActTurn{Bash: BashBatch{Commands: turn.Bash.Commands[:remaining]}, Reasoning: turn.Reasoning}
 			}
-			execResult, err := a.ExecuteTurn(ctx, turn)
+			execResult, err := a.ExecuteTurnWithSkipped(ctx, turn, skipped)
 			if err != nil {
 				return err
 			}

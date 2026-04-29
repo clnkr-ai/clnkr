@@ -160,8 +160,6 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 	if m.nativeBashTools {
 		schema = openaiwire.FinalTurnSchema()
 		input = mapNativeMessages(messages)
-		noParallel := false
-		parallelTools = &noParallel
 		tools = []openAITool{bashToolSchema()}
 	}
 	return m.queryStructured(ctx, input, schema, tools, parallelTools)
@@ -510,19 +508,26 @@ func parseNativeResponse(respBody []byte) (clnkr.Response, error) {
 	if len(calls) > 0 && strings.TrimSpace(outputText) != "" {
 		return clnkr.Response{Raw: string(respBody), Usage: usage, ProtocolErr: fmt.Errorf("%w: mixed bash tool call and structured text", clnkr.ErrInvalidJSON)}, nil
 	}
-	if len(calls) > 1 {
-		return clnkr.Response{Raw: string(respBody), Usage: usage, ProtocolErr: fmt.Errorf("%w: multiple bash tool calls", clnkr.ErrTooManyCommands)}, nil
-	}
-	if len(calls) == 1 {
-		turn, call, err := turnFromFunctionCall(calls[0])
-		if err != nil {
-			return clnkr.Response{Raw: string(respBody), Usage: usage, ProtocolErr: err}, nil
+	if len(calls) > 0 {
+		actions := make([]clnkr.BashAction, 0, len(calls))
+		toolCalls := make([]clnkr.BashToolCall, 0, len(calls))
+		for _, item := range calls {
+			turn, call, err := turnFromFunctionCall(item)
+			if err != nil {
+				return clnkr.Response{Raw: string(respBody), Usage: usage, ProtocolErr: err}, nil
+			}
+			act, ok := turn.(*clnkr.ActTurn)
+			if !ok || len(act.Bash.Commands) != 1 {
+				return clnkr.Response{}, fmt.Errorf("native structured output response: expected one command from function call")
+			}
+			actions = append(actions, act.Bash.Commands[0])
+			toolCalls = append(toolCalls, call)
 		}
 		return clnkr.Response{
-			Turn:           turn,
+			Turn:           &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: actions}},
 			Raw:            string(respBody),
 			Usage:          usage,
-			BashToolCalls:  []clnkr.BashToolCall{call},
+			BashToolCalls:  toolCalls,
 			ProviderReplay: replay,
 		}, nil
 	}

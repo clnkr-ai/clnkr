@@ -68,8 +68,9 @@ Every accepted model instruction is a **turn**. There are three turn types:
 : Summarize completion and stop the run successfully.
 
 An **act** turn contains a **bash batch**. Each **bash action** contains a shell
-command and an optional working directory. A batch is intentionally small: the
-prompt asks for one or two commands, and the parser rejects more than three.
+command and an optional working directory. **Max steps** is the execution cap;
+if a batch exceeds the remaining command budget, clnkr runs only the commands
+that fit and then asks for a final summary.
 
 A **canonical turn** is the internal JSON shape clnkr writes to the transcript
 after a provider adapter projects provider output into clnkr's turn space:
@@ -77,12 +78,10 @@ after a provider adapter projects provider output into clnkr's turn space:
 structured-output shape before that projection.
 
 The default turn protocol is **structured-json**. In that mode all accepted
-turns arrive as provider structured text and **act** carries one to three bash
-actions. **native-bash-tools** is an explicit fail-closed protocol for
-Anthropic Messages and OpenAI Responses. In that mode a provider-native
-**bash** tool call becomes a single-command **act** turn, while **clarify** and
-**done** remain structured JSON. Native mode requires the full-send control
-loop; approval mode remains structured JSON only.
+turns arrive as provider structured text and **act** carries bash actions.
+**native-bash-tools** is an explicit fail-closed protocol for Anthropic
+Messages and OpenAI Responses. In that mode provider-native **bash** tool calls
+become an **act** turn, while **clarify** and **done** remain structured JSON.
 
 Provider request options such as effort and output-token limits change provider
 wire fields. They do not add turn types or change the canonical turn shape.
@@ -102,11 +101,13 @@ conversation sent to the model, but they are not user-authored text.
 : A transcript message whose content came from the human user.
 
 **Host block**
-: A clnkr-authored tagged transcript message.
+: A clnkr-authored transcript message.
 
 **Command result block**
-: A host block containing command, exit code, stdout, stderr, and optional
-command feedback.
+: A host block containing a JSON object with **stdout**, **stderr**,
+**outcome**, and optional **feedback**. Exit outcomes include **exit_code**.
+Other outcomes include **timeout**, **cancelled**, **denied**, **skipped**, and
+**error**.
 
 **Bash tool metadata**
 : Optional transcript metadata that records provider tool call IDs, native bash
@@ -190,8 +191,8 @@ through the provider adapter.
 **native-bash-tools** requires a provider API that can accept tools, return
 tool calls with IDs, accept tool results, and let the adapter map calls/results
 without prompt parsing. Anthropic Messages uses a custom **bash** tool. OpenAI
-Responses uses a strict function tool named **bash** and disables parallel tool
-calls. OpenAI Chat Completions is rejected for native mode.
+Responses uses a strict function tool named **bash**. OpenAI Chat Completions
+is rejected for native mode.
 
 Provider adapters serialize validated provider request options. They do not
 resolve **CLNKR_** environment variables, choose API keys, or parse CLI base

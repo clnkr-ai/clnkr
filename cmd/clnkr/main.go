@@ -300,10 +300,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	if turnProtocol == clnkr.TurnProtocolNativeBashTools && !*fullSend {
-		fatalf("--turn-protocol native-bash-tools requires --full-send=true or -p")
-	}
-
 	if (*continueFlag || *continueShort) && *trajectory != "" {
 		fatalf("--continue and --trajectory are mutually exclusive")
 	}

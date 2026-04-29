@@ -39,6 +39,21 @@ type Response struct {
 // CommandFeedback captures git-backed host feedback for the last command.
 type CommandFeedback = transcript.CommandFeedback
 
+// CommandOutcomeType describes how a command finished or why it did not run.
+type CommandOutcomeType = transcript.CommandOutcomeType
+
+const (
+	CommandOutcomeExit      = transcript.CommandOutcomeExit
+	CommandOutcomeTimeout   = transcript.CommandOutcomeTimeout
+	CommandOutcomeCancelled = transcript.CommandOutcomeCancelled
+	CommandOutcomeDenied    = transcript.CommandOutcomeDenied
+	CommandOutcomeSkipped   = transcript.CommandOutcomeSkipped
+	CommandOutcomeError     = transcript.CommandOutcomeError
+)
+
+// CommandOutcome captures a command's completion state.
+type CommandOutcome = transcript.CommandOutcome
+
 // CommandResult captures one shell command execution.
 // Zero PostCwd = no change; nil PostEnv = no snapshot.
 type CommandResult struct {
@@ -48,6 +63,7 @@ type CommandResult struct {
 	ExitCode int
 	PostCwd  string
 	PostEnv  map[string]string
+	Outcome  CommandOutcome
 	Feedback CommandFeedback
 }
 

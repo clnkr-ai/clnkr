@@ -297,19 +297,26 @@ func parseNativeResponse(apiResp response, raw []byte) (clnkr.Response, error) {
 	if len(toolUses) > 0 && strings.TrimSpace(outputText) != "" {
 		return clnkr.Response{Raw: string(raw), Usage: usage, ProtocolErr: fmt.Errorf("%w: mixed bash tool use and structured text", clnkr.ErrInvalidJSON)}, nil
 	}
-	if len(toolUses) > 1 {
-		return clnkr.Response{Raw: string(raw), Usage: usage, ProtocolErr: fmt.Errorf("%w: multiple bash tool calls", clnkr.ErrTooManyCommands)}, nil
-	}
-	if len(toolUses) == 1 {
-		turn, call, err := turnFromToolUse(toolUses[0])
-		if err != nil {
-			return clnkr.Response{Raw: string(raw), Usage: usage, ProtocolErr: err}, nil
+	if len(toolUses) > 0 {
+		actions := make([]clnkr.BashAction, 0, len(toolUses))
+		calls := make([]clnkr.BashToolCall, 0, len(toolUses))
+		for _, toolUse := range toolUses {
+			turn, call, err := turnFromToolUse(toolUse)
+			if err != nil {
+				return clnkr.Response{Raw: string(raw), Usage: usage, ProtocolErr: err}, nil
+			}
+			act, ok := turn.(*clnkr.ActTurn)
+			if !ok || len(act.Bash.Commands) != 1 {
+				return clnkr.Response{}, fmt.Errorf("native structured output response: expected one command from tool use")
+			}
+			actions = append(actions, act.Bash.Commands[0])
+			calls = append(calls, call)
 		}
 		return clnkr.Response{
-			Turn:          turn,
+			Turn:          &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: actions}},
 			Raw:           string(raw),
 			Usage:         usage,
-			BashToolCalls: []clnkr.BashToolCall{call},
+			BashToolCalls: calls,
 		}, nil
 	}
 	if strings.TrimSpace(outputText) == "" {
@@ -409,7 +416,8 @@ func mapNativeMessages(messages []clnkr.Message) []anthropicMessage {
 	normalized := normalizeMessagesForProvider(messages)
 	mapped := make([]anthropicMessage, 0, len(normalized))
 	knownCalls := make(map[string]struct{})
-	for _, msg := range normalized {
+	for i := 0; i < len(normalized); i++ {
+		msg := normalized[i]
 		if msg.Role == "assistant" && len(msg.BashToolCalls) > 0 {
 			blocks := make([]map[string]any, 0, len(msg.BashToolCalls))
 			for _, call := range msg.BashToolCalls {
@@ -421,20 +429,40 @@ func mapNativeMessages(messages []clnkr.Message) []anthropicMessage {
 		}
 		if msg.BashToolResult != nil {
 			if _, ok := knownCalls[msg.BashToolResult.ID]; ok {
+				blocks := make([]map[string]any, 0, 1)
+				for ; i < len(normalized); i++ {
+					next := normalized[i]
+					if next.BashToolResult == nil {
+						break
+					}
+					if _, ok := knownCalls[next.BashToolResult.ID]; !ok {
+						break
+					}
+					blocks = append(blocks, toolResultBlock(*next.BashToolResult))
+				}
 				mapped = append(mapped, anthropicMessage{
-					Role: "user",
-					Content: []map[string]any{{
-						"type":        "tool_result",
-						"tool_use_id": msg.BashToolResult.ID,
-						"content":     msg.BashToolResult.Content,
-					}},
+					Role:    "user",
+					Content: blocks,
 				})
+				i--
 				continue
 			}
 		}
 		mapped = append(mapped, anthropicMessage{Role: msg.Role, Content: msg.Content})
 	}
 	return mapped
+}
+
+func toolResultBlock(result clnkr.BashToolResult) map[string]any {
+	block := map[string]any{
+		"type":        "tool_result",
+		"tool_use_id": result.ID,
+		"content":     result.Content,
+	}
+	if result.IsError {
+		block["is_error"] = true
+	}
+	return block
 }
 
 func toolUseBlock(call clnkr.BashToolCall) map[string]any {

@@ -22,6 +22,7 @@ type BashToolCall struct {
 type BashToolResult struct {
 	ID      string `json:"id"`
 	Content string `json:"content"`
+	IsError bool   `json:"is_error,omitempty"`
 }
 
 // ProviderReplayItem carries opaque provider/API-scoped data needed for replay.
@@ -38,12 +39,31 @@ type CommandFeedback struct {
 	Diff         string   `json:"diff,omitempty"`
 }
 
+type CommandOutcomeType string
+
+const (
+	CommandOutcomeExit      CommandOutcomeType = "exit"
+	CommandOutcomeTimeout   CommandOutcomeType = "timeout"
+	CommandOutcomeCancelled CommandOutcomeType = "cancelled"
+	CommandOutcomeDenied    CommandOutcomeType = "denied"
+	CommandOutcomeSkipped   CommandOutcomeType = "skipped"
+	CommandOutcomeError     CommandOutcomeType = "error"
+)
+
+type CommandOutcome struct {
+	Type     CommandOutcomeType `json:"type"`
+	ExitCode *int               `json:"exit_code,omitempty"`
+	Reason   string             `json:"reason,omitempty"`
+	Message  string             `json:"message,omitempty"`
+}
+
 // CommandResult captures one command transcript payload.
 type CommandResult struct {
 	Command  string
 	Stdout   string
 	Stderr   string
 	ExitCode int
+	Outcome  CommandOutcome
 	Feedback CommandFeedback
 }
 

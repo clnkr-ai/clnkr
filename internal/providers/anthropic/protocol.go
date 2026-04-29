@@ -6,7 +6,7 @@ import (
 )
 
 func requestSchema() map[string]any {
-	return turnwire.RequestSchema(false)
+	return turnwire.RequestSchema()
 }
 
 func finalTurnSchema() map[string]any {

@@ -303,7 +303,9 @@ func RunApprovalTask(ctx context.Context, agent *clnkr.Agent, task string, promp
 			if remaining := agent.MaxSteps - steps; agent.MaxSteps > 0 && remaining <= 0 {
 				return agent.RequestStepLimitSummary(ctx)
 			}
+			var skipped []clnkr.BashAction
 			if remaining := agent.MaxSteps - steps; agent.MaxSteps > 0 && len(turn.Bash.Commands) > remaining {
+				skipped = append([]clnkr.BashAction(nil), turn.Bash.Commands[remaining:]...)
 				turn = &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: turn.Bash.Commands[:remaining]}, Reasoning: turn.Reasoning}
 			}
 			reply, err := waitForReply(ctx, prompter.ActReply, FormatActProposal(turn.Bash.Commands), reportRejected)
@@ -311,10 +313,12 @@ func RunApprovalTask(ctx context.Context, agent *clnkr.Agent, task string, promp
 				return err
 			}
 			if strings.TrimSpace(reply) != "y" {
-				agent.AppendUserMessage(reply)
+				allCommands := append([]clnkr.BashAction(nil), turn.Bash.Commands...)
+				allCommands = append(allCommands, skipped...)
+				agent.RejectTurn(&clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: allCommands}, Reasoning: turn.Reasoning}, reply)
 				continue
 			}
-			result, err := agent.ExecuteTurn(ctx, turn)
+			result, err := agent.ExecuteTurnWithSkipped(ctx, turn, skipped)
 			if err != nil {
 				return err
 			}

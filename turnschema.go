@@ -62,9 +62,6 @@ func strictTurnFromEnvelope(env turnEnvelope, fields map[string]json.RawMessage)
 		if env.Bash == nil || len(env.Bash.Commands) == 0 {
 			return nil, ErrMissingCommand
 		}
-		if len(env.Bash.Commands) > 3 {
-			return nil, ErrTooManyCommands
-		}
 		if err := rejectPresentField(fields, "question", "act turn only allows question when it is omitted"); err != nil {
 			return nil, err
 		}

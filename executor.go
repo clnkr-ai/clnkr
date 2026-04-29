@@ -40,7 +40,7 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 
 	wrapped, stateFile, cleanup, err := shellstate.Wrap(command)
 	if err != nil {
-		return CommandResult{}, fmt.Errorf("wrap command: %w", err)
+		return CommandResult{Command: command, Outcome: commandOutcomeError(err)}, fmt.Errorf("wrap command: %w", err)
 	}
 	defer cleanup()
 
@@ -79,18 +79,19 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 	if cmd.ProcessState != nil {
 		result.ExitCode = cmd.ProcessState.ExitCode()
 	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		result.ExitCode = exitErr.ExitCode()
+	}
+	result.Outcome = classifyCommandOutcome(ctx, err, result.ExitCode)
 
 	if err == nil {
 		result, stateErr := e.applyPostState(result, stateFile)
 		if stateErr != nil {
+			result.Outcome = commandOutcomeError(stateErr)
 			return result, stateErr
 		}
 		return applyCommandFeedback(result, baseline, dir), nil
-	}
-
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		result.ExitCode = exitErr.ExitCode()
 	}
 
 	result, stateErr := e.applyPostState(result, stateFile)
@@ -99,6 +100,35 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 	}
 	result = applyCommandFeedback(result, baseline, dir)
 	return result, fmt.Errorf("run command: %w", err)
+}
+
+func classifyCommandOutcome(ctx context.Context, err error, exitCode int) CommandOutcome {
+	if err == nil {
+		return commandOutcomeExit(exitCode)
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return CommandOutcome{Type: CommandOutcomeTimeout}
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return CommandOutcome{Type: CommandOutcomeCancelled}
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return commandOutcomeExit(exitCode)
+	}
+	return commandOutcomeError(err)
+}
+
+func commandOutcomeExit(code int) CommandOutcome {
+	return CommandOutcome{Type: CommandOutcomeExit, ExitCode: &code}
+}
+
+func commandOutcomeError(err error) CommandOutcome {
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	return CommandOutcome{Type: CommandOutcomeError, Message: message}
 }
 
 func (e *CommandExecutor) applyPostState(result CommandResult, stateFile string) (CommandResult, error) {
