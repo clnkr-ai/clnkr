@@ -143,4 +143,4 @@ Brian Cosgrove <cosgroveb@gmail.com>
 
 # SEE ALSO
 
-**clnkr**(7)
+**clnkr**(3), **clnkr**(7)

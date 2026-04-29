@@ -469,4 +469,4 @@ vLLM OpenAI-compatible server:
 
 # SEE ALSO
 
-**clnkr**(1)
+**clnkr**(1), **clnkr**(3)
