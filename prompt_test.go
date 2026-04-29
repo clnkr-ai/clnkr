@@ -73,7 +73,7 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, "If the user names a file or path, inspect that exact path first.") {
 			t.Error("prompt should prioritize exact user-named paths")
 		}
-		if !strings.Contains(prompt, "You may also receive a [state] block containing JSON host execution state such as the current working directory.") {
+		if !strings.Contains(prompt, `You may also receive a JSON host state message such as {"type":"state","source":"clnkr","cwd":"/repo"}.`) {
 			t.Error("prompt should explain host state messages")
 		}
 		if strings.Contains(prompt, "[command]") || strings.Contains(prompt, "[stdout]") || strings.Contains(prompt, "[command_feedback]") {

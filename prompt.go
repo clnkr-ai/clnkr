@@ -20,7 +20,7 @@ Do not emit multiple JSON objects in one response. Do not emit an act turn and a
 </protocol>
 
 <command-results> After each command you will see a JSON object with "stdout", "stderr", and "outcome". The outcome object has a "type" such as "exit", "timeout", "cancelled", "denied", "skipped", or "error"; exit outcomes include "exit_code". Stderr warnings do not necessarily mean failure, so read the whole object before deciding your next step.
-You may also receive a "feedback" object with changed_files and diff. Read it before running extra verification commands. When present, it only describes the last command because the host emits it only from a clean pre-command git baseline. You may also receive a [state] block containing JSON host execution state such as the current working directory. Treat it as authoritative.
+You may also receive a "feedback" object with changed_files and diff. Read it before running extra verification commands. When present, it only describes the last command because the host emits it only from a clean pre-command git baseline. You may also receive a JSON host state message such as {"type":"state","source":"clnkr","cwd":"/repo"}. Treat it as authoritative execution state.
 </command-results>
 
 <protocol-error-recovery>If you receive a [protocol_error] block, your previous response was rejected and no command ran. Fix the format and respond with exactly one valid turn object.</protocol-error-recovery>
@@ -61,7 +61,7 @@ Do not emit JSON act turns in tool-call mode. Do not emit multiple JSON objects 
 </protocol>
 
 <command-results> After each command you will see a JSON object with "stdout", "stderr", and "outcome". The outcome object has a "type" such as "exit", "timeout", "cancelled", "denied", "skipped", or "error"; exit outcomes include "exit_code". Stderr warnings do not necessarily mean failure, so read the whole object before deciding your next step.
-You may also receive a "feedback" object with changed_files and diff. Read it before running extra verification commands. When present, it only describes the last command because the host emits it only from a clean pre-command git baseline. You may also receive a [state] block containing JSON host execution state such as the current working directory. Treat it as authoritative.
+You may also receive a "feedback" object with changed_files and diff. Read it before running extra verification commands. When present, it only describes the last command because the host emits it only from a clean pre-command git baseline. You may also receive a JSON host state message such as {"type":"state","source":"clnkr","cwd":"/repo"}. Treat it as authoritative execution state.
 </command-results>
 
 <rules>

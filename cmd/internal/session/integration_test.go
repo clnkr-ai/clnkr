@@ -23,10 +23,8 @@ func (c fakeCompactor) Summarize(_ context.Context, _ []clnkr.Message) (string, 
 	return c.summary, nil
 }
 
-func stateBlock(source, cwd string) string {
-	return "[state]\n" +
-		`{"source":"` + source + `","kind":"state","cwd":"` + cwd + `"}` + "\n" +
-		"[/state]"
+func stateMessage(source, cwd string) string {
+	return `{"type":"state","source":"` + source + `","cwd":"` + cwd + `"}`
 }
 
 func compactTranscript(t *testing.T, cwd string, messages []clnkr.Message) []clnkr.Message {
@@ -156,7 +154,7 @@ func TestContinueRestoresCanonicalAssistantTurn(t *testing.T) {
 	want := []clnkr.Message{
 		{Role: "user", Content: "first task"},
 		{Role: "assistant", Content: doneText},
-		{Role: "user", Content: stateBlock("clnkr", "/restored")},
+		{Role: "user", Content: stateMessage("clnkr", "/restored")},
 	}
 
 	if err := session.SaveSession(projdir, want); err != nil {
@@ -204,12 +202,12 @@ func TestSessionRoundTripWithCompactionState(t *testing.T) {
 		compacted := compactTranscript(t, "/wrong", []clnkr.Message{
 			{Role: "user", Content: "first task"},
 			{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
-			{Role: "user", Content: stateBlock("clnkr", "/old")},
+			{Role: "user", Content: stateMessage("clnkr", "/old")},
 			{Role: "user", Content: "second task"},
 			{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
 			{Role: "user", Content: "third task"},
 			{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
-			{Role: "user", Content: stateBlock("clnkr", "/restored")},
+			{Role: "user", Content: stateMessage("clnkr", "/restored")},
 		})
 
 		if err := session.SaveSession(projdir, compacted); err != nil {
@@ -242,14 +240,14 @@ func TestSessionRoundTripWithCompactionState(t *testing.T) {
 		}
 	})
 
-	t.Run("foreign state blocks still do not restore cwd after compaction", func(t *testing.T) {
+	t.Run("foreign state messages still do not restore cwd after compaction", func(t *testing.T) {
 		projdir := filepath.Join(tmpdir, "testproj-foreign")
 		compacted := compactTranscript(t, "/original", []clnkr.Message{
 			{Role: "user", Content: "first task"},
 			{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
 			{Role: "user", Content: "second task"},
 			{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
-			{Role: "user", Content: stateBlock("user", "/wrong")},
+			{Role: "user", Content: stateMessage("user", "/wrong")},
 			{Role: "assistant", Content: `{"type":"done","summary":"foreign state tail"}`},
 			{Role: "user", Content: "third task"},
 			{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
