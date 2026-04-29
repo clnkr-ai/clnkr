@@ -10,7 +10,7 @@ A minimal coding agent. Query an LLM, execute bash commands, repeat. Supports th
 
 Ships one binary: **clnkr** (plain CLI). The evaluation runner lives in the separate **clankerval** project and is installed independently.
 
-<img width="512" height="512" alt="Isildur cut the Ring (the ring here is bash -jokeexplainer)from his hand with the hilt-shard of his father's sword, and took it for his own." src="https://github.com/user-attachments/assets/7c9d648c-f5b9-4610-a311-04f5af37b364" />
+<img width="719" alt="clnkr terminal mascot" src="site/static/readme-terminal.png">
 
 
 ## Install
