@@ -139,6 +139,41 @@ func TestNewModelForConfigPassesAnthropicRequestOptions(t *testing.T) {
 	}
 }
 
+func TestNewModelForConfigPassesBashToolCallOption(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]any{{
+				"type":  "tool_use",
+				"id":    "toolu_1",
+				"name":  "bash",
+				"input": map[string]any{"command": "pwd", "workdir": nil},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
+		Provider:    providerdomain.ProviderAnthropic,
+		Model:       "claude-sonnet-4-20250514",
+		BaseURL:     server.URL,
+		APIKey:      "test-key",
+		ActProtocol: clnkr.ActProtocolToolCalls,
+	}, "sys")
+	resp, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if tools, ok := gotBody["tools"].([]any); !ok || len(tools) != 1 {
+		t.Fatalf("tools = %#v, want one bash tool", gotBody["tools"])
+	}
+	if _, ok := resp.Turn.(*clnkr.ActTurn); !ok {
+		t.Fatalf("Turn = %T, want *ActTurn", resp.Turn)
+	}
+}
+
 func TestNewModelForConfigPassesAnthropicEffortWithAdaptiveThinking(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

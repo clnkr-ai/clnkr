@@ -105,10 +105,10 @@ func (a *Agent) appendSuccessfulResponse(resp *Response) error {
 	return nil
 }
 
-func (a *Agent) appendProtocolFailure(resp Response, addCorrection bool) {
+func (a *Agent) appendProtocolFailure(resp Response, appendCorrection bool) {
 	a.messages = append(a.messages, Message{Role: "assistant", Content: resp.Raw})
 	a.notify(EventProtocolFailure{Reason: errorToReason(resp.ProtocolErr), Raw: resp.Raw})
-	if addCorrection {
+	if appendCorrection {
 		a.messages = append(a.messages, Message{Role: "user", Content: protocolCorrectionMessageFor(resp.ProtocolErr, a.ActProtocol)})
 	}
 }
@@ -397,6 +397,8 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 			if a.MaxSteps > 0 && steps >= a.MaxSteps {
 				return a.RequestStepLimitSummary(ctx)
 			}
+		default:
+			return fmt.Errorf("unhandled turn type %T", turn)
 		}
 	}
 }

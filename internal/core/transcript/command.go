@@ -8,11 +8,13 @@ import (
 // FormatCommandResult renders a command result as structured shell output.
 func FormatCommandResult(result CommandResult) string {
 	payload := struct {
+		Command  string           `json:"command,omitempty"`
 		Stdout   string           `json:"stdout"`
 		Stderr   string           `json:"stderr"`
 		Outcome  CommandOutcome   `json:"outcome"`
 		Feedback *CommandFeedback `json:"feedback,omitempty"`
 	}{
+		Command: result.Command,
 		Stdout:  result.Stdout,
 		Stderr:  result.Stderr,
 		Outcome: normalizedOutcome(result.Outcome, result.ExitCode),

@@ -96,11 +96,6 @@ func errorToReason(err error) string {
 	}
 }
 
-// protocolCorrectionMessage returns a tagged-text correction message for the model.
-func protocolCorrectionMessage(err error) string {
-	return protocolCorrectionMessageFor(err, ActProtocolClnkrInline)
-}
-
 func protocolCorrectionMessageFor(err error, protocol ActProtocol) string {
 	detail := err.Error()
 	var hint string

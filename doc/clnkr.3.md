@@ -55,6 +55,19 @@ limit. A **clarify** turn returns **ErrClarificationNeeded**.
 : Runs an accepted **ActTurn** and appends command result blocks to the
 transcript.
 
+**Agent.ExecuteTurnWithSkipped**
+: Runs an accepted **ActTurn** and records skipped bash tool calls.
+
+**Agent.AppendUserMessage**
+: Appends caller-authored input to the transcript.
+
+**Agent.RejectTurn**
+: Records that an approval-mode **ActTurn** was not executed.
+
+**Agent.RequestStepLimitSummary**
+: Asks the model for a final **done** turn after the caller exhausts its step
+budget.
+
 **Agent.Messages**
 : Returns a cloned transcript.
 
@@ -66,6 +79,12 @@ transcript.
 
 **CanonicalTurnJSON**
 : Marshals a validated turn into canonical transcript JSON.
+
+**ActProtocol**, **ParseActProtocol**
+: Select and validate the model act protocol.
+
+**BashToolCall**, **BashToolResult**, **ProviderReplayItem**
+: Provider-neutral transcript fields for native bash tool call replay.
 
 **LoadPromptWithOptions**
 : Builds the system prompt with optional **AGENTS.md** layers.

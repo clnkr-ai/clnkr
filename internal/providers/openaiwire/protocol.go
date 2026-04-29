@@ -2,25 +2,25 @@ package openaiwire
 
 import (
 	"github.com/clnkr-ai/clnkr"
-	"github.com/clnkr-ai/clnkr/internal/providers/turnwire"
+	"github.com/clnkr-ai/clnkr/internal/providers/actwire"
 )
 
 func RequestSchema() map[string]any {
-	return turnwire.RequestSchema()
+	return actwire.RequestSchema()
 }
 
 func FinalTurnSchema() map[string]any {
-	return turnwire.FinalTurnSchema()
+	return actwire.FinalTurnSchema()
 }
 
 func DoneOnlySchema() map[string]any {
-	return turnwire.DoneOnlySchema()
+	return actwire.DoneOnlySchema()
 }
 
 func NormalizeMessagesForProvider(messages []clnkr.Message) []clnkr.Message {
-	return turnwire.NormalizeMessagesForProvider(messages)
+	return actwire.NormalizeMessagesForProvider(messages)
 }
 
 func ParseProviderTurn(raw string) (clnkr.Turn, error) {
-	return turnwire.ParseProviderTurn(raw)
+	return actwire.ParseProviderTurn(raw)
 }

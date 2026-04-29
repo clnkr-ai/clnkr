@@ -238,6 +238,9 @@ func TestResolveConfigActProtocol(t *testing.T) {
 		if cfg.ActProtocol != clnkr.ActProtocolClnkrInline {
 			t.Fatalf("ActProtocol = %q, want clnkr-inline", cfg.ActProtocol)
 		}
+		if cfg.ActProtocol == clnkr.ActProtocolToolCalls {
+			t.Fatalf("ActProtocol = tool-calls, want clnkr-inline")
+		}
 	})
 
 	t.Run("accepts anthropic tool calls", func(t *testing.T) {
@@ -261,8 +264,8 @@ func TestResolveConfigActProtocol(t *testing.T) {
 			Model:       "proxy-model",
 			ActProtocol: clnkr.ActProtocolToolCalls,
 		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
-		if err == nil || !strings.Contains(err.Error(), "tool-calls") {
-			t.Fatalf("ResolveConfig err = %v, want tool-calls rejection", err)
+		if err == nil || !strings.Contains(err.Error(), "bash tool calls") {
+			t.Fatalf("ResolveConfig err = %v, want bash tool calls rejection", err)
 		}
 	})
 }

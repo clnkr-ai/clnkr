@@ -9,7 +9,7 @@ import (
 
 func TestProtocolCorrectionMessage(t *testing.T) {
 	t.Run("states prior response was ignored", func(t *testing.T) {
-		msg := protocolCorrectionMessage(fmt.Errorf("%w: unexpected trailing JSON value", ErrInvalidJSON))
+		msg := protocolCorrectionMessageFor(fmt.Errorf("%w: unexpected trailing JSON value", ErrInvalidJSON), ActProtocolClnkrInline)
 		if !strings.Contains(msg, "Your previous response was ignored and no command ran.") {
 			t.Fatalf("expected ignored-response guidance, got %q", msg)
 		}
@@ -43,14 +43,14 @@ func TestProtocolCorrectionMessage(t *testing.T) {
 	})
 
 	t.Run("mentions invalid pipe escape", func(t *testing.T) {
-		msg := protocolCorrectionMessage(fmt.Errorf("%w: invalid character '|' in string escape code", ErrInvalidJSON))
+		msg := protocolCorrectionMessageFor(fmt.Errorf("%w: invalid character '|' in string escape code", ErrInvalidJSON), ActProtocolClnkrInline)
 		if !strings.Contains(msg, `\|`) || !strings.Contains(msg, `\\|`) {
 			t.Fatalf("expected targeted pipe escape hint, got %q", msg)
 		}
 	})
 
 	t.Run("mentions invalid backtick escape", func(t *testing.T) {
-		msg := protocolCorrectionMessage(fmt.Errorf("%w: invalid character '`' in string escape code", ErrInvalidJSON))
+		msg := protocolCorrectionMessageFor(fmt.Errorf("%w: invalid character '`' in string escape code", ErrInvalidJSON), ActProtocolClnkrInline)
 		if !strings.Contains(msg, "\\`") || !strings.Contains(msg, "\\\\") {
 			t.Fatalf("expected targeted backtick escape hint, got %q", msg)
 		}

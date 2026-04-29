@@ -294,9 +294,6 @@ func parseToolCallResponse(apiResp response, raw []byte) (clnkr.Response, error)
 		}
 	}
 	outputText := text.String()
-	if len(toolUses) > 0 && strings.TrimSpace(outputText) != "" {
-		return clnkr.Response{Raw: string(raw), Usage: usage, ProtocolErr: fmt.Errorf("%w: mixed bash tool use and structured text", clnkr.ErrInvalidJSON)}, nil
-	}
 	if len(toolUses) > 0 {
 		actions := make([]clnkr.BashAction, 0, len(toolUses))
 		calls := make([]clnkr.BashToolCall, 0, len(toolUses))
@@ -313,7 +310,7 @@ func parseToolCallResponse(apiResp response, raw []byte) (clnkr.Response, error)
 			calls = append(calls, call)
 		}
 		return clnkr.Response{
-			Turn:          &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: actions}},
+			Turn:          &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: actions}, Reasoning: strings.TrimSpace(outputText)},
 			Raw:           string(raw),
 			Usage:         usage,
 			BashToolCalls: calls,
