@@ -25,6 +25,7 @@ require() {
 
 clnkr_bin=""
 event_log=""
+run_cwd="${CLNKR_RUN_CWD:-}"
 clnkr_args=()
 
 while (($#)); do
@@ -84,6 +85,11 @@ if [[ -z "$clnkr_bin" || ! -f "$clnkr_bin" || ! -x "$clnkr_bin" ]]; then
   exit 127
 fi
 
+if [[ -n "$run_cwd" && ! -d "$run_cwd" ]]; then
+  printf '%s: CLNKR_RUN_CWD is not a directory: %s\n' "$script_name" "$run_cwd" >&2
+  exit 2
+fi
+
 for arg in "${clnkr_args[@]}"; do
   case "$arg" in
   --event-log|--event-log=*)
@@ -99,6 +105,7 @@ else
   mkdir -p "$(dirname "$event_log")"
   : >"$event_log"
 fi
+event_log="$(cd "$(dirname "$event_log")" && pwd)/$(basename "$event_log")"
 
 strip_ansi() {
   sed -E $'s/\x1B\\[[0-9;?]*[ -\\/]*[@-~]//g'
@@ -174,6 +181,7 @@ render_run_header() {
   emit_frame_line "┌───────────────────────────────────────────────────────────┐"
   emit_field_line "BINARY" "$clnkr_bin"
   emit_field_line "EVENT LOG" "$event_log"
+  [[ -n "$run_cwd" ]] && emit_field_line "CWD" "$run_cwd"
   emit_frame_line "└───────────────────────────────────────────────────────────┘"
 }
 
@@ -283,6 +291,9 @@ show_splash
 render_run_header
 
 status=0
+if [[ -n "$run_cwd" ]]; then
+  cd "$run_cwd"
+fi
 "$clnkr_bin" "${clnkr_args[@]}" --event-log "$event_log" || status=$?
 
 printf '\n'

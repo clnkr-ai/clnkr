@@ -5,6 +5,8 @@ HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hug
 PANDOC ?= pandoc
 CLANKERVAL_PINNED_VERSION := 0.4.5
 CLANKERVAL_BINARY ?= $(CURDIR)/clnkr
+CLNKR_ARGS ?=
+CLNKR_RUN_CWD ?=
 CLANKERVAL_PREFLIGHT = \
 	clankerval_path="$$(command -v clankerval 2>/dev/null || true)"; \
 	if [ -z "$$clankerval_path" ]; then \
@@ -63,10 +65,10 @@ run: _build-clnkr ## Build and start the CLI
 	./clnkr
 
 clnkr: _build-clnkr _require-run-clnkr-tools ## Build and start the human clnkr wrapper
-	./scripts/run-clnkr.sh --clnkr-bin "$(CURDIR)/clnkr"
+	CLNKR_RUN_CWD="$(CLNKR_RUN_CWD)" ./scripts/run-clnkr.sh --clnkr-bin "$(CURDIR)/clnkr" -- $(CLNKR_ARGS)
 
 send: _build-clnkr _require-run-clnkr-tools ## Build and start the human clnkr wrapper with --full-send
-	./scripts/run-clnkr.sh --clnkr-bin "$(CURDIR)/clnkr" -- --full-send
+	CLNKR_RUN_CWD="$(CLNKR_RUN_CWD)" ./scripts/run-clnkr.sh --clnkr-bin "$(CURDIR)/clnkr" -- --full-send $(CLNKR_ARGS)
 
 _build-clnkr:
 	go build -trimpath -ldflags '$(LDFLAGS)' -o clnkr ./cmd/clnkr/
