@@ -24,12 +24,12 @@ CLANKERVAL_PREFLIGHT = \
 .DEFAULT_GOAL := build
 .PHONY: \
 	build clean install run \
-	readme-image \
+	clnkr send readme-image \
 	check test evaluations evaluations-live evaluations-live-openai evaluations-live-anthropic \
 	help man docs docs-serve \
 	_build-clnkr \
 	_fmt _fmt-check _vet _lint _arch sloc frontend-sloc _workflow-make-targets \
-	_hooks _check-docs _require-pandoc _require-readme-image-tools _site-sync _site-build
+	_hooks _check-docs _require-run-clnkr-tools _require-pandoc _require-readme-image-tools _site-sync _site-build
 
 PREFIX ?= /usr/local
 CORE_SLOC_LIMIT := 1625
@@ -61,6 +61,12 @@ install: build ## Install shipped binary
 
 run: _build-clnkr ## Build and start the CLI
 	./clnkr
+
+clnkr: _build-clnkr _require-run-clnkr-tools ## Build and start the human clnkr wrapper
+	./scripts/run-clnkr.sh --clnkr-bin "$(CURDIR)/clnkr"
+
+send: _build-clnkr _require-run-clnkr-tools ## Build and start the human clnkr wrapper with --full-send
+	./scripts/run-clnkr.sh --clnkr-bin "$(CURDIR)/clnkr" -- --full-send
 
 _build-clnkr:
 	go build -trimpath -ldflags '$(LDFLAGS)' -o clnkr ./cmd/clnkr/
@@ -167,6 +173,16 @@ _check-docs: man _site-build
 _require-pandoc:
 	@command -v "$(PANDOC)" >/dev/null 2>&1 || { \
 		echo "error: pandoc is required for docs generation" >&2; \
+		exit 1; \
+	}
+
+_require-run-clnkr-tools:
+	@command -v gum >/dev/null 2>&1 || { \
+		echo "error: gum is required for clnkr wrapper" >&2; \
+		exit 1; \
+	}
+	@command -v jq >/dev/null 2>&1 || { \
+		echo "error: jq is required for clnkr wrapper" >&2; \
 		exit 1; \
 	}
 
