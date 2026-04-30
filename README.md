@@ -8,12 +8,30 @@ A minimal coding agent CLI.
 
 Warning: `clnkr` executes bash directly. There is no permission system and no sandbox. Run it only in environments you are willing to trust and break.
 
-
 ## Quick start
+
+Install with Homebrew:
+
+```bash
+brew install clnkr-ai/tap/clnkr
+```
+
+Or install the Debian package from the latest release:
+
+```bash
+curl -fsSLO https://github.com/clnkr-ai/clnkr/releases/download/v<VERSION>/clnkr_<VERSION>-1_<ARCH>.deb
+sudo dpkg -i ./clnkr_<VERSION>-1_<ARCH>.deb
+```
+
+`go install` works too:
 
 ```bash
 go install github.com/clnkr-ai/clnkr/cmd/clnkr@latest
+```
 
+Set a provider and run:
+
+```bash
 export CLNKR_API_KEY=your-api-key
 export CLNKR_PROVIDER=anthropic
 export CLNKR_MODEL=claude-sonnet-4-6
@@ -33,14 +51,6 @@ Skip approvals:
 
 ```bash
 clnkr --full-send
-```
-
-Build from source:
-
-```bash
-git clone https://github.com/clnkr-ai/clnkr.git
-cd clnkr
-make build
 ```
 
 ## Usage
@@ -128,6 +138,9 @@ Architecture discussion: [`doc/clnkr.7.md`](doc/clnkr.7.md). Library/API referen
 ## Development
 
 ```bash
+git clone https://github.com/clnkr-ai/clnkr.git
+cd clnkr
+
 make help       # Show all targets
 make build      # Build shipped binaries
 make check      # Full quality suite
