@@ -2,13 +2,12 @@
 
 [![CI](https://github.com/clnkr-ai/clnkr/actions/workflows/ci.yml/badge.svg)](https://github.com/clnkr-ai/clnkr/actions/workflows/ci.yml)
 
-Minimal coding agent CLI.
+A minimal coding agent CLI.
+
+<img width="719" alt="clnkr terminal mascot" src="site/static/readme-terminal.png">
 
 Warning: `clnkr` executes bash directly. There is no permission system and no sandbox. Run it only in environments you are willing to trust and break.
 
-Platform: Linux and macOS. Windows is not supported.
-
-<img width="719" alt="clnkr terminal mascot" src="site/static/readme-terminal.png">
 
 ## Quick start
 
