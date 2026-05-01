@@ -354,9 +354,16 @@ func (a *Agent) RequestStepLimitSummary(ctx context.Context) error {
 	return nil
 }
 
-// Run loops Step until done, clarify, or step limit, executing act turns
-// immediately as the full-send policy path.
 func (a *Agent) Run(ctx context.Context, task string) error {
+	return a.RunWithPolicy(ctx, task, FullSendPolicy{})
+}
+
+// RunWithPolicy loops Step until done, clarify, or step limit. The policy
+// decides whether act turns execute and supplies clarification replies.
+func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy) error {
+	if policy == nil {
+		policy = FullSendPolicy{}
+	}
 	a.AppendUserMessage(task)
 	steps := 0
 	protocolErrors := 0
@@ -381,12 +388,35 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 		case *DoneTurn:
 			return nil
 		case *ClarifyTurn:
-			return ErrClarificationNeeded
+			reply, err := policy.Clarify(ctx, turn.Question)
+			if err != nil {
+				return fmt.Errorf("clarify: %w", err)
+			}
+			a.AppendUserMessage(reply)
 		case *ActTurn:
 			var skipped []BashAction
 			if remaining := a.MaxSteps - steps; a.MaxSteps > 0 && len(turn.Bash.Commands) > remaining {
 				skipped = append([]BashAction(nil), turn.Bash.Commands[remaining:]...)
 				turn = &ActTurn{Bash: BashBatch{Commands: turn.Bash.Commands[:remaining]}, Reasoning: turn.Reasoning}
+			}
+			commands := cloneBashActions(turn.Bash.Commands)
+			decision, err := policy.DecideAct(ctx, ActProposal{
+				Turn:     &ActTurn{Bash: BashBatch{Commands: cloneBashActions(commands)}, Reasoning: turn.Reasoning},
+				Skipped:  cloneBashActions(skipped),
+				Commands: commands,
+				Prompt:   formatActProposal(commands),
+			})
+			if err != nil {
+				return fmt.Errorf("decide act: %w", err)
+			}
+			switch decision.Kind {
+			case ActDecisionReject:
+				allCommands := append(cloneBashActions(turn.Bash.Commands), skipped...)
+				a.RejectTurn(&ActTurn{Bash: BashBatch{Commands: allCommands}, Reasoning: turn.Reasoning}, decision.Guidance)
+				continue
+			case ActDecisionApprove:
+			default:
+				return fmt.Errorf("decide act: unknown decision %q", decision.Kind)
 			}
 			execResult, err := a.ExecuteTurnWithSkipped(ctx, turn, skipped)
 			if err != nil {
@@ -401,4 +431,26 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 			return fmt.Errorf("unhandled turn type %T", turn)
 		}
 	}
+}
+
+func cloneBashActions(actions []BashAction) []BashAction {
+	if len(actions) == 0 {
+		return nil
+	}
+	return append([]BashAction(nil), actions...)
+}
+
+func formatActProposal(commands []BashAction) string {
+	var b strings.Builder
+	for i, action := range commands {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		command := action.Command
+		if workdir := strings.TrimSpace(action.Workdir); workdir != "" {
+			command = fmt.Sprintf("%s in %s", command, workdir)
+		}
+		fmt.Fprintf(&b, "%d. %s", i+1, command)
+	}
+	return b.String()
 }

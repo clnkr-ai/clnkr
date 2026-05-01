@@ -36,6 +36,49 @@ type Response struct {
 	ProviderReplay []ProviderReplayItem
 }
 
+// ActDecisionKind is the policy decision for an act turn.
+type ActDecisionKind string
+
+const (
+	// ActDecisionApprove allows the act turn to execute.
+	ActDecisionApprove ActDecisionKind = "approve"
+	// ActDecisionReject records guidance instead of executing the act turn.
+	ActDecisionReject ActDecisionKind = "reject"
+)
+
+// ActProposal describes an act turn being considered by a run policy.
+type ActProposal struct {
+	Turn     *ActTurn
+	Skipped  []BashAction
+	Commands []BashAction
+	Prompt   string
+}
+
+// ActDecision is a policy response for an act proposal.
+type ActDecision struct {
+	Kind     ActDecisionKind
+	Guidance string
+}
+
+// RunPolicy supplies decisions for act and clarify turns during RunWithPolicy.
+type RunPolicy interface {
+	DecideAct(context.Context, ActProposal) (ActDecision, error)
+	Clarify(context.Context, string) (string, error)
+}
+
+// FullSendPolicy approves every act turn and does not answer clarifications.
+type FullSendPolicy struct{}
+
+// DecideAct approves every act turn.
+func (FullSendPolicy) DecideAct(context.Context, ActProposal) (ActDecision, error) {
+	return ActDecision{Kind: ActDecisionApprove}, nil
+}
+
+// Clarify returns ErrClarificationNeeded.
+func (FullSendPolicy) Clarify(context.Context, string) (string, error) {
+	return "", ErrClarificationNeeded
+}
+
 // CommandFeedback captures git-backed host feedback for the last command.
 type CommandFeedback = transcript.CommandFeedback
 

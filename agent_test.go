@@ -72,6 +72,33 @@ type fakeCompactor struct {
 	got     [][]Message
 }
 
+type scriptedPolicy struct {
+	decisions []ActDecision
+	clarifies []string
+	proposals []ActProposal
+	questions []string
+}
+
+func (p *scriptedPolicy) DecideAct(_ context.Context, proposal ActProposal) (ActDecision, error) {
+	p.proposals = append(p.proposals, proposal)
+	if len(p.decisions) == 0 {
+		return ActDecision{Kind: ActDecisionApprove}, nil
+	}
+	decision := p.decisions[0]
+	p.decisions = p.decisions[1:]
+	return decision, nil
+}
+
+func (p *scriptedPolicy) Clarify(_ context.Context, question string) (string, error) {
+	p.questions = append(p.questions, question)
+	if len(p.clarifies) == 0 {
+		return "", ErrClarificationNeeded
+	}
+	reply := p.clarifies[0]
+	p.clarifies = p.clarifies[1:]
+	return reply, nil
+}
+
 func (c *fakeCompactor) Summarize(_ context.Context, messages []Message) (string, error) {
 	c.got = append(c.got, transcript.CloneMessages(messages))
 	if c.err != nil {
@@ -2230,6 +2257,59 @@ func TestAgent(t *testing.T) {
 }
 
 func TestRun(t *testing.T) {
+	t.Run("uses full send policy by default", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			mustResponse(actJSON("echo hi")),
+			mustResponse(`{"type":"done","summary":"done"}`),
+		}}
+		executor := &fakeExecutor{results: []CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		if err := agent.Run(context.Background(), "say hi"); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if got := executor.gotCmds; len(got) != 1 || got[0] != "echo hi" {
+			t.Fatalf("executed commands = %#v, want echo hi", got)
+		}
+	})
+
+	t.Run("policy rejection records guidance without executing command", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			mustResponse(actJSON("rm -rf /tmp/nope")),
+			mustResponse(`{"type":"done","summary":"done"}`),
+		}}
+		executor := &fakeExecutor{}
+		policy := &scriptedPolicy{decisions: []ActDecision{
+			{Kind: ActDecisionReject, Guidance: "do not delete that"},
+		}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		if err := agent.RunWithPolicy(context.Background(), "clean up", policy); err != nil {
+			t.Fatalf("RunWithPolicy: %v", err)
+		}
+		if executor.calls != 0 {
+			t.Fatalf("executor calls = %d, want 0", executor.calls)
+		}
+		if len(model.got) < 2 {
+			t.Fatalf("model calls = %d, want at least 2", len(model.got))
+		}
+		var sawGuidance bool
+		for _, msg := range model.got[1] {
+			if msg.Role == "user" && msg.Content == "do not delete that" {
+				sawGuidance = true
+			}
+		}
+		if !sawGuidance {
+			t.Fatalf("second query messages = %#v, want rejection guidance", model.got[1])
+		}
+		if len(policy.proposals) != 1 {
+			t.Fatalf("policy proposals = %d, want 1", len(policy.proposals))
+		}
+		if got := policy.proposals[0].Prompt; !strings.Contains(got, "rm -rf /tmp/nope") {
+			t.Fatalf("proposal prompt = %q, want command", got)
+		}
+	})
+
 	t.Run("counts executed commands toward max steps", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			mustResponse(actJSON("echo one", "echo two")),
@@ -2298,4 +2378,274 @@ func TestRun(t *testing.T) {
 			t.Fatalf("skipped payload = %#v", payload)
 		}
 	})
+}
+
+func TestRunWithPolicy(t *testing.T) {
+	t.Run("approval executes command", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			mustResponse(actJSON("echo hi")),
+			mustResponse(`{"type":"done","summary":"done"}`),
+		}}
+		executor := &fakeExecutor{results: []CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
+		policy := &scriptedPolicy{decisions: []ActDecision{{Kind: ActDecisionApprove}}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		if err := agent.RunWithPolicy(context.Background(), "say hi", policy); err != nil {
+			t.Fatalf("RunWithPolicy: %v", err)
+		}
+		if got := executor.gotCmds; len(got) != 1 || got[0] != "echo hi" {
+			t.Fatalf("executed commands = %#v, want echo hi", got)
+		}
+	})
+
+	t.Run("rejection guidance rejects turn and continues", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			mustResponse(actJSON("rm important.txt")),
+			mustResponse(`{"type":"done","summary":"okay"}`),
+		}}
+		executor := &fakeExecutor{}
+		policy := &scriptedPolicy{decisions: []ActDecision{
+			{Kind: ActDecisionReject, Guidance: "list files instead"},
+		}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		if err := agent.RunWithPolicy(context.Background(), "do it", policy); err != nil {
+			t.Fatalf("RunWithPolicy: %v", err)
+		}
+		if executor.calls != 0 {
+			t.Fatalf("executor calls = %d, want 0", executor.calls)
+		}
+		if len(model.got) != 2 {
+			t.Fatalf("model calls = %d, want 2", len(model.got))
+		}
+		if !hasMessage(model.got[1], "user", "list files instead") {
+			t.Fatalf("second query messages = %#v, want rejection guidance", model.got[1])
+		}
+	})
+
+	t.Run("clarification reply appends user message and continues", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			mustResponse(`{"type":"clarify","question":"Which repo?"}`),
+			mustResponse(`{"type":"done","summary":"okay"}`),
+		}}
+		policy := &scriptedPolicy{clarifies: []string{"/tmp/repo"}}
+
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		if err := agent.RunWithPolicy(context.Background(), "inspect", policy); err != nil {
+			t.Fatalf("RunWithPolicy: %v", err)
+		}
+		if len(policy.questions) != 1 || policy.questions[0] != "Which repo?" {
+			t.Fatalf("clarify questions = %#v, want Which repo?", policy.questions)
+		}
+		if len(model.got) != 2 {
+			t.Fatalf("model calls = %d, want 2", len(model.got))
+		}
+		if !hasMessage(model.got[1], "user", "/tmp/repo") {
+			t.Fatalf("second query messages = %#v, want clarification reply", model.got[1])
+		}
+	})
+
+	t.Run("tool-call rejection completes provider tool results", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{
+				Turn: &ActTurn{Bash: BashBatch{Commands: []BashAction{
+					{ID: "call_1", Command: "rm important.txt"},
+					{ID: "call_2", Command: "git status"},
+				}}},
+				Raw: `tool calls`,
+				BashToolCalls: []BashToolCall{
+					{ID: "call_1", Command: "rm important.txt"},
+					{ID: "call_2", Command: "git status"},
+				},
+			},
+			mustResponse(`{"type":"done","summary":"okay"}`),
+		}}
+		policy := &scriptedPolicy{decisions: []ActDecision{
+			{Kind: ActDecisionReject, Guidance: "list files instead"},
+		}}
+
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		agent.ActProtocol = ActProtocolToolCalls
+		if err := agent.RunWithPolicy(context.Background(), "do it", policy); err != nil {
+			t.Fatalf("RunWithPolicy: %v", err)
+		}
+		results := collectToolResults(agent.Messages())
+		if len(results) != 2 {
+			t.Fatalf("tool results = %#v, want one denial result per tool call", results)
+		}
+		if results[0].ID != "call_1" || results[1].ID != "call_2" {
+			t.Fatalf("tool result IDs = %#v", results)
+		}
+		if !results[0].IsError || !results[1].IsError {
+			t.Fatalf("denial tool results should be marked as errors: %#v", results)
+		}
+		payload := mustShellResultPayload(t, results[0].Content)
+		if payload.Outcome.Type != "denied" {
+			t.Fatalf("denial outcome = %#v", payload.Outcome)
+		}
+		if !strings.Contains(payload.Stderr, "not run") || !strings.Contains(payload.Stderr, "list files instead") {
+			t.Fatalf("denial stderr = %q, want command-not-run feedback", payload.Stderr)
+		}
+	})
+
+	t.Run("max-step truncates proposal and execution to remaining budget", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			mustResponse(`{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null},{"command":"go test ./...","workdir":"subdir"},{"command":"git status","workdir":null}]},"reasoning":"need status"}`),
+			mustResponse(`{"type":"done","summary":"step limit summary"}`),
+		}}
+		executor := &fakeExecutor{results: []CommandResult{
+			{Stdout: "/tmp\n", ExitCode: 0},
+			{Stdout: "ok\n", ExitCode: 0},
+		}}
+		policy := &scriptedPolicy{decisions: []ActDecision{{Kind: ActDecisionApprove}}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		agent.MaxSteps = 2
+		if err := agent.RunWithPolicy(context.Background(), "do it", policy); err != nil {
+			t.Fatalf("RunWithPolicy: %v", err)
+		}
+		if len(policy.proposals) != 1 {
+			t.Fatalf("policy proposals = %d, want 1", len(policy.proposals))
+		}
+		if got, want := policy.proposals[0].Prompt, "1. pwd\n2. go test ./... in subdir"; got != want {
+			t.Fatalf("proposal prompt = %q, want %q", got, want)
+		}
+		if got := len(policy.proposals[0].Skipped); got != 1 {
+			t.Fatalf("skipped proposal commands = %d, want 1", got)
+		}
+		wantCommands := []string{"pwd", "go test ./..."}
+		if strings.Join(executor.gotCmds, "\n") != strings.Join(wantCommands, "\n") {
+			t.Fatalf("executed commands = %#v, want %#v", executor.gotCmds, wantCommands)
+		}
+	})
+
+	t.Run("max-step truncation completes skipped tool-call results", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{
+				Turn: &ActTurn{Bash: BashBatch{Commands: []BashAction{
+					{ID: "call_1", Command: "echo one"},
+					{ID: "call_2", Command: "echo two"},
+				}}},
+				Raw: `tool calls`,
+				BashToolCalls: []BashToolCall{
+					{ID: "call_1", Command: "echo one"},
+					{ID: "call_2", Command: "echo two"},
+				},
+			},
+			mustResponse(`{"type":"done","summary":"step limit summary"}`),
+		}}
+		executor := &fakeExecutor{results: []CommandResult{{Stdout: "one\n", ExitCode: 0}}}
+		policy := &scriptedPolicy{decisions: []ActDecision{{Kind: ActDecisionApprove}}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		agent.ActProtocol = ActProtocolToolCalls
+		agent.MaxSteps = 1
+		if err := agent.RunWithPolicy(context.Background(), "do it", policy); err != nil {
+			t.Fatalf("RunWithPolicy: %v", err)
+		}
+		if executor.calls != 1 {
+			t.Fatalf("executed commands = %d, want 1", executor.calls)
+		}
+		results := collectToolResults(agent.Messages())
+		if len(results) != 2 {
+			t.Fatalf("tool results = %#v, want executed and skipped results", results)
+		}
+		if results[1].ID != "call_2" || !results[1].IsError {
+			t.Fatalf("skipped tool result = %#v", results[1])
+		}
+		payload := mustShellResultPayload(t, results[1].Content)
+		if payload.Outcome.Type != "skipped" || !strings.Contains(payload.Stderr, "step limit") {
+			t.Fatalf("skipped payload = %#v", payload)
+		}
+	})
+
+	t.Run("step-limit summary is requested once budget is exhausted", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			mustResponse(actJSON("pwd")),
+			mustResponse(`{"type":"done","summary":"step limit summary"}`),
+		}}
+		executor := &fakeExecutor{results: []CommandResult{{Stdout: "/tmp\n", ExitCode: 0}}}
+		policy := &scriptedPolicy{decisions: []ActDecision{{Kind: ActDecisionApprove}}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		agent.MaxSteps = 1
+		if err := agent.RunWithPolicy(context.Background(), "do it", policy); err != nil {
+			t.Fatalf("RunWithPolicy: %v", err)
+		}
+		if len(policy.proposals) != 1 {
+			t.Fatalf("policy proposals = %d, want 1", len(policy.proposals))
+		}
+		if model.calls != 2 {
+			t.Fatalf("model calls = %d, want act query and one final summary query", model.calls)
+		}
+		stepLimitMessages := 0
+		for _, msg := range agent.Messages() {
+			if msg.Role == "user" && strings.HasPrefix(msg.Content, "Step limit reached.") {
+				stepLimitMessages++
+			}
+		}
+		if stepLimitMessages != 1 {
+			t.Fatalf("step limit messages = %d, want 1", stepLimitMessages)
+		}
+	})
+
+	t.Run("policy errors do not execute or reject", func(t *testing.T) {
+		errApprovalPending := errors.New("approval pending")
+		model := &fakeModel{responses: []Response{
+			mustResponse(actJSON("rm important.txt")),
+		}}
+		policy := runPolicyFunc{
+			decideAct: func(context.Context, ActProposal) (ActDecision, error) {
+				return ActDecision{}, errApprovalPending
+			},
+			clarify: func(context.Context, string) (string, error) {
+				return "", ErrClarificationNeeded
+			},
+		}
+		executor := &fakeExecutor{}
+
+		agent := NewAgent(model, executor, "/tmp")
+		err := agent.RunWithPolicy(context.Background(), "do it", policy)
+		if !errors.Is(err, errApprovalPending) {
+			t.Fatalf("got %v, want errApprovalPending", err)
+		}
+		if executor.calls != 0 {
+			t.Fatalf("executor calls = %d, want 0", executor.calls)
+		}
+		if hasMessage(agent.Messages(), "user", "") {
+			t.Fatalf("empty reply was appended: %#v", agent.Messages())
+		}
+	})
+}
+
+type runPolicyFunc struct {
+	decideAct func(context.Context, ActProposal) (ActDecision, error)
+	clarify   func(context.Context, string) (string, error)
+}
+
+func (p runPolicyFunc) DecideAct(ctx context.Context, proposal ActProposal) (ActDecision, error) {
+	return p.decideAct(ctx, proposal)
+}
+
+func (p runPolicyFunc) Clarify(ctx context.Context, question string) (string, error) {
+	return p.clarify(ctx, question)
+}
+
+func hasMessage(messages []Message, role, content string) bool {
+	for _, msg := range messages {
+		if msg.Role == role && msg.Content == content {
+			return true
+		}
+	}
+	return false
+}
+
+func collectToolResults(messages []Message) []BashToolResult {
+	var results []BashToolResult
+	for _, msg := range messages {
+		if msg.BashToolResult != nil {
+			results = append(results, *msg.BashToolResult)
+		}
+	}
+	return results
 }

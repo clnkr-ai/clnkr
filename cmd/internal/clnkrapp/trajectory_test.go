@@ -51,10 +51,7 @@ func TestRunMetadataDebugEventFormatsJSON(t *testing.T) {
 		},
 	}, "system prompt")
 
-	event, err := RunMetadataDebugEvent(meta)
-	if err != nil {
-		t.Fatalf("RunMetadataDebugEvent: %v", err)
-	}
+	event := RunMetadataDebugEvent(meta)
 	var got RunMetadata
 	if err := json.Unmarshal([]byte(event.Message), &got); err != nil {
 		t.Fatalf("debug message is not JSON metadata: %v", err)

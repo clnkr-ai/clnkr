@@ -3,7 +3,6 @@ package compaction
 import (
 	"context"
 	"strings"
-	"unicode/utf8"
 
 	clnkr "github.com/clnkr-ai/clnkr"
 )
@@ -83,14 +82,9 @@ func tailStringWithinByteBudget(content string, budget int) string {
 	if len(content) <= budget {
 		return content
 	}
-
-	start := len(content)
-	for start > 0 {
-		prevStart := start
-		_, size := utf8.DecodeLastRuneInString(content[:start])
-		start -= size
-		if len(content)-start > budget {
-			return content[prevStart:]
+	for i := range content {
+		if len(content)-i <= budget {
+			return content[i:]
 		}
 	}
 	return content

@@ -24,9 +24,11 @@ under **internal/** and are not importable. External callers provide a
 **Model** implementation that returns clnkr turns, and an **Executor**
 implementation that runs commands and returns structured command results.
 
-Use **Agent.Run** for unattended execution. Use **Agent.Step** with
-**Agent.ExecuteTurn** or **Agent.RejectTurn** when the caller owns policy, such
-as approval prompts, custom step limits, or UI state.
+Use **Agent.Run** for unattended execution. Use **Agent.RunWithPolicy** when a
+frontend needs approval or clarification hooks while preserving the run loop's
+protocol retry, step-limit, command execution, and final-summary behavior. Use
+**Agent.Step** with **Agent.ExecuteTurn** or **Agent.RejectTurn** for custom
+turn loops.
 
 # API
 
@@ -47,6 +49,18 @@ directory and returns a **CommandResult**.
 **Agent.Run**
 : Runs the full-send policy loop until **done**, clarification, error, or step
 limit. A **clarify** turn returns **ErrClarificationNeeded**.
+
+**Agent.RunWithPolicy**
+: Runs the same loop as **Agent.Run** with caller-supplied **RunPolicy** hooks.
+
+**RunPolicy**
+: Interface for **DecideAct** and **Clarify** hooks.
+
+**ActProposal**, **ActDecision**, **ActDecisionApprove**, **ActDecisionReject**
+: Approval proposal and decision types used by **RunWithPolicy**.
+
+**FullSendPolicy**
+: Policy implementation used by **Agent.Run**.
 
 **Agent.Step**
 : Queries the model once and parses one turn. It does not execute commands.
