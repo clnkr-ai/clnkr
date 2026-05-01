@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ if .IsHome }}{{ .Site.Title }}{{ else }}{{ .Title }} | {{ .Site.Title }}{{ end }}</title>
     <meta name="description" content="{{ with .Description }}{{ . }}{{ else }}{{ .Site.Params.description }}{{ end }}">
+    <link rel="icon" type="image/png" href="/icons/clnkr-icon-2.png">
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body class="{{ if .IsHome }}page-home{{ else if eq .Section "docs" }}page-docs{{ else if eq .Section "evaluations" }}page-home{{ else }}page-default{{ end }}">
