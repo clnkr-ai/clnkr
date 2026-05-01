@@ -1,8 +1,9 @@
 #!/bin/sh
 set -e
 
-# Verify the binary is installed and reports its version
+# Verify the binaries are installed and report their versions
 clnkr --version
+clnkrd --version
 
 # Verify it exits with error when no API key is set
 unset CLNKR_API_KEY

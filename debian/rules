@@ -12,15 +12,17 @@ VERSION := $(DEB_VERSION_UPSTREAM)
 override_dh_auto_build:
 	$(MAKE) man
 	go build -trimpath -ldflags '-s -w -X main.version=$(VERSION)' -o clnkr ./cmd/clnkr
+	go build -trimpath -ldflags '-s -w -X main.version=$(VERSION)' -o clnkrd ./cmd/clnkrd
 
 override_dh_auto_test:
 	go test ./...
 
 override_dh_auto_install:
 	install -D -m 0755 clnkr debian/clnkr/usr/bin/clnkr
+	install -D -m 0755 clnkrd debian/clnkr/usr/bin/clnkrd
 
 override_dh_auto_clean:
-	rm -f clnkr
+	rm -f clnkr clnkrd
 	rm -rf build/docs
 
 override_dh_dwz:

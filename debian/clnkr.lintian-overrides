@@ -1,2 +1,3 @@
 # Go binaries are intentionally built statically.
 statically-linked-binary [usr/bin/clnkr]
+statically-linked-binary [usr/bin/clnkrd]

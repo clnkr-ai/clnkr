@@ -21,5 +21,6 @@ Description: minimal coding agent CLI
  commands in an iterative loop. It supports both Anthropic and
  OpenAI-compatible APIs, runs in conversational REPL mode or
  single-prompt mode, and loads project-specific instructions from
- AGENTS.md files. It ships one clnkr binary. The
- standalone clankerval package provides the external evaluation runner.
+ AGENTS.md files. It ships the clnkr CLI and clnkrd stdio JSONL adapter.
+ The standalone clankerval package provides the external evaluation
+ runner.
