@@ -92,9 +92,13 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 	if err != nil {
 		return ResolvedProviderConfig{}, err
 	}
-	actProtocol, err := clnkr.ParseActProtocol(string(inputs.ActProtocol))
-	if err != nil {
+	actProtocol := inputs.ActProtocol
+	if actProtocol == "" {
+		actProtocol = clnkr.ActProtocolClnkrInline
+	} else if parsed, err := clnkr.ParseActProtocol(string(actProtocol)); err != nil {
 		return ResolvedProviderConfig{}, err
+	} else {
+		actProtocol = parsed
 	}
 	requestInputs := inputs.RequestOptions
 	useBashToolCalls := actProtocol == clnkr.ActProtocolToolCalls

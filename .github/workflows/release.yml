@@ -170,9 +170,11 @@ jobs:
           VERSION="${GITHUB_REF_NAME}"
           for GOOS in linux darwin; do
             for GOARCH in amd64 arm64; do
-              env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
-                go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
-                -o "clnkr-${GOOS}-${GOARCH}" ./cmd/clnkr/
+              for CMD in clnkr clnkrd; do
+                env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+                  go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+                  -o "${CMD}-${GOOS}-${GOARCH}" "./cmd/${CMD}/"
+              done
             done
           done
 
@@ -182,6 +184,7 @@ jobs:
           name: binaries
           path: |
             clnkr-*
+            clnkrd-*
 
   release:
     needs: [debian-amd64, debian-arm64, binaries]
@@ -238,7 +241,7 @@ jobs:
           mkdir -p release
           cp artifacts/deb-amd64/*.deb release/
           cp artifacts/deb-arm64/*.deb release/
-          cp artifacts/binaries/clnkr-* release/
+          cp artifacts/binaries/clnkr-* artifacts/binaries/clnkrd-* release/
 
       - name: Generate source tarball
         run: |

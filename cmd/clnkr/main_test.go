@@ -130,61 +130,14 @@ func withoutCLNKREnv(env []string) []string {
 	return filtered
 }
 
-func TestUsageMentionsProviderAPI(t *testing.T) {
+func TestUsagePointsToManpage(t *testing.T) {
 	stdout, stderr, err := runMainHelper(t, "--help")
 	if err != nil {
 		t.Fatalf("help command: %v\nstderr: %s", err, stderr.String())
 	}
-	for _, want := range []string{"provider-api", "--effort", "thinking-budget-tokens", "max-output-tokens", "Limit executed commands", "before summary (default: 100)", "infers provider when provider is unset", "anthropic base URL  https://api.anthropic.com"} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("usage output missing %q, got %q", want, stdout.String())
-		}
-	}
-}
-
-func TestHelpSeparatesProviderOverrides(t *testing.T) {
-	stdout, stderr, err := runMainHelper(t, "--help")
-	if err != nil {
-		t.Fatalf("help command: %v\nstderr: %s", err, stderr.String())
-	}
-	usage := stdout.String()
-	generalStart := strings.Index(usage, "Options:\n")
-	overridesStart := strings.Index(usage, "Provider overrides:\n")
-	sessionsStart := strings.Index(usage, "Sessions:\n")
-	if generalStart == -1 || overridesStart == -1 || sessionsStart == -1 {
-		t.Fatalf("usage missing expected sections:\n%s", usage)
-	}
-	if generalStart >= overridesStart || overridesStart >= sessionsStart {
-		t.Fatalf("section order wrong:\n%s", usage)
-	}
-
-	generalOptions := usage[generalStart:overridesStart]
-	for _, commonProviderFlag := range []string{"--provider", "--effort", "--max-output-tokens"} {
-		if !strings.Contains(generalOptions, commonProviderFlag) {
-			t.Fatalf("general options missing %q:\n%s", commonProviderFlag, usage)
-		}
-	}
-	for _, overrideFlag := range []string{"--provider-api", "--thinking-budget-tokens"} {
-		if strings.Contains(generalOptions, overrideFlag) {
-			t.Fatalf("general options include provider override %q:\n%s", overrideFlag, usage)
-		}
-	}
-
-	providerOverrides := usage[overridesStart:sessionsStart]
-	for _, overrideFlag := range []string{"--provider-api", "--thinking-budget-tokens"} {
-		if !strings.Contains(providerOverrides, overrideFlag) {
-			t.Fatalf("provider overrides missing %q:\n%s", overrideFlag, usage)
-		}
-	}
-	for _, commonProviderFlag := range []string{"--provider string", "--effort", "--max-output-tokens"} {
-		if strings.Contains(providerOverrides, commonProviderFlag) {
-			t.Fatalf("provider overrides include common option %q:\n%s", commonProviderFlag, usage)
-		}
-	}
-	for _, want := range []string{"OpenAI", "Anthropic", "legacy/debug"} {
-		if !strings.Contains(providerOverrides, want) {
-			t.Fatalf("provider overrides missing %q label:\n%s", want, usage)
-		}
+	want := "Usage: clnkr [options]\nSee clnkr(1) for full help.\n"
+	if stdout.String() != want {
+		t.Fatalf("usage output = %q, want %q", stdout.String(), want)
 	}
 }
 
@@ -193,8 +146,8 @@ func TestHelpWritesUsageToStdout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("help command: %v\nstderr: %s", err, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "provider-api") {
-		t.Fatalf("stdout = %q, want usage", stdout.String())
+	if !strings.Contains(stdout.String(), "See clnkr(1)") {
+		t.Fatalf("stdout = %q, want manpage pointer", stdout.String())
 	}
 	for _, line := range strings.Split(stdout.String(), "\n") {
 		if len(line) > 79 {
@@ -214,8 +167,8 @@ func TestInvalidFlagKeepsUsageOffStdout(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "Run 'clnkr --help'") {
-		t.Fatalf("stderr = %q, want help hint", stderr.String())
+	if !strings.Contains(stderr.String(), "See clnkr(1)") {
+		t.Fatalf("stderr = %q, want manpage hint", stderr.String())
 	}
 	if got := strings.Count(stderr.String(), "flag provided but not defined"); got != 1 {
 		t.Fatalf("stderr repeated flag error %d times: %q", got, stderr.String())
@@ -233,8 +186,8 @@ func TestTurnProtocolFlagIsRemoved(t *testing.T) {
 	if !strings.Contains(stderr.String(), "flag provided but not defined: -turn-protocol") {
 		t.Fatalf("stderr = %q, want removed flag error", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "Run 'clnkr --help'") {
-		t.Fatalf("stderr = %q, want help hint", stderr.String())
+	if !strings.Contains(stderr.String(), "See clnkr(1)") {
+		t.Fatalf("stderr = %q, want manpage hint", stderr.String())
 	}
 }
 
@@ -919,35 +872,46 @@ func TestRunSingleTaskRejectsCompactCommandInFullSend(t *testing.T) {
 	}
 }
 
-func TestStdinPrompterConfirmWritesPromptToStderr(t *testing.T) {
+func TestRunDriverPromptApprovalReadsReplyAndExecutesCommand(t *testing.T) {
+	model := &fakeModel{responses: []clnkr.Response{
+		mustResponse(`{"type":"act","bash":{"commands":[{"command":"printf hi","workdir":null}]}}`),
+		mustResponse(`{"type":"done","summary":"done"}`),
+	}}
+	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi", ExitCode: 0}}}
+	agent := clnkr.NewAgent(model, executor, "/tmp")
+	driver := clnkrapp.NewDriver(agent, nil)
+
 	stderr := captureStderr(t, func() {
-		p := &stdinPrompter{reader: newLineReader(strings.NewReader("y\n"))}
-		reply, err := p.ActReply(context.Background(), "rm important.txt")
+		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("y\n")), "say hi", clnkrapp.PromptModeApproval)
 		if err != nil {
-			t.Fatalf("ActReply: %v", err)
-		}
-		if reply != "y" {
-			t.Fatalf("reply = %q, want y", reply)
+			t.Fatalf("runDriverPrompt: %v", err)
 		}
 	})
 
-	if !strings.Contains(stderr, "rm important.txt") {
-		t.Fatalf("stderr should contain command, got %q", stderr)
+	if !strings.Contains(stderr, "1. printf hi") {
+		t.Fatalf("stderr should contain approval request, got %q", stderr)
 	}
 	if !strings.Contains(stderr, "Send 'y' to approve, or type what the agent should do instead: ") {
 		t.Fatalf("stderr should contain approval prompt, got %q", stderr)
 	}
+	if executor.calls != 1 {
+		t.Fatalf("executor calls = %d, want 1", executor.calls)
+	}
 }
 
-func TestStdinPrompterConfirmShowsWorkdir(t *testing.T) {
+func TestRunDriverPromptApprovalShowsWorkdir(t *testing.T) {
+	model := &fakeModel{responses: []clnkr.Response{
+		mustResponse(`{"type":"act","bash":{"commands":[{"command":"rm important.txt","workdir":"subdir"}]}}`),
+		mustResponse(`{"type":"done","summary":"done"}`),
+	}}
+	executor := &fakeExecutor{results: []clnkr.CommandResult{{ExitCode: 0}}}
+	agent := clnkr.NewAgent(model, executor, "/tmp")
+	driver := clnkrapp.NewDriver(agent, nil)
+
 	stderr := captureStderr(t, func() {
-		p := &stdinPrompter{reader: newLineReader(strings.NewReader("y\n"))}
-		reply, err := p.ActReply(context.Background(), clnkrapp.FormatActProposal([]clnkr.BashAction{{Command: "rm important.txt", Workdir: "subdir"}}))
+		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("y\n")), "clean up", clnkrapp.PromptModeApproval)
 		if err != nil {
-			t.Fatalf("ActReply: %v", err)
-		}
-		if reply != "y" {
-			t.Fatalf("reply = %q, want y", reply)
+			t.Fatalf("runDriverPrompt: %v", err)
 		}
 	})
 
@@ -956,13 +920,46 @@ func TestStdinPrompterConfirmShowsWorkdir(t *testing.T) {
 	}
 }
 
-func TestStdinPrompterActReplyCanBeCanceled(t *testing.T) {
+func TestRunDriverPromptClarificationReadsReplyAndContinues(t *testing.T) {
+	model := &fakeModel{responses: []clnkr.Response{
+		mustResponse(`{"type":"clarify","question":"Which repo?"}`),
+		mustResponse(`{"type":"done","summary":"done"}`),
+	}}
+	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
+	driver := clnkrapp.NewDriver(agent, nil)
+
+	stderr := captureStderr(t, func() {
+		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("/tmp/repo\n")), "inspect", clnkrapp.PromptModeApproval)
+		if err != nil {
+			t.Fatalf("runDriverPrompt: %v", err)
+		}
+	})
+
+	if !strings.Contains(stderr, "Which repo?\nClarify: ") {
+		t.Fatalf("stderr should contain clarification prompt, got %q", stderr)
+	}
+	foundReply := false
+	for _, msg := range agent.Messages() {
+		if msg.Role == "user" && msg.Content == "/tmp/repo" {
+			foundReply = true
+			break
+		}
+	}
+	if !foundReply {
+		t.Fatalf("clarification reply not appended: %#v", agent.Messages())
+	}
+}
+
+func TestRunDriverPromptApprovalCanBeCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
+	agent := clnkr.NewAgent(&fakeModel{responses: []clnkr.Response{
+		mustResponse(`{"type":"act","bash":{"commands":[{"command":"rm important.txt","workdir":null}]}}`),
+	}}, &fakeExecutor{}, "/tmp")
+	driver := clnkrapp.NewDriver(agent, nil)
 
 	captureStderr(t, func() {
-		p := &stdinPrompter{reader: &lineReader{lines: make(chan lineResult)}}
-		_, err := p.ActReply(ctx, "rm important.txt")
+		err := runDriverPrompt(ctx, driver, &lineReader{lines: make(chan lineResult)}, "clean up", clnkrapp.PromptModeApproval)
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("got %v, want context.Canceled", err)
 		}

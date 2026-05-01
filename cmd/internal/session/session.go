@@ -124,61 +124,48 @@ func SaveSessionWithMetadata(pwd string, messages []clnkr.Message, metadata any)
 // LoadLatestSession loads the most recent session for the given working directory.
 // Returns nil, nil if no sessions exist.
 func LoadLatestSession(pwd string) ([]clnkr.Message, error) {
-	files, err := sessionFileRefs(pwd)
+	sessions, err := loadSessions(pwd, true)
 	if err != nil {
 		return nil, fmt.Errorf("load latest session: %w", err)
 	}
-	if len(files) == 0 {
+	if len(sessions) == 0 {
 		return nil, nil
 	}
-
-	sort.Slice(files, func(i, j int) bool {
-		return newerFilename(files[i].name, files[j].name)
-	})
-
-	sf, err := loadSessionFile(filepath.Join(files[0].dir, files[0].name))
-	if err != nil {
-		return nil, fmt.Errorf("load latest session %s: %w", files[0].name, err)
-	}
-	latest := loadedSession{
-		SessionInfo: sessionInfo(files[0].name, sf),
-		messages:    sf.Messages,
-	}
-	for _, e := range files[1:] {
-		sf, err := loadSessionFile(filepath.Join(e.dir, e.name))
-		if err != nil {
-			continue
-		}
-		candidate := loadedSession{
-			SessionInfo: sessionInfo(e.name, sf),
-			messages:    sf.Messages,
-		}
-		if newerSession(candidate.SessionInfo, latest.SessionInfo) {
-			latest = candidate
-		}
-	}
-	return latest.messages, nil
+	return sessions[0].messages, nil
 }
 
 // ListSessions lists all sessions for the given working directory.
 // Session filenames define recency before Created metadata.
 func ListSessions(pwd string) ([]SessionInfo, error) {
-	files, err := sessionFileRefs(pwd)
+	loaded, err := loadSessions(pwd, false)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
-
 	var sessions []SessionInfo
+	for _, session := range loaded {
+		sessions = append(sessions, session.SessionInfo)
+	}
+	return sessions, nil
+}
+
+func loadSessions(pwd string, failNewest bool) ([]loadedSession, error) {
+	files, err := sessionFileRefs(pwd)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(files, func(i, j int) bool { return newerFilename(files[i].name, files[j].name) })
+	var sessions []loadedSession
 	for _, e := range files {
 		sf, err := loadSessionFile(filepath.Join(e.dir, e.name))
 		if err != nil {
+			if failNewest && len(sessions) == 0 {
+				return nil, fmt.Errorf("%s: %w", e.name, err)
+			}
 			continue
 		}
-		sessions = append(sessions, sessionInfo(e.name, sf))
+		sessions = append(sessions, loadedSession{SessionInfo: sessionInfo(e.name, sf), messages: sf.Messages})
 	}
-	sort.Slice(sessions, func(i, j int) bool {
-		return newerSession(sessions[i], sessions[j])
-	})
+	sort.Slice(sessions, func(i, j int) bool { return newerSession(sessions[i].SessionInfo, sessions[j].SessionInfo) })
 	return sessions, nil
 }
 

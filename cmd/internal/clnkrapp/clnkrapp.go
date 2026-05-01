@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/compaction"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
+	"github.com/clnkr-ai/clnkr/cmd/internal/session"
 	"github.com/clnkr-ai/clnkr/internal/providers/anthropic"
 	"github.com/clnkr-ai/clnkr/internal/providers/openai"
 	"github.com/clnkr-ai/clnkr/internal/providers/openairesponses"
@@ -63,6 +65,37 @@ func MakeCompactorFactory(cfg providerconfig.ResolvedProviderConfig) compaction.
 	})
 }
 
+func RequestOptions(effort string, maxOutputTokens int, maxOutputTokensSet bool, thinkingBudgetTokens int, thinkingBudgetTokensSet bool) providerdomain.ProviderRequestOptions {
+	return providerdomain.ProviderRequestOptions{
+		Effort: providerdomain.ProviderEffortOptions{
+			Level: effort,
+			Set:   effort != "",
+		},
+		Output: providerdomain.ProviderOutputOptions{
+			MaxOutputTokens: requestInt(maxOutputTokens, maxOutputTokensSet),
+		},
+		AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
+			ThinkingBudgetTokens: requestInt(thinkingBudgetTokens, thinkingBudgetTokensSet),
+		},
+	}
+}
+
+func requestInt(value int, set bool) providerdomain.OptionalInt {
+	return providerdomain.OptionalInt{Value: value, Set: set}
+}
+
+func RequestOptionFlagsSet(flags *flag.FlagSet) (maxOutputTokensSet, thinkingBudgetTokensSet bool) {
+	flags.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "max-output-tokens":
+			maxOutputTokensSet = true
+		case "thinking-budget-tokens":
+			thinkingBudgetTokensSet = true
+		}
+	})
+	return maxOutputTokensSet, thinkingBudgetTokensSet
+}
+
 func WriteEventLog(w io.Writer, e clnkr.Event) error {
 	switch e := e.(type) {
 	case clnkr.EventResponse:
@@ -107,7 +140,6 @@ type RunMetadata struct {
 	ActProtocol  clnkr.ActProtocol          `json:"act_protocol"`
 	Requested    ProviderRequestMetadata    `json:"requested"`
 	Effective    ProviderRequestMetadata    `json:"effective"`
-	Compaction   CompactionMetadata         `json:"compaction"`
 }
 
 type ProviderRequestMetadata struct {
@@ -133,11 +165,6 @@ type AnthropicManualMetadata struct {
 	ThinkingBudgetTokens        *int `json:"thinking_budget_tokens,omitempty"`
 }
 
-type CompactionMetadata struct {
-	Policy          string `json:"policy"`
-	KeepRecentTurns int    `json:"keep_recent_turns"`
-}
-
 func NewRunMetadata(version string, cfg providerconfig.ResolvedProviderConfig, systemPrompt string) RunMetadata {
 	opts := cfg.RequestOptions
 
@@ -150,7 +177,6 @@ func NewRunMetadata(version string, cfg providerconfig.ResolvedProviderConfig, s
 		ActProtocol:  cfg.ActProtocol,
 		Requested:    providerRequestMetadata(opts, !opts.Effort.Set),
 		Effective:    providerRequestMetadata(opts, !opts.Effort.Set || opts.Effort.Level == "auto"),
-		Compaction:   CompactionMetadata{Policy: "manual", KeepRecentTurns: 2},
 	}
 
 	if cfg.Provider == providerdomain.ProviderAnthropic {
@@ -192,12 +218,9 @@ func providerRequestMetadata(opts providerdomain.ProviderRequestOptions, effortO
 	return meta
 }
 
-func RunMetadataDebugEvent(meta RunMetadata) (clnkr.EventDebug, error) {
-	data, err := json.Marshal(meta)
-	if err != nil {
-		return clnkr.EventDebug{}, fmt.Errorf("marshal run metadata: %w", err)
-	}
-	return clnkr.EventDebug{Message: string(data)}, nil
+func RunMetadataDebugEvent(meta RunMetadata) clnkr.EventDebug {
+	data, _ := json.Marshal(meta)
+	return clnkr.EventDebug{Message: string(data)}
 }
 
 func optionalIntPtr(value providerdomain.OptionalInt) *int {
@@ -224,7 +247,7 @@ func LoadMessages(data []byte) ([]clnkr.Message, error) {
 		return messages, nil
 	}
 	var envelope struct {
-		Messages *[]clnkr.Message `json:"messages"`
+		Messages []clnkr.Message `json:"messages"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return nil, fmt.Errorf("parse messages: %w", err)
@@ -232,7 +255,36 @@ func LoadMessages(data []byte) ([]clnkr.Message, error) {
 	if envelope.Messages == nil {
 		return nil, fmt.Errorf("parse messages: missing messages")
 	}
-	return *envelope.Messages, nil
+	return envelope.Messages, nil
+}
+
+func AddMessagesFile(agent *clnkr.Agent, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("cannot read messages file %q: %w", path, err)
+	}
+	msgs, err := LoadMessages(data)
+	if err != nil {
+		return fmt.Errorf("cannot parse messages file %q: %w", path, err)
+	}
+	if err := agent.AddMessages(msgs); err != nil {
+		return fmt.Errorf("cannot load messages: %w", err)
+	}
+	return nil
+}
+
+func ResumeLatestSession(agent *clnkr.Agent, cwd string) (int, bool, error) {
+	msgs, err := session.LoadLatestSession(cwd)
+	if err != nil {
+		return 0, false, fmt.Errorf("cannot load session: %w", err)
+	}
+	if msgs == nil {
+		return 0, false, nil
+	}
+	if err := agent.AddMessages(msgs); err != nil {
+		return 0, false, fmt.Errorf("cannot resume session: %w", err)
+	}
+	return len(msgs), true, nil
 }
 
 func ParseCompactCommand(input string) (instructions string, ok bool) {
@@ -267,101 +319,4 @@ func RejectCompactCommand(input string) error {
 		return fmt.Errorf("/compact is only available at the conversational prompt")
 	}
 	return nil
-}
-
-type ApprovalPrompter interface {
-	ActReply(context.Context, string) (string, error)
-	Clarify(context.Context, string) (string, error)
-}
-
-func RunApprovalTask(ctx context.Context, agent *clnkr.Agent, task string, prompter ApprovalPrompter, reportRejected func(error)) error {
-	agent.AppendUserMessage(task)
-	steps, protocolErrors := 0, 0
-	for {
-		result, err := agent.Step(ctx)
-		if err != nil {
-			return err
-		}
-		if result.ParseErr != nil {
-			protocolErrors++
-			if protocolErrors >= 3 {
-				return fmt.Errorf("consecutive protocol failures, exiting")
-			}
-			continue
-		}
-		protocolErrors = 0
-		switch turn := result.Turn.(type) {
-		case *clnkr.DoneTurn:
-			return nil
-		case *clnkr.ClarifyTurn:
-			reply, err := waitForReply(ctx, prompter.Clarify, turn.Question, reportRejected)
-			if err != nil {
-				return err
-			}
-			agent.AppendUserMessage(reply)
-		case *clnkr.ActTurn:
-			if remaining := agent.MaxSteps - steps; agent.MaxSteps > 0 && remaining <= 0 {
-				return agent.RequestStepLimitSummary(ctx)
-			}
-			var skipped []clnkr.BashAction
-			if remaining := agent.MaxSteps - steps; agent.MaxSteps > 0 && len(turn.Bash.Commands) > remaining {
-				skipped = append([]clnkr.BashAction(nil), turn.Bash.Commands[remaining:]...)
-				turn = &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: turn.Bash.Commands[:remaining]}, Reasoning: turn.Reasoning}
-			}
-			reply, err := waitForReply(ctx, prompter.ActReply, FormatActProposal(turn.Bash.Commands), reportRejected)
-			if err != nil {
-				return err
-			}
-			if strings.TrimSpace(reply) != "y" {
-				allCommands := append([]clnkr.BashAction(nil), turn.Bash.Commands...)
-				allCommands = append(allCommands, skipped...)
-				agent.RejectTurn(&clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: allCommands}, Reasoning: turn.Reasoning}, reply)
-				continue
-			}
-			result, err := agent.ExecuteTurnWithSkipped(ctx, turn, skipped)
-			if err != nil {
-				return err
-			}
-			steps += result.ExecCount
-			if agent.MaxSteps > 0 && steps >= agent.MaxSteps {
-				return agent.RequestStepLimitSummary(ctx)
-			}
-		default:
-			return fmt.Errorf("unhandled turn type %T", turn)
-		}
-	}
-}
-
-func waitForReply(ctx context.Context, prompt func(context.Context, string) (string, error), text string, reportRejected func(error)) (string, error) {
-	for {
-		reply, err := prompt(ctx, text)
-		if err != nil {
-			return "", err
-		}
-		if strings.TrimSpace(reply) == "" {
-			continue
-		}
-		if err := RejectCompactCommand(reply); err != nil {
-			if reportRejected != nil {
-				reportRejected(err)
-			}
-			continue
-		}
-		return reply, nil
-	}
-}
-
-func FormatActProposal(commands []clnkr.BashAction) string {
-	var b strings.Builder
-	for i, action := range commands {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		command := action.Command
-		if workdir := strings.TrimSpace(action.Workdir); workdir != "" {
-			command = fmt.Sprintf("%s in %s", command, workdir)
-		}
-		fmt.Fprintf(&b, "%d. %s", i+1, command)
-	}
-	return b.String()
 }

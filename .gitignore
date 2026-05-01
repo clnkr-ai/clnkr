@@ -1,5 +1,6 @@
 # Binaries
 /clnkr
+/clnkrd
 /cmd/clnkr/clnkr
 /build/
 
@@ -29,6 +30,7 @@ Thumbs.db
 /site/resources/
 /site/.hugo_build.lock
 /site/content/docs/clnkr.md
+/site/content/docs/clnkrd.md
 
 # Evaluations
 /evaluations/trials/*

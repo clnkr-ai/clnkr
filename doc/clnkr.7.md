@@ -44,9 +44,32 @@ result.
 **Transcript**
 : The ordered message history sent to the model.
 
+**Driver**
+: The frontend coordinator around **RunWithPolicy**. It starts prompts,
+routes compaction requests, chooses approval or full-send policy for a prompt,
+turns policy hooks into frontend events, and passes replies back to the run.
+
+**cmd/clnkr**
+: The terminal adapter. It resolves CLI inputs, creates the agent and driver,
+renders terminal output, reads human replies, and maps terminal outcomes to
+exit status.
+
+**cmd/clnkrd**
+: The stdio JSONL adapter. It resolves non-interactive inputs, creates the
+agent and driver, reads JSONL commands from stdin, writes JSONL events to
+stdout, and writes diagnostics to stderr.
+
 The main boundary is **Step** versus **Run**. **Step** performs one model query
-and protocol parse. **Run** owns policy: retrying after protocol failures,
-executing act turns, stopping on clarify or done, and enforcing step limits.
+and protocol parse. **Run** owns policy execution: retrying after protocol
+failures, executing act turns, stopping on clarify or done, asking for a final
+summary at the step limit, and enforcing step limits. **RunWithPolicy** exposes
+the same loop with policy hooks for act approval and clarification replies.
+**Run** delegates to **RunWithPolicy** with a full-send policy.
+
+The frontend boundary is **Driver** versus command adapters. **Driver**
+coordinates frontend interaction around **RunWithPolicy**. It does not own the
+turn policy itself. **cmd/clnkr** and **cmd/clnkrd** adapt terminal and stdio
+JSONL surfaces to the driver.
 
 The configuration ownership boundary is **CLI config resolver** versus
 **Provider request semantics**. The CLI resolver owns app inputs and user-facing
@@ -250,7 +273,7 @@ effective metadata also records the Anthropic thinking mode and effective
 : A turn that asks the host to run one or more bash actions.
 
 **Approval mode**
-: The local human-gated loop that asks before executing accepted act turns.
+: A **RunWithPolicy** policy that asks before executing accepted act turns.
 
 **Bash action**
 : One shell command plus an optional working directory.
@@ -290,6 +313,10 @@ cancelled, denied, skipped, or error.
 
 **Done turn**
 : A turn that summarizes completion and stops the run successfully.
+
+**Driver**
+: The frontend coordinator that turns policy hooks and top-level frontend
+requests into terminal or JSONL interaction.
 
 **Effective request metadata**
 : The provider request state after validation, defaults, and provider-specific
@@ -346,7 +373,10 @@ normalization.
 
 **Run metadata**
 : The version, provider selection, prompt hash, requested and effective request
-metadata, and compaction policy for one run.
+metadata for one run.
+
+**RunWithPolicy**
+: The run loop with policy hooks for approval and clarification interaction.
 
 **Step**
 : One model query plus protocol parsing cycle.
@@ -399,8 +429,10 @@ request options used to construct model calls.
 **6. Launch/Pause/Resume with simple APIs**
 : clnkr starts from a prompt, stdin, or an interactive session. **--continue**,
 **--load-messages**, saved sessions, and single-task mode cover local resume
-flows. Saved sessions include run metadata for inspection. clnkr has no HTTP
-API, webhook entry point, or pause state outside local session files.
+flows. **clnkrd** adds a stdio JSONL launch surface for frontends that need a
+machine-readable adapter. Saved sessions include run metadata for inspection.
+clnkr has no HTTP API, webhook entry point, or pause state outside local
+session files.
 
 **7. Contact humans with tool calls**
 : clnkr has **clarify** turns and approval mode. Human contact is local stdin
@@ -408,11 +440,12 @@ interaction, not a general contact-human tool with Slack, email, or SMS
 delivery.
 
 **8. Own your control flow**
-: **Run** and approval mode switch on accepted turn types, count protocol
-failures, enforce step limits, and decide when commands execute. Approval mode
-truncates an act batch to the remaining step budget before showing the proposal
-or executing commands. Provider request validation happens before the control
-loop constructs the model.
+: **Run** owns policy execution. It switches on accepted turn types, counts
+protocol failures, enforces step limits, truncates act batches to the remaining
+step budget, and decides when commands execute. **RunWithPolicy** exposes the
+same control loop with policy hooks. **Driver** coordinates terminal and stdio
+JSONL interaction around those hooks. Provider request validation happens
+before the control loop constructs the model.
 
 **9. Compact errors into context window**
 : Protocol failures become protocol correction blocks. Command stderr and exit
@@ -420,12 +453,14 @@ codes become command result blocks. Compaction preserves recent context while
 summarizing older history.
 
 **10. Small, focused agents**
-: clnkr is a focused coding-agent CLI with one shipped binary and a small core
-API. Bash is still a broad tool surface.
+: clnkr is a focused coding-agent core with terminal and stdio JSONL adapters.
+The stdio adapter lets another frontend drive the same local agent loop without
+turning clnkr into a service platform. Bash is still a broad tool surface.
 
 **11. External triggers**
-: clnkr starts from CLI flags, stdin, and an interactive REPL. It has no Slack,
-email, webhook, cron, or service integrations.
+: clnkr starts from CLI flags, stdin, an interactive REPL, and clnkrd JSONL
+commands on stdin. It has no Slack, email, webhook, cron, socket listener, web
+server, plugin, or background lifecycle integration.
 
 **12. Make your agent a stateless reducer**
 : clnkr's transcript and sessions make state explicit. **Agent** still holds
