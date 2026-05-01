@@ -20,6 +20,38 @@ import (
 // version is set at build time via -ldflags.
 var version = "dev"
 
+func usageText() string {
+	return `clnkrd - stdio JSONL adapter for clnkr
+
+Usage:
+  clnkrd [options]          Read JSONL commands on stdin, emit events on stdout
+
+JSONL commands:
+  prompt                    Start a run: text + mode approval|full_send
+  reply                     Answer approval_request or clarify
+  compact                   Compact transcript history
+  shutdown                  Cancel active run, drain events, exit 0
+
+JSONL events:
+  debug response protocol_failure approval_request clarify command_start
+  command_done compacted done error
+
+Options:
+      --max-steps int       Limit executed commands before summary
+      --continue            Resume most recent session for this project
+      --load-messages file  Seed conversation from a JSON file
+      --event-log file      Copy JSONL events to a file
+      --version             Print version and exit
+
+` + clnkrapp.ProviderOptionsUsage + `
+` + clnkrapp.SystemPromptUsage + `
+` + clnkrapp.EnvironmentUsage + `
+Examples:
+  printf '%s\n' '{"type":"prompt","text":"inspect","mode":"approval"}' |
+    clnkrd --model "$CLNKR_MODEL" --provider anthropic
+`
+}
+
 func main() {
 	os.Exit(runMain(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv))
 }
@@ -52,7 +84,7 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
-			fmt.Fprint(out, "Usage: clnkrd [options]\n") //nolint:errcheck
+			fmt.Fprint(out, usageText()) //nolint:errcheck
 			return 0
 		}
 		return fail("%v\nSee clnkrd(1) for available options.", err)

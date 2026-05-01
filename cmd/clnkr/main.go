@@ -23,6 +23,42 @@ import (
 // version is set at build time via -ldflags.
 var version = "dev"
 
+func usageText() string {
+	return `clnkr - a minimal coding agent
+
+Usage:
+  clnkr                     Start conversational mode
+
+Options:
+  -p, --prompt string       Task to run unattended and exit
+      --max-steps int       Limit executed commands
+                            before summary (default: 100)
+      --full-send           Execute every act batch without approval
+                            (implied by -p)
+  -v, --verbose             Show internal decisions
+
+Sessions:
+  -c, --continue            Resume most recent session for this project
+  -l, --list-sessions       List saved sessions for this project
+
+Debugging:
+      --load-messages string   Seed conversation from a JSON file
+      --event-log string       Stream JSONL events to file during execution
+      --trajectory string      Save single-task history as JSON on exit
+
+Short aliases:
+  -m, -u, -S                Aliases for --model, --base-url, --no-system-prompt
+  -V, --version             Print version and exit
+
+` + clnkrapp.ProviderOptionsUsage + `
+` + clnkrapp.SystemPromptUsage + `
+` + clnkrapp.EnvironmentUsage + `
+Defaults:
+  anthropic base URL  https://api.anthropic.com
+  openai base URL     https://api.openai.com/v1
+`
+}
+
 func aliasedString(preferred, fallback string) string {
 	if strings.TrimSpace(preferred) != "" {
 		return preferred
@@ -73,14 +109,6 @@ func (r *lineReader) ReadLine(ctx context.Context) (string, error) {
 		}
 		return line.text, nil
 	}
-}
-
-func readTerminalReply(ctx context.Context, reader *lineReader) (string, error) {
-	line, err := reader.ReadLine(ctx)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(line), nil
 }
 
 func runDriverPrompt(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, input string, mode string) error {
@@ -151,11 +179,11 @@ func handleTerminalDriverEvent(ctx context.Context, driver *clnkrapp.Driver, rea
 func replyToTerminalRequest(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, text, prompt string) error {
 	fmt.Fprintln(os.Stderr, text) //nolint:errcheck
 	fmt.Fprint(os.Stderr, prompt) //nolint:errcheck
-	reply, err := readTerminalReply(ctx, reader)
+	reply, err := reader.ReadLine(ctx)
 	if err != nil {
 		return err
 	}
-	return driver.Reply(ctx, reply)
+	return driver.Reply(ctx, strings.TrimSpace(reply))
 }
 
 func fatalf(format string, args ...any) {
@@ -224,7 +252,7 @@ func main() {
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
-			fmt.Fprint(os.Stdout, "Usage: clnkr [options]\nSee clnkr(1) for full help.\n") //nolint:errcheck
+			fmt.Fprint(os.Stdout, usageText()) //nolint:errcheck
 			os.Exit(0)
 		}
 		fmt.Fprintf(os.Stderr, "Error: %v\nSee clnkr(1) for available options.\n", err)

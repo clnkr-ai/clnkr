@@ -16,6 +16,35 @@ import (
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
 )
 
+func TestHelpWritesRichUsageToStdout(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := runMain([]string{"--help"}, strings.NewReader(""), &out, &errOut, func(string) string { return "" })
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0\nstderr: %s", code, errOut.String())
+	}
+	for _, want := range []string{
+		"clnkrd - stdio JSONL adapter for clnkr",
+		"Usage:",
+		"JSONL commands:",
+		"JSONL events:",
+		"Options:",
+		"Environment:",
+		"Examples:",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, out.String())
+		}
+	}
+	for _, line := range strings.Split(out.String(), "\n") {
+		if len(line) > 79 {
+			t.Fatalf("help line length = %d, want <= 79: %q", len(line), line)
+		}
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", errOut.String())
+	}
+}
+
 func TestRunJSONLPromptWritesResponseAndDone(t *testing.T) {
 	var out, errOut bytes.Buffer
 	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished"}`)}}

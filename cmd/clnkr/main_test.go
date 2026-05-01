@@ -130,24 +130,25 @@ func withoutCLNKREnv(env []string) []string {
 	return filtered
 }
 
-func TestUsagePointsToManpage(t *testing.T) {
+func TestHelpWritesRichUsageToStdout(t *testing.T) {
 	stdout, stderr, err := runMainHelper(t, "--help")
 	if err != nil {
 		t.Fatalf("help command: %v\nstderr: %s", err, stderr.String())
 	}
-	want := "Usage: clnkr [options]\nSee clnkr(1) for full help.\n"
-	if stdout.String() != want {
-		t.Fatalf("usage output = %q, want %q", stdout.String(), want)
-	}
-}
-
-func TestHelpWritesUsageToStdout(t *testing.T) {
-	stdout, stderr, err := runMainHelper(t, "--help")
-	if err != nil {
-		t.Fatalf("help command: %v\nstderr: %s", err, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "See clnkr(1)") {
-		t.Fatalf("stdout = %q, want manpage pointer", stdout.String())
+	for _, want := range []string{
+		"clnkr - a minimal coding agent",
+		"Usage:",
+		"Options:",
+		"Provider options:",
+		"Sessions:",
+		"System prompt:",
+		"Debugging:",
+		"Environment:",
+		"Defaults:",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		}
 	}
 	for _, line := range strings.Split(stdout.String(), "\n") {
 		if len(line) > 79 {
