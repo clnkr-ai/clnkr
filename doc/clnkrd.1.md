@@ -126,7 +126,7 @@ or event write failure.
 # ENVIRONMENT
 
 **CLNKR_API_KEY**
-: API key for the LLM provider.
+: API key for **anthropic** or **openai** providers. Not used for **openai-codex**.
 
 **CLNKR_PROVIDER**
 : Provider adapter semantics.
@@ -139,6 +139,12 @@ or event write failure.
 
 **CLNKR_BASE_URL**
 : Default LLM endpoint when **--base-url** is not provided.
+
+**CLNKR_OPENAI_CODEX_AUTH_BASE_URL**
+: Test/debug override for OpenAI Codex auth endpoints.
+
+**CLNKR_OPENAI_CODEX_AUTH_PATH**
+: Test/debug override for the OpenAI Codex auth file path.
 
 # SEE ALSO
 

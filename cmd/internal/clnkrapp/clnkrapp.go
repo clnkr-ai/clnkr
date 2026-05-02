@@ -12,6 +12,7 @@ import (
 
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/compaction"
+	"github.com/clnkr-ai/clnkr/cmd/internal/openaicodexauth"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
 	"github.com/clnkr-ai/clnkr/cmd/internal/session"
 	"github.com/clnkr-ai/clnkr/internal/providers/anthropic"
@@ -43,13 +44,21 @@ func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt s
 		}
 		anthropicOpts.UseBashToolCalls = cfg.ActProtocol == clnkr.ActProtocolToolCalls
 		return anthropic.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, anthropicOpts)
+	case cfg.Provider == providerdomain.ProviderOpenAICodex:
+		return openairesponses.NewModelWithOptions(cfg.BaseURL, "", cfg.Model, systemPrompt, openairesponses.Options{
+			ReasoningEffort:    responseEffort(opts),
+			MaxOutputTokens:    opts.Output.MaxOutputTokens.Value,
+			HasMaxOutputTokens: opts.Output.MaxOutputTokens.Set,
+			UseBashToolCalls:   cfg.ActProtocol == clnkr.ActProtocolToolCalls,
+			DisableStore:       true,
+			RequestHook: openaicodexauth.NewManager(openaicodexauth.Config{
+				AuthBaseURL: cfg.OpenAICodexAuthBaseURL,
+				AuthPath:    cfg.OpenAICodexAuthPath,
+			}),
+		})
 	case cfg.ProviderAPI == providerdomain.ProviderAPIOpenAIResponses:
-		var effort string
-		if opts.Effort.Set && opts.Effort.Level != "auto" {
-			effort = opts.Effort.Level
-		}
 		return openairesponses.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, openairesponses.Options{
-			ReasoningEffort:    effort,
+			ReasoningEffort:    responseEffort(opts),
 			MaxOutputTokens:    opts.Output.MaxOutputTokens.Value,
 			HasMaxOutputTokens: opts.Output.MaxOutputTokens.Set,
 			UseBashToolCalls:   cfg.ActProtocol == clnkr.ActProtocolToolCalls,
@@ -82,6 +91,13 @@ func RequestOptions(effort string, maxOutputTokens int, maxOutputTokensSet bool,
 
 func requestInt(value int, set bool) providerdomain.OptionalInt {
 	return providerdomain.OptionalInt{Value: value, Set: set}
+}
+
+func responseEffort(opts providerdomain.ProviderRequestOptions) string {
+	if !opts.Effort.Set || opts.Effort.Level == "auto" {
+		return ""
+	}
+	return opts.Effort.Level
 }
 
 func RequestOptionFlagsSet(flags *flag.FlagSet) (maxOutputTokensSet, thinkingBudgetTokensSet bool) {

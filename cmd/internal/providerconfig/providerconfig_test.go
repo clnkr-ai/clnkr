@@ -54,6 +54,58 @@ func TestResolveConfigRequiresProviderModelAndAPIKey(t *testing.T) {
 	})
 }
 
+func TestResolveConfigOpenAICodexDoesNotRequireAPIKey(t *testing.T) {
+	cfg, err := ResolveConfig(Inputs{
+		Provider: "openai-codex",
+		Model:    "gpt-5.2-codex",
+	}, func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("ResolveConfig(): %v", err)
+	}
+	if cfg.Provider != providerdomain.ProviderOpenAICodex {
+		t.Fatalf("Provider = %q, want %q", cfg.Provider, providerdomain.ProviderOpenAICodex)
+	}
+	if cfg.ProviderAPI != providerdomain.ProviderAPIOpenAIResponses {
+		t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, providerdomain.ProviderAPIOpenAIResponses)
+	}
+	if cfg.BaseURL != DefaultOpenAICodexBaseURL {
+		t.Fatalf("BaseURL = %q, want %q", cfg.BaseURL, DefaultOpenAICodexBaseURL)
+	}
+	if cfg.APIKey != "" {
+		t.Fatalf("APIKey = %q, want empty", cfg.APIKey)
+	}
+}
+
+func TestResolveConfigRejectsProviderAPIForOpenAICodex(t *testing.T) {
+	_, err := ResolveConfig(Inputs{
+		Provider:    "openai-codex",
+		ProviderAPI: "openai-chat-completions",
+		Model:       "gpt-5.2-codex",
+	}, func(string) string { return "" })
+	if err == nil || err.Error() != `provider-api is only valid for provider "openai"` {
+		t.Fatalf("ResolveConfig() err = %v, want openai-codex provider-api rejection", err)
+	}
+}
+
+func TestResolveConfigCarriesOpenAICodexAuthOverrides(t *testing.T) {
+	cfg, err := ResolveConfig(Inputs{
+		Provider: "openai-codex",
+		Model:    "gpt-5.2-codex",
+	}, envMap(map[string]string{
+		"CLNKR_OPENAI_CODEX_AUTH_BASE_URL": "https://auth.example",
+		"CLNKR_OPENAI_CODEX_AUTH_PATH":     "/tmp/auth.json",
+	}))
+	if err != nil {
+		t.Fatalf("ResolveConfig(): %v", err)
+	}
+	if cfg.OpenAICodexAuthBaseURL != "https://auth.example" {
+		t.Fatalf("OpenAICodexAuthBaseURL = %q, want auth override", cfg.OpenAICodexAuthBaseURL)
+	}
+	if cfg.OpenAICodexAuthPath != "/tmp/auth.json" {
+		t.Fatalf("OpenAICodexAuthPath = %q, want path override", cfg.OpenAICodexAuthPath)
+	}
+}
+
 func TestResolveConfigPrefersFlagsOverEnv(t *testing.T) {
 	cfg, err := ResolveConfig(Inputs{
 		Provider:    "openai",

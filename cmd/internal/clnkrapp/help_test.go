@@ -48,6 +48,8 @@ func TestSharedHelpFragments(t *testing.T) {
 		"CLNKR_PROVIDER_API",
 		"CLNKR_MODEL",
 		"CLNKR_BASE_URL",
+		"CLNKR_OPENAI_CODEX_AUTH_BASE_URL",
+		"CLNKR_OPENAI_CODEX_AUTH_PATH",
 	} {
 		if !strings.Contains(EnvironmentUsage, want) {
 			t.Fatalf("environment help missing %q", want)

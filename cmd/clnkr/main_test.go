@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	clnkr "github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
@@ -43,6 +45,14 @@ func mustCanonicalDoneText(summary string) string {
 		panic(err)
 	}
 	return text
+}
+
+func testJWT(claims map[string]any) string {
+	body, err := json.Marshal(claims)
+	if err != nil {
+		panic(err)
+	}
+	return base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." + base64.RawURLEncoding.EncodeToString(body) + ".sig"
 }
 
 func runDoneTranscript(t *testing.T, summary string) []clnkr.Message {
@@ -219,6 +229,68 @@ func TestDumpToolCallsSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "exactly once") {
 		t.Fatalf("stdout imposes one tool call: %q", stdout.String())
+	}
+	if strings.Contains(stderr.String(), "provider is required") {
+		t.Fatalf("stderr = %q, provider validation ran first", stderr.String())
+	}
+}
+
+func TestLoginOpenAICodexDoesNotRequireProviderConfig(t *testing.T) {
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/accounts/deviceauth/usercode":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"device_auth_id": "device-1",
+				"user_code":      "TEST-CODE",
+				"interval":       0,
+			})
+		case "/api/accounts/deviceauth/token":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"authorization_code": "auth-code",
+				"code_verifier":      "verifier",
+				"code_challenge":     "challenge",
+			})
+		case "/oauth/token":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id_token":      testJWT(map[string]any{"https://api.openai.com/auth": map[string]any{"chatgpt_account_id": "acct-123"}}),
+				"access_token":  testJWT(map[string]any{"exp": time.Now().Add(time.Hour).Unix()}),
+				"refresh_token": "refresh-token",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer authServer.Close()
+
+	authPath := filepath.Join(t.TempDir(), "auth.json")
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{
+		"CLNKR_OPENAI_CODEX_AUTH_BASE_URL=" + authServer.URL,
+		"CLNKR_OPENAI_CODEX_AUTH_PATH=" + authPath,
+	}, "--login-openai-codex")
+	if err != nil {
+		t.Fatalf("login: %v\nstderr: %s", err, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "TEST-CODE") || !strings.Contains(stderr.String(), "Successfully logged in") {
+		t.Fatalf("stderr = %q, want code and success", stderr.String())
+	}
+	if _, err := os.Stat(authPath); err != nil {
+		t.Fatalf("auth file not written: %v", err)
+	}
+}
+
+func TestLoginOpenAICodexRejectsRunFlagsBeforeProviderConfig(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t, "--login-openai-codex", "-p", "hi")
+	if err == nil {
+		t.Fatal("login with prompt succeeded, want failure")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "--login-openai-codex conflicts with -p") {
+		t.Fatalf("stderr = %q, want conflict", stderr.String())
 	}
 	if strings.Contains(stderr.String(), "provider is required") {
 		t.Fatalf("stderr = %q, provider validation ran first", stderr.String())

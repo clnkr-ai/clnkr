@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -243,6 +244,152 @@ func TestModelQuerySerializesProviderRequestOptions(t *testing.T) {
 	}
 }
 
+func TestModelQueryUsesRequestHookAndRetriesOneUnauthorized(t *testing.T) {
+	var calls int
+	var gotAuth []string
+	var gotAccount []string
+	var gotStore []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+		gotAccount = append(gotAccount, r.Header.Get("ChatGPT-Account-ID"))
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotStore = append(gotStore, body["store"])
+		if calls == 1 {
+			http.Error(w, `{"error":{"message":"expired"}}`, http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": []map[string]any{
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]any{
+						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","reasoning":null}}`},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	hook := &rotatingHook{token: "old", refreshed: "new", accountID: "acct-123"}
+	model := openairesponses.NewModelWithOptions(server.URL, "", "gpt-5.2-codex", "sys", openairesponses.Options{
+		DisableStore: true,
+		RequestHook:  hook,
+	})
+	_, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2", calls)
+	}
+	if hook.refreshes != 1 {
+		t.Fatalf("refreshes = %d, want 1", hook.refreshes)
+	}
+	if gotAuth[0] != "Bearer old" || gotAuth[1] != "Bearer new" {
+		t.Fatalf("Authorization headers = %#v", gotAuth)
+	}
+	if gotAccount[0] != "acct-123" || gotAccount[1] != "acct-123" {
+		t.Fatalf("ChatGPT-Account-ID headers = %#v", gotAccount)
+	}
+	if gotStore[0] != false || gotStore[1] != false {
+		t.Fatalf("store fields = %#v, want false on both requests", gotStore)
+	}
+}
+
+func TestModelQueryParsesStreamingResponse(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: response.output_item.done\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"turn\\\":{\\\"type\\\":\\\"done\\\",\\\"summary\\\":\\\"ok\\\",\\\"reasoning\\\":null}}\"}]}}\n\n")
+		_, _ = fmt.Fprint(w, "event: response.completed\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp1\",\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}}\n\n")
+	}))
+	defer server.Close()
+
+	model := openairesponses.NewModelWithOptions(server.URL, "", "gpt-5.4", "sys", openairesponses.Options{DisableStore: true, RequestHook: staticHook{}})
+	resp, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if gotBody["store"] != false || gotBody["stream"] != true {
+		t.Fatalf("request store/stream = %#v/%#v, want false/true", gotBody["store"], gotBody["stream"])
+	}
+	if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok"}` {
+		t.Fatalf("canonical turn = %q, want done ok", got)
+	}
+	if resp.Usage.InputTokens != 2 || resp.Usage.OutputTokens != 3 {
+		t.Fatalf("usage = %+v, want 2/3", resp.Usage)
+	}
+}
+
+type staticHook struct{}
+
+func (staticHook) Authorize(_ context.Context, r *http.Request) error {
+	r.Header.Set("Authorization", "Bearer token")
+	r.Header.Set("ChatGPT-Account-ID", "acct")
+	return nil
+}
+
+func (staticHook) HandleUnauthorized(context.Context) (bool, error) {
+	return false, nil
+}
+
+type rotatingHook struct {
+	token     string
+	refreshed string
+	accountID string
+	refreshes int
+}
+
+func (a *rotatingHook) Authorize(_ context.Context, r *http.Request) error {
+	r.Header.Set("Authorization", "Bearer "+a.token)
+	r.Header.Set("ChatGPT-Account-ID", a.accountID)
+	return nil
+}
+
+func (a *rotatingHook) HandleUnauthorized(_ context.Context) (bool, error) {
+	a.refreshes++
+	a.token = a.refreshed
+	return true, nil
+}
+
+func TestModelQueryUnauthorizedHookErrorIsAuthNeutral(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"message":"expired"}}`, http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	model := openairesponses.NewModelWithOptions(server.URL, "", "gpt-5", "", openairesponses.Options{
+		RequestHook: failingUnauthorizedHook{},
+	})
+	_, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+	if err == nil {
+		t.Fatal("Query succeeded, want error")
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "codex") || strings.Contains(strings.ToLower(err.Error()), "refresh") {
+		t.Fatalf("error = %q, want auth-neutral text", err.Error())
+	}
+	if !strings.Contains(err.Error(), "handle unauthorized response") {
+		t.Fatalf("error = %q, want unauthorized hook context", err.Error())
+	}
+}
+
+type failingUnauthorizedHook struct{}
+
+func (failingUnauthorizedHook) Authorize(context.Context, *http.Request) error { return nil }
+
+func (failingUnauthorizedHook) HandleUnauthorized(context.Context) (bool, error) {
+	return false, errors.New("hook failed")
+}
+
 func TestModelQueryRejectsContradictoryStructuredTurn(t *testing.T) {
 	content := `{"turn":{"type":"done","bash":{"commands":[{"command":"rm -rf tmp","workdir":null}]},"question":null,"summary":"done","reasoning":null}}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -470,6 +617,33 @@ func TestModelQueryTextOmitsStructuredOutputConfigAndNormalizesAssistantHistory(
 	annotations, ok := item["annotations"].([]any)
 	if !ok || len(annotations) != 0 {
 		t.Fatalf("assistant annotations = %#v, want empty array", item["annotations"])
+	}
+}
+
+func TestModelQueryTextDoesNotRetryUnauthorizedThroughHook(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, `{"error":{"message":"expired"}}`, http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	hook := &rotatingHook{token: "old", refreshed: "new", accountID: "acct-123"}
+	model := openairesponses.NewModelWithOptions(server.URL, "", "gpt-5.2-codex", "", openairesponses.Options{
+		RequestHook: hook,
+	})
+	_, err := model.QueryText(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+	if err == nil {
+		t.Fatal("QueryText succeeded, want unauthorized error")
+	}
+	if calls != 1 {
+		t.Fatalf("calls = %d, want 1", calls)
+	}
+	if hook.refreshes != 0 {
+		t.Fatalf("refreshes = %d, want 0", hook.refreshes)
+	}
+	if !strings.Contains(err.Error(), "api error (status 401)") {
+		t.Fatalf("error = %q, want unauthorized API error", err.Error())
 	}
 }
 

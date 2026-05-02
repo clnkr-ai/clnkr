@@ -16,6 +16,7 @@ import (
 
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
+	"github.com/clnkr-ai/clnkr/cmd/internal/openaicodexauth"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
 	"github.com/clnkr-ai/clnkr/cmd/internal/session"
 )
@@ -36,6 +37,7 @@ Options:
       --full-send           Execute every act batch without approval
                             (implied by -p)
   -v, --verbose             Show internal decisions
+      --login-openai-codex  Sign in to ChatGPT Codex subscription auth
 
 Sessions:
   -c, --continue            Resume most recent session for this project
@@ -54,8 +56,9 @@ Short aliases:
 ` + clnkrapp.SystemPromptUsage + `
 ` + clnkrapp.EnvironmentUsage + `
 Defaults:
-  anthropic base URL  https://api.anthropic.com
-  openai base URL     https://api.openai.com/v1
+  anthropic base URL     https://api.anthropic.com
+  openai base URL        https://api.openai.com/v1
+  openai-codex base URL  https://chatgpt.com/backend-api/codex
 `
 }
 
@@ -205,6 +208,34 @@ func exitRunErr(err error) {
 	}
 }
 
+func validateOpenAICodexLoginFlags(flags *flag.FlagSet) error {
+	var conflict string
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name != "login-openai-codex" && conflict == "" {
+			conflict = f.Name
+		}
+	})
+	if conflict == "p" || conflict == "prompt" {
+		return fmt.Errorf("--login-openai-codex conflicts with -p")
+	}
+	if conflict != "" || flags.NArg() != 0 {
+		return fmt.Errorf("--login-openai-codex cannot be combined with run or session options")
+	}
+	return nil
+}
+
+func runOpenAICodexLogin(w io.Writer, flags *flag.FlagSet, env func(string) string) error {
+	if err := validateOpenAICodexLoginFlags(flags); err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	return openaicodexauth.DeviceLogin(ctx, w, openaicodexauth.Config{
+		AuthBaseURL: env("CLNKR_OPENAI_CODEX_AUTH_BASE_URL"),
+		AuthPath:    env("CLNKR_OPENAI_CODEX_AUTH_PATH"),
+	})
+}
+
 func main() {
 	flags := flag.NewFlagSet("clnkr", flag.ContinueOnError)
 	flags.Usage = func() {}
@@ -249,6 +280,7 @@ func main() {
 	noSystemPromptShort := flags.Bool("S", false, "")
 	systemPromptAppend := flags.String("system-prompt-append", "", "")
 	dumpSystemPrompt := flags.Bool("dump-system-prompt", false, "")
+	loginOpenAICodex := flags.Bool("login-openai-codex", false, "")
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -262,6 +294,13 @@ func main() {
 
 	if *showVersion || *showVersionShort {
 		fmt.Printf("clnkr %s\n", version)
+		os.Exit(0)
+	}
+
+	if *loginOpenAICodex {
+		if err := runOpenAICodexLogin(os.Stderr, flags, os.Getenv); err != nil {
+			fatalf("%v", err)
+		}
 		os.Exit(0)
 	}
 

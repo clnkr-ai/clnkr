@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	DefaultAnthropicBaseURL = "https://api.anthropic.com"
-	DefaultOpenAIBaseURL    = "https://api.openai.com/v1"
+	DefaultAnthropicBaseURL   = "https://api.anthropic.com"
+	DefaultOpenAIBaseURL      = "https://api.openai.com/v1"
+	DefaultOpenAICodexBaseURL = "https://chatgpt.com/backend-api/codex"
 )
 
 type Inputs struct {
@@ -31,6 +32,9 @@ type ResolvedProviderConfig struct {
 	APIKey         string
 	ActProtocol    clnkr.ActProtocol
 	RequestOptions providerdomain.ProviderRequestOptions
+
+	OpenAICodexAuthBaseURL string
+	OpenAICodexAuthPath    string
 }
 
 func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConfig, error) {
@@ -60,12 +64,12 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 	}
 
 	apiKey := strings.TrimSpace(env("CLNKR_API_KEY"))
-	if apiKey == "" {
+	if apiKey == "" && provider != providerdomain.ProviderOpenAICodex {
 		return ResolvedProviderConfig{}, fmt.Errorf("api key is required; set CLNKR_API_KEY")
 	}
 
 	providerAPIRaw, _, providerAPISet := chooseValue(inputs.ProviderAPI, env("CLNKR_PROVIDER_API"), "--provider-api", "CLNKR_PROVIDER_API")
-	if provider == providerdomain.ProviderAnthropic && providerAPISet {
+	if provider != providerdomain.ProviderOpenAI && providerAPISet {
 		return ResolvedProviderConfig{}, fmt.Errorf(`provider-api is only valid for provider "openai"`)
 	}
 
@@ -80,6 +84,9 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 		baseURL, baseURLSource = DefaultAnthropicBaseURL, "default"
 		if provider == providerdomain.ProviderOpenAI {
 			baseURL = DefaultOpenAIBaseURL
+		}
+		if provider == providerdomain.ProviderOpenAICodex {
+			baseURL = DefaultOpenAICodexBaseURL
 		}
 	}
 	parsedBaseURL, err := parseBaseURL(baseURL, baseURLSource)
@@ -107,7 +114,17 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 		return ResolvedProviderConfig{}, err
 	}
 
-	return ResolvedProviderConfig{Provider: provider, ProviderAPI: providerAPI, Model: model, BaseURL: baseURL, APIKey: apiKey, ActProtocol: actProtocol, RequestOptions: requestOptions}, nil
+	return ResolvedProviderConfig{
+		Provider:               provider,
+		ProviderAPI:            providerAPI,
+		Model:                  model,
+		BaseURL:                baseURL,
+		APIKey:                 apiKey,
+		ActProtocol:            actProtocol,
+		RequestOptions:         requestOptions,
+		OpenAICodexAuthBaseURL: strings.TrimSpace(env("CLNKR_OPENAI_CODEX_AUTH_BASE_URL")),
+		OpenAICodexAuthPath:    strings.TrimSpace(env("CLNKR_OPENAI_CODEX_AUTH_PATH")),
+	}, nil
 }
 
 func chooseValue(flagValue, envValue, flagSource, envSource string) (string, string, bool) {

@@ -39,6 +39,14 @@ export CLNKR_MODEL=claude-sonnet-4-6
 clnkr
 ```
 
+Or sign in with a ChatGPT Codex subscription and use the explicit
+`openai-codex` provider:
+
+```bash
+clnkr --login-openai-codex
+clnkr --provider openai-codex --model gpt-5.2-codex
+```
+
 At the prompt, ask for a task. `clnkr` proposes bash commands and asks before running each batch.
 
 Run unattended:
@@ -103,14 +111,17 @@ Full CLI reference: [`doc/clnkr.1.md`](doc/clnkr.1.md).
 
 ## Configuration
 
-Set `CLNKR_API_KEY`. Everything else can come from flags or environment variables.
+Set `CLNKR_API_KEY` for API-key providers. For ChatGPT Codex subscription auth,
+run `clnkr --login-openai-codex` and use `--provider openai-codex`.
 
 | Variable | Description |
 |----------|-------------|
-| `CLNKR_API_KEY` | API key for the LLM provider (required) |
-| `CLNKR_PROVIDER` | Provider: `anthropic` or `openai` |
+| `CLNKR_API_KEY` | API key for `anthropic` or `openai` |
+| `CLNKR_PROVIDER` | Provider: `anthropic`, `openai`, or `openai-codex` |
 | `CLNKR_MODEL` | Model name (overridden by `--model`) |
 | `CLNKR_BASE_URL` | LLM endpoint (overridden by `--base-url`) |
+| `CLNKR_OPENAI_CODEX_AUTH_BASE_URL` | Test/debug override for OpenAI Codex auth endpoints during login and runtime auth |
+| `CLNKR_OPENAI_CODEX_AUTH_PATH` | Test/debug override for the OpenAI Codex auth file path during login and runtime auth |
 
 clnkr builds its system prompt from the built-in prompt plus `AGENTS.md` files found in the user home directory, the XDG config directory, and the current working directory.
 
