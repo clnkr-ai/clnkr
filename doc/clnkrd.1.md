@@ -126,7 +126,7 @@ or event write failure.
 # ENVIRONMENT
 
 **CLNKR_API_KEY**
-: API key for the LLM provider.
+: API key for **anthropic** or **openai** providers. Not used for **openai-codex**.
 
 **CLNKR_PROVIDER**
 : Provider adapter semantics.

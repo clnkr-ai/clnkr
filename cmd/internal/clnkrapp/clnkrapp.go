@@ -16,6 +16,7 @@ import (
 	"github.com/clnkr-ai/clnkr/cmd/internal/session"
 	"github.com/clnkr-ai/clnkr/internal/providers/anthropic"
 	"github.com/clnkr-ai/clnkr/internal/providers/openai"
+	"github.com/clnkr-ai/clnkr/internal/providers/openaicodexauth"
 	"github.com/clnkr-ai/clnkr/internal/providers/openairesponses"
 	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
 )
@@ -43,17 +44,10 @@ func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt s
 		}
 		anthropicOpts.UseBashToolCalls = cfg.ActProtocol == clnkr.ActProtocolToolCalls
 		return anthropic.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, anthropicOpts)
+	case cfg.Provider == providerdomain.ProviderOpenAICodex:
+		return openairesponses.NewModelWithRequestOptions(cfg.BaseURL, "", cfg.Model, systemPrompt, opts.Effort.Level, opts.Effort.Set, opts.Output.MaxOutputTokens.Value, opts.Output.MaxOutputTokens.Set, cfg.ActProtocol == clnkr.ActProtocolToolCalls, true, openaicodexauth.NewManager(openaicodexauth.Config{}))
 	case cfg.ProviderAPI == providerdomain.ProviderAPIOpenAIResponses:
-		var effort string
-		if opts.Effort.Set && opts.Effort.Level != "auto" {
-			effort = opts.Effort.Level
-		}
-		return openairesponses.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, openairesponses.Options{
-			ReasoningEffort:    effort,
-			MaxOutputTokens:    opts.Output.MaxOutputTokens.Value,
-			HasMaxOutputTokens: opts.Output.MaxOutputTokens.Set,
-			UseBashToolCalls:   cfg.ActProtocol == clnkr.ActProtocolToolCalls,
-		})
+		return openairesponses.NewModelWithRequestOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, opts.Effort.Level, opts.Effort.Set, opts.Output.MaxOutputTokens.Value, opts.Output.MaxOutputTokens.Set, cfg.ActProtocol == clnkr.ActProtocolToolCalls, false, nil)
 	default:
 		return openai.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
 	}

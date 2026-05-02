@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -241,6 +242,121 @@ func TestModelQuerySerializesProviderRequestOptions(t *testing.T) {
 	if got, want := gotBody["max_output_tokens"], float64(8000); got != want {
 		t.Fatalf("max_output_tokens = %#v, want %v", got, want)
 	}
+}
+
+func TestModelQueryUsesRequestAuthorizerAndRetriesOneUnauthorized(t *testing.T) {
+	var calls int
+	var gotAuth []string
+	var gotAccount []string
+	var gotStore []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+		gotAccount = append(gotAccount, r.Header.Get("ChatGPT-Account-ID"))
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotStore = append(gotStore, body["store"])
+		if calls == 1 {
+			http.Error(w, `{"error":{"message":"expired"}}`, http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": []map[string]any{
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]any{
+						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","reasoning":null}}`},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	authorizer := &rotatingAuthorizer{token: "old", refreshed: "new", accountID: "acct-123"}
+	model := openairesponses.NewModelWithOptions(server.URL, "", "gpt-5.2-codex", "sys", openairesponses.Options{
+		DisableStore: true,
+		Authorizer:   authorizer,
+	})
+	_, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2", calls)
+	}
+	if authorizer.refreshes != 1 {
+		t.Fatalf("refreshes = %d, want 1", authorizer.refreshes)
+	}
+	if gotAuth[0] != "Bearer old" || gotAuth[1] != "Bearer new" {
+		t.Fatalf("Authorization headers = %#v", gotAuth)
+	}
+	if gotAccount[0] != "acct-123" || gotAccount[1] != "acct-123" {
+		t.Fatalf("ChatGPT-Account-ID headers = %#v", gotAccount)
+	}
+	if gotStore[0] != false || gotStore[1] != false {
+		t.Fatalf("store fields = %#v, want false on both requests", gotStore)
+	}
+}
+
+func TestModelQueryParsesStreamingResponse(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: response.output_item.done\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"turn\\\":{\\\"type\\\":\\\"done\\\",\\\"summary\\\":\\\"ok\\\",\\\"reasoning\\\":null}}\"}]}}\n\n")
+		_, _ = fmt.Fprint(w, "event: response.completed\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp1\",\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}}\n\n")
+	}))
+	defer server.Close()
+
+	model := openairesponses.NewModelWithOptions(server.URL, "", "gpt-5.4", "sys", openairesponses.Options{DisableStore: true, Authorizer: staticAuthorizer{}})
+	resp, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if gotBody["store"] != false || gotBody["stream"] != true {
+		t.Fatalf("request store/stream = %#v/%#v, want false/true", gotBody["store"], gotBody["stream"])
+	}
+	if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok"}` {
+		t.Fatalf("canonical turn = %q, want done ok", got)
+	}
+	if resp.Usage.InputTokens != 2 || resp.Usage.OutputTokens != 3 {
+		t.Fatalf("usage = %+v, want 2/3", resp.Usage)
+	}
+}
+
+type staticAuthorizer struct{}
+
+func (staticAuthorizer) Authorize(_ context.Context, r *http.Request) error {
+	r.Header.Set("Authorization", "Bearer token")
+	r.Header.Set("ChatGPT-Account-ID", "acct")
+	return nil
+}
+
+func (staticAuthorizer) Refresh(context.Context) error { return nil }
+
+type rotatingAuthorizer struct {
+	token     string
+	refreshed string
+	accountID string
+	refreshes int
+}
+
+func (a *rotatingAuthorizer) Authorize(_ context.Context, r *http.Request) error {
+	r.Header.Set("Authorization", "Bearer "+a.token)
+	r.Header.Set("ChatGPT-Account-ID", a.accountID)
+	return nil
+}
+
+func (a *rotatingAuthorizer) Refresh(_ context.Context) error {
+	a.refreshes++
+	a.token = a.refreshed
+	return nil
 }
 
 func TestModelQueryRejectsContradictoryStructuredTurn(t *testing.T) {

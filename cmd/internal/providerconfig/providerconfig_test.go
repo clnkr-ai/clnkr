@@ -54,6 +54,39 @@ func TestResolveConfigRequiresProviderModelAndAPIKey(t *testing.T) {
 	})
 }
 
+func TestResolveConfigOpenAICodexDoesNotRequireAPIKey(t *testing.T) {
+	cfg, err := ResolveConfig(Inputs{
+		Provider: "openai-codex",
+		Model:    "gpt-5.2-codex",
+	}, func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("ResolveConfig(): %v", err)
+	}
+	if cfg.Provider != providerdomain.ProviderOpenAICodex {
+		t.Fatalf("Provider = %q, want %q", cfg.Provider, providerdomain.ProviderOpenAICodex)
+	}
+	if cfg.ProviderAPI != providerdomain.ProviderAPIOpenAIResponses {
+		t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, providerdomain.ProviderAPIOpenAIResponses)
+	}
+	if cfg.BaseURL != DefaultOpenAICodexBaseURL {
+		t.Fatalf("BaseURL = %q, want %q", cfg.BaseURL, DefaultOpenAICodexBaseURL)
+	}
+	if cfg.APIKey != "" {
+		t.Fatalf("APIKey = %q, want empty", cfg.APIKey)
+	}
+}
+
+func TestResolveConfigRejectsProviderAPIForOpenAICodex(t *testing.T) {
+	_, err := ResolveConfig(Inputs{
+		Provider:    "openai-codex",
+		ProviderAPI: "openai-chat-completions",
+		Model:       "gpt-5.2-codex",
+	}, func(string) string { return "" })
+	if err == nil || err.Error() != `provider-api is only valid for provider "openai"` {
+		t.Fatalf("ResolveConfig() err = %v, want openai-codex provider-api rejection", err)
+	}
+}
+
 func TestResolveConfigPrefersFlagsOverEnv(t *testing.T) {
 	cfg, err := ResolveConfig(Inputs{
 		Provider:    "openai",

@@ -18,6 +18,7 @@ import (
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
 	"github.com/clnkr-ai/clnkr/cmd/internal/session"
+	"github.com/clnkr-ai/clnkr/internal/providers/openaicodexauth"
 )
 
 // version is set at build time via -ldflags.
@@ -36,6 +37,7 @@ Options:
       --full-send           Execute every act batch without approval
                             (implied by -p)
   -v, --verbose             Show internal decisions
+      --login-openai-codex  Sign in to ChatGPT Codex subscription auth
 
 Sessions:
   -c, --continue            Resume most recent session for this project
@@ -249,6 +251,7 @@ func main() {
 	noSystemPromptShort := flags.Bool("S", false, "")
 	systemPromptAppend := flags.String("system-prompt-append", "", "")
 	dumpSystemPrompt := flags.Bool("dump-system-prompt", false, "")
+	loginOpenAICodex := flags.Bool("login-openai-codex", false, "")
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -264,6 +267,8 @@ func main() {
 		fmt.Printf("clnkr %s\n", version)
 		os.Exit(0)
 	}
+
+	openaicodexauth.RunValidatedDeviceLoginIfRequested(*loginOpenAICodex, flags, os.Stderr, os.Getenv, fatalf)
 
 	cwd, err := os.Getwd()
 	if err != nil {

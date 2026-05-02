@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	DefaultAnthropicBaseURL = "https://api.anthropic.com"
-	DefaultOpenAIBaseURL    = "https://api.openai.com/v1"
+	DefaultAnthropicBaseURL   = "https://api.anthropic.com"
+	DefaultOpenAIBaseURL      = "https://api.openai.com/v1"
+	DefaultOpenAICodexBaseURL = "https://chatgpt.com/backend-api/codex"
 )
 
 type Inputs struct {
@@ -60,12 +61,12 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 	}
 
 	apiKey := strings.TrimSpace(env("CLNKR_API_KEY"))
-	if apiKey == "" {
+	if apiKey == "" && provider != providerdomain.ProviderOpenAICodex {
 		return ResolvedProviderConfig{}, fmt.Errorf("api key is required; set CLNKR_API_KEY")
 	}
 
 	providerAPIRaw, _, providerAPISet := chooseValue(inputs.ProviderAPI, env("CLNKR_PROVIDER_API"), "--provider-api", "CLNKR_PROVIDER_API")
-	if provider == providerdomain.ProviderAnthropic && providerAPISet {
+	if provider != providerdomain.ProviderOpenAI && providerAPISet {
 		return ResolvedProviderConfig{}, fmt.Errorf(`provider-api is only valid for provider "openai"`)
 	}
 
@@ -80,6 +81,9 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 		baseURL, baseURLSource = DefaultAnthropicBaseURL, "default"
 		if provider == providerdomain.ProviderOpenAI {
 			baseURL = DefaultOpenAIBaseURL
+		}
+		if provider == providerdomain.ProviderOpenAICodex {
+			baseURL = DefaultOpenAICodexBaseURL
 		}
 	}
 	parsedBaseURL, err := parseBaseURL(baseURL, baseURLSource)

@@ -10,8 +10,9 @@ import (
 type Provider string
 
 const (
-	ProviderAnthropic Provider = "anthropic"
-	ProviderOpenAI    Provider = "openai"
+	ProviderAnthropic   Provider = "anthropic"
+	ProviderOpenAI      Provider = "openai"
+	ProviderOpenAICodex Provider = "openai-codex"
 )
 
 type ProviderAPI string
@@ -24,10 +25,10 @@ const (
 
 func ParseProvider(raw string) (Provider, error) {
 	provider := Provider(strings.ToLower(strings.TrimSpace(raw)))
-	if provider == ProviderAnthropic || provider == ProviderOpenAI {
+	if provider == ProviderAnthropic || provider == ProviderOpenAI || provider == ProviderOpenAICodex {
 		return provider, nil
 	}
-	return "", fmt.Errorf(`invalid provider %q (allowed: anthropic, openai)`, raw)
+	return "", fmt.Errorf(`invalid provider %q (allowed: anthropic, openai, openai-codex)`, raw)
 }
 
 func ParseProviderAPI(raw string) (ProviderAPI, error) {
@@ -106,6 +107,9 @@ var unsupportedStructuredOpenAIModels = map[string]struct{}{
 }
 
 func ResolveProviderAPI(provider Provider, providerAPI ProviderAPI, model string) (ProviderAPI, error) {
+	if provider == ProviderOpenAICodex {
+		return ProviderAPIOpenAIResponses, nil
+	}
 	if provider == ProviderOpenAI {
 		normalizedModel := strings.ToLower(strings.TrimSpace(model))
 		if listedModel(unsupportedStructuredOpenAIModels, normalizedModel) {
@@ -119,7 +123,7 @@ func ResolveProviderAPI(provider Provider, providerAPI ProviderAPI, model string
 
 func ValidateRequestOptions(provider Provider, providerAPI ProviderAPI, model string, useBashToolCalls bool, opts ProviderRequestOptions) (ProviderRequestOptions, error) {
 	if useBashToolCalls {
-		if provider == ProviderOpenAI && providerAPI != ProviderAPIOpenAIResponses {
+		if (provider == ProviderOpenAI || provider == ProviderOpenAICodex) && providerAPI != ProviderAPIOpenAIResponses {
 			return ProviderRequestOptions{}, fmt.Errorf("bash tool calls require provider-api %q for provider openai", ProviderAPIOpenAIResponses)
 		}
 	}
@@ -133,7 +137,7 @@ func ValidateRequestOptions(provider Provider, providerAPI ProviderAPI, model st
 		if opts.Output.MaxOutputTokens.Value < 1 {
 			return ProviderRequestOptions{}, fmt.Errorf("max-output-tokens must be at least 1")
 		}
-		if provider == ProviderOpenAI && providerAPI != ProviderAPIOpenAIResponses {
+		if (provider == ProviderOpenAI || provider == ProviderOpenAICodex) && providerAPI != ProviderAPIOpenAIResponses {
 			return ProviderRequestOptions{}, fmt.Errorf("max-output-tokens is not supported for provider-api %q", providerAPI)
 		}
 		if provider == ProviderAnthropic && opts.Output.MaxOutputTokens.Value > MaxAnthropicNonStreamingTokens {
@@ -164,7 +168,7 @@ func validateEffort(provider Provider, providerAPI ProviderAPI, model, effort st
 			return fmt.Errorf(`effort %q is not supported for provider anthropic (allowed: low, medium, high)`, effort)
 		}
 	}
-	if provider == ProviderOpenAI {
+	if provider == ProviderOpenAI || provider == ProviderOpenAICodex {
 		if providerAPI == ProviderAPIOpenAIChatCompletions {
 			return fmt.Errorf(`effort is not supported for provider-api %q`, providerAPI)
 		}

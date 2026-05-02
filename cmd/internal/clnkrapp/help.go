@@ -3,7 +3,7 @@ package clnkrapp
 const ProviderOptionsUsage = `Provider options:
       --model string        Model identifier (required; env: $CLNKR_MODEL)
       --base-url string     LLM endpoint transport URL (env: $CLNKR_BASE_URL)
-      --provider string     Provider adapter: anthropic|openai
+      --provider string     Provider adapter: anthropic|openai|openai-codex
       --provider-api string OpenAI API override
       --act-protocol string Act protocol: clnkr-inline|tool-calls
       --effort string       Provider effort: auto|low|medium|high|xhigh|max
@@ -19,7 +19,7 @@ const SystemPromptUsage = `System prompt:
 `
 
 const EnvironmentUsage = `Environment:
-  CLNKR_API_KEY      API key for the LLM provider (required)
+  CLNKR_API_KEY      API key for anthropic or openai providers
   CLNKR_PROVIDER     Provider adapter semantics
   CLNKR_PROVIDER_API OpenAI-only API surface override
   CLNKR_MODEL        Model identifier override

@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
+	"github.com/clnkr-ai/clnkr/internal/providers/openaicodexauth"
 	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
 )
 
@@ -54,6 +56,68 @@ func TestNewModelForConfigUsesOpenAIResponsesWhenConfigured(t *testing.T) {
 	}
 	if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok"}` {
 		t.Fatalf("canonical turn = %q, want %q", got, `{"type":"done","summary":"ok"}`)
+	}
+}
+
+func TestNewModelForConfigUsesOpenAICodexAuthWhenConfigured(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	if err := openaicodexauth.Save(openaicodexauth.DefaultPath(), openaicodexauth.Token{
+		Type:         "oauth",
+		AccessToken:  "access-token",
+		RefreshToken: "refresh-token",
+		ExpiresAt:    time.Now().Add(time.Hour).UnixMilli(),
+		AccountID:    "acct-123",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	var gotAuth string
+	var gotAccount string
+	var gotOriginator string
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotAccount = r.Header.Get("ChatGPT-Account-ID")
+		gotOriginator = r.Header.Get("originator")
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": []map[string]any{
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]any{
+						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","reasoning":null}}`},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
+		Provider:    providerdomain.ProviderOpenAICodex,
+		ProviderAPI: providerdomain.ProviderAPIOpenAIResponses,
+		Model:       "gpt-5.2-codex",
+		BaseURL:     server.URL,
+	}, "sys")
+	if _, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}}); err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if gotAuth != "Bearer access-token" {
+		t.Fatalf("Authorization = %q, want bearer token", gotAuth)
+	}
+	if gotAccount != "acct-123" {
+		t.Fatalf("ChatGPT-Account-ID = %q, want acct-123", gotAccount)
+	}
+	if gotOriginator != "clnkr" {
+		t.Fatalf("originator = %q, want clnkr", gotOriginator)
+	}
+	if gotBody["store"] != false {
+		t.Fatalf("store = %#v, want false", gotBody["store"])
+	}
+	if gotBody["stream"] != true {
+		t.Fatalf("stream = %#v, want true", gotBody["stream"])
 	}
 }
 

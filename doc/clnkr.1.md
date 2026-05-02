@@ -6,7 +6,7 @@ clnkr - a minimal coding agent (plain CLI)
 
 # SYNOPSIS
 
-**clnkr** [**-p**|**--prompt** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--provider** *mode*] [**--provider-api** *surface*] [**--act-protocol** *protocol*] [**--effort** *level*] [**--thinking-budget-tokens** *n*] [**--max-output-tokens** *n*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
+**clnkr** [**-p**|**--prompt** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--provider** *mode*] [**--provider-api** *surface*] [**--login-openai-codex**] [**--act-protocol** *protocol*] [**--effort** *level*] [**--thinking-budget-tokens** *n*] [**--max-output-tokens** *n*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
 
 # DESCRIPTION
 
@@ -17,6 +17,10 @@ In default mode, **clnkr** starts an interactive REPL. With **-p**, it runs a si
 At the main idle conversational prompt, **/compact** summarizes older transcript history while keeping recent context intact for the current working thread.
 
 **clnkr** has no external dependencies beyond the Go standard library.
+
+To use a ChatGPT Codex subscription instead of an OpenAI API key, run
+**clnkr --login-openai-codex** once, then use **--provider openai-codex**.
+This provider is explicit and separate from **--provider openai**.
 
 The agent communicates through JSON turns: **act** (execute one or more `bash.commands[]` entries with `command` and nullable `workdir`), **clarify** (ask the user), and **done** (signal completion).
 
@@ -41,13 +45,16 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : LLM model identifier. Required unless **CLNKR_MODEL** is set.
 
 **-u**, **--base-url** *url*
-: LLM endpoint transport URL. If omitted, clnkr uses the provider default: **https://api.anthropic.com** for **anthropic** or **https://api.openai.com/v1** for **openai**. **CLNKR_BASE_URL** overrides the default when set.
+: LLM endpoint transport URL. If omitted, clnkr uses the provider default: **https://api.anthropic.com** for **anthropic**, **https://api.openai.com/v1** for **openai**, or **https://chatgpt.com/backend-api/codex** for **openai-codex**. **CLNKR_BASE_URL** overrides the default when set.
 
 **--provider** *mode*
-: Provider adapter semantics: **anthropic** or **openai**. Required in normal use unless **CLNKR_PROVIDER** is set. Compatibility fallback: if provider is unset but **--base-url** or **CLNKR_BASE_URL** is explicitly set, clnkr infers the provider from that URL.
+: Provider adapter semantics: **anthropic**, **openai**, or **openai-codex**. Required in normal use unless **CLNKR_PROVIDER** is set. Compatibility fallback: if provider is unset but **--base-url** or **CLNKR_BASE_URL** is explicitly set, clnkr infers **anthropic** for Anthropic hosts and **openai** otherwise. **openai-codex** is never inferred.
 
 **--provider-api** *surface*
 : OpenAI-only API surface override: **auto**, **openai-chat-completions**, or **openai-responses**. With **provider=openai**, **auto** prefers **openai-responses** for known supported names and other OpenAI-looking model names such as **gpt-***, **o** followed by a digit, **codex**, **codex-***, names ending in **-codex**, and names containing **-codex-**. Names that do not look OpenAI-ish, such as **llama3**, **gemini-2.0-flash**, **orca-***, **olmo-***, **openhermes-***, and **chatgpt-***, stay on **openai-chat-completions**. This flag is rejected for **provider=anthropic**.
+
+**--login-openai-codex**
+: Sign in to ChatGPT Codex subscription auth using device code authorization and exit. This flag prints a browser URL and one-time code to stderr, waits for authorization, writes the local auth file, and exits. It does not require **--model**, **--provider**, or **CLNKR_API_KEY**. It conflicts with normal run/session/debug flags.
 
 **--act-protocol** *protocol*
 : How the model proposes act turns. **clnkr-inline** accepts provider-portable, host-parsed clnkr act JSON in assistant text. **tool-calls** uses provider-native tools. **clarify** and **done** remain text JSON in both modes. The default is **clnkr-inline**.
@@ -107,7 +114,7 @@ This command is only available at the top-level conversational prompt. In single
 # ENVIRONMENT
 
 **CLNKR_API_KEY**
-: API key for the LLM provider (required).
+: API key for **anthropic** or **openai** providers. Not used for **openai-codex**.
 
 **CLNKR_PROVIDER**
 : Provider adapter semantics.
@@ -120,6 +127,12 @@ This command is only available at the top-level conversational prompt. In single
 
 **CLNKR_BASE_URL**
 : Default LLM endpoint when **--base-url** is not provided.
+
+**CLNKR_OPENAI_CODEX_AUTH_BASE_URL**
+: Test/debug override for OpenAI Codex auth endpoints.
+
+**CLNKR_OPENAI_CODEX_AUTH_PATH**
+: Test/debug override for the OpenAI Codex auth file path.
 
 # FILES
 

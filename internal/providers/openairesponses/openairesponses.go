@@ -27,6 +27,8 @@ type Model struct {
 	maxOutputTokens    int
 	hasMaxOutputTokens bool
 	useBashToolCalls   bool
+	disableStore       bool
+	authorizer         RequestAuthorizer
 	client             *http.Client
 }
 
@@ -35,6 +37,13 @@ type Options struct {
 	MaxOutputTokens    int
 	HasMaxOutputTokens bool
 	UseBashToolCalls   bool
+	DisableStore       bool
+	Authorizer         RequestAuthorizer
+}
+
+type RequestAuthorizer interface {
+	Authorize(context.Context, *http.Request) error
+	Refresh(context.Context) error
 }
 
 // NewModel sets up an OpenAI Responses adapter.
@@ -53,8 +62,24 @@ func NewModelWithOptions(baseURL, apiKey, model, systemPrompt string, opts Optio
 		maxOutputTokens:    opts.MaxOutputTokens,
 		hasMaxOutputTokens: opts.HasMaxOutputTokens,
 		useBashToolCalls:   opts.UseBashToolCalls,
+		disableStore:       opts.DisableStore,
+		authorizer:         opts.Authorizer,
 		client:             &http.Client{Timeout: 240 * time.Second},
 	}
+}
+
+func NewModelWithRequestOptions(baseURL, apiKey, model, systemPrompt string, effort string, effortSet bool, maxOutputTokens int, maxOutputTokensSet bool, useBashToolCalls bool, disableStore bool, authorizer RequestAuthorizer) *Model {
+	if !effortSet || effort == "auto" {
+		effort = ""
+	}
+	return NewModelWithOptions(baseURL, apiKey, model, systemPrompt, Options{
+		ReasoningEffort:    effort,
+		MaxOutputTokens:    maxOutputTokens,
+		HasMaxOutputTokens: maxOutputTokensSet,
+		UseBashToolCalls:   useBashToolCalls,
+		DisableStore:       disableStore,
+		Authorizer:         authorizer,
+	})
 }
 
 type request struct {
@@ -66,6 +91,8 @@ type request struct {
 	MaxOutputTokens *int                 `json:"max_output_tokens,omitempty"`
 	Tools           []openAITool         `json:"tools,omitempty"`
 	ParallelTools   *bool                `json:"parallel_tool_calls,omitempty"`
+	Store           *bool                `json:"store,omitempty"`
+	Stream          *bool                `json:"stream,omitempty"`
 }
 
 type textOptions struct {
@@ -178,6 +205,8 @@ func (m *Model) queryStructured(ctx context.Context, input []responsesInputItem,
 		MaxOutputTokens: m.maxOutputTokensValue(),
 		Tools:           tools,
 		ParallelTools:   parallelTools,
+		Store:           m.storeValue(),
+		Stream:          m.streamValue(),
 		Text: &textOptions{
 			Format: &responseFormat{
 				Type:   "json_schema",
@@ -191,6 +220,7 @@ func (m *Model) queryStructured(ctx context.Context, input []responsesInputItem,
 		return clnkr.Response{}, fmt.Errorf("marshal request: %w", err)
 	}
 
+	authRetried := false
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		respBody, statusCode, retryAfter, err := m.doRequest(ctx, body)
 		if err != nil {
@@ -201,6 +231,23 @@ func (m *Model) queryStructured(ctx context.Context, input []responsesInputItem,
 				return parseToolCallResponse(respBody)
 			}
 			return parseStructuredResponse(respBody)
+		}
+
+		if statusCode == http.StatusUnauthorized && m.authorizer != nil && !authRetried {
+			authRetried = true
+			if err := m.authorizer.Refresh(ctx); err != nil {
+				return clnkr.Response{}, fmt.Errorf("refresh openai-codex auth: %w", err)
+			}
+			respBody, statusCode, retryAfter, err = m.doRequest(ctx, body)
+			if err != nil {
+				return clnkr.Response{}, err
+			}
+			if statusCode == http.StatusOK {
+				if m.useBashToolCalls && len(tools) > 0 {
+					return parseToolCallResponse(respBody)
+				}
+				return parseStructuredResponse(respBody)
+			}
 		}
 
 		apiErr := fmt.Errorf("api error (status %d): %s", statusCode, extractErrorMessage(respBody))
@@ -222,11 +269,14 @@ func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string
 		Input:           mapMessages(messages),
 		Reasoning:       m.reasoningOptions(),
 		MaxOutputTokens: m.maxOutputTokensValue(),
+		Store:           m.storeValue(),
+		Stream:          m.streamValue(),
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
+	authRetried := false
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		respBody, statusCode, retryAfter, err := m.doRequest(ctx, body)
 		if err != nil {
@@ -234,6 +284,20 @@ func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string
 		}
 		if statusCode == http.StatusOK {
 			return parseTextResponse(respBody)
+		}
+
+		if statusCode == http.StatusUnauthorized && m.authorizer != nil && !authRetried {
+			authRetried = true
+			if err := m.authorizer.Refresh(ctx); err != nil {
+				return "", fmt.Errorf("refresh openai-codex auth: %w", err)
+			}
+			respBody, statusCode, retryAfter, err = m.doRequest(ctx, body)
+			if err != nil {
+				return "", err
+			}
+			if statusCode == http.StatusOK {
+				return parseTextResponse(respBody)
+			}
 		}
 
 		apiErr := fmt.Errorf("api error (status %d): %s", statusCode, extractErrorMessage(respBody))
@@ -260,6 +324,22 @@ func (m *Model) maxOutputTokensValue() *int {
 		return nil
 	}
 	return &m.maxOutputTokens
+}
+
+func (m *Model) storeValue() *bool {
+	if !m.disableStore {
+		return nil
+	}
+	store := false
+	return &store
+}
+
+func (m *Model) streamValue() *bool {
+	if !m.disableStore {
+		return nil
+	}
+	stream := true
+	return &stream
 }
 
 func mapMessages(messages []clnkr.Message) []responsesInputItem {
@@ -402,7 +482,13 @@ func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, int, string
 		return nil, 0, "", fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+m.apiKey)
+	if m.authorizer != nil {
+		if err := m.authorizer.Authorize(ctx, req); err != nil {
+			return nil, 0, "", fmt.Errorf("authorize request: %w", err)
+		}
+	} else {
+		req.Header.Set("Authorization", "Bearer "+m.apiKey)
+	}
 
 	resp, err := m.client.Do(req)
 	if err != nil {
@@ -414,7 +500,56 @@ func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, int, string
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("read response: %w", err)
 	}
+	trimmedBody := bytes.TrimSpace(respBody)
+	if resp.StatusCode == http.StatusOK && (strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") || bytes.HasPrefix(trimmedBody, []byte("event:")) || bytes.HasPrefix(trimmedBody, []byte("data:"))) {
+		respBody, err = responseJSONFromSSE(respBody)
+		if err != nil {
+			return nil, 0, "", err
+		}
+	}
 	return respBody, resp.StatusCode, resp.Header.Get("Retry-After"), nil
+}
+
+func responseJSONFromSSE(body []byte) ([]byte, error) {
+	out := response{}
+	for _, event := range bytes.Split(body, []byte("\n\n")) {
+		var dataLines []string
+		for _, line := range bytes.Split(event, []byte("\n")) {
+			line = bytes.TrimSpace(line)
+			if bytes.HasPrefix(line, []byte("data:")) {
+				data := strings.TrimSpace(string(bytes.TrimPrefix(line, []byte("data:"))))
+				if data != "" && data != "[DONE]" {
+					dataLines = append(dataLines, data)
+				}
+			}
+		}
+		if len(dataLines) == 0 {
+			continue
+		}
+		var wire struct {
+			Type     string          `json:"type"`
+			Item     json.RawMessage `json:"item"`
+			Response json.RawMessage `json:"response"`
+		}
+		if err := json.Unmarshal([]byte(strings.Join(dataLines, "\n")), &wire); err != nil {
+			return nil, fmt.Errorf("parse streaming response event: %w", err)
+		}
+		switch wire.Type {
+		case "response.output_item.done":
+			out.RawOutput = append(out.RawOutput, append(json.RawMessage(nil), wire.Item...))
+			var item outputItem
+			if err := json.Unmarshal(wire.Item, &item); err != nil {
+				return nil, fmt.Errorf("parse streaming output item: %w", err)
+			}
+			out.Output = append(out.Output, item)
+		case "response.completed":
+			var completed response
+			if err := json.Unmarshal(wire.Response, &completed); err == nil {
+				out.Usage = completed.Usage
+			}
+		}
+	}
+	return json.Marshal(out)
 }
 
 func endpointURL(baseURL, endpoint string) string {
