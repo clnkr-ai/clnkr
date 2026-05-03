@@ -31,6 +31,8 @@ Usage:
 
 Options:
   -p, --prompt string       Task to run unattended and exit
+      --prompt-mode-unattended string
+                            Long alias for -p/--prompt
       --max-steps int       Limit executed commands
                             before summary (default: 100)
       --full-send           Execute every act batch without approval
@@ -64,6 +66,28 @@ func aliasedString(preferred, fallback string) string {
 		return preferred
 	}
 	return fallback
+}
+
+func promptModeMarker(args []string, i int) bool {
+	if i > 0 && valueFlag(args[i-1]) {
+		return false
+	}
+	return args[i] == "-p" || args[i] == "--prompt" || args[i] == "--prompt-mode-unattended"
+}
+
+func dumpPromptMarker(args []string, i int) bool {
+	if i > 0 && valueFlag(args[i-1]) {
+		return false
+	}
+	return args[i] == "--dump-system-prompt"
+}
+
+func valueFlag(arg string) bool {
+	switch arg {
+	case "-p", "--prompt", "--prompt-mode-unattended", "-m", "--model", "-u", "--base-url", "--provider", "--provider-api", "--act-protocol", "--effort", "--thinking-budget-tokens", "--max-output-tokens", "--max-steps", "--event-log", "--trajectory", "--load-messages", "--system-prompt-append":
+		return true
+	}
+	return false
 }
 
 func isTerminal(fd uintptr) bool {
@@ -205,14 +229,6 @@ func exitRunErr(err error) {
 	}
 }
 
-func exitUnattendedRunErr(err error) {
-	if errors.Is(err, clnkr.ErrClarificationNeeded) {
-		fmt.Fprintln(os.Stderr, "clarify not allowed in unattended mode")
-		os.Exit(2)
-	}
-	exitRunErr(err)
-}
-
 func main() {
 	flags := flag.NewFlagSet("clnkr", flag.ContinueOnError)
 	flags.Usage = func() {}
@@ -220,6 +236,7 @@ func main() {
 
 	taskPromptFlag := flags.String("p", "", "")
 	promptLong := flags.String("prompt", "", "")
+	promptModeUnattended := flags.String("prompt-mode-unattended", "", "")
 	modelFlag := flags.String("model", "", "")
 	modelShort := flags.String("m", "", "")
 	baseURLFlag := flags.String("base-url", "", "")
@@ -258,7 +275,16 @@ func main() {
 	systemPromptAppend := flags.String("system-prompt-append", "", "")
 	dumpSystemPrompt := flags.Bool("dump-system-prompt", false, "")
 
-	if err := flags.Parse(os.Args[1:]); err != nil {
+	args, dumpUnattendedPrompt := os.Args[1:], false
+	if n := len(args); n >= 2 && dumpPromptMarker(args, n-2) && promptModeMarker(args, n-1) {
+		args, dumpUnattendedPrompt = args[:n-1], true
+	}
+	for i := 0; i+1 < len(args); i++ {
+		if promptModeMarker(args, i) && args[i+1] == "--dump-system-prompt" {
+			fatalf("%s requires a task. To dump the unattended prompt, use: clnkr --dump-system-prompt %s", args[i], args[i])
+		}
+	}
+	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			fmt.Fprint(os.Stdout, usageText()) //nolint:errcheck
 			os.Exit(0)
@@ -294,8 +320,8 @@ func main() {
 		os.Exit(0)
 	}
 
-	taskPrompt := aliasedString(*promptLong, *taskPromptFlag)
-	singleTask := taskPrompt != ""
+	taskPrompt := aliasedString(*promptModeUnattended, aliasedString(*promptLong, *taskPromptFlag))
+	singleTask := taskPrompt != "" || dumpUnattendedPrompt
 	if singleTask && explicitFullSendFalse {
 		fatalf("--full-send=false conflicts with -p")
 	}
@@ -443,7 +469,11 @@ func main() {
 				os.Exit(1)
 			}
 		}
-		exitUnattendedRunErr(runErr)
+		if errors.Is(runErr, clnkr.ErrClarificationNeeded) {
+			fmt.Fprintln(os.Stderr, "clarify not allowed in unattended mode")
+			os.Exit(2)
+		}
+		exitRunErr(runErr)
 		return
 	}
 
