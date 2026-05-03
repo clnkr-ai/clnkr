@@ -148,7 +148,7 @@ Windows is unsupported.
 
 # COPYRIGHT
 
-Copyright 2025-2026 Brian Cosgrove. Licensed under the Apache License, Version
+Copyright 2026 Brian Cosgrove. Licensed under the Apache License, Version
 2.0.
 
 # SEE ALSO
