@@ -79,21 +79,16 @@ var (
 const protocolActExample = `{"type":"act","bash":{"commands":[{"command":"...","workdir":null}]}}`
 const protocolDoneExample = `{"type":"done","summary":"..."}`
 
+var protocolErrorTargets = []error{ErrInvalidJSON, ErrMissingCommand, ErrEmptyClarify, ErrEmptySummary, ErrUnknownTurnType}
+var protocolErrorReasons = []string{"invalid_json", "missing_command", "empty_clarify", "empty_summary", "unknown_turn_type"}
+
 func errorToReason(err error) string {
-	switch {
-	case errors.Is(err, ErrInvalidJSON):
-		return "invalid_json"
-	case errors.Is(err, ErrMissingCommand):
-		return "missing_command"
-	case errors.Is(err, ErrEmptyClarify):
-		return "empty_clarify"
-	case errors.Is(err, ErrEmptySummary):
-		return "empty_summary"
-	case errors.Is(err, ErrUnknownTurnType):
-		return "unknown_turn_type"
-	default:
-		return "unknown"
+	for i, target := range protocolErrorTargets {
+		if errors.Is(err, target) {
+			return protocolErrorReasons[i]
+		}
 	}
+	return "unknown"
 }
 
 func protocolCorrectionMessageFor(err error, protocol ActProtocol) string {
