@@ -25,7 +25,17 @@ type model interface {
 	compaction.FreeformModel
 }
 
+// ModelOptions configures frontend-owned model construction behavior.
+type ModelOptions struct {
+	Unattended bool
+}
+
 func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt string) model {
+	return NewModelForConfigWithOptions(cfg, systemPrompt, ModelOptions{})
+}
+
+// NewModelForConfigWithOptions creates the provider model for a resolved config.
+func NewModelForConfigWithOptions(cfg providerconfig.ResolvedProviderConfig, systemPrompt string, modelOpts ModelOptions) model {
 	opts := cfg.RequestOptions
 	switch {
 	case cfg.Provider == providerdomain.ProviderAnthropic:
@@ -42,6 +52,7 @@ func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt s
 			anthropicOpts.ThinkingMode = anthropic.ThinkingModeAdaptive
 		}
 		anthropicOpts.UseBashToolCalls = cfg.ActProtocol == clnkr.ActProtocolToolCalls
+		anthropicOpts.Unattended = modelOpts.Unattended
 		return anthropic.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, anthropicOpts)
 	case cfg.ProviderAPI == providerdomain.ProviderAPIOpenAIResponses:
 		var effort string
@@ -53,9 +64,10 @@ func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt s
 			MaxOutputTokens:    opts.Output.MaxOutputTokens.Value,
 			HasMaxOutputTokens: opts.Output.MaxOutputTokens.Set,
 			UseBashToolCalls:   cfg.ActProtocol == clnkr.ActProtocolToolCalls,
+			Unattended:         modelOpts.Unattended,
 		})
 	default:
-		return openai.NewModel(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt)
+		return openai.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, openai.Options{Unattended: modelOpts.Unattended})
 	}
 }
 

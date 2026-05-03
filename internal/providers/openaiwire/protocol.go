@@ -9,6 +9,11 @@ func RequestSchema() map[string]any {
 	return actwire.RequestSchema()
 }
 
+// UnattendedRequestSchema accepts act and done turns, but not clarify.
+func UnattendedRequestSchema() map[string]any {
+	return actwire.UnattendedRequestSchema()
+}
+
 func FinalTurnSchema() map[string]any {
 	return actwire.FinalTurnSchema()
 }

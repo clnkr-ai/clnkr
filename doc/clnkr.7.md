@@ -59,17 +59,19 @@ exit status.
 agent and driver, reads JSONL commands from stdin, writes JSONL events to
 stdout, and writes diagnostics to stderr.
 
-The main boundary is **Step** versus **Run**. **Step** performs one model query
-and protocol parse. **Run** owns policy execution: retrying after protocol
-failures, executing act turns, stopping on clarify or done, asking for a final
-summary at the step limit, and enforcing step limits. **RunWithPolicy** exposes
-the same loop with policy hooks for act approval and clarification replies.
-**Run** delegates to **RunWithPolicy** with a full-send policy.
+The main boundary is **Step** versus **RunWithPolicy**. **Step** performs one
+model query and protocol parse. **RunWithPolicy** owns the control loop:
+retrying after protocol failures, dispatching turn policy hooks, executing
+approved act turns, stopping on done, asking for a final summary at the step
+limit, and enforcing step limits. **Run** is the full-send entry point; it
+delegates to **RunWithPolicy** with a policy that approves act turns and leaves
+clarify turns unanswered.
 
 The frontend boundary is **Driver** versus command adapters. **Driver**
-coordinates frontend interaction around **RunWithPolicy**. It does not own the
-turn policy itself. **cmd/clnkr** and **cmd/clnkrd** adapt terminal and stdio
-JSONL surfaces to the driver.
+coordinates frontend interaction around **RunWithPolicy** by turning approval
+and clarify policy hooks into frontend events and accepting replies. It does
+not query the Model, parse Turns, or execute commands directly. **cmd/clnkr**
+and **cmd/clnkrd** adapt terminal and stdio JSONL surfaces to the driver.
 
 The configuration ownership boundary is **CLI config resolver** versus
 **Provider request semantics**. The CLI resolver owns app inputs and user-facing
@@ -403,7 +405,8 @@ outside clnkr's local coding CLI boundary.
 : clnkr turns natural-language tasks into **act**, **clarify**, or **done**.
 In **clnkr-inline** mode, **act** carries bash actions in assistant text. In
 **tool-calls** mode, provider tool calls are projected into **act**. The
-executor runs the resulting bash actions in both modes.
+executor runs the resulting bash actions in both modes. Single-task **-p**
+runs use an unattended prompt and provider schema that omit **clarify**.
 
 **2. Own your prompts**
 : clnkr defines the base prompt, protocol examples, AGENTS.md layering, prompt
@@ -440,12 +443,12 @@ interaction, not a general contact-human tool with Slack, email, or SMS
 delivery.
 
 **8. Own your control flow**
-: **Run** owns policy execution. It switches on accepted turn types, counts
-protocol failures, enforces step limits, truncates act batches to the remaining
-step budget, and decides when commands execute. **RunWithPolicy** exposes the
-same control loop with policy hooks. **Driver** coordinates terminal and stdio
-JSONL interaction around those hooks. Provider request validation happens
-before the control loop constructs the model.
+: **RunWithPolicy** owns policy execution. It switches on accepted turn types,
+counts protocol failures, enforces step limits, truncates act batches to the
+remaining step budget, and decides when commands execute. **Run** uses that
+loop with the full-send policy. **Driver** coordinates terminal and stdio JSONL
+interaction around approval and clarify hooks. Provider request validation
+happens before the control loop constructs the model.
 
 **9. Compact errors into context window**
 : Protocol failures become protocol correction blocks. Command stderr and exit

@@ -225,6 +225,22 @@ func TestDumpToolCallsSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
 	}
 }
 
+func TestPromptFlagDumpsUnattendedSystemPrompt(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t, "-p", "fix it", "--dump-system-prompt")
+	if err != nil {
+		t.Fatalf("dump unattended system prompt: %v\nstderr: %s", err, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "clarify") {
+		t.Fatalf("stdout contains clarify: %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `Set type to exactly one of "act" or "done".`) {
+		t.Fatalf("stdout missing unattended turn contract: %q", stdout.String())
+	}
+	if strings.Contains(stderr.String(), "provider is required") {
+		t.Fatalf("stderr = %q, provider validation ran first", stderr.String())
+	}
+}
+
 func TestTrajectoryRequiresPromptBeforeProviderConfig(t *testing.T) {
 	stdout, stderr, err := runMainHelper(t, "--trajectory", filepath.Join(t.TempDir(), "trajectory.json"))
 	if err == nil {
@@ -400,7 +416,7 @@ func TestStepLimitInvalidSummaryExitsNonzero(t *testing.T) {
 	}
 }
 
-func TestSingleTaskFullSendClarificationWritesQuestionToStderr(t *testing.T) {
+func TestSingleTaskFullSendClarificationCrashesWithoutQuestion(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -429,8 +445,8 @@ func TestSingleTaskFullSendClarificationWritesQuestionToStderr(t *testing.T) {
 	if stdout.String() != "" {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
-	if stderr.String() != "Which repo?\nClarification needed.\n" {
-		t.Fatalf("stderr = %q, want clarification question and status", stderr.String())
+	if stderr.String() != "clarify not allowed in unattended mode\n" {
+		t.Fatalf("stderr = %q, want unattended clarify error", stderr.String())
 	}
 	if calls != 1 {
 		t.Fatalf("model calls = %d, want 1", calls)
