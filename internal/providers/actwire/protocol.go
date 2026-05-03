@@ -34,7 +34,12 @@ type wireCommand struct {
 }
 
 func RequestSchema() map[string]any {
-	return structuredOutputSchema()
+	return structuredOutputSchema(true)
+}
+
+// UnattendedRequestSchema accepts act and done turns, but not clarify.
+func UnattendedRequestSchema() map[string]any {
+	return structuredOutputSchema(false)
 }
 
 func FinalTurnSchema() map[string]any {
@@ -45,17 +50,17 @@ func DoneOnlySchema() map[string]any {
 	return finalTurnSchema(true)
 }
 
-func structuredOutputSchema() map[string]any {
+func structuredOutputSchema(allowClarify bool) map[string]any {
+	choices := []any{actTurnSchema(), doneTurnSchema()}
+	if allowClarify {
+		choices = []any{actTurnSchema(), clarifyTurnSchema(), doneTurnSchema()}
+	}
 	return map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
 		"properties": map[string]any{
 			"turn": map[string]any{
-				"anyOf": []any{
-					actTurnSchema(),
-					clarifyTurnSchema(),
-					doneTurnSchema(),
-				},
+				"anyOf": choices,
 			},
 		},
 		"required": []string{"turn"},

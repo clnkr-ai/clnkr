@@ -22,7 +22,7 @@ The agent communicates through JSON turns: **act** (execute one or more `bash.co
 
 With **--act-protocol tool-calls**, command execution uses provider-native **bash** tool calls. **clarify** and **done** remain text JSON. Tool calls are rejected for OpenAI Chat Completions and OpenAI-compatible endpoints.
 
-By default, **clnkr** asks for approval before each **act** turn in conversational mode. One approval accepts the whole command batch. Approval prompts show each requested command and any explicit workdir override. Pass **--full-send** to execute commands immediately without approval. Single-task mode (**-p**) implies **--full-send**.
+By default, **clnkr** asks for approval before each **act** turn in conversational mode. One approval accepts the whole command batch. Approval prompts show each requested command and any explicit workdir override. Pass **--full-send** to execute commands immediately without approval. Single-task mode (**-p**) implies **--full-send** and uses an unattended turn contract that omits **clarify**.
 
 For Anthropic runs, **clnkr** requests Anthropic's native structured output format on every turn. Use **--model** with a model Anthropic documents as supporting structured output.
 
@@ -35,7 +35,7 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 # OPTIONS
 
 **-p**, **--prompt** *task*
-: Run the given task unattended and exit. Without this flag, clnkr starts in conversational REPL mode. This implies **--full-send**; passing **--full-send=false** with **-p** is rejected.
+: Run the given task unattended and exit. Without this flag, clnkr starts in conversational REPL mode. This implies **--full-send** and removes **clarify** from the model turn contract; passing **--full-send=false** with **-p** is rejected.
 
 **-m**, **--model** *name*
 : LLM model identifier. Required unless **CLNKR_MODEL** is set.

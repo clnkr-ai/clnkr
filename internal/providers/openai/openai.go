@@ -23,16 +23,28 @@ type Model struct {
 	apiKey       string
 	model        string
 	systemPrompt string
+	unattended   bool
 	client       *http.Client
+}
+
+// Options configures OpenAI-compatible request behavior.
+type Options struct {
+	Unattended bool
 }
 
 // NewModel sets up an OpenAI-compatible adapter.
 func NewModel(baseURL, apiKey, model, systemPrompt string) *Model {
+	return NewModelWithOptions(baseURL, apiKey, model, systemPrompt, Options{})
+}
+
+// NewModelWithOptions sets up an OpenAI-compatible adapter with request options.
+func NewModelWithOptions(baseURL, apiKey, model, systemPrompt string, opts Options) *Model {
 	return &Model{
 		baseURL:      baseURL,
 		apiKey:       apiKey,
 		model:        model,
 		systemPrompt: systemPrompt,
+		unattended:   opts.Unattended,
 		client:       &http.Client{Timeout: 240 * time.Second},
 	}
 }
@@ -104,6 +116,10 @@ func extractErrorMessage(body []byte) string {
 
 func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
 	messages = openaiwire.NormalizeMessagesForProvider(messages)
+	schema := openaiwire.RequestSchema()
+	if m.unattended {
+		schema = openaiwire.UnattendedRequestSchema()
+	}
 	allMessages := make([]clnkr.Message, 0, len(messages)+1)
 	allMessages = append(allMessages, clnkr.Message{Role: "system", Content: m.systemPrompt})
 	allMessages = append(allMessages, messages...)
@@ -116,7 +132,7 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 			JSONSchema: responseJSONSchema{
 				Name:   "agent_turn",
 				Strict: true,
-				Schema: openaiwire.RequestSchema(),
+				Schema: schema,
 			},
 		},
 	})

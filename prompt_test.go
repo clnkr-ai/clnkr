@@ -123,6 +123,19 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		}
 	})
 
+	t.Run("unattended prompt omits clarify", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		prompt := LoadPromptWithOptions(dir, PromptOptions{Unattended: true})
+		if strings.Contains(prompt, "clarify") {
+			t.Fatalf("unattended prompt contains clarify: %q", prompt)
+		}
+		if !strings.Contains(prompt, `Set type to exactly one of "act" or "done".`) {
+			t.Fatalf("unattended prompt should describe act/done contract")
+		}
+	})
+
 	t.Run("appends AGENTS.md when present", func(t *testing.T) {
 		dir := t.TempDir()
 		t.Setenv("HOME", t.TempDir())

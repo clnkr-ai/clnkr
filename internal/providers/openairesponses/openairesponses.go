@@ -27,6 +27,7 @@ type Model struct {
 	maxOutputTokens    int
 	hasMaxOutputTokens bool
 	useBashToolCalls   bool
+	unattended         bool
 	client             *http.Client
 }
 
@@ -35,6 +36,7 @@ type Options struct {
 	MaxOutputTokens    int
 	HasMaxOutputTokens bool
 	UseBashToolCalls   bool
+	Unattended         bool
 }
 
 // NewModel sets up an OpenAI Responses adapter.
@@ -53,6 +55,7 @@ func NewModelWithOptions(baseURL, apiKey, model, systemPrompt string, opts Optio
 		maxOutputTokens:    opts.MaxOutputTokens,
 		hasMaxOutputTokens: opts.HasMaxOutputTokens,
 		useBashToolCalls:   opts.UseBashToolCalls,
+		unattended:         opts.Unattended,
 		client:             &http.Client{Timeout: 240 * time.Second},
 	}
 }
@@ -154,11 +157,17 @@ const (
 
 func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
 	schema := openaiwire.RequestSchema()
+	if m.unattended {
+		schema = openaiwire.UnattendedRequestSchema()
+	}
 	input := mapMessages(messages)
 	var tools []openAITool
 	var parallelTools *bool
 	if m.useBashToolCalls {
 		schema = openaiwire.FinalTurnSchema()
+		if m.unattended {
+			schema = openaiwire.DoneOnlySchema()
+		}
 		input = mapToolCallMessages(messages)
 		tools = []openAITool{bashToolSchema()}
 	}

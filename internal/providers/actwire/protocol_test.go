@@ -88,6 +88,20 @@ func TestRequestSchema(t *testing.T) {
 	}
 }
 
+func TestUnattendedRequestSchemaExcludesClarify(t *testing.T) {
+	schema := UnattendedRequestSchema()
+	choices := schema["properties"].(map[string]any)["turn"].(map[string]any)["anyOf"].([]any)
+	if len(choices) != 2 {
+		t.Fatalf("UnattendedRequestSchema choices = %d, want act and done", len(choices))
+	}
+	for _, choice := range choices {
+		typ := choice.(map[string]any)["properties"].(map[string]any)["type"].(map[string]any)["const"]
+		if typ == "clarify" {
+			t.Fatalf("UnattendedRequestSchema includes clarify: %#v", schema)
+		}
+	}
+}
+
 func TestFinalTurnSchemasExcludeAct(t *testing.T) {
 	schema := FinalTurnSchema()
 	choices := schema["properties"].(map[string]any)["turn"].(map[string]any)["anyOf"].([]any)

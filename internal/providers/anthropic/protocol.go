@@ -9,6 +9,10 @@ func requestSchema() map[string]any {
 	return actwire.RequestSchema()
 }
 
+func unattendedRequestSchema() map[string]any {
+	return actwire.UnattendedRequestSchema()
+}
+
 func finalTurnSchema() map[string]any {
 	return actwire.FinalTurnSchema()
 }

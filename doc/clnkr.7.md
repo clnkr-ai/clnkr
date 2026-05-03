@@ -405,7 +405,8 @@ outside clnkr's local coding CLI boundary.
 : clnkr turns natural-language tasks into **act**, **clarify**, or **done**.
 In **clnkr-inline** mode, **act** carries bash actions in assistant text. In
 **tool-calls** mode, provider tool calls are projected into **act**. The
-executor runs the resulting bash actions in both modes.
+executor runs the resulting bash actions in both modes. Single-task **-p**
+runs use an unattended prompt and provider schema that omit **clarify**.
 
 **2. Own your prompts**
 : clnkr defines the base prompt, protocol examples, AGENTS.md layering, prompt

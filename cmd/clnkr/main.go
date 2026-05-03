@@ -205,6 +205,14 @@ func exitRunErr(err error) {
 	}
 }
 
+func exitUnattendedRunErr(err error) {
+	if errors.Is(err, clnkr.ErrClarificationNeeded) {
+		fmt.Fprintln(os.Stderr, "clarify not allowed in unattended mode")
+		os.Exit(2)
+	}
+	exitRunErr(err)
+}
+
 func main() {
 	flags := flag.NewFlagSet("clnkr", flag.ContinueOnError)
 	flags.Usage = func() {}
@@ -304,6 +312,7 @@ func main() {
 		OmitSystemPrompt:   *noSystemPrompt || *noSystemPromptShort,
 		SystemPromptAppend: *systemPromptAppend,
 		ActProtocol:        actProtocol,
+		Unattended:         singleTask,
 	})
 
 	if *dumpSystemPrompt {
@@ -342,7 +351,7 @@ func main() {
 		defer eventLogFile.Close() //nolint:errcheck
 	}
 
-	agent := clnkr.NewAgent(clnkrapp.NewModelForConfig(cfg, systemPrompt), &clnkr.CommandExecutor{}, cwd)
+	agent := clnkr.NewAgent(clnkrapp.NewModelForConfigWithOptions(cfg, systemPrompt, clnkrapp.ModelOptions{Unattended: singleTask}), &clnkr.CommandExecutor{}, cwd)
 	agent.ActProtocol = cfg.ActProtocol
 
 	showDebug := *verbose || *verboseShort
@@ -353,7 +362,7 @@ func main() {
 			case *clnkr.DoneTurn:
 				fmt.Fprintln(os.Stdout, turn.Summary) //nolint:errcheck
 			case *clnkr.ClarifyTurn:
-				if *fullSend {
+				if *fullSend && !singleTask {
 					fmt.Fprintln(os.Stderr, turn.Question) //nolint:errcheck
 				}
 			default:
@@ -434,7 +443,7 @@ func main() {
 				os.Exit(1)
 			}
 		}
-		exitRunErr(runErr)
+		exitUnattendedRunErr(runErr)
 		return
 	}
 

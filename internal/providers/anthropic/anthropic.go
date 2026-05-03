@@ -35,6 +35,7 @@ type Model struct {
 	thinkingMode         ThinkingMode
 	effort               string
 	useBashToolCalls     bool
+	unattended           bool
 	client               *http.Client
 }
 
@@ -46,6 +47,7 @@ type Options struct {
 	ThinkingMode         ThinkingMode
 	Effort               string
 	UseBashToolCalls     bool
+	Unattended           bool
 }
 
 // NewModel sets up an Anthropic adapter.
@@ -69,6 +71,7 @@ func NewModelWithOptions(baseURL, apiKey, model, systemPrompt string, opts Optio
 		thinkingMode:         opts.ThinkingMode,
 		effort:               opts.Effort,
 		useBashToolCalls:     opts.UseBashToolCalls,
+		unattended:           opts.Unattended,
 		client:               &http.Client{Timeout: 240 * time.Second},
 	}
 }
@@ -162,10 +165,16 @@ func extractErrorMessage(body []byte) string {
 func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
 	var tools []anthropicTool
 	schema := requestSchema()
+	if m.unattended {
+		schema = unattendedRequestSchema()
+	}
 	mappedMessages := mapTextMessages(messages)
 	if m.useBashToolCalls {
 		tools = []anthropicTool{bashToolSchema()}
 		schema = finalTurnSchema()
+		if m.unattended {
+			schema = doneOnlySchema()
+		}
 		mappedMessages = mapToolCallMessages(messages)
 	}
 
