@@ -16,6 +16,7 @@ const SystemPromptUsage = `System prompt:
       --no-system-prompt              Skip the built-in system prompt entirely
       --system-prompt-append string   Append text to the built-in system prompt
       --dump-system-prompt            Print the composed system prompt and exit
+                                      Use with -p for unattended prompt
 `
 
 const EnvironmentUsage = `Environment:

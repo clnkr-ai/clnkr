@@ -118,6 +118,7 @@ Prompt controls:
 
 ```bash
 clnkr --dump-system-prompt
+clnkr --dump-system-prompt -p
 clnkr --system-prompt-append "Prefer targeted tests first"
 clnkr --no-system-prompt
 ```

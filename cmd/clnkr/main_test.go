@@ -209,6 +209,32 @@ func TestDumpSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
 	}
 }
 
+func TestDumpSystemPromptAllowsPromptFlagTextInAppend(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t, "--system-prompt-append", "-p", "--dump-system-prompt")
+	if err != nil {
+		t.Fatalf("dump system prompt: %v\nstderr: %s", err, stderr.String())
+	}
+	if !strings.HasSuffix(stdout.String(), "\n\n-p") {
+		t.Fatalf("stdout should include appended -p text: %q", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestDumpSystemPromptMarkerAsAppendValueDoesNotSelectUnattendedPrompt(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t, "--system-prompt-append", "--dump-system-prompt", "-p")
+	if err == nil {
+		t.Fatalf("run main succeeded; stdout: %s stderr: %s", stdout.String(), stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "flag needs an argument: -p") {
+		t.Fatalf("stderr = %q, want missing -p argument error", stderr.String())
+	}
+}
+
 func TestDumpToolCallsSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
 	stdout, stderr, err := runMainHelper(t, "--act-protocol", "tool-calls", "--dump-system-prompt")
 	if err != nil {
@@ -226,18 +252,70 @@ func TestDumpToolCallsSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
 }
 
 func TestPromptFlagDumpsUnattendedSystemPrompt(t *testing.T) {
-	stdout, stderr, err := runMainHelper(t, "-p", "fix it", "--dump-system-prompt")
+	for _, args := range [][]string{
+		{"-p", "fix it", "--dump-system-prompt"},
+		{"--prompt-mode-unattended", "fix it", "--dump-system-prompt"},
+		{"--dump-system-prompt", "-p"},
+		{"--dump-system-prompt", "--prompt-mode-unattended"},
+	} {
+		stdout, stderr, err := runMainHelper(t, args...)
+		if err != nil {
+			t.Fatalf("dump unattended system prompt with %v: %v\nstderr: %s", args, err, stderr.String())
+		}
+		if strings.Contains(stdout.String(), "clarify") {
+			t.Fatalf("stdout contains clarify: %q", stdout.String())
+		}
+		if !strings.Contains(stdout.String(), `Set type to exactly one of "act" or "done".`) {
+			t.Fatalf("stdout missing unattended turn contract: %q", stdout.String())
+		}
+		if strings.Contains(stderr.String(), "provider is required") {
+			t.Fatalf("stderr = %q, provider validation ran first", stderr.String())
+		}
+	}
+}
+
+func TestPromptFlagBeforeDumpSystemPromptErrors(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t, "-p", "--dump-system-prompt")
+	if err == nil {
+		t.Fatalf("run main succeeded; stdout: %s stderr: %s", stdout.String(), stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "-p requires a task") {
+		t.Fatalf("stderr = %q, want missing task error", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "clnkr --dump-system-prompt -p") {
+		t.Fatalf("stderr = %q, want dump hint", stderr.String())
+	}
+}
+
+func TestPromptModeUnattendedRunsSingleTask(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"role": "assistant", "content": openAIWrappedDone("ok")}},
+			},
+			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
+		})
+	}))
+	defer server.Close()
+
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
+		"--provider", "openai",
+		"--provider-api", "openai-chat-completions",
+		"--base-url", server.URL,
+		"--model", "gpt-test",
+		"--prompt-mode-unattended", "hi",
+	)
 	if err != nil {
-		t.Fatalf("dump unattended system prompt: %v\nstderr: %s", err, stderr.String())
+		t.Fatalf("run main: %v\nstderr: %s", err, stderr.String())
 	}
-	if strings.Contains(stdout.String(), "clarify") {
-		t.Fatalf("stdout contains clarify: %q", stdout.String())
+	if strings.TrimSpace(stdout.String()) != "ok" {
+		t.Fatalf("stdout = %q, want ok", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), `Set type to exactly one of "act" or "done".`) {
-		t.Fatalf("stdout missing unattended turn contract: %q", stdout.String())
-	}
-	if strings.Contains(stderr.String(), "provider is required") {
-		t.Fatalf("stderr = %q, provider validation ran first", stderr.String())
+	if strings.Contains(stderr.String(), "Clarification needed") {
+		t.Fatalf("stderr = %q, want no clarification", stderr.String())
 	}
 }
 

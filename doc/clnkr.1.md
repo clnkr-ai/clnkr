@@ -6,7 +6,7 @@ clnkr - a minimal coding agent (plain CLI)
 
 # SYNOPSIS
 
-**clnkr** [**-p**|**--prompt** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--provider** *mode*] [**--provider-api** *surface*] [**--act-protocol** *protocol*] [**--effort** *level*] [**--thinking-budget-tokens** *n*] [**--max-output-tokens** *n*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
+**clnkr** [**-p**|**--prompt**|**--prompt-mode-unattended** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--provider** *mode*] [**--provider-api** *surface*] [**--act-protocol** *protocol*] [**--effort** *level*] [**--thinking-budget-tokens** *n*] [**--max-output-tokens** *n*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
 
 # DESCRIPTION
 
@@ -36,6 +36,9 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 
 **-p**, **--prompt** *task*
 : Run the given task unattended and exit. Without this flag, clnkr starts in conversational REPL mode. This implies **--full-send** and removes **clarify** from the model turn contract; passing **--full-send=false** with **-p** is rejected.
+
+**--prompt-mode-unattended** *task*
+: Long alias for **-p** and **--prompt**. When preceded by **--dump-system-prompt** with no *task*, selects the unattended prompt contract and exits after printing it.
 
 **-m**, **--model** *name*
 : LLM model identifier. Required unless **CLNKR_MODEL** is set.
@@ -80,7 +83,7 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : Append *text* to the built-in system prompt after any loaded **AGENTS.md** content.
 
 **--dump-system-prompt**
-: Print the composed system prompt and exit.
+: Print the composed system prompt and exit. By default this prints the conversational prompt. Use **--dump-system-prompt -p** or **--dump-system-prompt --prompt-mode-unattended** to print the unattended prompt.
 
 **--load-messages** *file*
 : Read a JSON message array, or a compatible envelope with a **messages** field, from *file* and prepend the messages to the conversation before starting. Host-generated JSON state messages in that transcript restore the current working directory.
