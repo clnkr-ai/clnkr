@@ -3,6 +3,7 @@
 include /usr/share/dpkg/pkg-info.mk
 
 export CGO_ENABLED=0
+export GO111MODULE=on
 
 VERSION := $(DEB_VERSION_UPSTREAM)
 
@@ -27,3 +28,6 @@ override_dh_auto_clean:
 
 override_dh_dwz:
 	# dwz fails on Go binaries
+
+override_dh_builddeb:
+	dh_builddeb -- -Zxz
