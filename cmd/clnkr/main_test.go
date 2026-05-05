@@ -19,7 +19,7 @@ import (
 
 	clnkr "github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
-	"github.com/clnkr-ai/clnkr/cmd/internal/session"
+	"github.com/clnkr-ai/clnkr/internal/session"
 )
 
 func openAIWrappedDone(summary string) string {

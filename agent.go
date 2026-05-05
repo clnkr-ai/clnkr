@@ -2,6 +2,7 @@ package clnkr
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -16,15 +17,18 @@ var ErrClarificationNeeded = errors.New("clarification needed")
 
 // Agent coordinates model turns and command execution.
 type Agent struct {
-	model       Model
-	executor    Executor
-	messages    []Message
-	cwd         string
-	env         map[string]string
-	started     bool
-	Notify      func(Event)
-	MaxSteps    int
-	ActProtocol ActProtocol
+	model                    Model
+	executor                 Executor
+	messages                 []Message
+	cwd                      string
+	env                      map[string]string
+	started                  bool
+	workingMemory            WorkingMemory
+	workingMemoryUpdater     WorkingMemoryUpdater
+	workingMemoryLastMessage int
+	Notify                   func(Event)
+	MaxSteps                 int
+	ActProtocol              ActProtocol
 }
 
 func NewAgent(model Model, executor Executor, cwd string) *Agent {
@@ -49,6 +53,23 @@ func (a *Agent) Messages() []Message {
 }
 
 func (a *Agent) Cwd() string { return a.cwd }
+
+func (a *Agent) WorkingMemory() WorkingMemory {
+	return a.workingMemory.Clone()
+}
+
+func (a *Agent) SetWorkingMemory(memory WorkingMemory) error {
+	if err := memory.Validate(); err != nil {
+		return fmt.Errorf("set working memory: %w", err)
+	}
+	a.workingMemory = memory.Clone()
+	a.workingMemoryLastMessage = len(a.messages)
+	return nil
+}
+
+func (a *Agent) SetWorkingMemoryUpdater(updater WorkingMemoryUpdater) {
+	a.workingMemoryUpdater = updater
+}
 
 // AddMessages prepends msgs before the first Step/Run call.
 func (a *Agent) AddMessages(msgs []Message) error {
@@ -97,6 +118,56 @@ func (a *Agent) appendResourceStateMessage(commandsUsed, modelTurnsUsed int) {
 		return
 	}
 	a.messages = append(a.messages, Message{Role: "user", Content: content})
+}
+
+func (a *Agent) queryMessages() []Message {
+	messages := transcript.CloneMessages(a.messages)
+	if a.workingMemory.IsZero() {
+		return messages
+	}
+	content := transcript.FormatWorkingMemoryMessage(json.RawMessage(a.workingMemory))
+	insertAt := min(a.workingMemoryLastMessage, len(messages))
+	for insertAt > 0 && transcript.IsTrailingHostStateMessage(messages[insertAt-1]) {
+		insertAt--
+	}
+	messages = append(messages, Message{})
+	copy(messages[insertAt+1:], messages[insertAt:])
+	messages[insertAt] = Message{Role: "user", Content: content}
+	return messages
+}
+
+func (a *Agent) UpdateWorkingMemory(ctx context.Context, reason string) error {
+	if a.workingMemoryUpdater == nil {
+		return nil
+	}
+	previous := a.workingMemory.Clone()
+	input := WorkingMemoryUpdateInput{
+		Previous:      previous,
+		Messages:      transcript.CloneMessages(a.messages),
+		Cwd:           a.cwd,
+		Reason:        reason,
+		DeltaMessages: len(a.messages) - a.workingMemoryLastMessage,
+	}
+	updated, err := a.workingMemoryUpdater.UpdateWorkingMemory(ctx, input)
+	if err != nil {
+		stats := WorkingMemoryUpdateStats(previous, previous, input.DeltaMessages, true)
+		a.notify(EventDebug{Message: fmt.Sprintf("working memory update failed: %v", err)})
+		a.notify(EventWorkingMemoryUpdated{Reason: reason, Stats: stats})
+		return nil
+	}
+	if err := updated.Validate(); err != nil {
+		stats := WorkingMemoryUpdateStats(previous, previous, input.DeltaMessages, true)
+		a.notify(EventDebug{Message: fmt.Sprintf("working memory update rejected: %v", err)})
+		a.notify(EventWorkingMemoryUpdated{Reason: reason, Stats: stats})
+		return nil
+	}
+	a.workingMemory = updated.Clone()
+	a.workingMemoryLastMessage = len(a.messages)
+	a.notify(EventWorkingMemoryUpdated{
+		Reason: reason,
+		Stats:  WorkingMemoryUpdateStats(previous, updated, input.DeltaMessages, false),
+	})
+	return nil
 }
 
 func (a *Agent) notifyRunError(err error, commandsUsed, modelTurns int) error {
@@ -186,7 +257,7 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	a.started = true
 	a.appendStateMessageIfNeeded()
 	a.notify(EventDebug{Message: "querying model..."})
-	resp, err := a.model.Query(ctx, transcript.CloneMessages(a.messages))
+	resp, err := a.model.Query(ctx, a.queryMessages())
 	if err != nil {
 		return StepResult{}, fmt.Errorf("query model: %w", err)
 	}
@@ -346,7 +417,7 @@ func (a *Agent) RequestStepLimitSummary(ctx context.Context) error {
 	a.notify(EventDebug{Message: "step limit reached, requesting summary"})
 	a.AppendUserMessage("Step limit reached. Respond with " + protocolDoneExample + " summarizing your progress.")
 
-	queryMessages := transcript.CloneMessages(a.messages)
+	queryMessages := a.queryMessages()
 	query := a.model.Query
 	if finalModel, ok := a.model.(FinalSummaryModel); ok {
 		query = finalModel.QueryFinal
@@ -381,13 +452,18 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 	if policy == nil {
 		policy = FullSendPolicy{}
 	}
-	a.AppendUserMessage(task)
 	steps := 0
 	modelTurns := 0
 	protocolErrors := 0
 	completionGate := CompletionGate{}
 	completionRejects := 0
 	gateCompletions := policyUsesCompletionGate(policy)
+	a.AppendUserMessage(task)
+	if a.workingMemoryUpdater != nil && a.workingMemory.IsZero() {
+		if err := a.UpdateWorkingMemory(ctx, WorkingMemoryUpdateReasonPrompt); err != nil {
+			return a.notifyRunError(err, steps, modelTurns)
+		}
+	}
 
 	for {
 		a.appendStateMessageIfNeeded()
@@ -469,9 +545,17 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 				return a.notifyRunError(err, steps, modelTurns)
 			}
 			steps += execResult.ExecCount
+			if execResult.ExecCount > 0 {
+				if err := a.UpdateWorkingMemory(ctx, WorkingMemoryUpdateReasonCommand); err != nil {
+					return a.notifyRunError(err, steps, modelTurns)
+				}
+			}
 			a.notify(EventDebug{Message: fmt.Sprintf("step %d/%d", steps, a.MaxSteps)})
 			if a.MaxSteps > 0 && steps >= a.MaxSteps {
 				a.appendResourceStateMessage(steps, modelTurns)
+				if err := a.UpdateWorkingMemory(ctx, WorkingMemoryUpdateReasonSave); err != nil {
+					return a.notifyRunError(err, steps, modelTurns)
+				}
 				if err := a.RequestStepLimitSummary(ctx); err != nil {
 					modelTurns++
 					return a.notifyRunError(err, steps, modelTurns)

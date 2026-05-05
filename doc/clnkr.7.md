@@ -87,6 +87,11 @@ a host-authored child result block to the parent transcript. The
 **internal/delegation** runtime runs the child as a separate **clnkr**
 subprocess and owns the child request, result, event log, and trajectory
 artifacts. Terminal, TUI, CLI, and JSONL adaptation remain frontend-owned.
+Structured working memory also lives at the frontend boundary: frontends own
+the memory schema, update prompt, update triggers, saved-session envelope, and
+flags. **internal/workingmemory** owns the structured updater, and
+**internal/session** owns saved-session file mechanics. Core only carries
+validated opaque memory JSON and injects it into cloned query messages.
 
 The configuration ownership boundary is **CLI config resolver** versus
 **Provider request semantics**. The CLI resolver owns app inputs and user-facing
@@ -185,6 +190,14 @@ plain text.
 : A host message containing strict JSON current working directory state, for
 example **{"type":"state","source":"clnkr","cwd":"/repo"}**.
 
+**Working memory block**
+: An optional host block containing clnkr-derived session memory. Frontends own
+the structured schema and update policy; core treats the block as opaque JSON
+after envelope validation. It is injected into model queries, but not appended
+repeatedly to the durable transcript. clnkr places it before transcript content
+newer than the memory and before trailing state and resource-state messages so
+fresh evidence remains newer than memory.
+
 **Compact block**
 : A host block containing a summary of older transcript history.
 
@@ -196,7 +209,9 @@ and is not inserted into the parent transcript.
 
 During compaction, clnkr replaces an older transcript prefix with one compact
 block. It keeps a recent tail of user-authored turns and any host state the
-next model call still needs.
+next model call still needs. When working memory is enabled, successful manual
+compaction also asks the working-memory updater to align memory with the
+rewritten transcript.
 
 Run metadata is not a transcript message. It is emitted as a debug event and
 persisted alongside session files so a run can be inspected without adding
@@ -466,7 +481,9 @@ the run.
 **3. Own your context window**
 : clnkr appends state messages, command result blocks, protocol corrections,
 canonical assistant turns, and compact blocks into the transcript. Run metadata
-is stored beside the transcript, not inside the context window.
+is stored beside the transcript, not inside the context window. Optional
+working memory is stored beside session messages and injected as one host block
+at query time.
 
 **4. Tools are just structured outputs**
 : clnkr's core sees a typed **act** turn regardless of provider wire shape.

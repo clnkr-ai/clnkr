@@ -13,11 +13,12 @@ import (
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/compaction"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
-	"github.com/clnkr-ai/clnkr/cmd/internal/session"
 	"github.com/clnkr-ai/clnkr/internal/providers/anthropic"
 	"github.com/clnkr-ai/clnkr/internal/providers/openai"
 	"github.com/clnkr-ai/clnkr/internal/providers/openairesponses"
 	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
+	"github.com/clnkr-ai/clnkr/internal/session"
+	"github.com/clnkr-ai/clnkr/internal/workingmemory"
 )
 
 type model interface {
@@ -77,6 +78,12 @@ func MakeCompactorFactory(cfg providerconfig.ResolvedProviderConfig) compaction.
 	})
 }
 
+func MakeWorkingMemoryFactory(cfg providerconfig.ResolvedProviderConfig) workingmemory.Factory {
+	return workingmemory.NewFactory(func() workingmemory.FreeformModel {
+		return NewModelForConfig(cfg, workingmemory.LoadPrompt())
+	})
+}
+
 func RequestOptions(effort string, maxOutputTokens int, maxOutputTokensSet bool, thinkingBudgetTokens int, thinkingBudgetTokensSet bool) providerdomain.ProviderRequestOptions {
 	return providerdomain.ProviderRequestOptions{
 		Effort: providerdomain.ProviderEffortOptions{
@@ -106,6 +113,19 @@ func RequestOptionFlagsSet(flags *flag.FlagSet) (maxOutputTokensSet, thinkingBud
 		}
 	})
 	return maxOutputTokensSet, thinkingBudgetTokensSet
+}
+
+func WorkingMemoryEnabled(flagValue bool, env func(string) string) bool {
+	if flagValue {
+		return true
+	}
+	value := strings.TrimSpace(env("CLNKR_WORKING_MEMORY"))
+	switch strings.ToLower(value) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func WriteEventLog(w io.Writer, e clnkr.Event) error {
@@ -138,6 +158,16 @@ func WriteEventLog(w io.Writer, e clnkr.Event) error {
 		})
 	case clnkr.EventDebug:
 		return writeEvent(w, "debug", map[string]string{"message": e.Message})
+	case clnkr.EventWorkingMemoryUpdated:
+		return writeEvent(w, "working_memory_updated", map[string]any{
+			"reason": e.Reason,
+			"stats": map[string]any{
+				"previous_bytes": e.Stats.PreviousBytes,
+				"updated_bytes":  e.Stats.UpdatedBytes,
+				"delta_messages": e.Stats.DeltaMessages,
+				"rejected":       e.Stats.Rejected,
+			},
+		})
 	default:
 		return nil
 	}
@@ -260,20 +290,29 @@ func WriteTrajectory(path string, messages []clnkr.Message) error {
 }
 
 func LoadMessages(data []byte) ([]clnkr.Message, error) {
+	messages, _, err := LoadMessagesWithWorkingMemory(data)
+	return messages, err
+}
+
+func LoadMessagesWithWorkingMemory(data []byte) ([]clnkr.Message, clnkr.WorkingMemory, error) {
 	var messages []clnkr.Message
 	if err := json.Unmarshal(data, &messages); err == nil {
-		return messages, nil
+		return messages, clnkr.WorkingMemory{}, nil
 	}
 	var envelope struct {
-		Messages []clnkr.Message `json:"messages"`
+		Messages      []clnkr.Message     `json:"messages"`
+		WorkingMemory clnkr.WorkingMemory `json:"working_memory"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
-		return nil, fmt.Errorf("parse messages: %w", err)
+		return nil, clnkr.WorkingMemory{}, fmt.Errorf("parse messages: %w", err)
 	}
 	if envelope.Messages == nil {
-		return nil, fmt.Errorf("parse messages: missing messages")
+		return nil, clnkr.WorkingMemory{}, fmt.Errorf("parse messages: missing messages")
 	}
-	return envelope.Messages, nil
+	if err := envelope.WorkingMemory.Validate(); err != nil {
+		return nil, clnkr.WorkingMemory{}, fmt.Errorf("parse messages: working memory: %w", err)
+	}
+	return envelope.Messages, envelope.WorkingMemory.Clone(), nil
 }
 
 func AddMessagesFile(agent *clnkr.Agent, path string) error {
@@ -281,28 +320,38 @@ func AddMessagesFile(agent *clnkr.Agent, path string) error {
 	if err != nil {
 		return fmt.Errorf("cannot read messages file %q: %w", path, err)
 	}
-	msgs, err := LoadMessages(data)
+	msgs, memory, err := LoadMessagesWithWorkingMemory(data)
 	if err != nil {
 		return fmt.Errorf("cannot parse messages file %q: %w", path, err)
 	}
 	if err := agent.AddMessages(msgs); err != nil {
 		return fmt.Errorf("cannot load messages: %w", err)
 	}
+	if !memory.IsZero() {
+		if err := agent.SetWorkingMemory(memory); err != nil {
+			return fmt.Errorf("cannot load working memory: %w", err)
+		}
+	}
 	return nil
 }
 
 func ResumeLatestSession(agent *clnkr.Agent, cwd string) (int, bool, error) {
-	msgs, err := session.LoadLatestSession(cwd)
+	loaded, err := session.LoadLatestSessionEnvelope(cwd)
 	if err != nil {
 		return 0, false, fmt.Errorf("cannot load session: %w", err)
 	}
-	if msgs == nil {
+	if loaded == nil {
 		return 0, false, nil
 	}
-	if err := agent.AddMessages(msgs); err != nil {
+	if err := agent.AddMessages(loaded.Messages); err != nil {
 		return 0, false, fmt.Errorf("cannot resume session: %w", err)
 	}
-	return len(msgs), true, nil
+	if !loaded.WorkingMemory.IsZero() {
+		if err := agent.SetWorkingMemory(loaded.WorkingMemory); err != nil {
+			return 0, false, fmt.Errorf("cannot resume working memory: %w", err)
+		}
+	}
+	return len(loaded.Messages), true, nil
 }
 
 func ParseCompactCommand(input string) (instructions string, ok bool) {
@@ -327,6 +376,9 @@ func HandleCompactCommand(ctx context.Context, agent *clnkr.Agent, input string,
 	}
 	stats, err := agent.Compact(ctx, compactor, clnkr.CompactOptions{Instructions: instructions, KeepRecentTurns: 2})
 	if err != nil {
+		return clnkr.CompactStats{}, false, err
+	}
+	if err := agent.UpdateWorkingMemory(ctx, clnkr.WorkingMemoryUpdateReasonCompact); err != nil {
 		return clnkr.CompactStats{}, false, err
 	}
 	return stats, true, nil

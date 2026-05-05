@@ -108,6 +108,11 @@ type fakeCompactor struct {
 	messages []clnkr.Message
 }
 
+type fakeWorkingMemoryUpdater struct {
+	calls   int
+	reasons []string
+}
+
 func (c *fakeCompactor) Summarize(_ context.Context, messages []clnkr.Message) (string, error) {
 	c.calls++
 	c.messages = append([]clnkr.Message{}, messages...)
@@ -115,6 +120,12 @@ func (c *fakeCompactor) Summarize(_ context.Context, messages []clnkr.Message) (
 		return "", c.err
 	}
 	return c.summary, nil
+}
+
+func (u *fakeWorkingMemoryUpdater) UpdateWorkingMemory(_ context.Context, input clnkr.WorkingMemoryUpdateInput) (clnkr.WorkingMemory, error) {
+	u.calls++
+	u.reasons = append(u.reasons, input.Reason)
+	return clnkr.WorkingMemory(fmt.Sprintf(`{"source":"clnkr","kind":"working_memory","version":1,"current_state":[%q]}`, input.Reason)), nil
 }
 
 func compactableMessages() []clnkr.Message {

@@ -80,6 +80,12 @@ type fakeCompactor struct {
 	got     [][]Message
 }
 
+type fakeWorkingMemoryUpdater struct {
+	updates []WorkingMemory
+	err     error
+	got     []WorkingMemoryUpdateInput
+}
+
 type scriptedPolicy struct {
 	decisions []ActDecision
 	clarifies []string
@@ -113,6 +119,23 @@ func (c *fakeCompactor) Summarize(_ context.Context, messages []Message) (string
 		return "", c.err
 	}
 	return c.summary, nil
+}
+
+func (u *fakeWorkingMemoryUpdater) UpdateWorkingMemory(_ context.Context, input WorkingMemoryUpdateInput) (WorkingMemory, error) {
+	u.got = append(u.got, input.Clone())
+	if u.err != nil {
+		return WorkingMemory{}, u.err
+	}
+	if len(u.updates) == 0 {
+		return testWorkingMemory("updated"), nil
+	}
+	memory := u.updates[0]
+	u.updates = u.updates[1:]
+	return memory, nil
+}
+
+func testWorkingMemory(state string) WorkingMemory {
+	return WorkingMemory(fmt.Sprintf(`{"source":"clnkr","kind":"working_memory","version":1,"current_state":[%q]}`, state))
 }
 
 func (e *fakeExecutor) Execute(_ context.Context, command string, dir string) (CommandResult, error) {
@@ -1905,6 +1928,209 @@ func TestFinalSummaryUsesCanonicalTranscript(t *testing.T) {
 	}
 	if done.Summary != "wrapped summary" {
 		t.Fatalf("done summary = %q, want %q", done.Summary, "wrapped summary")
+	}
+}
+
+func TestWorkingMemoryInjectedBeforeTrailingState(t *testing.T) {
+	model := &fakeModel{responses: []Response{
+		mustResponse(`{"type":"done","summary":"done"}`),
+	}}
+	agent := NewAgent(model, &fakeExecutor{}, "/repo")
+	if err := agent.SetWorkingMemory(testWorkingMemory("remember this")); err != nil {
+		t.Fatalf("SetWorkingMemory: %v", err)
+	}
+
+	if err := agent.Run(context.Background(), "finish"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(model.got) != 1 {
+		t.Fatalf("model calls = %d, want 1", len(model.got))
+	}
+	query := model.got[0]
+	if len(query) < 4 {
+		t.Fatalf("query messages = %#v, want task, memory, state, resource", query)
+	}
+	memoryIndex := -1
+	for i, msg := range query {
+		if transcript.IsWorkingMemoryMessage(msg) {
+			memoryIndex = i
+			break
+		}
+	}
+	if memoryIndex < 0 {
+		t.Fatalf("query missing working memory: %#v", query)
+	}
+	if memoryIndex >= len(query)-2 {
+		t.Fatalf("working memory index = %d, want before trailing state/resource in %#v", memoryIndex, query)
+	}
+	if !strings.Contains(query[len(query)-2].Content, `"type":"state"`) {
+		t.Fatalf("state should be newer than memory: %#v", query[len(query)-2])
+	}
+	if !strings.Contains(query[len(query)-1].Content, `"type":"resource_state"`) {
+		t.Fatalf("resource state should be newest: %#v", query[len(query)-1])
+	}
+
+	for _, msg := range agent.Messages() {
+		if transcript.IsWorkingMemoryMessage(msg) {
+			t.Fatal("working memory injection mutated durable transcript")
+		}
+	}
+}
+
+func TestWorkingMemoryInjectedBeforeMessagesNewerThanMemory(t *testing.T) {
+	model := &fakeModel{responses: []Response{
+		mustResponse(`{"type":"done","summary":"done"}`),
+	}}
+	agent := NewAgent(model, &fakeExecutor{}, "/repo")
+	if err := agent.AddMessages([]Message{{Role: "user", Content: "older prompt"}}); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+	if err := agent.SetWorkingMemory(testWorkingMemory("older memory")); err != nil {
+		t.Fatalf("SetWorkingMemory: %v", err)
+	}
+
+	if err := agent.Run(context.Background(), "newer prompt"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	query := model.got[0]
+	memoryIndex, newerPromptIndex := -1, -1
+	for i, msg := range query {
+		if transcript.IsWorkingMemoryMessage(msg) {
+			memoryIndex = i
+		}
+		if msg.Role == "user" && msg.Content == "newer prompt" {
+			newerPromptIndex = i
+		}
+	}
+	if memoryIndex < 0 {
+		t.Fatalf("query missing working memory: %#v", query)
+	}
+	if newerPromptIndex < 0 {
+		t.Fatalf("query missing newer prompt: %#v", query)
+	}
+	if memoryIndex > newerPromptIndex {
+		t.Fatalf("working memory index = %d, newer prompt index = %d; stale memory should not be newest evidence", memoryIndex, newerPromptIndex)
+	}
+}
+
+func TestFailedWorkingMemoryUpdateDoesNotMoveMemoryPastNewCommandResult(t *testing.T) {
+	model := &fakeModel{responses: []Response{
+		mustResponse(actJSON("printf ok")),
+		mustResponse(`{"type":"done","summary":"done"}`),
+	}}
+	executor := &fakeExecutor{results: []CommandResult{{Stdout: "ok\n", ExitCode: 0}}}
+	agent := NewAgent(model, executor, "/repo")
+	if err := agent.SetWorkingMemory(testWorkingMemory("before command")); err != nil {
+		t.Fatalf("SetWorkingMemory: %v", err)
+	}
+	agent.SetWorkingMemoryUpdater(&fakeWorkingMemoryUpdater{err: errors.New("update failed")})
+
+	if err := agent.Run(context.Background(), "do it"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(model.got) != 2 {
+		t.Fatalf("model calls = %d, want 2", len(model.got))
+	}
+
+	query := model.got[1]
+	memoryIndex, commandIndex := -1, -1
+	for i, msg := range query {
+		if transcript.IsWorkingMemoryMessage(msg) {
+			memoryIndex = i
+		}
+		if msg.Role == "user" && strings.Contains(msg.Content, `"stdout":"ok\n"`) {
+			commandIndex = i
+		}
+	}
+	if memoryIndex < 0 {
+		t.Fatalf("second query missing working memory: %#v", query)
+	}
+	if commandIndex < 0 {
+		t.Fatalf("second query missing command result: %#v", query)
+	}
+	if memoryIndex > commandIndex {
+		t.Fatalf("working memory index = %d, command result index = %d; stale memory should not follow newer command evidence", memoryIndex, commandIndex)
+	}
+}
+
+func TestRunWithPolicyUpdatesWorkingMemoryAfterPromptAndCommands(t *testing.T) {
+	model := &fakeModel{responses: []Response{
+		mustResponse(actJSON("printf ok")),
+		mustResponse(`{"type":"done","summary":"done"}`),
+	}}
+	executor := &fakeExecutor{results: []CommandResult{{Stdout: "ok\n", ExitCode: 0}}}
+	updater := &fakeWorkingMemoryUpdater{updates: []WorkingMemory{
+		testWorkingMemory("prompt"),
+		testWorkingMemory("command"),
+	}}
+	agent := NewAgent(model, executor, "/repo")
+	agent.SetWorkingMemoryUpdater(updater)
+
+	if err := agent.Run(context.Background(), "do it"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(updater.got) != 2 {
+		t.Fatalf("updates = %d, want 2: %#v", len(updater.got), updater.got)
+	}
+	if updater.got[0].Reason != WorkingMemoryUpdateReasonPrompt {
+		t.Fatalf("first reason = %q, want prompt", updater.got[0].Reason)
+	}
+	if updater.got[1].Reason != WorkingMemoryUpdateReasonCommand {
+		t.Fatalf("second reason = %q, want command", updater.got[1].Reason)
+	}
+	got := agent.WorkingMemory()
+	if !strings.Contains(string(got), `"command"`) {
+		t.Fatalf("WorkingMemory = %#v, want command update", got)
+	}
+}
+
+func TestWorkingMemoryRejectsInvalidUpdaterResult(t *testing.T) {
+	updater := &fakeWorkingMemoryUpdater{updates: []WorkingMemory{WorkingMemory(`{"source":"user","kind":"working_memory","version":1}`)}}
+	agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/repo")
+	agent.SetWorkingMemoryUpdater(updater)
+	var events []Event
+	agent.Notify = func(e Event) { events = append(events, e) }
+
+	if err := agent.UpdateWorkingMemory(context.Background(), WorkingMemoryUpdateReasonPrompt); err != nil {
+		t.Fatalf("UpdateWorkingMemory: %v", err)
+	}
+	if !agent.WorkingMemory().IsZero() {
+		t.Fatalf("invalid update should not replace memory: %#v", agent.WorkingMemory())
+	}
+	var rejected bool
+	for _, event := range events {
+		if update, ok := event.(EventWorkingMemoryUpdated); ok && update.Stats.Rejected {
+			rejected = true
+		}
+	}
+	if !rejected {
+		t.Fatalf("events missing rejected working memory update: %#v", events)
+	}
+}
+
+func TestRequestStepLimitSummaryInjectsWorkingMemory(t *testing.T) {
+	model := &fakeFinalModel{}
+	agent := NewAgent(model, &fakeExecutor{}, "/repo")
+	agent.messages = append(agent.messages, Message{Role: "user", Content: "do it"})
+	if err := agent.SetWorkingMemory(testWorkingMemory("almost done")); err != nil {
+		t.Fatalf("SetWorkingMemory: %v", err)
+	}
+
+	if err := agent.RequestStepLimitSummary(context.Background()); err != nil {
+		t.Fatalf("RequestStepLimitSummary: %v", err)
+	}
+	if len(model.got) != 1 {
+		t.Fatalf("final query count = %d, want 1", len(model.got))
+	}
+	var found bool
+	for _, msg := range model.got[0] {
+		if transcript.IsWorkingMemoryMessage(msg) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("final query missing working memory: %#v", model.got[0])
 	}
 }
 

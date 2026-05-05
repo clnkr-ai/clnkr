@@ -18,8 +18,8 @@ import (
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
-	"github.com/clnkr-ai/clnkr/cmd/internal/session"
 	"github.com/clnkr-ai/clnkr/internal/delegation"
+	"github.com/clnkr-ai/clnkr/internal/session"
 )
 
 // version is set at build time via -ldflags.
@@ -39,6 +39,7 @@ Options:
                             before summary (default: 100)
       --full-send           Execute every act batch without approval
                             (implied by -p)
+      --working-memory      Enable structured session working memory
   -v, --verbose             Show internal decisions
 
 Sessions:
@@ -272,6 +273,7 @@ func main() {
 	effortFlag := flags.String("effort", "", "")
 	thinkingBudgetTokens := flags.Int("thinking-budget-tokens", 0, "")
 	maxOutputTokens := flags.Int("max-output-tokens", 0, "")
+	workingMemory := flags.Bool("working-memory", false, "")
 	maxSteps := flags.Int("max-steps", 0, "")
 	delegateEnabled := flags.Bool("delegate", false, "")
 	delegateMaxChildren := flags.Int("delegate-max-children", 3, "")
@@ -418,6 +420,9 @@ func main() {
 	}
 	agent := clnkr.NewAgent(clnkrapp.NewModelForConfigWithOptions(cfg, systemPrompt, clnkrapp.ModelOptions{Unattended: singleTask}), executor, cwd)
 	agent.ActProtocol = cfg.ActProtocol
+	if clnkrapp.WorkingMemoryEnabled(*workingMemory, os.Getenv) {
+		agent.SetWorkingMemoryUpdater(clnkrapp.MakeWorkingMemoryFactory(cfg)())
+	}
 
 	showDebug := *verbose || *verboseShort
 	agent.Notify = func(e clnkr.Event) {
@@ -597,7 +602,10 @@ func main() {
 	}
 	// Auto-save session on exit (conversational mode)
 	if msgs := agent.Messages(); len(msgs) > 0 {
-		if err := session.SaveSessionWithMetadata(cwd, msgs, runMetadata); err != nil {
+		if err := agent.UpdateWorkingMemory(context.Background(), clnkr.WorkingMemoryUpdateReasonSave); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not update working memory: %v\n", err)
+		}
+		if err := session.SaveSessionEnvelope(cwd, msgs, agent.WorkingMemory(), runMetadata); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", err)
 		} else if dir, err := session.SessionDir(cwd); err == nil {
 			fmt.Fprintf(os.Stderr, "[Session saved to %s]\n", dir)

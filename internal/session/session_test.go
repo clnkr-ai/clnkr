@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/clnkr-ai/clnkr"
-	"github.com/clnkr-ai/clnkr/cmd/internal/session"
+	"github.com/clnkr-ai/clnkr/internal/session"
 )
 
 func TestNormalizeProjectPath(t *testing.T) {
@@ -161,6 +161,63 @@ func TestSaveSessionWithMetadataPreservesLoadCompatibility(t *testing.T) {
 	}
 	if len(loaded) != 1 || !reflect.DeepEqual(loaded[0], original[0]) {
 		t.Fatalf("loaded = %#v, want %#v", loaded, original)
+	}
+}
+
+func TestSaveAndLoadSessionWithWorkingMemory(t *testing.T) {
+	tmpdir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", tmpdir)
+
+	projectDir := "/tmp/test-project-save-memory"
+	messages := []clnkr.Message{{Role: "user", Content: "hello"}}
+	memory := clnkr.WorkingMemory(`{"source":"clnkr","kind":"working_memory","version":1,"current_state":["state"]}`)
+
+	if err := session.SaveSessionEnvelope(projectDir, messages, memory, nil); err != nil {
+		t.Fatalf("SaveSessionEnvelope: %v", err)
+	}
+
+	loaded, err := session.LoadLatestSessionEnvelope(projectDir)
+	if err != nil {
+		t.Fatalf("LoadLatestSessionEnvelope: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("LoadLatestSessionEnvelope returned nil")
+	}
+	if !reflect.DeepEqual(loaded.Messages, messages) {
+		t.Fatalf("messages = %#v, want %#v", loaded.Messages, messages)
+	}
+	if !reflect.DeepEqual(loaded.WorkingMemory, memory) {
+		t.Fatalf("working memory = %#v, want %#v", loaded.WorkingMemory, memory)
+	}
+
+	legacyMessages, err := session.LoadLatestSession(projectDir)
+	if err != nil {
+		t.Fatalf("LoadLatestSession: %v", err)
+	}
+	if !reflect.DeepEqual(legacyMessages, messages) {
+		t.Fatalf("legacy messages = %#v, want %#v", legacyMessages, messages)
+	}
+}
+
+func TestLoadLatestSessionEnvelopeTreatsMissingWorkingMemoryAsEmpty(t *testing.T) {
+	tmpdir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", tmpdir)
+
+	projectDir := "/tmp/test-project-legacy-memory"
+	messages := []clnkr.Message{{Role: "user", Content: "hello"}}
+	if err := session.SaveSession(projectDir, messages); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	loaded, err := session.LoadLatestSessionEnvelope(projectDir)
+	if err != nil {
+		t.Fatalf("LoadLatestSessionEnvelope: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("LoadLatestSessionEnvelope returned nil")
+	}
+	if !loaded.WorkingMemory.IsZero() {
+		t.Fatalf("working memory = %#v, want zero", loaded.WorkingMemory)
 	}
 }
 

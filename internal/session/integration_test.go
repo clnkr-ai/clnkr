@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/clnkr-ai/clnkr"
-	"github.com/clnkr-ai/clnkr/cmd/internal/session"
+	"github.com/clnkr-ai/clnkr/internal/session"
 )
 
 type fakeCompactor struct {

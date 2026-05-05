@@ -158,6 +158,29 @@ func TestLoadMessagesAcceptsLegacyArrayAndEnvelope(t *testing.T) {
 	}
 }
 
+func TestLoadMessagesEnvelopeRestoresWorkingMemory(t *testing.T) {
+	messages := []clnkr.Message{{Role: "user", Content: "hello"}}
+	memory := clnkr.WorkingMemory(`{"source":"clnkr","kind":"working_memory","version":1,"current_state":["state"]}`)
+	data, err := json.Marshal(struct {
+		Messages      []clnkr.Message     `json:"messages"`
+		WorkingMemory clnkr.WorkingMemory `json:"working_memory"`
+	}{Messages: messages, WorkingMemory: memory})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	got, gotMemory, err := LoadMessagesWithWorkingMemory(data)
+	if err != nil {
+		t.Fatalf("LoadMessagesWithWorkingMemory: %v", err)
+	}
+	if !reflect.DeepEqual(got, messages) {
+		t.Fatalf("messages = %#v, want %#v", got, messages)
+	}
+	if !reflect.DeepEqual(gotMemory, memory) {
+		t.Fatalf("working memory = %#v, want %#v", gotMemory, memory)
+	}
+}
+
 func TestLoadMessagesRejectsEnvelopeWithoutMessages(t *testing.T) {
 	_, err := LoadMessages([]byte(`{"metadata":{"version":"dev"}}`))
 	if err == nil || err.Error() != "parse messages: missing messages" {

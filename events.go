@@ -43,12 +43,18 @@ type EventCompletionGate struct {
 // EventDebug carries internal diagnostic messages.
 type EventDebug struct{ Message string }
 
-func (EventResponse) event()        {}
-func (EventCommandStart) event()    {}
-func (EventCommandDone) event()     {}
-func (EventProtocolFailure) event() {}
-func (EventCompletionGate) event()  {}
-func (EventDebug) event()           {}
+type EventWorkingMemoryUpdated struct {
+	Reason string
+	Stats  WorkingMemoryStats
+}
+
+func (EventResponse) event()             {}
+func (EventCommandStart) event()         {}
+func (EventCommandDone) event()          {}
+func (EventProtocolFailure) event()      {}
+func (EventCompletionGate) event()       {}
+func (EventDebug) event()                {}
+func (EventWorkingMemoryUpdated) event() {}
 
 // StepResult is the outcome of one agent operation.
 type StepResult struct {

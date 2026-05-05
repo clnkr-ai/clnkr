@@ -22,6 +22,7 @@ Run `make _fmt` then `make check` before committing. Do not commit if either fai
 - Root `clnkr` is the only public import surface. `internal/` is allowed when it clarifies ownership.
 - Output goes through typed events. Do not add `io.Writer` parameters.
 - Policy logic in `Run()`, shared logic in `Step()`. No policy in `Step()`.
+- Structured working-memory schema and update prompts stay in `internal/workingmemory`; session persistence stays in `internal/session`; update policy and flags stay frontend-owned. Root core may only carry opaque validated working-memory JSON for query-time injection.
 - CLI config resolution stays in `cmd/internal/providerconfig`: env/flag precedence, `CLNKR_*`, API keys, base URL parsing, provider detection, and user-facing config errors.
 - Provider request semantics stay in `internal/providers/providerconfig`: provider/API constants, request options, model capability checks, and provider-specific validation.
 - Provider adapters serialize validated options; they do not resolve CLI config.
@@ -42,12 +43,16 @@ Core importable library at module root. Two command adapters. `evaluations/` con
 clnkr/                  # core: types, Agent, events (stdlib only)
 ├── internal/providers/ # Anthropic/OpenAI adapters
 ├── internal/delegation # Child probe runtime boundary
+├── internal/session    # Session persistence runtime boundary
+├── internal/workingmemory # Frontend-owned structured working-memory updater
 ├── cmd/clnkr/          # Plain CLI (root go.mod, no external deps)
 ├── cmd/clnkrd/         # Stdio JSONL adapter
 └── evaluations/        # Eval suites for clankerval
 ```
 
 **Agent API:** `Step()` = one typed-turn cycle, no policy. `ExecuteTurn()` = run an act turn, update state, emit events. `Run()` = full-send policy loop (3 consecutive protocol failures = exit).
+
+**Working memory:** Frontends own structured memory and update policy. Core only injects an opaque working-memory host block into cloned query messages and never appends it repeatedly to the durable transcript.
 
 **Act protocol:** Three turn types: `act`, `clarify`, `done`. Providers own wire translation. Root `ParseTurn` validates canonical internal JSON for replay/tests only.
 
