@@ -86,6 +86,27 @@ func (a *Agent) appendStateMessageIfNeeded() {
 	a.messages = append(a.messages, Message{Role: "user", Content: transcript.FormatStateMessage(a.cwd)})
 }
 
+func (a *Agent) appendResourceStateMessage(commandsUsed, modelTurnsUsed int) {
+	content := fmt.Sprintf(`{"type":"resource_state","source":"clnkr","commands_used":%d,"model_turns_used":%d}`,
+		commandsUsed, modelTurnsUsed)
+	if a.MaxSteps > 0 {
+		content = fmt.Sprintf(`{"type":"resource_state","source":"clnkr","commands_used":%d,"commands_remaining":%d,"max_commands":%d,"model_turns_used":%d}`,
+			commandsUsed, max(a.MaxSteps-commandsUsed, 0), a.MaxSteps, modelTurnsUsed)
+	}
+	if len(a.messages) > 0 && a.messages[len(a.messages)-1].Role == "user" && a.messages[len(a.messages)-1].Content == content {
+		return
+	}
+	a.messages = append(a.messages, Message{Role: "user", Content: content})
+}
+
+func (a *Agent) notifyRunError(err error, commandsUsed, modelTurns int) error {
+	a.notify(EventDebug{Message: fmt.Sprintf(
+		"run error: model_turns=%d commands=%d messages=%d cwd=%s last_error=%v",
+		modelTurns, commandsUsed, len(a.messages), a.cwd, err,
+	)})
+	return err
+}
+
 func (a *Agent) appendSuccessfulResponse(resp *Response) error {
 	resp.Turn = turnPointer(resp.Turn)
 	if resp.Turn == nil {
@@ -362,19 +383,23 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 	}
 	a.AppendUserMessage(task)
 	steps := 0
+	modelTurns := 0
 	protocolErrors := 0
 
 	for {
+		a.appendStateMessageIfNeeded()
+		a.appendResourceStateMessage(steps, modelTurns)
 		result, err := a.Step(ctx)
+		modelTurns++
 		if err != nil {
-			return err
+			return a.notifyRunError(err, steps, modelTurns)
 		}
 
 		if result.ParseErr != nil {
 			protocolErrors++
 			a.notify(EventDebug{Message: fmt.Sprintf("consecutive protocol errors: %d", protocolErrors)})
 			if protocolErrors >= 3 {
-				return fmt.Errorf("consecutive protocol failures, exiting")
+				return a.notifyRunError(fmt.Errorf("consecutive protocol failures, exiting"), steps, modelTurns)
 			}
 			continue
 		}
@@ -386,7 +411,7 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 		case *ClarifyTurn:
 			reply, err := policy.Clarify(ctx, turn.Question)
 			if err != nil {
-				return fmt.Errorf("clarify: %w", err)
+				return a.notifyRunError(fmt.Errorf("clarify: %w", err), steps, modelTurns)
 			}
 			a.AppendUserMessage(reply)
 		case *ActTurn:
@@ -403,7 +428,7 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 				Prompt:   formatActProposal(commands),
 			})
 			if err != nil {
-				return fmt.Errorf("decide act: %w", err)
+				return a.notifyRunError(fmt.Errorf("decide act: %w", err), steps, modelTurns)
 			}
 			switch decision.Kind {
 			case ActDecisionReject:
@@ -412,19 +437,25 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 				continue
 			case ActDecisionApprove:
 			default:
-				return fmt.Errorf("decide act: unknown decision %q", decision.Kind)
+				return a.notifyRunError(fmt.Errorf("decide act: unknown decision %q", decision.Kind), steps, modelTurns)
 			}
 			execResult, err := a.ExecuteTurnWithSkipped(ctx, turn, skipped)
 			if err != nil {
-				return err
+				return a.notifyRunError(err, steps, modelTurns)
 			}
 			steps += execResult.ExecCount
 			a.notify(EventDebug{Message: fmt.Sprintf("step %d/%d", steps, a.MaxSteps)})
 			if a.MaxSteps > 0 && steps >= a.MaxSteps {
-				return a.RequestStepLimitSummary(ctx)
+				a.appendResourceStateMessage(steps, modelTurns)
+				if err := a.RequestStepLimitSummary(ctx); err != nil {
+					modelTurns++
+					return a.notifyRunError(err, steps, modelTurns)
+				}
+				modelTurns++
+				return nil
 			}
 		default:
-			return fmt.Errorf("unhandled turn type %T", turn)
+			return a.notifyRunError(fmt.Errorf("unhandled turn type %T", turn), steps, modelTurns)
 		}
 	}
 }

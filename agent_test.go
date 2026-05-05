@@ -57,6 +57,14 @@ func (m mutatingModel) Query(_ context.Context, messages []Message) (Response, e
 	return Response{Turn: &DoneTurn{Summary: "done"}}, nil
 }
 
+type errorModel struct {
+	err error
+}
+
+func (m errorModel) Query(context.Context, []Message) (Response, error) {
+	return Response{}, m.err
+}
+
 type fakeExecutor struct {
 	results []CommandResult
 	errs    []error
@@ -1896,14 +1904,17 @@ func TestAgent(t *testing.T) {
 			t.Fatalf("expected one model call, got %d", model.calls)
 		}
 		msgs := agent.Messages()
-		if len(msgs) != 3 {
-			t.Fatalf("expected task, state, and assistant messages, got %d", len(msgs))
+		if len(msgs) != 4 {
+			t.Fatalf("expected task, state, resource state, and assistant messages, got %d", len(msgs))
 		}
 		if !reflect.DeepEqual(msgs[1], Message{Role: "user", Content: transcript.FormatStateMessage("/tmp")}) {
 			t.Fatalf("unexpected state message: %#v", msgs[1])
 		}
-		if msgs[2].Role != "assistant" {
-			t.Fatalf("unexpected message role: %q", msgs[2].Role)
+		if !strings.Contains(msgs[2].Content, `"type":"resource_state"`) {
+			t.Fatalf("unexpected resource state message: %#v", msgs[2])
+		}
+		if msgs[3].Role != "assistant" {
+			t.Fatalf("unexpected message role: %q", msgs[3].Role)
 		}
 	})
 
@@ -2420,6 +2431,117 @@ func TestRun(t *testing.T) {
 }
 
 func TestRunWithPolicy(t *testing.T) {
+	t.Run("emits final query error diagnostics", func(t *testing.T) {
+		agent := NewAgent(errorModel{err: errors.New("api error (status 502): context deadline exceeded")}, &fakeExecutor{}, "/tmp")
+		var debug []string
+		agent.Notify = func(event Event) {
+			if ev, ok := event.(EventDebug); ok {
+				debug = append(debug, ev.Message)
+			}
+		}
+
+		err := agent.Run(context.Background(), "finish")
+		if err == nil {
+			t.Fatal("Run succeeded, want error")
+		}
+		joined := strings.Join(debug, "\n")
+		for _, want := range []string{
+			"querying model...",
+			"run error:",
+			"model_turns=1",
+			"messages=",
+			"last_error=query model: api error (status 502): context deadline exceeded",
+		} {
+			if !strings.Contains(joined, want) {
+				t.Fatalf("debug events = %q, missing %q", joined, want)
+			}
+		}
+	})
+
+	t.Run("appends resource state before queries", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			mustResponse(actJSON("pwd")),
+			mustResponse(`{"type":"done","summary":"done"}`),
+		}}
+		executor := &fakeExecutor{results: []CommandResult{{Command: "pwd", Stdout: "/tmp\n", ExitCode: 0}}}
+		agent := NewAgent(model, executor, "/tmp")
+		agent.MaxSteps = 3
+
+		if err := agent.Run(context.Background(), "finish"); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if len(model.got) < 2 {
+			t.Fatalf("model queries = %d, want at least 2", len(model.got))
+		}
+		second := messagesText(model.got[1])
+		for _, want := range []string{
+			`"type":"resource_state"`,
+			`"source":"clnkr"`,
+			`"commands_used":1`,
+			`"commands_remaining":2`,
+			`"max_commands":3`,
+			`"model_turns_used":1`,
+		} {
+			if !strings.Contains(second, want) {
+				t.Fatalf("second query messages missing %q:\n%s", want, second)
+			}
+		}
+	})
+
+	t.Run("unlimited command budget omits remaining count", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			mustResponse(actJSON("pwd")),
+			mustResponse(`{"type":"done","summary":"done"}`),
+		}}
+		executor := &fakeExecutor{results: []CommandResult{{Command: "pwd", Stdout: "/tmp\n", ExitCode: 0}}}
+		agent := NewAgent(model, executor, "/tmp")
+		agent.MaxSteps = 0
+
+		if err := agent.Run(context.Background(), "finish"); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		second := messagesText(model.got[1])
+		for _, want := range []string{
+			`"type":"resource_state"`,
+			`"commands_used":1`,
+			`"model_turns_used":1`,
+		} {
+			if !strings.Contains(second, want) {
+				t.Fatalf("second query messages missing %q:\n%s", want, second)
+			}
+		}
+		for _, notWant := range []string{`"commands_remaining"`, `"max_commands"`} {
+			if strings.Contains(second, notWant) {
+				t.Fatalf("second query messages contain %q for unlimited budget:\n%s", notWant, second)
+			}
+		}
+	})
+
+	t.Run("command budget resets between runs on one agent", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			mustResponse(actJSON("echo one")),
+			mustResponse(`{"type":"done","summary":"first"}`),
+			mustResponse(actJSON("echo two")),
+			mustResponse(`{"type":"done","summary":"second"}`),
+		}}
+		executor := &fakeExecutor{results: []CommandResult{
+			{Stdout: "one\n", ExitCode: 0},
+			{Stdout: "two\n", ExitCode: 0},
+		}}
+		agent := NewAgent(model, executor, "/tmp")
+		agent.MaxSteps = 1
+
+		if err := agent.Run(context.Background(), "first"); err != nil {
+			t.Fatalf("first Run: %v", err)
+		}
+		if err := agent.Run(context.Background(), "second"); err != nil {
+			t.Fatalf("second Run: %v", err)
+		}
+		if got, want := strings.Join(executor.gotCmds, ","), "echo one,echo two"; got != want {
+			t.Fatalf("executed commands = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("bounds huge command output before the next model query", func(t *testing.T) {
 		hugeStdout := "stdout-head-" + strings.Repeat("o", 128*1024) + "-stdout-tail"
 		hugeStderr := "stderr-head-" + strings.Repeat("e", 128*1024) + "-stderr-tail"
@@ -2742,6 +2864,15 @@ func hasMessage(messages []Message, role, content string) bool {
 		}
 	}
 	return false
+}
+
+func messagesText(messages []Message) string {
+	var b strings.Builder
+	for _, msg := range messages {
+		b.WriteString(msg.Content)
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 func collectToolResults(messages []Message) []BashToolResult {

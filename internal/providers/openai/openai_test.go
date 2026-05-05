@@ -109,6 +109,40 @@ func TestModel(t *testing.T) {
 		}
 	})
 
+	t.Run("QueryText retries transient server error and succeeds", func(t *testing.T) {
+		attempts := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			attempts++
+			if attempts == 1 {
+				w.Header().Set("Retry-After", "0")
+				w.WriteHeader(http.StatusBadGateway)
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"error": map[string]interface{}{"message": "context deadline exceeded"},
+				})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"message": map[string]string{"role": "assistant", "content": "ok after retry"}},
+				},
+				"usage": map[string]int{"prompt_tokens": 2, "completion_tokens": 3},
+			})
+		}))
+		defer server.Close()
+
+		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+		summary, err := m.QueryText(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if attempts != 2 {
+			t.Fatalf("attempt count = %d, want 2", attempts)
+		}
+		if summary != "ok after retry" {
+			t.Fatalf("summary = %q, want ok after retry", summary)
+		}
+	})
+
 	t.Run("returns canonical json text", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -283,6 +317,45 @@ func TestModel(t *testing.T) {
 		}
 	})
 
+	t.Run("retries transient server error and succeeds", func(t *testing.T) {
+		attempts := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			attempts++
+			if attempts == 1 {
+				w.Header().Set("Retry-After", "0")
+				w.WriteHeader(http.StatusBadGateway)
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"error": map[string]interface{}{
+						"message": "context deadline exceeded",
+					},
+				})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"message": map[string]string{
+						"role":    "assistant",
+						"content": openAIWrappedDone("ok after retry"),
+					}},
+				},
+				"usage": map[string]int{"prompt_tokens": 2, "completion_tokens": 3},
+			})
+		}))
+		defer server.Close()
+
+		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+		resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if attempts != 2 {
+			t.Fatalf("attempt count = %d, want 2", attempts)
+		}
+		if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok after retry"}` {
+			t.Fatalf("content = %q, want %q", got, `{"type":"done","summary":"ok after retry"}`)
+		}
+	})
+
 	t.Run("fails closed on unsupported structured output backend", func(t *testing.T) {
 		attempts := 0
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -354,10 +427,11 @@ func TestModel(t *testing.T) {
 		}
 	})
 
-	t.Run("falls back to raw body for non-JSON errors", func(t *testing.T) {
+	t.Run("retries non-JSON server errors then returns raw body", func(t *testing.T) {
 		attempts := 0
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			attempts++
+			w.Header().Set("Retry-After", "0")
 			w.WriteHeader(http.StatusBadGateway)
 			_, _ = w.Write([]byte("Bad Gateway"))
 		}))
@@ -372,8 +446,8 @@ func TestModel(t *testing.T) {
 		if err.Error() != want {
 			t.Errorf("got %q, want error containing %q", err.Error(), want)
 		}
-		if attempts != 1 {
-			t.Fatalf("attempt count = %d, want 1", attempts)
+		if attempts != 5 {
+			t.Fatalf("attempt count = %d, want 5", attempts)
 		}
 	})
 

@@ -213,7 +213,7 @@ func (m *Model) queryStructured(ctx context.Context, input []responsesInputItem,
 		}
 
 		apiErr := fmt.Errorf("api error (status %d): %s", statusCode, extractErrorMessage(respBody))
-		if statusCode != http.StatusTooManyRequests || attempt == maxAttempts {
+		if !retryableStatus(statusCode) || attempt == maxAttempts {
 			return clnkr.Response{}, apiErr
 		}
 		if err := waitForRetry(ctx, retryDelay(retryAfter, attempt)); err != nil {
@@ -246,7 +246,7 @@ func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string
 		}
 
 		apiErr := fmt.Errorf("api error (status %d): %s", statusCode, extractErrorMessage(respBody))
-		if statusCode != http.StatusTooManyRequests || attempt == maxAttempts {
+		if !retryableStatus(statusCode) || attempt == maxAttempts {
 			return "", apiErr
 		}
 		if err := waitForRetry(ctx, retryDelay(retryAfter, attempt)); err != nil {
@@ -666,6 +666,15 @@ func extractErrorMessage(body []byte) string {
 	}
 
 	return string(body)
+}
+
+func retryableStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return statusCode >= 500 && statusCode < 600
+	}
 }
 
 func retryDelay(retryAfter string, attempt int) time.Duration {
