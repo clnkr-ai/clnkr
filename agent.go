@@ -310,17 +310,13 @@ func (a *Agent) appendSkippedToolResult(action BashAction, reason string) (strin
 }
 
 func commandResultIsError(result CommandResult) bool {
-	outcome := result.Outcome
-	if outcome.Type == "" {
-		outcome = CommandOutcome{Type: CommandOutcomeExit, ExitCode: &result.ExitCode}
+	if result.Outcome.Type == "" || result.Outcome.Type == CommandOutcomeExit && result.Outcome.ExitCode == nil {
+		return result.ExitCode != 0
 	}
-	if outcome.Type != CommandOutcomeExit {
+	if result.Outcome.Type != CommandOutcomeExit {
 		return true
 	}
-	if outcome.ExitCode != nil {
-		return *outcome.ExitCode != 0
-	}
-	return result.ExitCode != 0
+	return *result.Outcome.ExitCode != 0
 }
 
 // RequestStepLimitSummary asks the model for a final done summary after the

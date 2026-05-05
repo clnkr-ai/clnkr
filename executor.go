@@ -66,15 +66,12 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, dir strin
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	result := CommandResult{Command: command}
 	err = cmd.Run()
-	result.Stdout = stdout.String()
-	result.Stderr = stderr.String()
+	result := CommandResult{Command: command, Stdout: stdout.String(), Stderr: stderr.String()}
 
 	if cmd.ProcessState != nil {
 		result.ExitCode = cmd.ProcessState.ExitCode()

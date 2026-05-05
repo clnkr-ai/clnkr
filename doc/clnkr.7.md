@@ -132,7 +132,8 @@ conversation sent to the model, but they are not user-authored text.
 : A host block containing a JSON object with optional **command**, **stdout**,
 **stderr**, **outcome**, and optional **feedback**. Exit outcomes include
 **exit_code**. Other outcomes include **timeout**, **cancelled**, **denied**,
-**skipped**, and **error**.
+**skipped**, and **error**. Large stdout and stderr streams are truncated before
+they are added to the model transcript.
 
 **Bash tool metadata**
 : Optional transcript metadata that records provider tool calls,

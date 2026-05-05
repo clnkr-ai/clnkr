@@ -2,8 +2,11 @@ package transcript
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 )
+
+const maxCommandStreamBytes = 64 * 1024
 
 // FormatCommandResult renders a command result as structured shell output.
 func FormatCommandResult(result CommandResult) string {
@@ -15,8 +18,8 @@ func FormatCommandResult(result CommandResult) string {
 		Feedback *CommandFeedback `json:"feedback,omitempty"`
 	}{
 		Command: result.Command,
-		Stdout:  result.Stdout,
-		Stderr:  result.Stderr,
+		Stdout:  truncateCommandStream("stdout", result.Stdout),
+		Stderr:  truncateCommandStream("stderr", result.Stderr),
 		Outcome: normalizedOutcome(result.Outcome, result.ExitCode),
 	}
 	if len(result.Feedback.ChangedFiles) > 0 || result.Feedback.Diff != "" {
@@ -29,12 +32,27 @@ func FormatCommandResult(result CommandResult) string {
 	return string(body)
 }
 
+func truncateCommandStream(name string, stream string) string {
+	if len(stream) <= maxCommandStreamBytes {
+		return stream
+	}
+	omitted := len(stream) - maxCommandStreamBytes + len("\n[clnkr: "+name+" truncated; omitted  bytes]\n")
+	digits := len(strconv.Itoa(omitted))
+	if len(strconv.Itoa(omitted+digits)) > digits {
+		digits++
+	}
+	marker := "\n[clnkr: " + name + " truncated; omitted " + strconv.Itoa(omitted+digits) + " bytes]\n"
+	keep := maxCommandStreamBytes - len(marker)
+	head := keep / 2
+	return stream[:head] + marker + stream[len(stream)-(keep-head):]
+}
+
 func FormatDeniedCommandResult(reply string) string {
 	stderr := "Command was not run because the user denied approval."
 	if trimmed := strings.TrimSpace(reply); trimmed != "" {
 		stderr += "\nUser guidance: " + trimmed
 	}
-	return formatUnexecutedCommandResult(stderr, CommandOutcome{Type: CommandOutcomeDenied})
+	return FormatCommandResult(CommandResult{Stderr: stderr, Outcome: CommandOutcome{Type: CommandOutcomeDenied}})
 }
 
 func FormatSkippedCommandResult(reason string) string {
@@ -52,14 +70,7 @@ func FormatSkippedCommandResult(reason string) string {
 	default:
 		stderr += "\nReason: " + reason
 	}
-	return formatUnexecutedCommandResult(stderr, CommandOutcome{Type: CommandOutcomeSkipped, Reason: outcomeReason})
-}
-
-func formatUnexecutedCommandResult(stderr string, outcome CommandOutcome) string {
-	return FormatCommandResult(CommandResult{
-		Stderr:  stderr,
-		Outcome: outcome,
-	})
+	return FormatCommandResult(CommandResult{Stderr: stderr, Outcome: CommandOutcome{Type: CommandOutcomeSkipped, Reason: outcomeReason}})
 }
 
 func normalizedOutcome(outcome CommandOutcome, fallbackExitCode int) CommandOutcome {

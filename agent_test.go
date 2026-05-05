@@ -169,6 +169,45 @@ func mustShellResultPayload(t *testing.T, raw string) struct {
 	return payload
 }
 
+func mustFindCommandPayload(t *testing.T, messages []Message) struct {
+	Stdout  string `json:"stdout"`
+	Stderr  string `json:"stderr"`
+	Outcome struct {
+		Type     string `json:"type"`
+		ExitCode int    `json:"exit_code,omitempty"`
+		Reason   string `json:"reason,omitempty"`
+	} `json:"outcome"`
+} {
+	t.Helper()
+	for _, msg := range messages {
+		if msg.Role != "user" {
+			continue
+		}
+		var payload struct {
+			Stdout  string `json:"stdout"`
+			Stderr  string `json:"stderr"`
+			Outcome struct {
+				Type     string `json:"type"`
+				ExitCode int    `json:"exit_code,omitempty"`
+				Reason   string `json:"reason,omitempty"`
+			} `json:"outcome"`
+		}
+		if err := json.Unmarshal([]byte(msg.Content), &payload); err == nil && payload.Outcome.Type != "" {
+			return payload
+		}
+	}
+	t.Fatalf("no command payload in messages: %#v", messages)
+	return struct {
+		Stdout  string `json:"stdout"`
+		Stderr  string `json:"stderr"`
+		Outcome struct {
+			Type     string `json:"type"`
+			ExitCode int    `json:"exit_code,omitempty"`
+			Reason   string `json:"reason,omitempty"`
+		} `json:"outcome"`
+	}{}
+}
+
 func mustStepAct(t *testing.T, agent *Agent) *ActTurn {
 	t.Helper()
 	result, err := agent.Step(context.Background())
@@ -2381,6 +2420,71 @@ func TestRun(t *testing.T) {
 }
 
 func TestRunWithPolicy(t *testing.T) {
+	t.Run("bounds huge command output before the next model query", func(t *testing.T) {
+		hugeStdout := "stdout-head-" + strings.Repeat("o", 128*1024) + "-stdout-tail"
+		hugeStderr := "stderr-head-" + strings.Repeat("e", 128*1024) + "-stderr-tail"
+		model := &fakeModel{responses: []Response{
+			mustResponse(actJSON("generate-noise")),
+			mustResponse(`{"type":"done","summary":"finished"}`),
+		}}
+		executor := &fakeExecutor{results: []CommandResult{{
+			Stdout:   hugeStdout,
+			Stderr:   hugeStderr,
+			ExitCode: 0,
+		}}}
+		notify, events := collectEvents()
+
+		agent := NewAgent(model, executor, "/tmp")
+		agent.Notify = notify
+
+		if err := agent.Run(context.Background(), "handle noisy command"); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if model.calls != 2 {
+			t.Fatalf("model calls = %d, want 2", model.calls)
+		}
+
+		var commandDone EventCommandDone
+		for _, event := range *events {
+			if ev, ok := event.(EventCommandDone); ok {
+				commandDone = ev
+				break
+			}
+		}
+		if commandDone.Stdout != hugeStdout {
+			t.Fatalf("EventCommandDone stdout length = %d, want full %d", len(commandDone.Stdout), len(hugeStdout))
+		}
+		if commandDone.Stderr != hugeStderr {
+			t.Fatalf("EventCommandDone stderr length = %d, want full %d", len(commandDone.Stderr), len(hugeStderr))
+		}
+
+		payload := mustFindCommandPayload(t, model.got[1])
+		if payload.Stdout == hugeStdout {
+			t.Fatal("next model query received full stdout")
+		}
+		if payload.Stderr == hugeStderr {
+			t.Fatal("next model query received full stderr")
+		}
+		if len(payload.Stdout) >= len(hugeStdout) || len(payload.Stderr) >= len(hugeStderr) {
+			t.Fatalf("bounded streams are not smaller: stdout %d/%d stderr %d/%d", len(payload.Stdout), len(hugeStdout), len(payload.Stderr), len(hugeStderr))
+		}
+		if !strings.Contains(payload.Stdout, "truncated") {
+			t.Fatalf("stdout missing truncation marker: %q", payload.Stdout)
+		}
+		if !strings.Contains(payload.Stderr, "truncated") {
+			t.Fatalf("stderr missing truncation marker: %q", payload.Stderr)
+		}
+		if !strings.HasPrefix(payload.Stdout, "stdout-head-") || !strings.HasSuffix(payload.Stdout, "-stdout-tail") {
+			t.Fatalf("stdout should preserve head and tail: %q ... %q", payload.Stdout[:32], payload.Stdout[len(payload.Stdout)-32:])
+		}
+		if !strings.HasPrefix(payload.Stderr, "stderr-head-") || !strings.HasSuffix(payload.Stderr, "-stderr-tail") {
+			t.Fatalf("stderr should preserve head and tail: %q ... %q", payload.Stderr[:32], payload.Stderr[len(payload.Stderr)-32:])
+		}
+		if !strings.Contains(payload.Stdout, "omitted") || !strings.Contains(payload.Stderr, "omitted") {
+			t.Fatalf("truncation markers should report omitted bytes: stdout=%q stderr=%q", payload.Stdout, payload.Stderr)
+		}
+	})
+
 	t.Run("approval executes command", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			mustResponse(actJSON("echo hi")),
