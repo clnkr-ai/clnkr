@@ -94,6 +94,9 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, `"stdout"`) || !strings.Contains(prompt, `"stderr"`) || !strings.Contains(prompt, `"outcome"`) {
 			t.Error("prompt should describe structured command-result JSON")
 		}
+		if !strings.Contains(prompt, `"observation" metadata when stdout/stderr were compressed`) {
+			t.Error("prompt should describe compressed command-result observation metadata")
+		}
 		if !strings.Contains(prompt, "clean pre-command git baseline") {
 			t.Error("prompt should explain feedback scope")
 		}

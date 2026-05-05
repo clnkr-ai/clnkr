@@ -155,8 +155,11 @@ conversation sent to the model, but they are not user-authored text.
 : A host block containing a JSON object with optional **command**, **stdout**,
 **stderr**, **outcome**, and optional **feedback**. Exit outcomes include
 **exit_code**. Other outcomes include **timeout**, **cancelled**, **denied**,
-**skipped**, and **error**. Large stdout and stderr streams are truncated before
-they are added to the model transcript.
+**skipped**, and **error**. Large command observations are compressed before
+they enter the model transcript. The executor and command-done events keep raw
+stdout/stderr, while the transcript receives bounded **stdout** and **stderr**
+strings with deterministic markers and optional **observation** metadata that
+records original, shown, and omitted byte counts.
 
 **Bash tool metadata**
 : Optional transcript metadata that records provider tool calls,

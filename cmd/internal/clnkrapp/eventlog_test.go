@@ -1,10 +1,12 @@
 package clnkrapp
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/clnkr-ai/clnkr"
@@ -137,6 +139,44 @@ func TestWriteEventLogIncludesFeedback(t *testing.T) {
 	}
 	if len(payload.Payload.Feedback.ChangedFiles) != 1 || payload.Payload.Feedback.ChangedFiles[0] != "note.txt" {
 		t.Fatalf("feedback = %#v, want note.txt", payload.Payload.Feedback)
+	}
+}
+
+func TestWriteEventLogPreservesRawCommandOutput(t *testing.T) {
+	var buf bytes.Buffer
+	stdout := "stdout-head\n" + strings.Repeat("raw stdout\n", 80*1024/len("raw stdout\n")) + "stdout-tail\n"
+	stderr := "stderr-head\n" + strings.Repeat("raw stderr\n", 80*1024/len("raw stderr\n")) + "stderr-tail\n"
+
+	if err := WriteEventLog(&buf, clnkr.EventCommandDone{
+		Command:  "make test",
+		Stdout:   stdout,
+		Stderr:   stderr,
+		ExitCode: 1,
+	}); err != nil {
+		t.Fatalf("WriteEventLog: %v", err)
+	}
+
+	var event struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Stdout string `json:"stdout"`
+			Stderr string `json:"stderr"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &event); err != nil {
+		t.Fatalf("event log is not JSON: %v\n%s", err, buf.String())
+	}
+	if event.Type != "command_done" {
+		t.Fatalf("event type = %q, want command_done", event.Type)
+	}
+	if event.Payload.Stdout != stdout {
+		t.Fatalf("stdout length = %d, want raw %d", len(event.Payload.Stdout), len(stdout))
+	}
+	if event.Payload.Stderr != stderr {
+		t.Fatalf("stderr length = %d, want raw %d", len(event.Payload.Stderr), len(stderr))
+	}
+	if strings.Contains(event.Payload.Stdout, "compressed") || strings.Contains(event.Payload.Stderr, "compressed") {
+		t.Fatalf("event log should not contain model-facing compression markers")
 	}
 }
 

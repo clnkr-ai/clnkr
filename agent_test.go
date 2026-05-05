@@ -814,6 +814,31 @@ func TestExecuteTurn(t *testing.T) {
 		}
 	})
 
+	t.Run("stores compressed tool-call result metadata", func(t *testing.T) {
+		hugeStdout := "stdout-head-" + strings.Repeat("o", 128*1024) + "-stdout-tail"
+		executor := &fakeExecutor{results: []CommandResult{{Stdout: hugeStdout, ExitCode: 0}}}
+		agent := NewAgent(&fakeModel{}, executor, "/tmp")
+
+		_, err := agent.ExecuteTurn(context.Background(), &ActTurn{Bash: bashBatch(BashAction{ID: "call_1", Command: "generate-noise"})})
+		if err != nil {
+			t.Fatalf("ExecuteTurn: %v", err)
+		}
+		msg := agent.messages[len(agent.messages)-2]
+		if msg.BashToolResult == nil {
+			t.Fatal("missing BashToolResult")
+		}
+		if msg.BashToolResult.Content != msg.Content {
+			t.Fatalf("tool result content = %q, want exact payload %q", msg.BashToolResult.Content, msg.Content)
+		}
+		payload := mustShellResultPayload(t, msg.BashToolResult.Content)
+		if payload.Stdout == hugeStdout {
+			t.Fatal("tool result received full stdout")
+		}
+		if !strings.Contains(payload.Stdout, "compressed") {
+			t.Fatalf("tool result stdout missing compression marker: %q", payload.Stdout)
+		}
+	})
+
 	t.Run("marks nonzero tool-call result as error", func(t *testing.T) {
 		executor := &fakeExecutor{
 			results: []CommandResult{{Stderr: "nope\n", ExitCode: 2}},
@@ -2717,20 +2742,20 @@ func TestRunWithPolicy(t *testing.T) {
 		if len(payload.Stdout) >= len(hugeStdout) || len(payload.Stderr) >= len(hugeStderr) {
 			t.Fatalf("bounded streams are not smaller: stdout %d/%d stderr %d/%d", len(payload.Stdout), len(hugeStdout), len(payload.Stderr), len(hugeStderr))
 		}
-		if !strings.Contains(payload.Stdout, "truncated") {
-			t.Fatalf("stdout missing truncation marker: %q", payload.Stdout)
+		if !strings.Contains(payload.Stdout, "compressed") {
+			t.Fatalf("stdout missing compression marker: %q", payload.Stdout)
 		}
-		if !strings.Contains(payload.Stderr, "truncated") {
-			t.Fatalf("stderr missing truncation marker: %q", payload.Stderr)
+		if !strings.Contains(payload.Stderr, "compressed") {
+			t.Fatalf("stderr missing compression marker: %q", payload.Stderr)
 		}
-		if !strings.HasPrefix(payload.Stdout, "stdout-head-") || !strings.HasSuffix(payload.Stdout, "-stdout-tail") {
+		if !strings.Contains(payload.Stdout, "stdout-head-") || !strings.HasSuffix(payload.Stdout, "-stdout-tail") {
 			t.Fatalf("stdout should preserve head and tail: %q ... %q", payload.Stdout[:32], payload.Stdout[len(payload.Stdout)-32:])
 		}
-		if !strings.HasPrefix(payload.Stderr, "stderr-head-") || !strings.HasSuffix(payload.Stderr, "-stderr-tail") {
+		if !strings.Contains(payload.Stderr, "stderr-head-") || !strings.HasSuffix(payload.Stderr, "-stderr-tail") {
 			t.Fatalf("stderr should preserve head and tail: %q ... %q", payload.Stderr[:32], payload.Stderr[len(payload.Stderr)-32:])
 		}
 		if !strings.Contains(payload.Stdout, "omitted") || !strings.Contains(payload.Stderr, "omitted") {
-			t.Fatalf("truncation markers should report omitted bytes: stdout=%q stderr=%q", payload.Stdout, payload.Stderr)
+			t.Fatalf("compression markers should report omitted bytes: stdout=%q stderr=%q", payload.Stdout, payload.Stderr)
 		}
 	})
 
