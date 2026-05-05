@@ -41,6 +41,10 @@ request options, model capability checks, and request-option validation.
 : The host component that runs one bash action and returns a structured command
 result.
 
+**Child probe**
+: A bounded child **clnkr** run launched by the frontend for a narrow
+inspection or verification task. The parent remains the only coordinator.
+
 **Transcript**
 : The ordered message history sent to the model.
 
@@ -72,6 +76,10 @@ coordinates frontend interaction around **RunWithPolicy** by turning approval
 and clarify policy hooks into frontend events and accepting replies. It does
 not query the Model, parse Turns, or execute commands directly. **cmd/clnkr**
 and **cmd/clnkrd** adapt terminal and stdio JSONL surfaces to the driver.
+Manual delegation also lives at this boundary: **Driver** handles **/delegate**
+before model execution, emits child lifecycle events, and appends a
+host-authored child result block to the parent transcript. The child runs as a
+separate **clnkr** subprocess with its own event log and trajectory artifacts.
 
 The configuration ownership boundary is **CLI config resolver** versus
 **Provider request semantics**. The CLI resolver owns app inputs and user-facing
@@ -90,7 +98,8 @@ Every accepted model instruction is a **turn**. There are three turn types:
 : Ask the user a non-empty question and stop the run.
 
 **done**
-: Summarize completion and stop the run successfully.
+: Summarize completion with structured verification evidence and stop the run
+successfully.
 
 An **act** turn contains a **bash batch**. Each **bash action** contains a shell
 command and an optional working directory. **Max steps** is the execution cap;
@@ -110,6 +119,20 @@ become an **act** turn, while **clarify** and **done** remain text JSON.
 
 Provider request options such as effort and output-token limits change provider
 wire fields. They do not add turn types or change the canonical turn shape.
+
+A **done** turn contains a non-empty summary, a **verification** object, and a
+**known_risks** array. Verification status is **verified**,
+**partially_verified**, or **not_verified**. **verified** completions include at
+least one concrete check with command, outcome, and evidence.
+**partially_verified** completions list remaining risks. This makes completion a
+claim backed by transcript evidence instead of a summary-only stop signal.
+
+In full-send unattended runs, **RunWithPolicy** applies a completion gate before
+accepting **done**. The gate rejects internally invalid completions, challenges
+thin verification once, appends guidance as a normal user message, and emits a
+machine-readable completion-gate event. Approval and interactive policies still
+use the parser/schema validation but leave completion quality to the frontend
+or user.
 
 A **protocol failure** is a model response that cannot be accepted as exactly
 one valid turn. When that happens, clnkr appends a **protocol correction** to
@@ -148,6 +171,12 @@ example **{"type":"state","source":"clnkr","cwd":"/repo"}**.
 
 **Compact block**
 : A host block containing a summary of older transcript history.
+
+**Child result block**
+: A host block containing child probe status, summary, evidence pointers, and
+artifact paths. It is untrusted child output. The parent treats it as evidence
+requiring verification. The full child transcript is stored as a child artifact
+and is not inserted into the parent transcript.
 
 During compaction, clnkr replaces an older transcript prefix with one compact
 block. It keeps a recent tail of user-authored turns and any host state the

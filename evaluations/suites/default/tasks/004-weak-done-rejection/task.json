@@ -1,0 +1,40 @@
+{
+  "id": "004-weak-done-rejection",
+  "instruction_file": "input/instruction.txt",
+  "scripted_turns_file": "input/model-turns.json",
+  "working_directory": ".",
+  "full_send": true,
+  "step_limit": 10,
+  "graders": {
+    "outcome_diff": {
+      "enabled": true,
+      "required": true
+    },
+    "outcome_command_output": {
+      "enabled": true,
+      "required": true,
+      "command": [
+        "bash",
+        "-lc",
+        "python3 - <<'PY'\nimport json\nwith open('result.json') as f:\n    data = json.load(f)\nassert data == {'status': 'ok'}\nprint(data['status'])\nPY"
+      ],
+      "expected_exit_code": 0,
+      "stdout_contains": [
+        "ok"
+      ]
+    },
+    "transcript_command_trace": {
+      "enabled": true,
+      "required": false,
+      "expected_commands": [
+        "printf '{\"status\":\"ok\"}\\n' > result.json",
+        "python3 - <<'PY'\nimport json\nwith open('result.json') as f:\n    data = json.load(f)\nassert data == {'status': 'ok'}\nprint(data['status'])\nPY"
+      ],
+      "expected_exit_codes": [
+        0,
+        0
+      ],
+      "max_command_count": 5
+    }
+  }
+}

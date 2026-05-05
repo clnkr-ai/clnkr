@@ -2,6 +2,7 @@ package clnkrapp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/clnkr-ai/clnkr"
@@ -13,14 +14,36 @@ func actJSON(command string) string {
 
 func mustTurn(raw string) clnkr.Turn {
 	turn, err := clnkr.ParseTurn(raw)
-	if err != nil {
-		panic(err)
+	if err == nil {
+		return turn
 	}
-	return turn
+	var env struct {
+		Type    string `json:"type"`
+		Summary string `json:"summary"`
+	}
+	if json.Unmarshal([]byte(raw), &env) == nil && env.Type == "done" {
+		return verifiedDone(env.Summary)
+	}
+	panic(err)
 }
 
 func mustResponse(raw string) clnkr.Response {
 	return clnkr.Response{Turn: mustTurn(raw), Raw: raw}
+}
+
+func verifiedDone(summary string) *clnkr.DoneTurn {
+	return &clnkr.DoneTurn{
+		Summary: summary,
+		Verification: clnkr.CompletionVerification{
+			Status: clnkr.VerificationVerified,
+			Checks: []clnkr.VerificationCheck{{
+				Command:  "go test ./...",
+				Outcome:  "passed",
+				Evidence: "go test ./... passed and ls output showed current directory entries for completion",
+			}},
+		},
+		KnownRisks: []string{},
+	}
 }
 
 func mustCanonicalTurn(t testingT, turn clnkr.Turn) string {

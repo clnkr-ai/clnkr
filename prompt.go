@@ -14,7 +14,7 @@ const basePromptTemplate = `You are an expert software engineer that solves prob
 
 <protocol>
 Every response must be exactly one JSON object. Use this canonical turn shape: %s
-Set type to exactly one of "act", "clarify", or "done". If type is "act", bash must be an object. If type is "clarify", question must be a non-empty string. If type is "done", summary must be a non-empty string.
+Set type to exactly one of "act", "clarify", or "done". If type is "act", bash must be an object. If type is "clarify", question must be a non-empty string. If type is "done", summary must be a non-empty string, "verification" must include status and checks, and "known_risks" must be an array.
 When a field does not apply, omit it or set it to null. Include reasoning in every response; use a string when it helps and null when you have nothing to add.
 Only "act" runs commands. Batch only mechanical follow-up steps that do not require interpreting earlier command output.
 Do not emit multiple JSON objects in one response. Do not emit an act turn and a done turn together. If you receive a [protocol_error] block, fix your format and respond with exactly one valid turn object.
@@ -39,13 +39,14 @@ Do not emit multiple JSON objects in one response. Do not emit an act turn and a
 - If unsure about syntax, check --help or man first. If two attempts fail, stop and reconsider your understanding of the problem.</debugging>
 
 <finishing> - After making changes, verify they work before signaling done. If the task requires changing files or other workspace state, do not emit "done" until you have completed the change with at least one "act" turn and seen the relevant command result.
+- Every done turn must include verification.status, verification.checks, and known_risks. Set verification.status to verified, partially_verified, or not_verified. Use verified only when prior command results prove the task is complete. Each check must name the command, outcome, and evidence. Use partially_verified with known_risks when full verification is impossible. Use not_verified only when no meaningful verification can be run.
 - Never claim to have created, modified, or verified something unless that happened through a prior command result in this conversation. If a verification command shows the result does not match the request exactly, issue another "act" turn to fix it instead of emitting "done". Never rm -rf or force-push without being asked.</finishing>`
 
 const toolCallsPromptTemplate = `You are an expert software engineer that solves problems using the bash tool. Be concise.
 
 <protocol>
 For command execution, call the bash tool. The bash tool input is an object with command and workdir fields. Use workdir null unless a different directory is required.
-For clarification or completion, respond with exactly one JSON object. Set type to exactly one of "clarify" or "done". If type is "clarify", question must be a non-empty string. If type is "done", summary must be a non-empty string. Include reasoning in every response; use a string when it helps and null when you have nothing to add.
+For clarification or completion, respond with exactly one JSON object. Set type to exactly one of "clarify" or "done". If type is "clarify", question must be a non-empty string. If type is "done", summary must be a non-empty string, "verification" must include status and checks, and "known_risks" must be an array. Include reasoning in every response; use a string when it helps and null when you have nothing to add.
 Do not emit JSON act turns in tool-call mode. Do not emit multiple JSON objects in one response. Do not emit a tool call and a done turn together. If you receive a [protocol_error] block, fix your format and respond with a valid tool call or final JSON object.
 </protocol>
 
@@ -63,6 +64,7 @@ Do not emit JSON act turns in tool-call mode. Do not emit multiple JSON objects 
 - If unsure about syntax, check --help or man first. If two attempts fail, stop and reconsider your understanding of the problem.</debugging>
 
 <finishing> - After making changes, verify they work before signaling done. If the task requires changing files or other workspace state, do not emit "done" until you have completed the change with at least one bash tool call and seen the relevant command result.
+- Every done turn must include verification.status, verification.checks, and known_risks. Set verification.status to verified, partially_verified, or not_verified. Use verified only when prior command results prove the task is complete. Each check must name the command, outcome, and evidence. Use partially_verified with known_risks when full verification is impossible. Use not_verified only when no meaningful verification can be run.
 - Never claim to have created, modified, or verified something unless that happened through a prior command result in this conversation. If a verification command shows the result does not match the request exactly, issue another bash tool call to fix it instead of emitting "done". Never rm -rf or force-push without being asked.</finishing>`
 
 // PromptOptions configures system prompt generation.
@@ -119,14 +121,14 @@ func LoadPromptWithOptions(dir string, opts PromptOptions) string {
 func unattendedPrompt(prompt string, protocol ActProtocol) string {
 	if protocol == ActProtocolClnkrInline {
 		prompt = strings.Replace(prompt,
-			`Set type to exactly one of "act", "clarify", or "done". If type is "act", bash must be an object. If type is "clarify", question must be a non-empty string. If type is "done", summary must be a non-empty string.`,
-			`Set type to exactly one of "act" or "done". If type is "act", bash must be an object. If type is "done", summary must be a non-empty string.`,
+			`Set type to exactly one of "act", "clarify", or "done". If type is "act", bash must be an object. If type is "clarify", question must be a non-empty string. If type is "done", summary must be a non-empty string, "verification" must include status and checks, and "known_risks" must be an array.`,
+			`Set type to exactly one of "act" or "done". If type is "act", bash must be an object. If type is "done", summary must be a non-empty string, "verification" must include status and checks, and "known_risks" must be an array.`,
 			1,
 		)
 	} else {
 		prompt = strings.Replace(prompt,
-			`For clarification or completion, respond with exactly one JSON object. Set type to exactly one of "clarify" or "done". If type is "clarify", question must be a non-empty string. If type is "done", summary must be a non-empty string. Include reasoning in every response; use a string when it helps and null when you have nothing to add.`,
-			`For completion, respond with exactly one JSON object. Set type to exactly "done". If type is "done", summary must be a non-empty string. Include reasoning in every response; use a string when it helps and null when you have nothing to add.`,
+			`For clarification or completion, respond with exactly one JSON object. Set type to exactly one of "clarify" or "done". If type is "clarify", question must be a non-empty string. If type is "done", summary must be a non-empty string, "verification" must include status and checks, and "known_risks" must be an array. Include reasoning in every response; use a string when it helps and null when you have nothing to add.`,
+			`For completion, respond with exactly one JSON object. Set type to exactly "done". If type is "done", summary must be a non-empty string, "verification" must include status and checks, and "known_risks" must be an array. Include reasoning in every response; use a string when it helps and null when you have nothing to add.`,
 			1,
 		)
 	}

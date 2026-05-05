@@ -47,7 +47,7 @@ func TestHelpWritesRichUsageToStdout(t *testing.T) {
 
 func TestRunJSONLPromptWritesResponseAndDone(t *testing.T) {
 	var out, errOut bytes.Buffer
-	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished"}`)}}
+	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)}}
 	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
 	agent.Notify = func(event clnkr.Event) {
 		if err := clnkrapp.WriteJSONL(&out, event); err != nil {
@@ -74,7 +74,7 @@ func TestRunJSONLReplyApprovesPendingCommand(t *testing.T) {
 	defer writer.Close() //nolint:errcheck
 	model := &fakeModel{responses: []clnkr.Response{
 		mustResponse(`{"type":"act","bash":{"commands":[{"command":"echo hi","workdir":null}]}}`),
-		mustResponse(`{"type":"done","summary":"done"}`),
+		mustResponse(`{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`),
 	}}
 	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
 	agent := clnkr.NewAgent(model, executor, "/tmp")
@@ -142,7 +142,7 @@ func TestRunJSONLShutdownReturnsWithoutClosingInput(t *testing.T) {
 
 func TestRunJSONLReplyWithoutPendingRequestDoesNotCarryAcrossRuns(t *testing.T) {
 	var out, errOut bytes.Buffer
-	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished"}`)}}
+	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)}}
 	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
 	agent.Notify = func(event clnkr.Event) {
 		if err := clnkrapp.WriteJSONL(&out, event); err != nil {
@@ -171,7 +171,7 @@ func TestRunJSONLReplyWithoutPendingRequestDoesNotCarryAcrossRuns(t *testing.T) 
 
 func TestRunJSONLAcceptsLargePromptLines(t *testing.T) {
 	var out, errOut bytes.Buffer
-	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished"}`)}}
+	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)}}
 	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
 	agent.Notify = func(event clnkr.Event) {
 		if err := clnkrapp.WriteJSONL(&out, event); err != nil {
@@ -361,10 +361,32 @@ func waitForRunJSONL(t *testing.T, errCh <-chan error) error {
 
 func mustResponse(raw string) clnkr.Response {
 	turn, err := clnkr.ParseTurn(raw)
-	if err != nil {
-		panic(err)
+	if err == nil {
+		return clnkr.Response{Turn: turn, Raw: raw}
 	}
-	return clnkr.Response{Turn: turn, Raw: raw}
+	var env struct {
+		Type    string `json:"type"`
+		Summary string `json:"summary"`
+	}
+	if json.Unmarshal([]byte(raw), &env) == nil && env.Type == "done" {
+		return clnkr.Response{Turn: verifiedDone(env.Summary), Raw: raw}
+	}
+	panic(err)
+}
+
+func verifiedDone(summary string) *clnkr.DoneTurn {
+	return &clnkr.DoneTurn{
+		Summary: summary,
+		Verification: clnkr.CompletionVerification{
+			Status: clnkr.VerificationVerified,
+			Checks: []clnkr.VerificationCheck{{
+				Command:  "test -d .",
+				Outcome:  "passed",
+				Evidence: "current working directory was available for completion",
+			}},
+		},
+		KnownRisks: []string{},
+	}
 }
 
 func mustMarshalJSONLCommand(t *testing.T, command clnkrapp.JSONLCommand) string {
@@ -473,10 +495,10 @@ func (c *fakeCompactor) Summarize(_ context.Context, messages []clnkr.Message) (
 func compactableMessages() []clnkr.Message {
 	return []clnkr.Message{
 		{Role: "user", Content: "first task"},
-		{Role: "assistant", Content: `{"type":"done","summary":"done"}`},
+		{Role: "assistant", Content: `{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 		{Role: "user", Content: "second task"},
-		{Role: "assistant", Content: `{"type":"done","summary":"done again"}`},
+		{Role: "assistant", Content: `{"type":"done","summary":"done again","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 		{Role: "user", Content: "third task"},
-		{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+		{Role: "assistant", Content: `{"type":"done","summary":"done third","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 	}
 }

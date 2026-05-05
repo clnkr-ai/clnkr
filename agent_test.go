@@ -42,7 +42,7 @@ func (m *fakeFinalModel) QueryFinal(_ context.Context, messages []Message) (Resp
 	if m.mutateFinal && len(messages) > 0 && len(messages[0].BashToolCalls) > 0 {
 		messages[0].BashToolCalls[0].Command = "mutated"
 	}
-	return Response{Turn: &DoneTurn{Summary: "final"}}, nil
+	return Response{Turn: verifiedDone("final")}, nil
 }
 
 type mutatingModel struct{}
@@ -54,7 +54,7 @@ func (m mutatingModel) Query(_ context.Context, messages []Message) (Response, e
 	if len(messages) > 0 && len(messages[0].ProviderReplay) > 0 && len(messages[0].ProviderReplay[0].JSON) > 0 {
 		messages[0].ProviderReplay[0].JSON[0] = '{'
 	}
-	return Response{Turn: &DoneTurn{Summary: "done"}}, nil
+	return Response{Turn: verifiedDone("done")}, nil
 }
 
 type errorModel struct {
@@ -260,6 +260,9 @@ func actJSONWithReasoning(reasoning string, commands ...string) string {
 }
 
 func mustTurn(raw string) Turn {
+	if turn, err := ParseTurn(raw); err == nil {
+		return turn
+	}
 	var env struct {
 		Type string `json:"type"`
 		Bash struct {
@@ -290,9 +293,26 @@ func mustTurn(raw string) Turn {
 	case "clarify":
 		return &ClarifyTurn{Question: env.Question, Reasoning: env.Reasoning}
 	case "done":
-		return &DoneTurn{Summary: env.Summary, Reasoning: env.Reasoning}
+		done := verifiedDone(env.Summary)
+		done.Reasoning = env.Reasoning
+		return done
 	default:
 		panic(fmt.Sprintf("unsupported test turn type %q", env.Type))
+	}
+}
+
+func verifiedDone(summary string) *DoneTurn {
+	return &DoneTurn{
+		Summary: summary,
+		Verification: CompletionVerification{
+			Status: VerificationVerified,
+			Checks: []VerificationCheck{{
+				Command:  "go test ./...",
+				Outcome:  "passed",
+				Evidence: "go test ./... passed and ls output showed current directory entries for completion",
+			}},
+		},
+		KnownRisks: []string{},
 	}
 }
 
@@ -308,6 +328,16 @@ func mustResponseWithUsage(raw string, usage Usage) Response {
 func collectEvents() (func(Event), *[]Event) {
 	var events []Event
 	return func(e Event) { events = append(events, e) }, &events
+}
+
+func completionGateDecisions(events []Event) []string {
+	var decisions []string
+	for _, event := range events {
+		if ev, ok := event.(EventCompletionGate); ok {
+			decisions = append(decisions, string(ev.Decision))
+		}
+	}
+	return decisions
 }
 
 func TestStep(t *testing.T) {
@@ -593,7 +623,7 @@ func TestStep(t *testing.T) {
 func TestStepStoresCanonicalAssistantSuccess(t *testing.T) {
 	raw := `{"turn":{"type":"done","summary":"wrapped summary"}}`
 	model := &fakeModel{responses: []Response{
-		{Turn: &DoneTurn{Summary: "wrapped summary"}, Raw: raw},
+		{Turn: verifiedDone("wrapped summary"), Raw: raw},
 	}}
 	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
 	agent.AppendUserMessage("finish it")
@@ -602,7 +632,11 @@ func TestStepStoresCanonicalAssistantSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Step: %v", err)
 	}
-	if got := agent.messages[len(agent.messages)-1]; !reflect.DeepEqual(got, Message{Role: "assistant", Content: `{"type":"done","summary":"wrapped summary"}`}) {
+	want, err := CanonicalTurnJSON(verifiedDone("wrapped summary"))
+	if err != nil {
+		t.Fatalf("CanonicalTurnJSON: %v", err)
+	}
+	if got := agent.messages[len(agent.messages)-1]; !reflect.DeepEqual(got, Message{Role: "assistant", Content: want}) {
 		t.Fatalf("assistant message = %#v", got)
 	}
 	if result.Turn == nil {
@@ -685,7 +719,7 @@ func TestStepStoresRawInvalidProviderResponse(t *testing.T) {
 func TestEventResponseCarriesTypedTurn(t *testing.T) {
 	raw := `{"turn":{"type":"done","summary":"wrapped summary"}}`
 	model := &fakeModel{responses: []Response{
-		{Turn: DoneTurn{Summary: "wrapped summary"}, Raw: raw, Usage: Usage{InputTokens: 9, OutputTokens: 4}},
+		{Turn: *verifiedDone("wrapped summary"), Raw: raw, Usage: Usage{InputTokens: 9, OutputTokens: 4}},
 	}}
 	notify, events := collectEvents()
 	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -1818,7 +1852,7 @@ func TestExecuteTurnRejectsNilActTurn(t *testing.T) {
 func TestFinalSummaryUsesCanonicalTranscript(t *testing.T) {
 	raw := `{"turn":{"type":"done","summary":"wrapped summary"}}`
 	model := &fakeModel{responses: []Response{
-		{Turn: &DoneTurn{Summary: "wrapped summary"}, Raw: raw},
+		{Turn: verifiedDone("wrapped summary"), Raw: raw},
 	}}
 
 	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
@@ -1828,7 +1862,7 @@ func TestFinalSummaryUsesCanonicalTranscript(t *testing.T) {
 		t.Fatalf("RequestStepLimitSummary: %v", err)
 	}
 
-	want, err := CanonicalTurnJSON(&DoneTurn{Summary: "wrapped summary"})
+	want, err := CanonicalTurnJSON(verifiedDone("wrapped summary"))
 	if err != nil {
 		t.Fatalf("CanonicalTurnJSON: %v", err)
 	}
@@ -1853,7 +1887,7 @@ func TestAgent(t *testing.T) {
 	t.Run("accepts value turns from model", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{
 			{Turn: ActTurn{Bash: BashBatch{Commands: []BashAction{{Command: "ls"}}}}},
-			{Turn: DoneTurn{Summary: "done"}},
+			{Turn: *verifiedDone("done")},
 		}}
 		executor := &fakeExecutor{results: []CommandResult{{Stdout: "file1.go\n", ExitCode: 0}}}
 
@@ -2119,7 +2153,11 @@ func TestAgent(t *testing.T) {
 		if !foundCorrection {
 			t.Fatal("second query should include a protocol_error correction message")
 		}
-		if got := agent.messages[len(agent.messages)-1].Content; got != `{"type":"done","summary":"Done."}` {
+		wantDone, err := CanonicalTurnJSON(verifiedDone("Done."))
+		if err != nil {
+			t.Fatalf("CanonicalTurnJSON: %v", err)
+		}
+		if got := agent.messages[len(agent.messages)-1].Content; got != wantDone {
 			t.Fatalf("final assistant message = %q, want canonical done turn", got)
 		}
 	})
@@ -2514,6 +2552,95 @@ func TestRunWithPolicy(t *testing.T) {
 			if strings.Contains(second, notWant) {
 				t.Fatalf("second query messages contain %q for unlimited budget:\n%s", notWant, second)
 			}
+		}
+	})
+
+	t.Run("unattended rejects incomplete done and continues", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{
+			{Turn: &DoneTurn{
+				Summary: "Protocol correction: need to continue.",
+				Verification: CompletionVerification{
+					Status: VerificationVerified,
+					Checks: []VerificationCheck{{Command: "true", Outcome: "passed", Evidence: "true exited zero"}},
+				},
+				KnownRisks: []string{},
+			}},
+			{Turn: &DoneTurn{
+				Summary: "Created result.txt.",
+				Verification: CompletionVerification{
+					Status: VerificationVerified,
+					Checks: []VerificationCheck{{Command: "test -f result.txt && cat result.txt", Outcome: "passed", Evidence: "result.txt exists and contains expected text"}},
+				},
+				KnownRisks: []string{},
+			}},
+		}}
+		notify, events := collectEvents()
+
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		agent.Notify = notify
+		if err := agent.Run(context.Background(), "finish"); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if len(model.got) != 2 {
+			t.Fatalf("model calls = %d, want 2", len(model.got))
+		}
+		if !hasMessage(model.got[1], "user", completionRejectGuidance("incomplete_summary")) {
+			t.Fatalf("second query messages = %#v, want completion rejection guidance", model.got[1])
+		}
+		if got := completionGateDecisions(*events); strings.Join(got, ",") != "reject,accept" {
+			t.Fatalf("completion gate decisions = %#v, want reject,accept", got)
+		}
+	})
+
+	t.Run("unattended challenges weak artifact evidence once", func(t *testing.T) {
+		weak := &DoneTurn{
+			Summary: "Created result.txt.",
+			Verification: CompletionVerification{
+				Status: VerificationVerified,
+				Checks: []VerificationCheck{{Command: "true", Outcome: "passed", Evidence: "ok"}},
+			},
+			KnownRisks: []string{},
+		}
+		model := &fakeModel{responses: []Response{
+			{Turn: weak},
+			{Turn: weak},
+		}}
+		notify, events := collectEvents()
+
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		agent.Notify = notify
+		if err := agent.Run(context.Background(), "finish"); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if len(model.got) != 2 {
+			t.Fatalf("model calls = %d, want 2", len(model.got))
+		}
+		if !hasMessage(model.got[1], "user", completionChallengeGuidance()) {
+			t.Fatalf("second query messages = %#v, want completion challenge guidance", model.got[1])
+		}
+		if got := completionGateDecisions(*events); strings.Join(got, ",") != "challenge,accept" {
+			t.Fatalf("completion gate decisions = %#v, want challenge,accept", got)
+		}
+	})
+
+	t.Run("interactive accepts weak structured done without challenge", func(t *testing.T) {
+		model := &fakeModel{responses: []Response{{Turn: &DoneTurn{
+			Summary: "Created result.txt.",
+			Verification: CompletionVerification{
+				Status: VerificationVerified,
+				Checks: []VerificationCheck{{Command: "true", Outcome: "passed", Evidence: "ok"}},
+			},
+			KnownRisks: []string{},
+		}}}}
+		notify, events := collectEvents()
+
+		agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+		agent.Notify = notify
+		if err := agent.RunWithPolicy(context.Background(), "finish", &scriptedPolicy{}); err != nil {
+			t.Fatalf("RunWithPolicy: %v", err)
+		}
+		if got := completionGateDecisions(*events); len(got) != 0 {
+			t.Fatalf("completion gate decisions = %#v, want none", got)
 		}
 	})
 

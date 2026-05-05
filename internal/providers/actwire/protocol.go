@@ -17,11 +17,13 @@ type wireEnvelope struct {
 }
 
 type wireTurn struct {
-	Type      string    `json:"type"`
-	Bash      *wireBash `json:"bash"`
-	Question  any       `json:"question"`
-	Summary   any       `json:"summary"`
-	Reasoning any       `json:"reasoning"`
+	Type         string            `json:"type"`
+	Bash         *wireBash         `json:"bash"`
+	Question     any               `json:"question"`
+	Summary      any               `json:"summary"`
+	Verification *wireVerification `json:"verification,omitempty"`
+	KnownRisks   any               `json:"known_risks,omitempty"`
+	Reasoning    any               `json:"reasoning"`
 }
 
 type wireBash struct {
@@ -31,6 +33,17 @@ type wireBash struct {
 type wireCommand struct {
 	Command string  `json:"command"`
 	Workdir *string `json:"workdir"`
+}
+
+type wireVerification struct {
+	Status string      `json:"status"`
+	Checks []wireCheck `json:"checks"`
+}
+
+type wireCheck struct {
+	Command  string `json:"command"`
+	Outcome  string `json:"outcome"`
+	Evidence string `json:"evidence"`
 }
 
 func RequestSchema() map[string]any {
@@ -142,6 +155,16 @@ func clarifyTurnSchema() map[string]any {
 }
 
 func doneTurnSchema() map[string]any {
+	checkSchema := map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"command":  map[string]any{"type": "string"},
+			"outcome":  map[string]any{"type": "string"},
+			"evidence": map[string]any{"type": "string"},
+		},
+		"required": []string{"command", "outcome", "evidence"},
+	}
 	return map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
@@ -150,12 +173,31 @@ func doneTurnSchema() map[string]any {
 				"type":  "string",
 				"const": "done",
 			},
-			"bash":      map[string]any{"type": "null"},
-			"question":  map[string]any{"type": "null"},
-			"summary":   map[string]any{"type": "string"},
+			"bash":     map[string]any{"type": "null"},
+			"question": map[string]any{"type": "null"},
+			"summary":  map[string]any{"type": "string"},
+			"verification": map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"status": map[string]any{
+						"type": "string",
+						"enum": []string{"verified", "partially_verified", "not_verified"},
+					},
+					"checks": map[string]any{
+						"type":  "array",
+						"items": checkSchema,
+					},
+				},
+				"required": []string{"status", "checks"},
+			},
+			"known_risks": map[string]any{
+				"type":  "array",
+				"items": map[string]any{"type": "string"},
+			},
 			"reasoning": nullableStringSchema(),
 		},
-		"required": []string{"type", "bash", "question", "summary", "reasoning"},
+		"required": []string{"type", "bash", "question", "summary", "verification", "known_risks", "reasoning"},
 	}
 }
 
@@ -215,11 +257,13 @@ func ParseProviderTurn(raw string) (clnkr.Turn, error) {
 }
 
 type wireTurnPayload struct {
-	Type      string    `json:"type"`
-	Bash      *wireBash `json:"bash"`
-	Question  string    `json:"question"`
-	Summary   string    `json:"summary"`
-	Reasoning string    `json:"reasoning"`
+	Type         string            `json:"type"`
+	Bash         *wireBash         `json:"bash"`
+	Question     string            `json:"question"`
+	Summary      string            `json:"summary"`
+	Verification *wireVerification `json:"verification"`
+	KnownRisks   []string          `json:"known_risks"`
+	Reasoning    string            `json:"reasoning"`
 }
 
 func extractWrappedTurn(raw string) (string, error) {
@@ -340,6 +384,15 @@ func validateWrappedTurnShape(raw string) error {
 		if err := rejectNonNullField(fields, "question", "done turn only allows question when it is null or omitted"); err != nil {
 			return err
 		}
+		for _, field := range []string{"summary", "verification", "known_risks"} {
+			if _, ok := fields[field]; !ok {
+				return fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, field)
+			}
+		}
+		var risks []string
+		if err := json.Unmarshal(fields["known_risks"], &risks); err != nil {
+			return fmt.Errorf("%w: structured output field %q must be array of strings", clnkr.ErrInvalidJSON, "known_risks")
+		}
 	}
 	return nil
 }
@@ -382,12 +435,57 @@ func turnFromProviderPayload(payload wireTurnPayload) (clnkr.Turn, error) {
 		if payload.Summary == "" {
 			return nil, clnkr.ErrEmptySummary
 		}
-		return &clnkr.DoneTurn{Summary: payload.Summary, Reasoning: payload.Reasoning}, nil
+		verification, err := providerCompletionVerification(payload.Verification, payload.KnownRisks)
+		if err != nil {
+			return nil, err
+		}
+		return &clnkr.DoneTurn{
+			Summary:      payload.Summary,
+			Verification: verification,
+			KnownRisks:   cloneStrings(payload.KnownRisks),
+			Reasoning:    payload.Reasoning,
+		}, nil
 	case "":
 		return nil, fmt.Errorf("%w: missing type field", clnkr.ErrUnknownTurnType)
 	default:
 		return nil, fmt.Errorf("%w: %q", clnkr.ErrUnknownTurnType, payload.Type)
 	}
+}
+
+func providerCompletionVerification(raw *wireVerification, knownRisks []string) (clnkr.CompletionVerification, error) {
+	if raw == nil {
+		return clnkr.CompletionVerification{}, fmt.Errorf("%w: missing required field %q", clnkr.ErrInvalidJSON, "verification")
+	}
+	status := clnkr.VerificationStatus(strings.TrimSpace(raw.Status))
+	switch status {
+	case clnkr.VerificationVerified, clnkr.VerificationPartiallyVerified, clnkr.VerificationNotVerified:
+	default:
+		return clnkr.CompletionVerification{}, fmt.Errorf("%w: invalid verification status %q", clnkr.ErrInvalidJSON, raw.Status)
+	}
+	checks := make([]clnkr.VerificationCheck, 0, len(raw.Checks))
+	for i, check := range raw.Checks {
+		if strings.TrimSpace(check.Command) == "" {
+			return clnkr.CompletionVerification{}, fmt.Errorf("%w: verification.checks[%d].command must be non-empty", clnkr.ErrInvalidJSON, i)
+		}
+		if strings.TrimSpace(check.Outcome) == "" {
+			return clnkr.CompletionVerification{}, fmt.Errorf("%w: verification.checks[%d].outcome must be non-empty", clnkr.ErrInvalidJSON, i)
+		}
+		if strings.TrimSpace(check.Evidence) == "" {
+			return clnkr.CompletionVerification{}, fmt.Errorf("%w: verification.checks[%d].evidence must be non-empty", clnkr.ErrInvalidJSON, i)
+		}
+		checks = append(checks, clnkr.VerificationCheck{
+			Command:  check.Command,
+			Outcome:  check.Outcome,
+			Evidence: check.Evidence,
+		})
+	}
+	if status == clnkr.VerificationVerified && len(checks) == 0 {
+		return clnkr.CompletionVerification{}, fmt.Errorf("%w: verified done requires at least one verification check", clnkr.ErrInvalidJSON)
+	}
+	if status == clnkr.VerificationPartiallyVerified && len(knownRisks) == 0 {
+		return clnkr.CompletionVerification{}, fmt.Errorf("%w: partially verified done requires at least one known risk", clnkr.ErrInvalidJSON)
+	}
+	return clnkr.CompletionVerification{Status: status, Checks: checks}, nil
 }
 
 func providerJSON(turn clnkr.Turn) (string, error) {
@@ -437,11 +535,13 @@ func wrappedEnvelope(turn clnkr.Turn) (wireEnvelope, error) {
 	case clnkr.DoneTurn:
 		return wireEnvelope{
 			Turn: wireTurn{
-				Type:      "done",
-				Bash:      nil,
-				Question:  nil,
-				Summary:   v.Summary,
-				Reasoning: nullableString(v.Reasoning),
+				Type:         "done",
+				Bash:         nil,
+				Question:     nil,
+				Summary:      v.Summary,
+				Verification: wireCompletionVerification(v.Verification),
+				KnownRisks:   cloneStrings(v.KnownRisks),
+				Reasoning:    nullableString(v.Reasoning),
 			},
 		}, nil
 	case *clnkr.DoneTurn:
@@ -453,6 +553,28 @@ func wrappedEnvelope(turn clnkr.Turn) (wireEnvelope, error) {
 		return wireEnvelope{}, fmt.Errorf("provider turn json: %w: nil turn", errUnsupportedTurn)
 	default:
 		return wireEnvelope{}, fmt.Errorf("provider turn json: %w: %T", errUnsupportedTurn, turn)
+	}
+}
+
+func cloneStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	return append([]string{}, values...)
+}
+
+func wireCompletionVerification(verification clnkr.CompletionVerification) *wireVerification {
+	checks := make([]wireCheck, 0, len(verification.Checks))
+	for _, check := range verification.Checks {
+		checks = append(checks, wireCheck{
+			Command:  check.Command,
+			Outcome:  check.Outcome,
+			Evidence: check.Evidence,
+		})
+	}
+	return &wireVerification{
+		Status: string(verification.Status),
+		Checks: checks,
 	}
 }
 

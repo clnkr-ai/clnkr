@@ -76,7 +76,7 @@ func TestModel(t *testing.T) {
 		var gotBody map[string]any
 		history := []clnkr.Message{
 			{Role: "user", Content: "first task"},
-			{Role: "assistant", Content: `{"type":"done","summary":"canonical transcript"}`},
+			{Role: "assistant", Content: `{"type":"done","summary":"canonical transcript","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 		}
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +117,7 @@ func TestModel(t *testing.T) {
 		if !ok {
 			t.Fatalf("last message = %#v, want map", msgs[len(msgs)-1])
 		}
-		if got, want := last["content"], `{"type":"done","summary":"canonical transcript"}`; got != want {
+		if got, want := last["content"], `{"type":"done","summary":"canonical transcript","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`; got != want {
 			t.Fatalf("last assistant content = %#v, want %q", got, want)
 		}
 	})
@@ -174,8 +174,8 @@ func TestModel(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"hello back"}` {
-			t.Errorf("got content %q, want %q", got, `{"type":"done","summary":"hello back"}`)
+		if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"hello back","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}` {
+			t.Errorf("got content %q, want %q", got, `{"type":"done","summary":"hello back","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)
 		}
 		if resp.ProtocolErr != nil {
 			t.Fatalf("got protocol error %v, want nil", resp.ProtocolErr)
@@ -204,7 +204,7 @@ func TestModel(t *testing.T) {
 		m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
 		_, err := m.Query(context.Background(), []clnkr.Message{
 			{Role: "user", Content: "hi"},
-			{Role: "assistant", Content: `{"type":"done","summary":"hello back"}`},
+			{Role: "assistant", Content: `{"type":"done","summary":"hello back","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -248,8 +248,8 @@ func TestModel(t *testing.T) {
 			{
 				name: "multiple text blocks",
 				content: []map[string]string{
-					{"type": "text", "text": `{"type":"done","summary":"one"}`},
-					{"type": "text", "text": `{"type":"done","summary":"two"}`},
+					{"type": "text", "text": `{"type":"done","summary":"one","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
+					{"type": "text", "text": `{"type":"done","summary":"two","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 				},
 			},
 		}
@@ -319,7 +319,7 @@ func TestModel(t *testing.T) {
 			want string
 		}{
 			{name: "clarify", text: `{"turn":{"type":"clarify","question":"Which directory?"}}`, want: `{"type":"clarify","question":"Which directory?"}`},
-			{name: "done", text: `{"turn":{"type":"done","summary":"ignored schema"}}`, want: `{"type":"done","summary":"ignored schema"}`},
+			{name: "done", text: `{"turn":{"type":"done","summary":"ignored schema","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}}`, want: `{"type":"done","summary":"ignored schema","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 		}
 
 		for _, tt := range tests {
@@ -348,7 +348,7 @@ func TestModel(t *testing.T) {
 	})
 
 	t.Run("returns raw payload plus protocol error when output config is ignored", func(t *testing.T) {
-		raw := `{"type":"done","summary":"ignored schema"}`
+		raw := `{"type":"done","summary":"ignored schema","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"content": []map[string]string{{"type": "text", "text": raw}},
@@ -414,7 +414,7 @@ func TestModel(t *testing.T) {
 }
 
 func anthropicWrappedDone(summary string) string {
-	return `{"turn":{"type":"done","bash":null,"question":null,"summary":"` + summary + `","reasoning":null}}`
+	return `{"turn":{"type":"done","bash":null,"question":null,"summary":"` + summary + `","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`
 }
 
 func TestModelToolCalls(t *testing.T) {

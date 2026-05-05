@@ -84,7 +84,7 @@ func TestWriteJSONL(t *testing.T) {
 
 	events := []any{
 		clnkr.EventResponse{
-			Turn:  &clnkr.DoneTurn{Summary: "done"},
+			Turn:  verifiedDone("done"),
 			Usage: clnkr.Usage{InputTokens: 1, OutputTokens: 2},
 		},
 		clnkr.EventCommandStart{Command: "pwd", Dir: "/tmp"},

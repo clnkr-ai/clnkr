@@ -130,6 +130,12 @@ func WriteEventLog(w io.Writer, e clnkr.Event) error {
 		return writeEvent(w, "command_done", payload)
 	case clnkr.EventProtocolFailure:
 		return writeEvent(w, "protocol_failure", map[string]string{"reason": e.Reason, "raw": e.Raw})
+	case clnkr.EventCompletionGate:
+		return writeEvent(w, "completion_gate", map[string]any{
+			"decision": e.Decision,
+			"reasons":  e.Reasons,
+			"summary":  e.Summary,
+		})
 	case clnkr.EventDebug:
 		return writeEvent(w, "debug", map[string]string{"message": e.Message})
 	default:

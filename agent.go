@@ -385,6 +385,9 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 	steps := 0
 	modelTurns := 0
 	protocolErrors := 0
+	completionGate := CompletionGate{}
+	completionRejects := 0
+	gateCompletions := policyUsesCompletionGate(policy)
 
 	for {
 		a.appendStateMessageIfNeeded()
@@ -407,6 +410,28 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 
 		switch turn := result.Turn.(type) {
 		case *DoneTurn:
+			if gateCompletions {
+				decision := completionGate.Decide(turn, steps, a.MaxSteps)
+				a.notify(EventCompletionGate{
+					Decision: decision.Kind,
+					Reasons:  cloneStrings(decision.Reasons),
+					Summary:  turn.Summary,
+				})
+				if decision.Kind == CompletionAccept {
+					return nil
+				}
+				if decision.Kind == CompletionReject {
+					completionRejects++
+					if completionRejects >= 3 {
+						return a.notifyRunError(fmt.Errorf("consecutive completion gate rejections, exiting"), steps, modelTurns)
+					}
+				}
+				if decision.Kind == CompletionChallenge {
+					completionRejects = 0
+				}
+				a.AppendUserMessage(decision.Guidance)
+				continue
+			}
 			return nil
 		case *ClarifyTurn:
 			reply, err := policy.Clarify(ctx, turn.Question)
@@ -457,6 +482,15 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 		default:
 			return a.notifyRunError(fmt.Errorf("unhandled turn type %T", turn), steps, modelTurns)
 		}
+	}
+}
+
+func policyUsesCompletionGate(policy RunPolicy) bool {
+	switch policy.(type) {
+	case FullSendPolicy, *FullSendPolicy:
+		return true
+	default:
+		return false
 	}
 }
 

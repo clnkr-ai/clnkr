@@ -58,21 +58,7 @@ func TestRequestSchema(t *testing.T) {
 								},
 								"required": []string{"type", "bash", "question", "summary", "reasoning"},
 							},
-							map[string]any{
-								"type":                 "object",
-								"additionalProperties": false,
-								"properties": map[string]any{
-									"type": map[string]any{
-										"type":  "string",
-										"const": "done",
-									},
-									"bash":      map[string]any{"type": "null"},
-									"question":  map[string]any{"type": "null"},
-									"summary":   map[string]any{"type": "string"},
-									"reasoning": expectedNullableStringSchema(),
-								},
-								"required": []string{"type", "bash", "question", "summary", "reasoning"},
-							},
+							expectedDoneTurnSchema(),
 						},
 					},
 				},
@@ -161,8 +147,25 @@ func TestParseProviderTurn(t *testing.T) {
 		},
 		{
 			name: "done",
-			raw:  `{"turn":{"type":"done","bash":null,"question":null,"summary":"complete","reasoning":"tests passed"}}`,
-			want: &clnkr.DoneTurn{Summary: "complete", Reasoning: "tests passed"},
+			raw:  `{"turn":{"type":"done","bash":null,"question":null,"summary":"complete","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"test suite passed"}]},"known_risks":[],"reasoning":"tests passed"}}`,
+			want: &clnkr.DoneTurn{
+				Summary: "complete",
+				Verification: clnkr.CompletionVerification{
+					Status: clnkr.VerificationVerified,
+					Checks: []clnkr.VerificationCheck{{
+						Command:  "go test ./...",
+						Outcome:  "passed",
+						Evidence: "test suite passed",
+					}},
+				},
+				KnownRisks: []string{},
+				Reasoning:  "tests passed",
+			},
+		},
+		{
+			name:    "done without verification",
+			raw:     `{"turn":{"type":"done","bash":null,"question":null,"summary":"complete","reasoning":null}}`,
+			wantErr: clnkr.ErrInvalidJSON,
 		},
 		{
 			name:    "malformed wrapped act shape",
@@ -198,7 +201,7 @@ func TestParseProviderTurn(t *testing.T) {
 func TestNormalizeMessagesForProvider(t *testing.T) {
 	messages := []clnkr.Message{
 		{Role: "user", Content: `{"type":"done","summary":"leave users alone"}`},
-		{Role: "assistant", Content: `{"type":"done","summary":"canonical","reasoning":"ok"}`},
+		{Role: "assistant", Content: `{"type":"done","summary":"canonical","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":"ok"}`},
 		{Role: "assistant", Content: `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":null,"reasoning":null}}`},
 		{Role: "assistant", Content: "plain text"},
 	}
@@ -208,7 +211,7 @@ func TestNormalizeMessagesForProvider(t *testing.T) {
 	if !reflect.DeepEqual(messages[0], got[0]) {
 		t.Fatalf("user message changed: %#v", got[0])
 	}
-	if got[1].Content != `{"turn":{"type":"done","bash":null,"question":null,"summary":"canonical","reasoning":"ok"}}` {
+	if got[1].Content != `{"turn":{"type":"done","bash":null,"question":null,"summary":"canonical","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":"ok"}}` {
 		t.Fatalf("canonical assistant content = %q", got[1].Content)
 	}
 	if got[2].Content != `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":null,"reasoning":null}}` {
@@ -228,12 +231,62 @@ func TestParseProviderTurnNormalizesEscapedHumanText(t *testing.T) {
 		t.Fatalf("clarify = %#v", got)
 	}
 
-	done, err := ParseProviderTurn(`{"turn":{"type":"done","bash":null,"question":null,"summary":"Fixed\\n\\\\- item","reasoning":"Reason\\n\\\\* item"}}`)
+	done, err := ParseProviderTurn(`{"turn":{"type":"done","bash":null,"question":null,"summary":"Fixed\\n\\\\- item","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":"Reason\\n\\\\* item"}}`)
 	if err != nil {
 		t.Fatalf("parse done: %v", err)
 	}
 	if got := done.(*clnkr.DoneTurn); got.Summary != "Fixed\n- item" || got.Reasoning != "Reason\n* item" {
 		t.Fatalf("done = %#v", got)
+	}
+}
+
+func expectedDoneTurnSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"type": map[string]any{
+				"type":  "string",
+				"const": "done",
+			},
+			"bash":     map[string]any{"type": "null"},
+			"question": map[string]any{"type": "null"},
+			"summary":  map[string]any{"type": "string"},
+			"verification": map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"status": map[string]any{
+						"type": "string",
+						"enum": []string{"verified", "partially_verified", "not_verified"},
+					},
+					"checks": map[string]any{
+						"type":  "array",
+						"items": verificationCheckSchema(),
+					},
+				},
+				"required": []string{"status", "checks"},
+			},
+			"known_risks": map[string]any{
+				"type":  "array",
+				"items": map[string]any{"type": "string"},
+			},
+			"reasoning": expectedNullableStringSchema(),
+		},
+		"required": []string{"type", "bash", "question", "summary", "verification", "known_risks", "reasoning"},
+	}
+}
+
+func verificationCheckSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"command":  map[string]any{"type": "string"},
+			"outcome":  map[string]any{"type": "string"},
+			"evidence": map[string]any{"type": "string"},
+		},
+		"required": []string{"command", "outcome", "evidence"},
 	}
 }
 

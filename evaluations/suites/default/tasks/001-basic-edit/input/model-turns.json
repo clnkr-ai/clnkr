@@ -1,4 +1,4 @@
 [
   "{\"turn\":{\"type\":\"act\",\"bash\":{\"commands\":[{\"command\":\"printf 'hello\\\\n' > note.txt\",\"workdir\":null}]},\"question\":null,\"summary\":null,\"reasoning\":null}}",
-  "{\"turn\":{\"type\":\"done\",\"bash\":null,\"question\":null,\"summary\":\"created note.txt\",\"reasoning\":null}}"
+  "{\"turn\":{\"type\":\"done\",\"bash\":null,\"question\":null,\"summary\":\"created note.txt\",\"verification\":{\"status\":\"verified\",\"checks\":[{\"command\":\"test -f note.txt && cat note.txt\",\"outcome\":\"passed\",\"evidence\":\"note.txt exists and contains hello\"}]},\"known_risks\":[],\"reasoning\":null}}"
 ]

@@ -10,11 +10,13 @@ import (
 )
 
 type turnEnvelope struct {
-	Type      string            `json:"type"`
-	Bash      *turnBashEnvelope `json:"bash,omitempty"`
-	Question  string            `json:"question,omitempty"`
-	Summary   string            `json:"summary,omitempty"`
-	Reasoning string            `json:"reasoning,omitempty"`
+	Type         string                  `json:"type"`
+	Bash         *turnBashEnvelope       `json:"bash,omitempty"`
+	Question     string                  `json:"question,omitempty"`
+	Summary      string                  `json:"summary,omitempty"`
+	Verification *completionVerification `json:"verification,omitempty"`
+	KnownRisks   []string                `json:"known_risks,omitempty"`
+	Reasoning    string                  `json:"reasoning,omitempty"`
 }
 
 type turnBashEnvelope struct {
@@ -24,6 +26,17 @@ type turnBashEnvelope struct {
 type turnBashAction struct {
 	Command string  `json:"command"`
 	Workdir *string `json:"workdir"`
+}
+
+type completionVerification struct {
+	Status string              `json:"status"`
+	Checks []verificationCheck `json:"checks"`
+}
+
+type verificationCheck struct {
+	Command  string `json:"command"`
+	Outcome  string `json:"outcome"`
+	Evidence string `json:"evidence"`
 }
 
 // ParseTurn validates an exact canonical turn without recovery or prose extraction.
@@ -104,12 +117,69 @@ func strictTurnFromEnvelope(env turnEnvelope, fields map[string]json.RawMessage)
 		if err := rejectPresentField(fields, "question", "done turn only allows question when it is omitted"); err != nil {
 			return nil, err
 		}
-		return &DoneTurn{Summary: env.Summary, Reasoning: env.Reasoning}, nil
+		verification, err := canonicalCompletionVerification(env.Verification, env.KnownRisks)
+		if err != nil {
+			return nil, err
+		}
+		return &DoneTurn{
+			Summary:      env.Summary,
+			Verification: verification,
+			KnownRisks:   cloneStrings(env.KnownRisks),
+			Reasoning:    env.Reasoning,
+		}, nil
 	case "":
 		return nil, fmt.Errorf("%w: missing type field", ErrUnknownTurnType)
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnknownTurnType, env.Type)
 	}
+}
+
+func canonicalCompletionVerification(raw *completionVerification, knownRisks []string) (CompletionVerification, error) {
+	if raw == nil {
+		return CompletionVerification{}, fmt.Errorf("%w: missing required field %q", ErrInvalidJSON, "verification")
+	}
+	status := VerificationStatus(strings.TrimSpace(raw.Status))
+	switch status {
+	case VerificationVerified, VerificationPartiallyVerified, VerificationNotVerified:
+	default:
+		return CompletionVerification{}, fmt.Errorf("%w: invalid verification status %q", ErrInvalidJSON, raw.Status)
+	}
+	checks := make([]VerificationCheck, 0, len(raw.Checks))
+	for i, check := range raw.Checks {
+		if strings.TrimSpace(check.Command) == "" {
+			return CompletionVerification{}, fmt.Errorf("%w: verification.checks[%d].command must be non-empty", ErrInvalidJSON, i)
+		}
+		if strings.TrimSpace(check.Outcome) == "" {
+			return CompletionVerification{}, fmt.Errorf("%w: verification.checks[%d].outcome must be non-empty", ErrInvalidJSON, i)
+		}
+		if strings.TrimSpace(check.Evidence) == "" {
+			return CompletionVerification{}, fmt.Errorf("%w: verification.checks[%d].evidence must be non-empty", ErrInvalidJSON, i)
+		}
+		checks = append(checks, VerificationCheck{
+			Command:  check.Command,
+			Outcome:  check.Outcome,
+			Evidence: check.Evidence,
+		})
+	}
+	switch status {
+	case VerificationVerified:
+		if len(checks) == 0 {
+			return CompletionVerification{}, fmt.Errorf("%w: verified done requires at least one verification check", ErrInvalidJSON)
+		}
+	case VerificationPartiallyVerified:
+		if len(knownRisks) == 0 {
+			return CompletionVerification{}, fmt.Errorf("%w: partially verified done requires at least one known risk", ErrInvalidJSON)
+		}
+	case VerificationNotVerified:
+	}
+	return CompletionVerification{Status: status, Checks: checks}, nil
+}
+
+func cloneStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	return append([]string{}, values...)
 }
 
 func rejectPresentField(fields map[string]json.RawMessage, field, detail string) error {

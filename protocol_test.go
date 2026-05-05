@@ -31,6 +31,12 @@ func TestProtocolCorrectionMessage(t *testing.T) {
 		if !strings.Contains(msg, "Include reasoning in every response; use null if you have nothing to add.") {
 			t.Fatalf("expected explicit reasoning-field guidance, got %q", msg)
 		}
+		if !strings.Contains(msg, `"verification"`) {
+			t.Fatalf("expected verification guidance, got %q", msg)
+		}
+		if !strings.Contains(msg, `"known_risks"`) {
+			t.Fatalf("expected known_risks guidance, got %q", msg)
+		}
 		if strings.Contains(msg, `top-level "turn" field`) {
 			t.Fatalf("expected provider-specific top-level guidance to be absent, got %q", msg)
 		}

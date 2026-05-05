@@ -9,6 +9,8 @@
   },
   "tasks": [
     "001-basic-edit",
-    "002-batched-basic-edit"
+    "002-batched-basic-edit",
+    "003-self-verification-artifact",
+    "004-weak-done-rejection"
   ]
 }

@@ -27,6 +27,21 @@ func stateMessage(source, cwd string) string {
 	return `{"type":"state","source":"` + source + `","cwd":"` + cwd + `"}`
 }
 
+func verifiedDone(summary string) *clnkr.DoneTurn {
+	return &clnkr.DoneTurn{
+		Summary: summary,
+		Verification: clnkr.CompletionVerification{
+			Status: clnkr.VerificationVerified,
+			Checks: []clnkr.VerificationCheck{{
+				Command:  "test -d .",
+				Outcome:  "passed",
+				Evidence: "current working directory was available for completion",
+			}},
+		},
+		KnownRisks: []string{},
+	}
+}
+
 func compactTranscript(t *testing.T, cwd string, messages []clnkr.Message) []clnkr.Message {
 	t.Helper()
 
@@ -147,7 +162,7 @@ func TestContinueRestoresCanonicalAssistantTurn(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", tmpdir)
 
 	projdir := filepath.Join(tmpdir, "continue-proj")
-	doneText, err := clnkr.CanonicalTurnJSON(&clnkr.DoneTurn{Summary: "saved summary"})
+	doneText, err := clnkr.CanonicalTurnJSON(verifiedDone("saved summary"))
 	if err != nil {
 		t.Fatalf("CanonicalTurnJSON: %v", err)
 	}
@@ -201,12 +216,12 @@ func TestSessionRoundTripWithCompactionState(t *testing.T) {
 		projdir := filepath.Join(tmpdir, "testproj-valid")
 		compacted := compactTranscript(t, "/wrong", []clnkr.Message{
 			{Role: "user", Content: "first task"},
-			{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+			{Role: "assistant", Content: `{"type":"done","summary":"done first","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 			{Role: "user", Content: stateMessage("clnkr", "/old")},
 			{Role: "user", Content: "second task"},
-			{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
+			{Role: "assistant", Content: `{"type":"done","summary":"done second","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 			{Role: "user", Content: "third task"},
-			{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+			{Role: "assistant", Content: `{"type":"done","summary":"done third","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 			{Role: "user", Content: stateMessage("clnkr", "/restored")},
 		})
 
@@ -244,13 +259,13 @@ func TestSessionRoundTripWithCompactionState(t *testing.T) {
 		projdir := filepath.Join(tmpdir, "testproj-foreign")
 		compacted := compactTranscript(t, "/original", []clnkr.Message{
 			{Role: "user", Content: "first task"},
-			{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+			{Role: "assistant", Content: `{"type":"done","summary":"done first","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 			{Role: "user", Content: "second task"},
-			{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
+			{Role: "assistant", Content: `{"type":"done","summary":"done second","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 			{Role: "user", Content: stateMessage("user", "/wrong")},
-			{Role: "assistant", Content: `{"type":"done","summary":"foreign state tail"}`},
+			{Role: "assistant", Content: `{"type":"done","summary":"foreign state tail","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 			{Role: "user", Content: "third task"},
-			{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+			{Role: "assistant", Content: `{"type":"done","summary":"done third","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 		})
 
 		if err := session.SaveSession(projdir, compacted); err != nil {

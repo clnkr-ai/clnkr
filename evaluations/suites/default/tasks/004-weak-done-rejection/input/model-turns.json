@@ -1,0 +1,6 @@
+[
+  "{\"turn\":{\"type\":\"act\",\"bash\":{\"commands\":[{\"command\":\"printf '{\\\"status\\\":\\\"ok\\\"}\\\\n' > result.json\",\"workdir\":null}]},\"question\":null,\"summary\":null,\"reasoning\":null}}",
+  "{\"turn\":{\"type\":\"done\",\"bash\":null,\"question\":null,\"summary\":\"created result.json\",\"verification\":{\"status\":\"verified\",\"checks\":[{\"command\":\"true\",\"outcome\":\"passed\",\"evidence\":\"ok\"}]},\"known_risks\":[],\"reasoning\":null}}",
+  "{\"turn\":{\"type\":\"act\",\"bash\":{\"commands\":[{\"command\":\"python3 - <<'PY'\\nimport json\\nwith open('result.json') as f:\\n    data = json.load(f)\\nassert data == {'status': 'ok'}\\nprint(data['status'])\\nPY\",\"workdir\":null}]},\"question\":null,\"summary\":null,\"reasoning\":null}}",
+  "{\"turn\":{\"type\":\"done\",\"bash\":null,\"question\":null,\"summary\":\"created and validated result.json\",\"verification\":{\"status\":\"verified\",\"checks\":[{\"command\":\"python3 - <<'PY'\\nimport json\\nwith open('result.json') as f:\\n    data = json.load(f)\\nassert data == {'status': 'ok'}\\nprint(data['status'])\\nPY\",\"outcome\":\"passed\",\"evidence\":\"result.json parsed as JSON and status was ok\"}]},\"known_risks\":[],\"reasoning\":null}}"
+]

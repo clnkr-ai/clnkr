@@ -1,0 +1,2 @@
+Create result.json containing a JSON object with key "status" and value "ok".
+You are done only after validating the file parses as JSON and the status value is exactly "ok".

@@ -45,7 +45,16 @@ func CanonicalTurnJSON(turn Turn) (string, error) {
 		if strings.TrimSpace(v.Summary) == "" {
 			return "", ErrEmptySummary
 		}
-		env = jsonEnvelope{Type: "done", Summary: v.Summary, Reasoning: v.Reasoning}
+		if err := validateDoneVerification(v.Verification, v.KnownRisks); err != nil {
+			return "", fmt.Errorf("canonical turn json: %w", err)
+		}
+		env = jsonEnvelope{
+			Type:         "done",
+			Summary:      v.Summary,
+			Verification: &v.Verification,
+			KnownRisks:   cloneStrings(v.KnownRisks),
+			Reasoning:    v.Reasoning,
+		}
 	case nil:
 		return "", fmt.Errorf("canonical turn json: nil turn")
 	default:
@@ -57,4 +66,30 @@ func CanonicalTurnJSON(turn Turn) (string, error) {
 		return "", fmt.Errorf("canonical turn json: marshal: %w", err)
 	}
 	return string(body), nil
+}
+
+func validateDoneVerification(verification CompletionVerification, knownRisks []string) error {
+	switch verification.Status {
+	case VerificationVerified, VerificationPartiallyVerified, VerificationNotVerified:
+	default:
+		return fmt.Errorf("%w: invalid verification status %q", ErrInvalidJSON, verification.Status)
+	}
+	for i, check := range verification.Checks {
+		if strings.TrimSpace(check.Command) == "" {
+			return fmt.Errorf("%w: verification.checks[%d].command must be non-empty", ErrInvalidJSON, i)
+		}
+		if strings.TrimSpace(check.Outcome) == "" {
+			return fmt.Errorf("%w: verification.checks[%d].outcome must be non-empty", ErrInvalidJSON, i)
+		}
+		if strings.TrimSpace(check.Evidence) == "" {
+			return fmt.Errorf("%w: verification.checks[%d].evidence must be non-empty", ErrInvalidJSON, i)
+		}
+	}
+	if verification.Status == VerificationVerified && len(verification.Checks) == 0 {
+		return fmt.Errorf("%w: verified done requires at least one verification check", ErrInvalidJSON)
+	}
+	if verification.Status == VerificationPartiallyVerified && len(knownRisks) == 0 {
+		return fmt.Errorf("%w: partially verified done requires at least one known risk", ErrInvalidJSON)
+	}
+	return nil
 }

@@ -1,0 +1,4 @@
+[
+  "{\"turn\":{\"type\":\"act\",\"bash\":{\"commands\":[{\"command\":\"printf 'agentic self verification works\\\\n' > result.txt\",\"workdir\":null},{\"command\":\"test -f result.txt && cat result.txt\",\"workdir\":null}]},\"question\":null,\"summary\":null,\"reasoning\":null}}",
+  "{\"turn\":{\"type\":\"done\",\"bash\":null,\"question\":null,\"summary\":\"created and verified result.txt\",\"verification\":{\"status\":\"verified\",\"checks\":[{\"command\":\"test -f result.txt && cat result.txt\",\"outcome\":\"passed\",\"evidence\":\"result.txt exists and contains exactly agentic self verification works\"}]},\"known_risks\":[],\"reasoning\":null}}"
+]

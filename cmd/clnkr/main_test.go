@@ -22,15 +22,22 @@ import (
 )
 
 func openAIWrappedDone(summary string) string {
-	return fmt.Sprintf(`{"turn":{"type":"done","bash":null,"question":null,"summary":%q,"reasoning":null}}`, summary)
+	return fmt.Sprintf(`{"turn":{"type":"done","bash":null,"question":null,"summary":%q,"verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`, summary)
 }
 
 func mustTurn(raw string) clnkr.Turn {
 	turn, err := clnkr.ParseTurn(raw)
-	if err != nil {
-		panic(err)
+	if err == nil {
+		return turn
 	}
-	return turn
+	var env struct {
+		Type    string `json:"type"`
+		Summary string `json:"summary"`
+	}
+	if json.Unmarshal([]byte(raw), &env) == nil && env.Type == "done" {
+		return verifiedDone(env.Summary)
+	}
+	panic(err)
 }
 
 func mustResponse(raw string) clnkr.Response {
@@ -38,11 +45,26 @@ func mustResponse(raw string) clnkr.Response {
 }
 
 func mustCanonicalDoneText(summary string) string {
-	text, err := clnkr.CanonicalTurnJSON(&clnkr.DoneTurn{Summary: summary})
+	text, err := clnkr.CanonicalTurnJSON(verifiedDone(summary))
 	if err != nil {
 		panic(err)
 	}
 	return text
+}
+
+func verifiedDone(summary string) *clnkr.DoneTurn {
+	return &clnkr.DoneTurn{
+		Summary: summary,
+		Verification: clnkr.CompletionVerification{
+			Status: clnkr.VerificationVerified,
+			Checks: []clnkr.VerificationCheck{{
+				Command:  "go test ./...",
+				Outcome:  "passed",
+				Evidence: "go test ./... passed and ls output showed current directory entries for completion",
+			}},
+		},
+		KnownRisks: []string{},
+	}
 }
 
 func runDoneTranscript(t *testing.T, summary string) []clnkr.Message {
@@ -432,7 +454,7 @@ func TestCommandProgressShowsWorkdir(t *testing.T) {
 		calls++
 		content := fmt.Sprintf(`{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":%q}]},"question":null,"summary":null,"reasoning":null}}`, workdir)
 		if calls > 1 {
-			content = `{"turn":{"type":"done","bash":null,"question":null,"summary":"done","reasoning":null}}`
+			content = openAIWrappedDone("done")
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{
@@ -676,7 +698,7 @@ func TestOpenAIResponsesHarnessFlagsReachRequestAndMetadata(t *testing.T) {
 					"type": "message",
 					"role": "assistant",
 					"content": []map[string]any{
-						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"done","reasoning":null}}`},
+						{"type": "output_text", "text": openAIWrappedDone("done")},
 					},
 				},
 			},

@@ -25,6 +25,15 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, `Set type to exactly one of "act", "clarify", or "done".`) {
 			t.Error("prompt should describe type explicitly")
 		}
+		if !strings.Contains(prompt, `"verification"`) {
+			t.Error("prompt should require done verification")
+		}
+		if !strings.Contains(prompt, `"known_risks"`) {
+			t.Error("prompt should require known_risks")
+		}
+		if !strings.Contains(prompt, "verified, partially_verified, or not_verified") {
+			t.Error("prompt should describe verification statuses")
+		}
 		if strings.Contains(prompt, "```bash") {
 			t.Error("prompt should not instruct fenced bash blocks")
 		}
@@ -136,6 +145,9 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		}
 		if !strings.Contains(prompt, `Set type to exactly one of "act" or "done".`) {
 			t.Fatalf("unattended prompt should describe act/done contract")
+		}
+		if !strings.Contains(prompt, `"verification"`) || !strings.Contains(prompt, `"known_risks"`) {
+			t.Fatalf("unattended prompt should require structured done verification")
 		}
 	})
 
