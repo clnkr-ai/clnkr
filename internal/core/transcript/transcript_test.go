@@ -3,6 +3,7 @@ package transcript
 import (
 	"encoding/json"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -337,6 +338,33 @@ func TestFormatCommandResultPreservesSectionMarkersAsData(t *testing.T) {
 	}
 	if payload.Outcome.Type != "exit" || payload.Outcome.ExitCode != 7 {
 		t.Fatalf("outcome = %#v", payload.Outcome)
+	}
+}
+
+func TestFormatCommandResultReportsActualOmittedBytes(t *testing.T) {
+	stream := "head-" + strings.Repeat("x", 70*1024) + "-tail"
+	got := FormatCommandResult(CommandResult{Stdout: stream, ExitCode: 0})
+
+	var payload struct {
+		Stdout string `json:"stdout"`
+	}
+	if err := json.Unmarshal([]byte(got), &payload); err != nil {
+		t.Fatalf("FormatCommandResult() returned invalid JSON: %v\n%s", err, got)
+	}
+	markerOpen := strings.Index(payload.Stdout, "\n[clnkr: stdout truncated; omitted ")
+	markerStart := markerOpen + 1
+	markerEnd := strings.Index(payload.Stdout, " bytes]")
+	if markerOpen < 0 || markerEnd < 0 {
+		t.Fatalf("stdout missing truncation marker: %q", payload.Stdout)
+	}
+	gotOmitted, err := strconv.Atoi(payload.Stdout[markerStart+len("[clnkr: stdout truncated; omitted ") : markerEnd])
+	if err != nil {
+		t.Fatalf("omitted byte count is not numeric: %v", err)
+	}
+	markerClose := markerEnd + len(" bytes]\n")
+	kept := markerOpen + len(payload.Stdout) - markerClose
+	if gotOmitted != len(stream)-kept {
+		t.Fatalf("omitted bytes = %d, want %d", gotOmitted, len(stream)-kept)
 	}
 }
 
