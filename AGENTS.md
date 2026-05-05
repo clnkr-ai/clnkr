@@ -56,6 +56,21 @@ clnkr/                  # core: types, Agent, events (stdlib only)
 ## Release
 Tag-driven. Push feature to `main`, wait for CI/evals/site to go green, then push the plain semantic version tag. Release workflow triggers from semver tags, updates `debian/main`, and generates Debian changelog. Remote `main` may move. Fetch and rebase before follow-up pushes.
 
+## Commit Metadata
+Before creating a commit, choose the functional area for the work. Every commit made by a coding agent must include exactly one `Functional-Area:` git trailer.
+
+Use a stable hyphenated area name. Pick it from the user-named feature, active roadmap item, or relevant atuin memory key when available. If the area is unclear, ask before committing.
+
+Examples:
+- `Functional-Area: context-management` for transcript, compaction, or context-budget changes
+- `Functional-Area: provider-config` for provider option and API configuration changes
+- `Functional-Area: docs` for documentation-only changes
+
+Commit with the trailer:
+```
+git commit --trailer "Functional-Area: context-management"
+```
+
 ## Evals
 Optimize for live runs that measure actual agent behavior. Fixture evals exist for harness determinism in CI, not as the primary signal. `clankerval` requires a clean checkout. Make a temporary commit from a dirty worktree, run, then unroll.
 

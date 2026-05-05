@@ -73,8 +73,11 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, "If the user names a file or path, inspect that exact path first.") {
 			t.Error("prompt should prioritize exact user-named paths")
 		}
-		if !strings.Contains(prompt, `You may also receive a JSON host state message such as {"type":"state","source":"clnkr","cwd":"/repo"}.`) {
+		if !strings.Contains(prompt, `You may also receive JSON host state messages such as {"type":"state","source":"clnkr","cwd":"/repo"} and resource_state`) {
 			t.Error("prompt should explain host state messages")
+		}
+		if !strings.Contains(prompt, "commands_used") || !strings.Contains(prompt, "commands_remaining") || !strings.Contains(prompt, "model_turns_used") {
+			t.Error("prompt should explain resource state fields")
 		}
 		if strings.Contains(prompt, "[command]") || strings.Contains(prompt, "[stdout]") || strings.Contains(prompt, "[command_feedback]") {
 			t.Error("prompt should not describe bracketed command-result sections")
@@ -133,6 +136,24 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		}
 		if !strings.Contains(prompt, `Set type to exactly one of "act" or "done".`) {
 			t.Fatalf("unattended prompt should describe act/done contract")
+		}
+	})
+
+	t.Run("unattended prompt teaches resource awareness", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		prompt := LoadPromptWithOptions(t.TempDir(), PromptOptions{Unattended: true})
+		for _, want := range []string{
+			"resource_state",
+			"commands_used",
+			"commands_remaining",
+			"model_turns_used",
+			"Prefer cheap inspection before expensive builds, downloads, training runs, or brute force.",
+			"When resources are low, produce the best verifiable artifact you can and finish.",
+		} {
+			if !strings.Contains(prompt, want) {
+				t.Fatalf("unattended prompt missing %q", want)
+			}
 		}
 	})
 

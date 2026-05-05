@@ -127,6 +127,70 @@ func TestModelQueryUsesResponsesStructuredRequest(t *testing.T) {
 	}
 }
 
+func TestModelQueryRetriesTransientServerError(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{"message": "context deadline exceeded"},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": []map[string]any{
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]any{
+						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","reasoning":null}}`},
+					},
+				},
+			},
+			"usage": map[string]any{"input_tokens": 3, "output_tokens": 4},
+		})
+	}))
+	defer server.Close()
+
+	model := openairesponses.NewModel(server.URL, "test-key", "gpt-test", "system")
+	resp, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "finish"}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok"}` {
+		t.Fatalf("canonical turn = %q, want done", got)
+	}
+}
+
+func TestModelQueryDoesNotRetryBadRequest(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "bad request"},
+		})
+	}))
+	defer server.Close()
+
+	model := openairesponses.NewModel(server.URL, "test-key", "gpt-test", "system")
+	_, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "finish"}})
+	if err == nil {
+		t.Fatal("Query succeeded, want bad request error")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+	if got, want := err.Error(), "api error (status 400): bad request"; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
+
 func TestModelQueryJoinsBaseURLPath(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -470,6 +534,46 @@ func TestModelQueryTextOmitsStructuredOutputConfigAndNormalizesAssistantHistory(
 	annotations, ok := item["annotations"].([]any)
 	if !ok || len(annotations) != 0 {
 		t.Fatalf("assistant annotations = %#v, want empty array", item["annotations"])
+	}
+}
+
+func TestModelQueryTextRetriesTransientServerError(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{"message": "context deadline exceeded"},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": []map[string]any{
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]any{
+						{"type": "output_text", "text": "Older work summarized after retry."},
+					},
+				},
+			},
+			"usage": map[string]any{"input_tokens": 2, "output_tokens": 3},
+		})
+	}))
+	defer server.Close()
+
+	model := openairesponses.NewModel(server.URL, "test-key", "gpt-5", "sys prompt")
+	summary, err := model.QueryText(context.Background(), []clnkr.Message{{Role: "user", Content: "hello"}})
+	if err != nil {
+		t.Fatalf("QueryText: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if summary != "Older work summarized after retry." {
+		t.Fatalf("summary = %q, want retry summary", summary)
 	}
 }
 

@@ -150,7 +150,7 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 		}
 
 		apiErr := fmt.Errorf("api error (status %d): %s", statusCode, extractErrorMessage(respBody))
-		if statusCode != http.StatusTooManyRequests || attempt == maxAttempts {
+		if !retryableStatus(statusCode) || attempt == maxAttempts {
 			return clnkr.Response{}, apiErr
 		}
 		if err := waitForRetry(ctx, retryDelay(retryAfter, attempt)); err != nil {
@@ -184,7 +184,7 @@ func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string
 		}
 
 		apiErr := fmt.Errorf("api error (status %d): %s", statusCode, extractErrorMessage(respBody))
-		if statusCode != http.StatusTooManyRequests || attempt == maxAttempts {
+		if !retryableStatus(statusCode) || attempt == maxAttempts {
 			return "", apiErr
 		}
 		if err := waitForRetry(ctx, retryDelay(retryAfter, attempt)); err != nil {
@@ -290,6 +290,15 @@ func parseTextResponse(respBody []byte) (string, error) {
 		return "", fmt.Errorf("empty choice content")
 	}
 	return choice.Message.Content, nil
+}
+
+func retryableStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return statusCode >= 500 && statusCode < 600
+	}
 }
 
 func retryDelay(retryAfter string, attempt int) time.Duration {
