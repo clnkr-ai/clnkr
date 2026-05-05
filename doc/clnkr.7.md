@@ -45,6 +45,11 @@ result.
 : A bounded child **clnkr** run launched by the frontend for a narrow
 inspection or verification task. The parent remains the only coordinator.
 
+**Child probe runtime**
+: The **internal/delegation** boundary that runs bounded child probes and owns
+subprocess execution, read-only child execution, request and result artifacts,
+and child artifact paths.
+
 **Transcript**
 : The ordered message history sent to the model.
 
@@ -76,16 +81,24 @@ coordinates frontend interaction around **RunWithPolicy** by turning approval
 and clarify policy hooks into frontend events and accepting replies. It does
 not query the Model, parse Turns, or execute commands directly. **cmd/clnkr**
 and **cmd/clnkrd** adapt terminal and stdio JSONL surfaces to the driver.
-Manual delegation also lives at this boundary: **Driver** handles **/delegate**
-before model execution, emits child lifecycle events, and appends a
-host-authored child result block to the parent transcript. The child runs as a
-separate **clnkr** subprocess with its own event log and trajectory artifacts.
+Manual delegation policy also lives at this boundary: **Driver** handles
+**/delegate** before model execution, emits child lifecycle events, and appends
+a host-authored child result block to the parent transcript. The
+**internal/delegation** runtime runs the child as a separate **clnkr**
+subprocess and owns the child request, result, event log, and trajectory
+artifacts. Terminal, TUI, CLI, and JSONL adaptation remain frontend-owned.
 
 The configuration ownership boundary is **CLI config resolver** versus
 **Provider request semantics**. The CLI resolver owns app inputs and user-facing
 errors. Provider request semantics own the provider vocabulary and reject
 unsupported provider/model/request combinations before adapters serialize a
 request.
+
+The delegation ownership boundary is **Driver** versus
+**internal/delegation**. **Driver** owns slash-command policy, child lifecycle
+events, transcript insertion, and frontend adaptation. **internal/delegation**
+owns runtime mechanics for child probes. Provider adapters, provider request
+semantics, canonical turns, and **Agent.Step** are unchanged by delegation.
 
 # ACT PROTOCOL
 
@@ -352,6 +365,10 @@ cancelled, denied, skipped, or error.
 **Driver**
 : The frontend coordinator that turns policy hooks and top-level frontend
 requests into terminal or JSONL interaction.
+
+**Child probe runtime**
+: The **internal/delegation** boundary that runs bounded child probes and writes
+child request, result, event log, and trajectory artifacts.
 
 **Effective request metadata**
 : The provider request state after validation, defaults, and provider-specific

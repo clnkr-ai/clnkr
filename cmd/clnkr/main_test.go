@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -182,6 +183,27 @@ func TestHelpWritesRichUsageToStdout(t *testing.T) {
 	}
 }
 
+func TestHelpIncludesDelegateFlags(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t, "--help")
+	if err != nil {
+		t.Fatalf("help command: %v\nstderr: %s", err, stderr.String())
+	}
+	for _, want := range []string{
+		"--delegate",
+		"--delegate-max-children int",
+		"--delegate-max-commands int",
+		"--delegate-timeout duration",
+		"--delegate-artifact-dir string",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.Contains(stdout.String(), "--delegate-child-read-only") {
+		t.Fatalf("hidden child flag leaked into help:\n%s", stdout.String())
+	}
+}
+
 func TestInvalidFlagKeepsUsageOffStdout(t *testing.T) {
 	stdout, stderr, err := runMainHelper(t, "--bogus")
 	if err == nil {
@@ -341,6 +363,58 @@ func TestPromptModeUnattendedRunsSingleTask(t *testing.T) {
 	}
 }
 
+func TestManualDelegateWritesLifecycleEventsAndSummary(t *testing.T) {
+	eventLog := filepath.Join(t.TempDir(), "events.jsonl")
+	childExe := helperMainExecutable(t)
+	stdin := strings.NewReader("/delegate inspect README\n")
+	stdout, stderr, err := runMainHelperWithEnvAndInput(t,
+		[]string{
+			"CLNKR_FAKE_DELEGATE_CHILD=1",
+			"CLNKR_DELEGATE_EXECUTABLE=" + childExe,
+			"CLNKR_PROVIDER=openai",
+			"CLNKR_PROVIDER_API=openai-chat-completions",
+			"CLNKR_MODEL=fake",
+			"CLNKR_API_KEY=fake",
+		},
+		stdin,
+		"--delegate",
+		"--full-send=true",
+		"--event-log", eventLog,
+	)
+	if err != nil {
+		t.Fatalf("manual delegate: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "child inspected README") {
+		t.Fatalf("stdout = %q, want child summary", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "[delegate") {
+		t.Fatalf("stderr = %q, want delegate lifecycle", stderr.String())
+	}
+	data, err := os.ReadFile(eventLog)
+	if err != nil {
+		t.Fatalf("ReadFile event log: %v", err)
+	}
+	if !strings.Contains(string(data), `"type":"child_probe_start"`) || !strings.Contains(string(data), `"type":"child_probe_done"`) {
+		t.Fatalf("event log = %s, want child lifecycle events", data)
+	}
+}
+
+func helperMainExecutable(t *testing.T) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "clnkr-helper")
+	script := "#!/usr/bin/env bash\n" +
+		"exec " + shellQuote(os.Args[0]) + " -test.run=TestMainHelper -- \"$@\"\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile helper executable: %v", err)
+	}
+	return path
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
 func TestTrajectoryRequiresPromptBeforeProviderConfig(t *testing.T) {
 	stdout, stderr, err := runMainHelper(t, "--trajectory", filepath.Join(t.TempDir(), "trajectory.json"))
 	if err == nil {
@@ -361,6 +435,10 @@ func TestMainHelper(t *testing.T) {
 	if os.Getenv("CLNKR_HELPER_MAIN") == "" {
 		return
 	}
+	if os.Getenv("CLNKR_FAKE_DELEGATE_CHILD") == "1" && argsContain(os.Args, "--delegate-child-read-only") {
+		runFakeDelegateChild()
+		os.Exit(0)
+	}
 	for i, arg := range os.Args {
 		if arg == "--" {
 			os.Args = append([]string{"clnkr"}, os.Args[i+1:]...)
@@ -369,6 +447,39 @@ func TestMainHelper(t *testing.T) {
 		}
 	}
 	t.Fatal("missing helper arg separator")
+}
+
+func argsContain(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
+}
+
+func runFakeDelegateChild() {
+	eventLog := ""
+	trajectory := ""
+	for i := 0; i < len(os.Args); i++ {
+		switch os.Args[i] {
+		case "--event-log":
+			eventLog = os.Args[i+1]
+			i++
+		case "--trajectory":
+			trajectory = os.Args[i+1]
+			i++
+		}
+	}
+	doneTurn := `{"type":"done","summary":"child inspected README","verification":{"status":"verified","checks":[{"command":"fake","outcome":"passed","evidence":"fake delegate child"}]},"known_risks":[]}`
+	if eventLog != "" {
+		line := `{"type":"response","payload":{"turn":` + doneTurn + `,"usage":{"input_tokens":1,"output_tokens":1}}}` + "\n"
+		_ = os.WriteFile(eventLog, []byte(line), 0o644)
+	}
+	if trajectory != "" {
+		_ = os.WriteFile(trajectory, []byte(`[{"role":"assistant","content":`+strconv.Quote(doneTurn)+`}]`), 0o644)
+	}
+	fmt.Println("child inspected README")
 }
 
 func TestAliasedStringPrefersExplicitPreferredValue(t *testing.T) {
@@ -425,7 +536,7 @@ func TestCommandProgressWritesToStderr(t *testing.T) {
 	if strings.Contains(stderr.String(), `{"type":"act"`) {
 		t.Fatalf("stderr contains non-verbose model response: %q", stderr.String())
 	}
-	if strings.Contains(stderr.String(), `{"type":"done","summary":"done"}`) {
+	if strings.Contains(stderr.String(), `{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`) {
 		t.Fatalf("stderr contains final summary response: %q", stderr.String())
 	}
 	if strings.Contains(stderr.String(), "err-no-newline--- done ---") {
@@ -454,7 +565,7 @@ func TestCommandProgressShowsWorkdir(t *testing.T) {
 		calls++
 		content := fmt.Sprintf(`{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":%q}]},"question":null,"summary":null,"reasoning":null}}`, workdir)
 		if calls > 1 {
-			content = openAIWrappedDone("done")
+			content = `{"turn":{"type":"done","bash":null,"question":null,"summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{
@@ -698,7 +809,7 @@ func TestOpenAIResponsesHarnessFlagsReachRequestAndMetadata(t *testing.T) {
 					"type": "message",
 					"role": "assistant",
 					"content": []map[string]any{
-						{"type": "output_text", "text": openAIWrappedDone("done")},
+						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`},
 					},
 				},
 			},
@@ -992,14 +1103,14 @@ func TestRunSingleTaskRejectsCompactCommandInFullSend(t *testing.T) {
 func TestRunDriverPromptApprovalReadsReplyAndExecutesCommand(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
 		mustResponse(`{"type":"act","bash":{"commands":[{"command":"printf hi","workdir":null}]}}`),
-		mustResponse(`{"type":"done","summary":"done"}`),
+		mustResponse(`{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`),
 	}}
 	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi", ExitCode: 0}}}
 	agent := clnkr.NewAgent(model, executor, "/tmp")
 	driver := clnkrapp.NewDriver(agent, nil)
 
 	stderr := captureStderr(t, func() {
-		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("y\n")), "say hi", clnkrapp.PromptModeApproval)
+		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("y\n")), "say hi", clnkrapp.PromptModeApproval, nil)
 		if err != nil {
 			t.Fatalf("runDriverPrompt: %v", err)
 		}
@@ -1019,14 +1130,14 @@ func TestRunDriverPromptApprovalReadsReplyAndExecutesCommand(t *testing.T) {
 func TestRunDriverPromptApprovalShowsWorkdir(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
 		mustResponse(`{"type":"act","bash":{"commands":[{"command":"rm important.txt","workdir":"subdir"}]}}`),
-		mustResponse(`{"type":"done","summary":"done"}`),
+		mustResponse(`{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`),
 	}}
 	executor := &fakeExecutor{results: []clnkr.CommandResult{{ExitCode: 0}}}
 	agent := clnkr.NewAgent(model, executor, "/tmp")
 	driver := clnkrapp.NewDriver(agent, nil)
 
 	stderr := captureStderr(t, func() {
-		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("y\n")), "clean up", clnkrapp.PromptModeApproval)
+		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("y\n")), "clean up", clnkrapp.PromptModeApproval, nil)
 		if err != nil {
 			t.Fatalf("runDriverPrompt: %v", err)
 		}
@@ -1040,13 +1151,13 @@ func TestRunDriverPromptApprovalShowsWorkdir(t *testing.T) {
 func TestRunDriverPromptClarificationReadsReplyAndContinues(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
 		mustResponse(`{"type":"clarify","question":"Which repo?"}`),
-		mustResponse(`{"type":"done","summary":"done"}`),
+		mustResponse(`{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`),
 	}}
 	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
 	driver := clnkrapp.NewDriver(agent, nil)
 
 	stderr := captureStderr(t, func() {
-		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("/tmp/repo\n")), "inspect", clnkrapp.PromptModeApproval)
+		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("/tmp/repo\n")), "inspect", clnkrapp.PromptModeApproval, nil)
 		if err != nil {
 			t.Fatalf("runDriverPrompt: %v", err)
 		}
@@ -1076,7 +1187,7 @@ func TestRunDriverPromptApprovalCanBeCanceled(t *testing.T) {
 	driver := clnkrapp.NewDriver(agent, nil)
 
 	captureStderr(t, func() {
-		err := runDriverPrompt(ctx, driver, &lineReader{lines: make(chan lineResult)}, "clean up", clnkrapp.PromptModeApproval)
+		err := runDriverPrompt(ctx, driver, &lineReader{lines: make(chan lineResult)}, "clean up", clnkrapp.PromptModeApproval, nil)
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("got %v, want context.Canceled", err)
 		}

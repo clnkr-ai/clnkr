@@ -2,6 +2,7 @@ package clnkrapp
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -132,6 +133,125 @@ func TestDriverTopLevelCompactDispatch(t *testing.T) {
 	if got := driver.Pending(); got != PendingNone {
 		t.Fatalf("Pending() = %q, want %q", got, PendingNone)
 	}
+}
+
+func TestDriverDelegateCommandAppendsChildSummaryOnly(t *testing.T) {
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp/repo")
+	runner := &fakeChildProbeRunner{result: ChildProbeResult{
+		ChildID: "child-001",
+		Status:  ChildProbeStatusDone,
+		Summary: "README says run make test.",
+		Artifacts: ChildProbeArtifacts{
+			EventLog:   "/tmp/delegates/child-001/event-log.jsonl",
+			Trajectory: "/tmp/delegates/child-001/trajectory.json",
+			Result:     "/tmp/delegates/child-001/result.json",
+		},
+	}}
+	driver := NewDriver(agent, nil)
+	driver.SetDelegateRunner(runner, DelegateConfig{
+		Enabled:     true,
+		MaxDepth:    1,
+		MaxChildren: 3,
+		MaxCommands: 10,
+		Timeout:     time.Minute,
+		ArtifactDir: "/tmp/delegates",
+	})
+
+	if err := driver.Prompt(context.Background(), "/delegate inspect README", PromptModeApproval); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+
+	start, ok := nextDriverEvent(t, driver).(EventChildProbeStart)
+	if !ok {
+		t.Fatalf("first event = %T, want EventChildProbeStart", start)
+	}
+	if start.Request.Task != "inspect README" || start.Request.ParentCwd != "/tmp/repo" {
+		t.Fatalf("request = %#v, want delegated task and cwd", start.Request)
+	}
+	done, ok := nextDriverEvent(t, driver).(EventChildProbeDone)
+	if !ok {
+		t.Fatalf("second event = %T, want EventChildProbeDone", done)
+	}
+	if done.Result.Summary != "README says run make test." {
+		t.Fatalf("summary = %q, want child summary", done.Result.Summary)
+	}
+	msgs := agent.Messages()
+	if len(msgs) != 1 || msgs[0].Role != "user" {
+		t.Fatalf("messages = %#v, want one host user block", msgs)
+	}
+	if !strings.Contains(msgs[0].Content, `"type":"child_probe_result"`) {
+		t.Fatalf("message = %s, want child probe result block", msgs[0].Content)
+	}
+	if strings.Contains(msgs[0].Content, "inspect README") {
+		t.Fatalf("parent transcript should contain result, not original delegate command: %s", msgs[0].Content)
+	}
+}
+
+func TestDriverDelegateRequiresEnabledRunner(t *testing.T) {
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp/repo")
+	driver := NewDriver(agent, nil)
+
+	err := driver.Prompt(context.Background(), "/delegate inspect README", PromptModeApproval)
+	if err == nil || !strings.Contains(err.Error(), "delegation is not enabled") {
+		t.Fatalf("Prompt error = %v, want disabled delegation error", err)
+	}
+	denied, ok := nextDriverEvent(t, driver).(EventChildProbeDenied)
+	if !ok {
+		t.Fatalf("event = %T, want EventChildProbeDenied", denied)
+	}
+	if denied.Reason != "delegation is not enabled" {
+		t.Fatalf("reason = %q, want disabled reason", denied.Reason)
+	}
+	if len(agent.Messages()) != 0 {
+		t.Fatalf("messages = %#v, want delegate command not appended on failure", agent.Messages())
+	}
+}
+
+func TestDriverDelegateEmitsDeniedForInvalidRequest(t *testing.T) {
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp/repo")
+	driver := NewDriver(agent, nil)
+	driver.SetDelegateRunner(&fakeChildProbeRunner{}, DelegateConfig{
+		Enabled:     true,
+		MaxDepth:    1,
+		MaxChildren: 3,
+		MaxCommands: 10,
+		Timeout:     time.Minute,
+	})
+
+	err := driver.Prompt(context.Background(), "/delegate", PromptModeApproval)
+	if err == nil || !strings.Contains(err.Error(), "task is required") {
+		t.Fatalf("Prompt error = %v, want task required error", err)
+	}
+	denied, ok := nextDriverEvent(t, driver).(EventChildProbeDenied)
+	if !ok {
+		t.Fatalf("event = %T, want EventChildProbeDenied", denied)
+	}
+	if !strings.Contains(denied.Reason, "task is required") {
+		t.Fatalf("reason = %q, want task required", denied.Reason)
+	}
+	if len(agent.Messages()) != 0 {
+		t.Fatalf("messages = %#v, want no transcript append", agent.Messages())
+	}
+}
+
+type fakeChildProbeRunner struct {
+	result ChildProbeResult
+	err    error
+	calls  int
+	got    ChildProbeRequest
+}
+
+func (r *fakeChildProbeRunner) RunChildProbe(_ context.Context, req ChildProbeRequest) (ChildProbeResult, error) {
+	r.calls++
+	r.got = req
+	if r.err != nil {
+		return ChildProbeResult{}, r.err
+	}
+	result := r.result
+	if result.ChildID == "" {
+		result.ChildID = req.ChildID
+	}
+	return result, nil
 }
 
 func nextDriverEvent(t *testing.T, driver *Driver) DriverEvent {

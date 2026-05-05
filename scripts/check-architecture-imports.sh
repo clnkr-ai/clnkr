@@ -12,6 +12,7 @@ kind_of() {
   case "$1" in
     "$module") echo root ;;
     "$module"/internal/core/*) echo core ;;
+    "$module"/internal/delegation) echo delegation ;;
     "$module"/internal/providers/*) echo provider ;;
     "$module"/cmd/internal/compaction) echo compaction ;;
     "$module"/cmd/*) echo cmd ;;
@@ -27,6 +28,7 @@ check_edge() {
   case "$kind" in
     root) case "$target" in "$module"/internal/core/*) ;; *) echo "error: $importer -> $target: root may import only internal/core/..." >&2; return 1 ;; esac ;;
     core) case "$target" in "$module"/internal/core/*) ;; *) echo "error: $importer -> $target: internal/core/... may import only internal/core/..." >&2; return 1 ;; esac ;;
+    delegation) [[ "$target" == "$module" ]] || { echo "error: $importer -> $target: internal/delegation should keep repo-local imports to root clnkr only" >&2; return 1; } ;;
     provider)
       case "$target" in
         "$module"|"$module"/internal/core/*|"$provider_actwire") ;;
@@ -35,7 +37,7 @@ check_edge() {
       esac
       ;;
     compaction) [[ "$target" == "$module" ]] || { echo "error: $importer -> $target: cmd/internal/compaction should keep repo-local imports to root clnkr only" >&2; return 1; } ;;
-    cmd) case "$target" in "$module"|"$module"/cmd/internal/*|"$module"/internal/providers/*) ;; *) echo "error: $importer -> $target: cmd/... may import only root clnkr, cmd/internal/..., or internal/providers/..." >&2; return 1 ;; esac ;;
+    cmd) case "$target" in "$module"|"$module"/cmd/internal/*|"$module"/internal/delegation|"$module"/internal/providers/*) ;; *) echo "error: $importer -> $target: cmd/... may import only root clnkr, cmd/internal/..., internal/delegation, or internal/providers/..." >&2; return 1 ;; esac ;;
     other) echo "error: $importer -> $target: unclassified repo-local importer" >&2; return 1 ;;
   esac
 }

@@ -25,6 +25,7 @@ Run `make _fmt` then `make check` before committing. Do not commit if either fai
 - CLI config resolution stays in `cmd/internal/providerconfig`: env/flag precedence, `CLNKR_*`, API keys, base URL parsing, provider detection, and user-facing config errors.
 - Provider request semantics stay in `internal/providers/providerconfig`: provider/API constants, request options, model capability checks, and provider-specific validation.
 - Provider adapters serialize validated options; they do not resolve CLI config.
+- Delegation runtime mechanics stay in `internal/delegation`: child probe subprocess execution, read-only child execution, request/result artifact writing, and child artifact paths. TUI/CLI/frontend policy stays in `cmd/internal/clnkrapp`: `/delegate` parsing, driver lifecycle events, transcript insertion, and terminal/JSONL adaptation.
 - Wrap errors: `fmt.Errorf("context: %w", err)`. No bare returns or third-party error packages.
 - Adapter tests use external packages (`package anthropic_test`). Core tests use internal (`package clnkr`). CLI tests use internal (`package main`). Match the existing pattern.
 - `exhaustive` linter is enabled. Switch on sealed types must cover all cases. `default` counts as exhaustive.
@@ -40,6 +41,7 @@ Core importable library at module root. Two command adapters. `evaluations/` con
 ```
 clnkr/                  # core: types, Agent, events (stdlib only)
 ├── internal/providers/ # Anthropic/OpenAI adapters
+├── internal/delegation # Child probe runtime boundary
 ├── cmd/clnkr/          # Plain CLI (root go.mod, no external deps)
 ├── cmd/clnkrd/         # Stdio JSONL adapter
 └── evaluations/        # Eval suites for clankerval
@@ -52,6 +54,8 @@ clnkr/                  # core: types, Agent, events (stdlib only)
 **Events:** Sealed interface, five types: `EventResponse`, `EventCommandStart`, `EventCommandDone`, `EventProtocolFailure`, `EventDebug`. Nil `Notify` = silent.
 
 **Command results (host→model):** JSON with `stdout`, `stderr`, `outcome`, and optional `feedback`. Exit outcomes include `exit_code`; non-exit outcomes include timeout, cancelled, denied, skipped, and error.
+
+**Delegation boundary:** `internal/delegation` owns bounded child probe runtime mechanics. `cmd/internal/clnkrapp.Driver` owns frontend policy around that runtime: recognizing `/delegate`, emitting driver events, appending the parent-visible child result block, and adapting lifecycle output for terminal/TUI/JSONL frontends. Provider adapters and `Agent.Step()` do not participate in delegation policy.
 
 ## Release
 Tag-driven. Push feature to `main`, wait for CI/evals/site to go green, then push the plain semantic version tag. Release workflow triggers from semver tags, updates `debian/main`, and generates Debian changelog. Remote `main` may move. Fetch and rebase before follow-up pushes.

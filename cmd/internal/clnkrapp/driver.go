@@ -20,12 +20,21 @@ type EventApprovalRequest struct {
 type EventClarificationRequest struct{ Question string }
 type EventDone struct{ Summary string }
 type EventCompacted struct{ Stats clnkr.CompactStats }
+type EventChildProbeStart struct{ Request ChildProbeRequest }
+type EventChildProbeDone struct{ Result ChildProbeResult }
+type EventChildProbeDenied struct {
+	ChildID string
+	Reason  string
+}
 type EventError struct{ Err error }
 
 func (EventApprovalRequest) driverEvent()      {}
 func (EventClarificationRequest) driverEvent() {}
 func (EventDone) driverEvent()                 {}
 func (EventCompacted) driverEvent()            {}
+func (EventChildProbeStart) driverEvent()      {}
+func (EventChildProbeDone) driverEvent()       {}
+func (EventChildProbeDenied) driverEvent()     {}
 func (EventError) driverEvent()                {}
 
 const (
@@ -43,6 +52,9 @@ type Driver struct {
 	agent            *clnkr.Agent
 	compactorFactory compaction.Factory
 	events           chan DriverEvent
+	delegateRunner   ChildProbeRunner
+	delegateConfig   DelegateConfig
+	childCount       int
 
 	mu      sync.Mutex
 	running bool
@@ -67,12 +79,29 @@ func (d *Driver) Events() <-chan DriverEvent {
 	return d.events
 }
 
+func (d *Driver) SetDelegateRunner(runner ChildProbeRunner, cfg DelegateConfig) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	d.delegateRunner = runner
+	d.delegateConfig = cfg
+}
+
 func (d *Driver) Prompt(ctx context.Context, text string, mode string) error {
 	if err := d.setRunning(true); err != nil {
 		_ = d.emit(ctx, EventError{Err: err})
 		return err
 	}
 	defer d.setRunning(false) //nolint:errcheck
+
+	delegated, err := d.handleDelegateCommand(ctx, text)
+	if err != nil {
+		_ = d.emit(ctx, EventError{Err: err})
+		return err
+	}
+	if delegated {
+		return nil
+	}
 
 	stats, compacted, err := HandleCompactCommand(ctx, d.agent, text, d.compactorFactory)
 	if err != nil {
@@ -113,6 +142,65 @@ func (d *Driver) Prompt(ctx context.Context, text string, mode string) error {
 		return err
 	}
 	return d.emit(ctx, EventDone{Summary: doneSummary})
+}
+
+func (d *Driver) handleDelegateCommand(ctx context.Context, text string) (bool, error) {
+	task, ok := ParseDelegateCommand(text)
+	if !ok {
+		return false, nil
+	}
+
+	d.mu.Lock()
+	runner := d.delegateRunner
+	cfg := d.delegateConfig
+	childCount := d.childCount
+	d.mu.Unlock()
+
+	if runner == nil || !cfg.Enabled {
+		_ = d.emit(ctx, EventChildProbeDenied{Reason: "delegation is not enabled"})
+		return true, fmt.Errorf("delegate command: delegation is not enabled")
+	}
+	req, err := PrepareChildProbeRequest(d.agent.Cwd(), task, cfg, childCount)
+	if err != nil {
+		_ = d.emit(ctx, EventChildProbeDenied{Reason: err.Error()})
+		return true, err
+	}
+	if err := d.emit(ctx, EventChildProbeStart{Request: req}); err != nil {
+		return true, err
+	}
+
+	result, runErr := runner.RunChildProbe(ctx, req)
+	if result.ChildID == "" {
+		result.ChildID = req.ChildID
+	}
+	if result.Artifacts.Input == "" && result.Artifacts.EventLog == "" {
+		result.Artifacts.Input = req.ArtifactDir
+	}
+	if runErr != nil && result.Status == "" {
+		result = ChildProbeResult{
+			ChildID:      req.ChildID,
+			Status:       ChildProbeStatusFailed,
+			Summary:      "child probe failed",
+			ErrorMessage: runErr.Error(),
+		}
+	}
+	block, err := FormatChildProbeTranscriptBlock(result)
+	if err != nil {
+		return true, err
+	}
+	d.agent.AppendUserMessage(block)
+
+	d.mu.Lock()
+	d.childCount++
+	d.mu.Unlock()
+
+	if err := d.emit(ctx, EventChildProbeDone{Result: result}); err != nil {
+		return true, err
+	}
+	if runErr != nil {
+		return true, fmt.Errorf("delegate command: %w", runErr)
+	}
+	return true, nil
 }
 
 func (d *Driver) Reply(ctx context.Context, text string) error {
