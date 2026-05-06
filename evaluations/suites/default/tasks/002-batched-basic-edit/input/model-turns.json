@@ -1,4 +1,4 @@
 [
   "{\"turn\":{\"type\":\"act\",\"bash\":{\"commands\":[{\"command\":\"printf 'hello\\\\n' > note.txt\",\"workdir\":null},{\"command\":\"sed -n '1,5p' note.txt\",\"workdir\":null}]},\"question\":null,\"summary\":null,\"reasoning\":null}}",
-  "{\"turn\":{\"type\":\"done\",\"bash\":null,\"question\":null,\"summary\":\"created and verified note.txt\",\"reasoning\":null}}"
+  "{\"turn\":{\"type\":\"done\",\"bash\":null,\"question\":null,\"summary\":\"created and verified note.txt\",\"verification\":{\"status\":\"verified\",\"checks\":[{\"command\":\"sed -n '1,5p' note.txt\",\"outcome\":\"passed\",\"evidence\":\"note.txt output was hello\"}]},\"known_risks\":[],\"reasoning\":null}}"
 ]

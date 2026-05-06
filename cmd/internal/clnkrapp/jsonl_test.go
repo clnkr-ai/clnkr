@@ -84,7 +84,7 @@ func TestWriteJSONL(t *testing.T) {
 
 	events := []any{
 		clnkr.EventResponse{
-			Turn:  &clnkr.DoneTurn{Summary: "done"},
+			Turn:  verifiedDone("done"),
 			Usage: clnkr.Usage{InputTokens: 1, OutputTokens: 2},
 		},
 		clnkr.EventCommandStart{Command: "pwd", Dir: "/tmp"},
@@ -124,6 +124,12 @@ func TestWriteJSONL(t *testing.T) {
 	for i, want := range wantTypes {
 		if got[i]["type"] != want {
 			t.Fatalf("event %d type = %q, want %q", i, got[i]["type"], want)
+		}
+	}
+	for _, gotEvent := range got {
+		switch gotEvent["type"] {
+		case "child_probe_start", "child_probe_done", "child_probe_denied":
+			t.Fatalf("child probe event leaked into JSONL output: %#v", gotEvent)
 		}
 	}
 

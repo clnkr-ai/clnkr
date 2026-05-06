@@ -1,9 +1,12 @@
 package clnkrapp
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/clnkr-ai/clnkr"
@@ -18,7 +21,7 @@ func TestWriteEventLogResponsePayload(t *testing.T) {
 	defer f.Close()           //nolint:errcheck
 
 	if err := WriteEventLog(f, clnkr.EventResponse{
-		Turn:  &clnkr.DoneTurn{Summary: "done"},
+		Turn:  verifiedDone("done"),
 		Usage: clnkr.Usage{InputTokens: 3, OutputTokens: 4},
 		Raw:   "raw response",
 	}); err != nil {
@@ -42,7 +45,7 @@ func TestWriteEventLogResponsePayload(t *testing.T) {
 	if payload.Type != "response" {
 		t.Fatalf("type = %q, want response", payload.Type)
 	}
-	if string(payload.Payload.Turn) != `{"type":"done","summary":"done"}` {
+	if string(payload.Payload.Turn) != `{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}` {
 		t.Fatalf("turn = %s, want canonical done turn", payload.Payload.Turn)
 	}
 	if _, ok := payload.Payload.Usage["input_tokens"]; !ok {
@@ -139,6 +142,44 @@ func TestWriteEventLogIncludesFeedback(t *testing.T) {
 	}
 }
 
+func TestWriteEventLogPreservesRawCommandOutput(t *testing.T) {
+	var buf bytes.Buffer
+	stdout := "stdout-head\n" + strings.Repeat("raw stdout\n", 80*1024/len("raw stdout\n")) + "stdout-tail\n"
+	stderr := "stderr-head\n" + strings.Repeat("raw stderr\n", 80*1024/len("raw stderr\n")) + "stderr-tail\n"
+
+	if err := WriteEventLog(&buf, clnkr.EventCommandDone{
+		Command:  "make test",
+		Stdout:   stdout,
+		Stderr:   stderr,
+		ExitCode: 1,
+	}); err != nil {
+		t.Fatalf("WriteEventLog: %v", err)
+	}
+
+	var event struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Stdout string `json:"stdout"`
+			Stderr string `json:"stderr"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &event); err != nil {
+		t.Fatalf("event log is not JSON: %v\n%s", err, buf.String())
+	}
+	if event.Type != "command_done" {
+		t.Fatalf("event type = %q, want command_done", event.Type)
+	}
+	if event.Payload.Stdout != stdout {
+		t.Fatalf("stdout length = %d, want raw %d", len(event.Payload.Stdout), len(stdout))
+	}
+	if event.Payload.Stderr != stderr {
+		t.Fatalf("stderr length = %d, want raw %d", len(event.Payload.Stderr), len(stderr))
+	}
+	if strings.Contains(event.Payload.Stdout, "compressed") || strings.Contains(event.Payload.Stderr, "compressed") {
+		t.Fatalf("event log should not contain model-facing compression markers")
+	}
+}
+
 func TestWriteEventLogCommandDoneErrOmittedWhenNil(t *testing.T) {
 	f, err := os.CreateTemp("", "clnkr-event-log")
 	if err != nil {
@@ -220,5 +261,43 @@ func TestWriteEventLogProtocolFailurePayload(t *testing.T) {
 	}
 	if payload.Type != "protocol_failure" || payload.Payload.Reason != "bad json" || payload.Payload.Raw != "nope" {
 		t.Fatalf("payload = %#v, want protocol failure details", payload)
+	}
+}
+
+func TestWriteEventLogCompletionGatePayload(t *testing.T) {
+	f, err := os.CreateTemp("", "clnkr-event-log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name()) //nolint:errcheck
+	defer f.Close()           //nolint:errcheck
+
+	if err := WriteEventLog(f, clnkr.EventCompletionGate{
+		Decision: clnkr.CompletionChallenge,
+		Reasons:  []string{"artifact_claim_without_check"},
+		Summary:  "created result.txt",
+	}); err != nil {
+		t.Fatalf("WriteEventLog: %v", err)
+	}
+
+	if _, err := f.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Decision string   `json:"decision"`
+			Reasons  []string `json:"reasons"`
+			Summary  string   `json:"summary"`
+		} `json:"payload"`
+	}
+	if err := json.NewDecoder(f).Decode(&payload); err != nil {
+		t.Fatalf("decode event log: %v", err)
+	}
+	if payload.Type != "completion_gate" ||
+		payload.Payload.Decision != "challenge" ||
+		!reflect.DeepEqual(payload.Payload.Reasons, []string{"artifact_claim_without_check"}) ||
+		payload.Payload.Summary != "created result.txt" {
+		t.Fatalf("payload = %#v, want completion gate details", payload)
 	}
 }

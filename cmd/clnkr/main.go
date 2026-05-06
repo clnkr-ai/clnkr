@@ -17,7 +17,7 @@ import (
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
-	"github.com/clnkr-ai/clnkr/cmd/internal/session"
+	"github.com/clnkr-ai/clnkr/internal/session"
 )
 
 // version is set at build time via -ldflags.
@@ -28,6 +28,7 @@ func usageText() string {
 
 Usage:
   clnkr                     Start conversational mode
+  Models may run clnkrd through bash for bounded child work.
 
 Options:
   -p, --prompt string       Task to run unattended and exit
@@ -135,7 +136,7 @@ func (r *lineReader) ReadLine(ctx context.Context) (string, error) {
 	}
 }
 
-func runDriverPrompt(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, input string, mode string) error {
+func runDriverPrompt(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, input string, mode string, eventLog io.Writer) error {
 	promptCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -149,13 +150,13 @@ func runDriverPrompt(ctx context.Context, driver *clnkrapp.Driver, reader *lineR
 		select {
 		case event := <-driver.Events():
 			var err error
-			pendingErr, err = handleTerminalDriverEvent(promptCtx, driver, reader, event, pendingErr)
+			pendingErr, err = handleTerminalDriverEvent(promptCtx, driver, reader, event, pendingErr, eventLog)
 			if err != nil {
 				cancel()
 				return err
 			}
 		case err := <-errCh:
-			return drainDriverEvents(promptCtx, driver, reader, pendingErr, err)
+			return drainDriverEvents(promptCtx, driver, reader, pendingErr, err, eventLog)
 		case <-ctx.Done():
 			cancel()
 			return ctx.Err()
@@ -163,12 +164,12 @@ func runDriverPrompt(ctx context.Context, driver *clnkrapp.Driver, reader *lineR
 	}
 }
 
-func drainDriverEvents(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, pendingErr error, runErr error) error {
+func drainDriverEvents(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, pendingErr error, runErr error, eventLog io.Writer) error {
 	for {
 		select {
 		case event := <-driver.Events():
 			var err error
-			pendingErr, err = handleTerminalDriverEvent(ctx, driver, reader, event, pendingErr)
+			pendingErr, err = handleTerminalDriverEvent(ctx, driver, reader, event, pendingErr, eventLog)
 			if err != nil && runErr == nil {
 				runErr = err
 			}
@@ -178,9 +179,12 @@ func drainDriverEvents(ctx context.Context, driver *clnkrapp.Driver, reader *lin
 	}
 }
 
-func handleTerminalDriverEvent(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, event clnkrapp.DriverEvent, pendingErr error) (error, error) {
+func handleTerminalDriverEvent(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, event clnkrapp.DriverEvent, pendingErr error, eventLog io.Writer) (error, error) {
 	if eventErr, ok := event.(clnkrapp.EventError); ok {
 		return eventErr.Err, nil
+	}
+	if eventLog != nil {
+		_ = clnkrapp.WriteJSONL(eventLog, event)
 	}
 	if pendingErr != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", pendingErr) //nolint:errcheck
@@ -243,7 +247,7 @@ func main() {
 	baseURLShort := flags.String("u", "", "")
 	providerFlag := flags.String("provider", "", "")
 	providerAPIFlag := flags.String("provider-api", "", "")
-	actProtocolFlag := flags.String("act-protocol", "clnkr-inline", "")
+	actProtocolFlag := flags.String("act-protocol", "auto", "")
 	effortFlag := flags.String("effort", "", "")
 	thinkingBudgetTokens := flags.Int("thinking-budget-tokens", 0, "")
 	maxOutputTokens := flags.Int("max-output-tokens", 0, "")
@@ -328,10 +332,29 @@ func main() {
 	if singleTask {
 		*fullSend = true
 	}
+	if (*continueFlag || *continueShort) && *trajectory != "" {
+		fatalf("--continue and --trajectory are mutually exclusive")
+	}
+	if *trajectory != "" && !singleTask {
+		fatalf("--trajectory requires -p (single-task mode)")
+	}
 
-	actProtocol, err := clnkr.ParseActProtocol(*actProtocolFlag)
+	actProtocolSetting, err := providerconfig.ParseActProtocolSetting(clnkrapp.ActProtocolFlagValue(flags, *actProtocolFlag, os.Getenv))
 	if err != nil {
 		fatalf("%v", err)
+	}
+	actProtocol := clnkr.ActProtocolClnkrInline
+	if !*noSystemPrompt && !*noSystemPromptShort {
+		actProtocol, err = providerconfig.ResolvePromptActProtocol(providerconfig.Inputs{
+			Provider:    *providerFlag,
+			ProviderAPI: *providerAPIFlag,
+			Model:       aliasedString(*modelShort, *modelFlag),
+			BaseURL:     aliasedString(*baseURLShort, *baseURLFlag),
+			ActProtocol: actProtocolSetting,
+		}, os.Getenv, *dumpSystemPrompt)
+		if err != nil {
+			fatalf("%v", err)
+		}
 	}
 
 	systemPrompt := clnkr.LoadPromptWithOptions(cwd, clnkr.PromptOptions{
@@ -346,17 +369,10 @@ func main() {
 		os.Exit(0)
 	}
 
-	if (*continueFlag || *continueShort) && *trajectory != "" {
-		fatalf("--continue and --trajectory are mutually exclusive")
-	}
-	if *trajectory != "" && !singleTask {
-		fatalf("--trajectory requires -p (single-task mode)")
-	}
-
 	cfg, err := providerconfig.ResolveConfig(providerconfig.Inputs{
 		Provider: *providerFlag, ProviderAPI: *providerAPIFlag,
 		Model: aliasedString(*modelShort, *modelFlag), BaseURL: aliasedString(*baseURLShort, *baseURLFlag),
-		ActProtocol:    actProtocol,
+		ActProtocol:    actProtocolSetting,
 		RequestOptions: clnkrapp.RequestOptions(*effortFlag, *maxOutputTokens, maxOutputTokensSet, *thinkingBudgetTokens, thinkingBudgetTokensSet),
 	}, os.Getenv)
 	if err != nil {
@@ -378,6 +394,7 @@ func main() {
 	}
 
 	agent := clnkr.NewAgent(clnkrapp.NewModelForConfigWithOptions(cfg, systemPrompt, clnkrapp.ModelOptions{Unattended: singleTask}), &clnkr.CommandExecutor{}, cwd)
+	agent.SetEnv(clnkrapp.CommandEnvFromProviderConfig(cfg, os.Environ()))
 	agent.ActProtocol = cfg.ActProtocol
 
 	showDebug := *verbose || *verboseShort
@@ -459,7 +476,7 @@ func main() {
 		if err := clnkrapp.RejectCompactCommand(taskPrompt); err != nil {
 			fatalf("%v", err)
 		}
-		runErr := runDriverPrompt(ctx, driver, newLineReader(strings.NewReader("")), taskPrompt, clnkrapp.PromptModeFullSend)
+		runErr := runDriverPrompt(ctx, driver, newLineReader(strings.NewReader("")), taskPrompt, clnkrapp.PromptModeFullSend, eventLogFile)
 		if *trajectory != "" {
 			if err := clnkrapp.WriteTrajectory(*trajectory, agent.Messages()); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -505,7 +522,7 @@ func main() {
 			continue
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-		if err := runDriverPrompt(ctx, driver, reader, input, mode); err != nil {
+		if err := runDriverPrompt(ctx, driver, reader, input, mode, eventLogFile); err != nil {
 			if !showPrompt {
 				stop()
 				loopErr = err

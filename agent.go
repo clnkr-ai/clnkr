@@ -31,6 +31,18 @@ func NewAgent(model Model, executor Executor, cwd string) *Agent {
 	return &Agent{model: model, executor: executor, cwd: cwd, MaxSteps: DefaultMaxSteps}
 }
 
+// SetEnv replaces the shell environment snapshot used for future commands.
+func (a *Agent) SetEnv(env map[string]string) {
+	if env == nil {
+		a.env = nil
+		return
+	}
+	a.env = make(map[string]string, len(env))
+	for k, v := range env {
+		a.env[k] = v
+	}
+}
+
 func cloneProviderReplay(items []ProviderReplayItem) []ProviderReplayItem {
 	if len(items) == 0 {
 		return nil
@@ -385,6 +397,9 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 	steps := 0
 	modelTurns := 0
 	protocolErrors := 0
+	completionGate := CompletionGate{}
+	completionRejects := 0
+	gateCompletions := policyUsesCompletionGate(policy)
 
 	for {
 		a.appendStateMessageIfNeeded()
@@ -407,12 +422,35 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 
 		switch turn := result.Turn.(type) {
 		case *DoneTurn:
+			if gateCompletions {
+				decision, reasons, guidance := completionGate.Decide(turn, steps, a.MaxSteps)
+				a.notify(EventCompletionGate{
+					Decision: decision,
+					Reasons:  cloneStrings(reasons),
+					Summary:  turn.Summary,
+				})
+				if decision == CompletionAccept {
+					return nil
+				}
+				if decision == CompletionReject {
+					completionRejects++
+					if completionRejects >= 3 {
+						return a.notifyRunError(fmt.Errorf("consecutive completion gate rejections, exiting"), steps, modelTurns)
+					}
+				}
+				if decision == CompletionChallenge {
+					completionRejects = 0
+				}
+				a.AppendUserMessage(guidance)
+				continue
+			}
 			return nil
 		case *ClarifyTurn:
 			reply, err := policy.Clarify(ctx, turn.Question)
 			if err != nil {
 				return a.notifyRunError(fmt.Errorf("clarify: %w", err), steps, modelTurns)
 			}
+			completionRejects = 0
 			a.AppendUserMessage(reply)
 		case *ActTurn:
 			var skipped []BashAction
@@ -443,6 +481,7 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 			if err != nil {
 				return a.notifyRunError(err, steps, modelTurns)
 			}
+			completionRejects = 0
 			steps += execResult.ExecCount
 			a.notify(EventDebug{Message: fmt.Sprintf("step %d/%d", steps, a.MaxSteps)})
 			if a.MaxSteps > 0 && steps >= a.MaxSteps {
@@ -457,6 +496,15 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 		default:
 			return a.notifyRunError(fmt.Errorf("unhandled turn type %T", turn), steps, modelTurns)
 		}
+	}
+}
+
+func policyUsesCompletionGate(policy RunPolicy) bool {
+	switch policy.(type) {
+	case FullSendPolicy, *FullSendPolicy:
+		return true
+	default:
+		return false
 	}
 }
 

@@ -15,7 +15,7 @@ import (
 )
 
 func anthropicWrappedDone(summary string) string {
-	return fmt.Sprintf(`{"turn":{"type":"done","bash":null,"question":null,"summary":%q,"reasoning":null}}`, summary)
+	return fmt.Sprintf(`{"turn":{"type":"done","bash":null,"question":null,"summary":%q,"verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`, summary)
 }
 
 func TestNewModelForConfigUsesOpenAIResponsesWhenConfigured(t *testing.T) {
@@ -29,7 +29,7 @@ func TestNewModelForConfigUsesOpenAIResponsesWhenConfigured(t *testing.T) {
 					"type": "message",
 					"role": "assistant",
 					"content": []map[string]any{
-						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","reasoning":null}}`},
+						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`},
 					},
 				},
 			},
@@ -52,8 +52,8 @@ func TestNewModelForConfigUsesOpenAIResponsesWhenConfigured(t *testing.T) {
 	if gotPath != "/responses" {
 		t.Fatalf("path = %q, want %q", gotPath, "/responses")
 	}
-	if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok"}` {
-		t.Fatalf("canonical turn = %q, want %q", got, `{"type":"done","summary":"ok"}`)
+	if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}` {
+		t.Fatalf("canonical turn = %q, want %q", got, `{"type":"done","summary":"ok","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)
 	}
 }
 
@@ -68,7 +68,7 @@ func TestNewModelForConfigPassesOpenAIResponsesRequestOptions(t *testing.T) {
 					"type": "message",
 					"role": "assistant",
 					"content": []map[string]any{
-						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","reasoning":null}}`},
+						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`},
 					},
 				},
 			},

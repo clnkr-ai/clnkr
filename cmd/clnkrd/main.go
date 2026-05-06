@@ -14,7 +14,7 @@ import (
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
-	"github.com/clnkr-ai/clnkr/cmd/internal/session"
+	"github.com/clnkr-ai/clnkr/internal/session"
 )
 
 // version is set at build time via -ldflags.
@@ -22,6 +22,8 @@ var version = "dev"
 
 func usageText() string {
 	return `clnkrd - stdio JSONL adapter for clnkr
+
+May be launched by clnkr through bash for bounded child work.
 
 Usage:
   clnkrd [options]          Read JSONL commands on stdin, emit events on stdout
@@ -34,7 +36,7 @@ JSONL commands:
 
 JSONL events:
   debug response protocol_failure approval_request clarify command_start
-  command_done compacted done error
+  command_done completion_gate compacted done error
 
 Options:
       --max-steps int       Limit executed commands before summary
@@ -53,10 +55,10 @@ Examples:
 }
 
 func main() {
-	os.Exit(runMain(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv))
+	os.Exit(runMain(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv, os.Environ))
 }
 
-func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env func(string) string) int {
+func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env func(string) string, environ func() []string) int {
 	flags := flag.NewFlagSet("clnkrd", flag.ContinueOnError)
 	flags.Usage = func() {}
 	flags.SetOutput(io.Discard)
@@ -69,7 +71,7 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 	baseURLFlag := flags.String("base-url", "", "")
 	providerFlag := flags.String("provider", "", "")
 	providerAPIFlag := flags.String("provider-api", "", "")
-	actProtocolFlag := flags.String("act-protocol", "clnkr-inline", "")
+	actProtocolFlag := flags.String("act-protocol", "auto", "")
 	effortFlag := flags.String("effort", "", "")
 	maxOutputTokens := flags.Int("max-output-tokens", 0, "")
 	thinkingBudgetTokens := flags.Int("thinking-budget-tokens", 0, "")
@@ -101,9 +103,22 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 		return fail("cannot get working directory: %v", err)
 	}
 
-	actProtocol, err := clnkr.ParseActProtocol(*actProtocolFlag)
+	actProtocolSetting, err := providerconfig.ParseActProtocolSetting(clnkrapp.ActProtocolFlagValue(flags, *actProtocolFlag, env))
 	if err != nil {
 		return fail("%v", err)
+	}
+	actProtocol := clnkr.ActProtocolClnkrInline
+	if !*noSystemPrompt {
+		actProtocol, err = providerconfig.ResolvePromptActProtocol(providerconfig.Inputs{
+			Provider:    *providerFlag,
+			ProviderAPI: *providerAPIFlag,
+			Model:       *modelFlag,
+			BaseURL:     *baseURLFlag,
+			ActProtocol: actProtocolSetting,
+		}, env, *dumpSystemPrompt)
+		if err != nil {
+			return fail("%v", err)
+		}
 	}
 	systemPrompt := clnkr.LoadPromptWithOptions(cwd, clnkr.PromptOptions{
 		OmitSystemPrompt:   *noSystemPrompt,
@@ -118,7 +133,7 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 	cfg, err := providerconfig.ResolveConfig(providerconfig.Inputs{
 		Provider: *providerFlag, ProviderAPI: *providerAPIFlag,
 		Model: *modelFlag, BaseURL: *baseURLFlag,
-		ActProtocol:    actProtocol,
+		ActProtocol:    actProtocolSetting,
 		RequestOptions: clnkrapp.RequestOptions(*effortFlag, *maxOutputTokens, maxOutputTokensSet, *thinkingBudgetTokens, thinkingBudgetTokensSet),
 	}, env)
 	if err != nil {
@@ -141,6 +156,7 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 	}
 
 	agent := clnkr.NewAgent(clnkrapp.NewModelForConfig(cfg, systemPrompt), &clnkr.CommandExecutor{}, cwd)
+	agent.SetEnv(clnkrapp.CommandEnvFromProviderConfig(cfg, environ()))
 	agent.ActProtocol = cfg.ActProtocol
 	agent.Notify = func(event clnkr.Event) {
 		if err := clnkrapp.WriteJSONL(eventOut, event); err != nil {

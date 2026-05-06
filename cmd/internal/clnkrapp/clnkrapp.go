@@ -13,11 +13,11 @@ import (
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/compaction"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
-	"github.com/clnkr-ai/clnkr/cmd/internal/session"
 	"github.com/clnkr-ai/clnkr/internal/providers/anthropic"
 	"github.com/clnkr-ai/clnkr/internal/providers/openai"
 	"github.com/clnkr-ai/clnkr/internal/providers/openairesponses"
 	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
+	"github.com/clnkr-ai/clnkr/internal/session"
 )
 
 type model interface {
@@ -108,6 +108,22 @@ func RequestOptionFlagsSet(flags *flag.FlagSet) (maxOutputTokensSet, thinkingBud
 	return maxOutputTokensSet, thinkingBudgetTokensSet
 }
 
+func ActProtocolFlagValue(flags *flag.FlagSet, flagValue string, env func(string) string) string {
+	flagSet := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "act-protocol" {
+			flagSet = true
+		}
+	})
+	if flagSet {
+		return flagValue
+	}
+	if value := strings.TrimSpace(env("CLNKR_ACT_PROTOCOL")); value != "" {
+		return value
+	}
+	return flagValue
+}
+
 func WriteEventLog(w io.Writer, e clnkr.Event) error {
 	switch e := e.(type) {
 	case clnkr.EventResponse:
@@ -130,6 +146,12 @@ func WriteEventLog(w io.Writer, e clnkr.Event) error {
 		return writeEvent(w, "command_done", payload)
 	case clnkr.EventProtocolFailure:
 		return writeEvent(w, "protocol_failure", map[string]string{"reason": e.Reason, "raw": e.Raw})
+	case clnkr.EventCompletionGate:
+		return writeEvent(w, "completion_gate", map[string]any{
+			"decision": e.Decision,
+			"reasons":  e.Reasons,
+			"summary":  e.Summary,
+		})
 	case clnkr.EventDebug:
 		return writeEvent(w, "debug", map[string]string{"message": e.Message})
 	default:

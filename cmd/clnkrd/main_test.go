@@ -18,15 +18,17 @@ import (
 
 func TestHelpWritesRichUsageToStdout(t *testing.T) {
 	var out, errOut bytes.Buffer
-	code := runMain([]string{"--help"}, strings.NewReader(""), &out, &errOut, func(string) string { return "" })
+	code := runMain([]string{"--help"}, strings.NewReader(""), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0\nstderr: %s", code, errOut.String())
 	}
 	for _, want := range []string{
 		"clnkrd - stdio JSONL adapter for clnkr",
+		"May be launched by clnkr through bash for bounded child work.",
 		"Usage:",
 		"JSONL commands:",
 		"JSONL events:",
+		"completion_gate",
 		"Options:",
 		"Environment:",
 		"Examples:",
@@ -45,9 +47,68 @@ func TestHelpWritesRichUsageToStdout(t *testing.T) {
 	}
 }
 
+func TestDumpAutoSystemPromptResolvesWithoutAPIKey(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := runMain([]string{"--provider", "openai", "--provider-api", "openai-responses", "--model", "gpt-5", "--dump-system-prompt"}, strings.NewReader(""), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0\nstderr: %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "call the bash tool") {
+		t.Fatalf("stdout missing tool-calls prompt: %q", out.String())
+	}
+	if strings.Contains(errOut.String(), "api key is required") {
+		t.Fatalf("stderr = %q, API key validation ran for prompt dump", errOut.String())
+	}
+}
+
+func TestDumpAutoSystemPromptReportsMissingProviderContext(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := runMain([]string{"--dump-system-prompt"}, strings.NewReader(""), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
+	if code == 0 {
+		t.Fatalf("exit code = 0, want failure\nstdout: %s stderr: %s", out.String(), errOut.String())
+	}
+	if out.String() != "" {
+		t.Fatalf("stdout = %q, want empty", out.String())
+	}
+	if !strings.Contains(errOut.String(), "--act-protocol clnkr-inline") {
+		t.Fatalf("stderr = %q, want concrete act protocol hint", errOut.String())
+	}
+}
+
+func TestDumpConcreteSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := runMain([]string{"--act-protocol", "clnkr-inline", "--dump-system-prompt"}, strings.NewReader(""), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0\nstderr: %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "Every response must be exactly one JSON object") {
+		t.Fatalf("stdout missing inline prompt: %q", out.String())
+	}
+	if strings.Contains(errOut.String(), "provider is required") {
+		t.Fatalf("stderr = %q, provider validation ran first", errOut.String())
+	}
+}
+
+func TestNormalStartupMissingProviderDoesNotMentionPromptDump(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := runMain(nil, strings.NewReader(""), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
+	if code == 0 {
+		t.Fatalf("exit code = 0, want failure\nstdout: %s stderr: %s", out.String(), errOut.String())
+	}
+	if out.String() != "" {
+		t.Fatalf("stdout = %q, want empty", out.String())
+	}
+	if !strings.Contains(errOut.String(), "provider is required") {
+		t.Fatalf("stderr = %q, want provider context error", errOut.String())
+	}
+	if strings.Contains(errOut.String(), "dump") {
+		t.Fatalf("stderr = %q, want no prompt dump hint", errOut.String())
+	}
+}
+
 func TestRunJSONLPromptWritesResponseAndDone(t *testing.T) {
 	var out, errOut bytes.Buffer
-	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished"}`)}}
+	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)}}
 	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
 	agent.Notify = func(event clnkr.Event) {
 		if err := clnkrapp.WriteJSONL(&out, event); err != nil {
@@ -74,7 +135,7 @@ func TestRunJSONLReplyApprovesPendingCommand(t *testing.T) {
 	defer writer.Close() //nolint:errcheck
 	model := &fakeModel{responses: []clnkr.Response{
 		mustResponse(`{"type":"act","bash":{"commands":[{"command":"echo hi","workdir":null}]}}`),
-		mustResponse(`{"type":"done","summary":"done"}`),
+		mustResponse(`{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`),
 	}}
 	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
 	agent := clnkr.NewAgent(model, executor, "/tmp")
@@ -142,7 +203,7 @@ func TestRunJSONLShutdownReturnsWithoutClosingInput(t *testing.T) {
 
 func TestRunJSONLReplyWithoutPendingRequestDoesNotCarryAcrossRuns(t *testing.T) {
 	var out, errOut bytes.Buffer
-	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished"}`)}}
+	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)}}
 	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
 	agent.Notify = func(event clnkr.Event) {
 		if err := clnkrapp.WriteJSONL(&out, event); err != nil {
@@ -171,7 +232,7 @@ func TestRunJSONLReplyWithoutPendingRequestDoesNotCarryAcrossRuns(t *testing.T) 
 
 func TestRunJSONLAcceptsLargePromptLines(t *testing.T) {
 	var out, errOut bytes.Buffer
-	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished"}`)}}
+	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)}}
 	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
 	agent.Notify = func(event clnkr.Event) {
 		if err := clnkrapp.WriteJSONL(&out, event); err != nil {
@@ -361,10 +422,32 @@ func waitForRunJSONL(t *testing.T, errCh <-chan error) error {
 
 func mustResponse(raw string) clnkr.Response {
 	turn, err := clnkr.ParseTurn(raw)
-	if err != nil {
-		panic(err)
+	if err == nil {
+		return clnkr.Response{Turn: turn, Raw: raw}
 	}
-	return clnkr.Response{Turn: turn, Raw: raw}
+	var env struct {
+		Type    string `json:"type"`
+		Summary string `json:"summary"`
+	}
+	if json.Unmarshal([]byte(raw), &env) == nil && env.Type == "done" {
+		return clnkr.Response{Turn: verifiedDone(env.Summary), Raw: raw}
+	}
+	panic(err)
+}
+
+func verifiedDone(summary string) *clnkr.DoneTurn {
+	return &clnkr.DoneTurn{
+		Summary: summary,
+		Verification: clnkr.CompletionVerification{
+			Status: clnkr.VerificationVerified,
+			Checks: []clnkr.VerificationCheck{{
+				Command:  "test -d .",
+				Outcome:  "passed",
+				Evidence: "current working directory was available for completion",
+			}},
+		},
+		KnownRisks: []string{},
+	}
 }
 
 func mustMarshalJSONLCommand(t *testing.T, command clnkrapp.JSONLCommand) string {
@@ -473,10 +556,10 @@ func (c *fakeCompactor) Summarize(_ context.Context, messages []clnkr.Message) (
 func compactableMessages() []clnkr.Message {
 	return []clnkr.Message{
 		{Role: "user", Content: "first task"},
-		{Role: "assistant", Content: `{"type":"done","summary":"done"}`},
+		{Role: "assistant", Content: `{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 		{Role: "user", Content: "second task"},
-		{Role: "assistant", Content: `{"type":"done","summary":"done again"}`},
+		{Role: "assistant", Content: `{"type":"done","summary":"done again","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 		{Role: "user", Content: "third task"},
-		{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+		{Role: "assistant", Content: `{"type":"done","summary":"done third","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 	}
 }

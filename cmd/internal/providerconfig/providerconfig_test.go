@@ -229,25 +229,99 @@ func TestResolveConfigKnownOpenAIResponsesModels(t *testing.T) {
 	}
 }
 
+func TestParseActProtocolSetting(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want ActProtocolSetting
+	}{
+		{name: "default", want: ActProtocolSettingAuto},
+		{name: "auto", raw: " AUTO ", want: ActProtocolSettingAuto},
+		{name: "inline", raw: "clnkr-inline", want: ActProtocolSettingClnkrInline},
+		{name: "tool calls", raw: "tool-calls", want: ActProtocolSettingToolCalls},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseActProtocolSetting(tc.raw)
+			if err != nil {
+				t.Fatalf("ParseActProtocolSetting(%q): %v", tc.raw, err)
+			}
+			if got != tc.want {
+				t.Fatalf("ParseActProtocolSetting(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseActProtocolSettingRejectsUnknownValues(t *testing.T) {
+	_, err := ParseActProtocolSetting("native-bash-tools")
+	if err == nil || !strings.Contains(err.Error(), `invalid act-protocol`) {
+		t.Fatalf("ParseActProtocolSetting err = %v, want act-protocol validation", err)
+	}
+	if !strings.Contains(err.Error(), "auto, clnkr-inline, tool-calls") {
+		t.Fatalf("ParseActProtocolSetting err = %q, want allowed values", err.Error())
+	}
+}
+
 func TestResolveConfigActProtocol(t *testing.T) {
-	t.Run("defaults clnkr inline", func(t *testing.T) {
+	t.Run("defaults auto to anthropic tool calls", func(t *testing.T) {
 		cfg, err := ResolveConfig(Inputs{Provider: "anthropic", Model: "claude-sonnet-4-6"}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
+		if err != nil {
+			t.Fatalf("ResolveConfig: %v", err)
+		}
+		if cfg.ActProtocol != clnkr.ActProtocolToolCalls {
+			t.Fatalf("ActProtocol = %q, want tool-calls", cfg.ActProtocol)
+		}
+	})
+
+	t.Run("auto uses openai responses tool calls", func(t *testing.T) {
+		cfg, err := ResolveConfig(Inputs{
+			Provider:    "openai",
+			ProviderAPI: "openai-responses",
+			Model:       "gpt-5",
+		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
+		if err != nil {
+			t.Fatalf("ResolveConfig: %v", err)
+		}
+		if cfg.ActProtocol != clnkr.ActProtocolToolCalls {
+			t.Fatalf("ActProtocol = %q, want tool-calls", cfg.ActProtocol)
+		}
+	})
+
+	t.Run("auto falls back for openai chat completions", func(t *testing.T) {
+		cfg, err := ResolveConfig(Inputs{
+			Provider:    "openai",
+			ProviderAPI: "openai-chat-completions",
+			Model:       "proxy-model",
+		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
 		if err != nil {
 			t.Fatalf("ResolveConfig: %v", err)
 		}
 		if cfg.ActProtocol != clnkr.ActProtocolClnkrInline {
 			t.Fatalf("ActProtocol = %q, want clnkr-inline", cfg.ActProtocol)
 		}
-		if cfg.ActProtocol == clnkr.ActProtocolToolCalls {
-			t.Fatalf("ActProtocol = tool-calls, want clnkr-inline")
-		}
 	})
 
-	t.Run("accepts anthropic tool calls", func(t *testing.T) {
+	t.Run("explicit inline stays inline", func(t *testing.T) {
 		cfg, err := ResolveConfig(Inputs{
 			Provider:    "anthropic",
 			Model:       "claude-sonnet-4-6",
-			ActProtocol: clnkr.ActProtocolToolCalls,
+			ActProtocol: ActProtocolSettingClnkrInline,
+		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
+		if err != nil {
+			t.Fatalf("ResolveConfig: %v", err)
+		}
+		if cfg.ActProtocol != clnkr.ActProtocolClnkrInline {
+			t.Fatalf("ActProtocol = %q, want clnkr-inline", cfg.ActProtocol)
+		}
+	})
+
+	t.Run("accepts explicit anthropic tool calls", func(t *testing.T) {
+		cfg, err := ResolveConfig(Inputs{
+			Provider:    "anthropic",
+			Model:       "claude-sonnet-4-6",
+			ActProtocol: ActProtocolSettingToolCalls,
 		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
 		if err != nil {
 			t.Fatalf("ResolveConfig: %v", err)
@@ -262,10 +336,72 @@ func TestResolveConfigActProtocol(t *testing.T) {
 			Provider:    "openai",
 			ProviderAPI: "openai-chat-completions",
 			Model:       "proxy-model",
-			ActProtocol: clnkr.ActProtocolToolCalls,
+			ActProtocol: ActProtocolSettingToolCalls,
 		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
 		if err == nil || !strings.Contains(err.Error(), "bash tool calls") {
 			t.Fatalf("ResolveConfig err = %v, want bash tool calls rejection", err)
+		}
+	})
+}
+
+func TestResolvePromptActProtocol(t *testing.T) {
+	t.Run("concrete inline needs no provider config", func(t *testing.T) {
+		got, err := ResolvePromptActProtocol(Inputs{ActProtocol: ActProtocolSettingClnkrInline}, func(string) string { return "" }, false)
+		if err != nil {
+			t.Fatalf("ResolvePromptActProtocol: %v", err)
+		}
+		if got != clnkr.ActProtocolClnkrInline {
+			t.Fatalf("ActProtocol = %q, want clnkr-inline", got)
+		}
+	})
+
+	t.Run("concrete tool calls needs no provider config", func(t *testing.T) {
+		got, err := ResolvePromptActProtocol(Inputs{ActProtocol: ActProtocolSettingToolCalls}, func(string) string { return "" }, false)
+		if err != nil {
+			t.Fatalf("ResolvePromptActProtocol: %v", err)
+		}
+		if got != clnkr.ActProtocolToolCalls {
+			t.Fatalf("ActProtocol = %q, want tool-calls", got)
+		}
+	})
+
+	t.Run("auto resolves anthropic without api key", func(t *testing.T) {
+		got, err := ResolvePromptActProtocol(Inputs{Provider: "anthropic", Model: "claude-sonnet-4-6"}, func(string) string { return "" }, false)
+		if err != nil {
+			t.Fatalf("ResolvePromptActProtocol: %v", err)
+		}
+		if got != clnkr.ActProtocolToolCalls {
+			t.Fatalf("ActProtocol = %q, want tool-calls", got)
+		}
+	})
+
+	t.Run("auto resolves openai responses without api key", func(t *testing.T) {
+		got, err := ResolvePromptActProtocol(Inputs{Provider: "openai", ProviderAPI: "openai-responses", Model: "gpt-5"}, func(string) string { return "" }, false)
+		if err != nil {
+			t.Fatalf("ResolvePromptActProtocol: %v", err)
+		}
+		if got != clnkr.ActProtocolToolCalls {
+			t.Fatalf("ActProtocol = %q, want tool-calls", got)
+		}
+	})
+
+	t.Run("auto resolves openai chat completions without api key", func(t *testing.T) {
+		got, err := ResolvePromptActProtocol(Inputs{Provider: "openai", ProviderAPI: "openai-chat-completions", Model: "proxy-model"}, func(string) string { return "" }, false)
+		if err != nil {
+			t.Fatalf("ResolvePromptActProtocol: %v", err)
+		}
+		if got != clnkr.ActProtocolClnkrInline {
+			t.Fatalf("ActProtocol = %q, want clnkr-inline", got)
+		}
+	})
+
+	t.Run("auto reports missing context", func(t *testing.T) {
+		_, err := ResolvePromptActProtocol(Inputs{}, func(string) string { return "" }, false)
+		if err == nil || !strings.Contains(err.Error(), "provider is required") {
+			t.Fatalf("ResolvePromptActProtocol err = %v, want provider context error", err)
+		}
+		if strings.Contains(err.Error(), "dump") || strings.Contains(err.Error(), "--act-protocol clnkr-inline") {
+			t.Fatalf("ResolvePromptActProtocol err = %q, want raw context error", err.Error())
 		}
 	})
 }

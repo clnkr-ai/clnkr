@@ -31,7 +31,7 @@ func TestModelQueryUsesResponsesStructuredRequest(t *testing.T) {
 					"role": "assistant",
 					"content": []map[string]any{
 						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"hello`},
-						{"type": "output_text", "text": ` back","reasoning":null}}`},
+						{"type": "output_text", "text": ` back","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`},
 					},
 				},
 			},
@@ -116,8 +116,8 @@ func TestModelQueryUsesResponsesStructuredRequest(t *testing.T) {
 		t.Fatalf("text.format.schema = %#v, want schema object", format["schema"])
 	}
 
-	if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"hello back"}` {
-		t.Fatalf("canonical turn = %q, want %q", got, `{"type":"done","summary":"hello back"}`)
+	if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"hello back","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}` {
+		t.Fatalf("canonical turn = %q, want %q", got, `{"type":"done","summary":"hello back","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)
 	}
 	if resp.ProtocolErr != nil {
 		t.Fatalf("ProtocolErr = %v, want nil", resp.ProtocolErr)
@@ -145,7 +145,7 @@ func TestModelQueryRetriesTransientServerError(t *testing.T) {
 					"type": "message",
 					"role": "assistant",
 					"content": []map[string]any{
-						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","reasoning":null}}`},
+						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`},
 					},
 				},
 			},
@@ -162,7 +162,7 @@ func TestModelQueryRetriesTransientServerError(t *testing.T) {
 	if attempts != 2 {
 		t.Fatalf("attempts = %d, want 2", attempts)
 	}
-	if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok"}` {
+	if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}` {
 		t.Fatalf("canonical turn = %q, want done", got)
 	}
 }
@@ -240,7 +240,7 @@ func TestModelQueryJoinsBaseURLPath(t *testing.T) {
 							"type": "message",
 							"role": "assistant",
 							"content": []map[string]any{
-								{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","reasoning":null}}`},
+								{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`},
 							},
 						},
 					},
@@ -277,7 +277,7 @@ func TestModelQuerySerializesProviderRequestOptions(t *testing.T) {
 					"type": "message",
 					"role": "assistant",
 					"content": []map[string]any{
-						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","reasoning":null}}`},
+						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`},
 					},
 				},
 			},
@@ -413,7 +413,7 @@ func TestModelQuerySendsAssistantHistoryAsResponsesOutputItems(t *testing.T) {
 			http.Error(w, "assistant history must use output_text", http.StatusBadRequest)
 			return
 		}
-		if got := item["text"]; got != `{"turn":{"type":"done","bash":null,"question":null,"summary":"canonical transcript","reasoning":null}}` {
+		if got := item["text"]; got != `{"turn":{"type":"done","bash":null,"question":null,"summary":"canonical transcript","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}` {
 			http.Error(w, "assistant history text not normalized", http.StatusBadRequest)
 			return
 		}
@@ -429,7 +429,7 @@ func TestModelQuerySendsAssistantHistoryAsResponsesOutputItems(t *testing.T) {
 					"type": "message",
 					"role": "assistant",
 					"content": []map[string]any{
-						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","reasoning":null}}`},
+						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`},
 					},
 				},
 			},
@@ -439,7 +439,7 @@ func TestModelQuerySendsAssistantHistoryAsResponsesOutputItems(t *testing.T) {
 
 	history := []clnkr.Message{
 		{Role: "user", Content: "first task"},
-		{Role: "assistant", Content: `{"type":"done","summary":"canonical transcript"}`},
+		{Role: "assistant", Content: `{"type":"done","summary":"canonical transcript","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 	}
 
 	model := openairesponses.NewModel(server.URL, "test-key", "gpt-5", "sys prompt")
@@ -476,7 +476,7 @@ func TestModelQueryTextOmitsStructuredOutputConfigAndNormalizesAssistantHistory(
 
 	history := []clnkr.Message{
 		{Role: "user", Content: "first task"},
-		{Role: "assistant", Content: `{"type":"done","summary":"canonical transcript"}`},
+		{Role: "assistant", Content: `{"type":"done","summary":"canonical transcript","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 	}
 
 	model := openairesponses.NewModel(server.URL, "test-key", "gpt-5", "sys prompt")
@@ -528,7 +528,7 @@ func TestModelQueryTextOmitsStructuredOutputConfigAndNormalizesAssistantHistory(
 	if got, want := item["type"], "output_text"; got != want {
 		t.Fatalf("assistant content type = %#v, want %q", got, want)
 	}
-	if got, want := item["text"], `{"turn":{"type":"done","bash":null,"question":null,"summary":"canonical transcript","reasoning":null}}`; got != want {
+	if got, want := item["text"], `{"turn":{"type":"done","bash":null,"question":null,"summary":"canonical transcript","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`; got != want {
 		t.Fatalf("assistant text = %#v, want %q", got, want)
 	}
 	annotations, ok := item["annotations"].([]any)
@@ -726,7 +726,7 @@ func TestModelQueryToolCallsReplayToolMessagesWithoutDuplicateText(t *testing.T)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"output": []map[string]any{{
 				"type": "message", "role": "assistant",
-				"content": []map[string]any{{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","reasoning":null}}`}},
+				"content": []map[string]any{{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`}},
 			}},
 		})
 	}))
@@ -767,7 +767,7 @@ func TestModelQueryFinalOmitsBashTool(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"output": []map[string]any{{
 				"type": "message", "role": "assistant",
-				"content": []map[string]any{{"type": "output_text", "text": `{"turn":{"type":"done","summary":"final","reasoning":null}}`}},
+				"content": []map[string]any{{"type": "output_text", "text": `{"turn":{"type":"done","summary":"final","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`}},
 			}},
 		})
 	}))

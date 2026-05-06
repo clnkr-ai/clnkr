@@ -2,49 +2,61 @@ package transcript
 
 import (
 	"encoding/json"
+	"regexp"
 	"strconv"
 	"strings"
 )
 
-const maxCommandStreamBytes = 64 * 1024
+const commandStreamBudget = 64 * 1024
+
+var salientPattern = regexp.MustCompile(`(?i)(error|failed|failure|panic|exception|traceback|fatal|undefined|cannot|no such file|permission denied|denied|timeout|killed|segmentation fault|failures|expected|actual|assertion|FAIL|FAILED|--- FAIL|:[0-9]+:)`)
 
 // FormatCommandResult renders a command result as structured shell output.
 func FormatCommandResult(result CommandResult) string {
-	payload := struct {
-		Command  string           `json:"command,omitempty"`
-		Stdout   string           `json:"stdout"`
-		Stderr   string           `json:"stderr"`
-		Outcome  CommandOutcome   `json:"outcome"`
-		Feedback *CommandFeedback `json:"feedback,omitempty"`
-	}{
-		Command: result.Command,
-		Stdout:  truncateCommandStream("stdout", result.Stdout),
-		Stderr:  truncateCommandStream("stderr", result.Stderr),
-		Outcome: normalizedOutcome(result.Outcome, result.ExitCode),
+	outcome := normalizedOutcome(result.Outcome, result.ExitCode)
+	diagnostic := outcome.Type != CommandOutcomeExit || outcome.ExitCode != nil && *outcome.ExitCode != 0
+	stdout, stdoutMeta := compressCommandStream("stdout", result.Stdout, diagnostic && result.Stderr == "")
+	stderr, stderrMeta := compressCommandStream("stderr", result.Stderr, diagnostic)
+	payload := map[string]any{"stdout": stdout, "stderr": stderr, "outcome": outcome}
+	if result.Command != "" {
+		payload["command"] = result.Command
 	}
 	if len(result.Feedback.ChangedFiles) > 0 || result.Feedback.Diff != "" {
-		payload.Feedback = &result.Feedback
+		payload["feedback"] = result.Feedback
 	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return `{"stdout":"","stderr":"failed to marshal command result","outcome":{"type":"error","message":"failed to marshal command result"}}`
+	if stdoutMeta != nil || stderrMeta != nil {
+		payload["observation"] = map[string]any{"source": "clnkr", "version": 1, "stdout": stdoutMeta, "stderr": stderrMeta}
 	}
+	body, _ := json.Marshal(payload)
 	return string(body)
 }
 
-func truncateCommandStream(name string, stream string) string {
-	if len(stream) <= maxCommandStreamBytes {
-		return stream
+func compressCommandStream(name, stream string, salient bool) (string, map[string]any) {
+	if len(stream) <= commandStreamBudget {
+		return stream, nil
 	}
-	omitted := len(stream) - maxCommandStreamBytes + len("\n[clnkr: "+name+" truncated; omitted  bytes]\n")
-	digits := len(strconv.Itoa(omitted))
-	if len(strconv.Itoa(omitted+digits)) > digits {
-		digits++
+	marker := "[clnkr: " + name + " compressed; original " + strconv.Itoa(len(stream)) + " bytes, omitted bytes recorded in observation metadata]\n"
+	keep := max(0, commandStreamBudget-len(marker)-len("\n[head]\n\n[tail]\n\n[salient]\n"))
+	head, tail := keep/3, keep/3
+	middle := salientLines(stream[head:len(stream)-tail], keep-head-tail, salient)
+	shown := marker + "[head]\n" + stream[:head]
+	if middle != "" {
+		shown += "\n[salient]\n" + middle
 	}
-	marker := "\n[clnkr: " + name + " truncated; omitted " + strconv.Itoa(omitted+digits) + " bytes]\n"
-	keep := maxCommandStreamBytes - len(marker)
-	head := keep / 2
-	return stream[:head] + marker + stream[len(stream)-(keep-head):]
+	shown += "\n[tail]\n" + stream[len(stream)-tail:]
+	shown = strings.ToValidUTF8(shown, "")
+	return shown, map[string]any{"original_bytes": len(stream), "shown_bytes": len(shown), "omitted_bytes": len(stream) - head - tail - len(middle), "mode": "compressed"}
+}
+
+func salientLines(stream string, budget int, ok bool) string {
+	var out string
+	seen := map[string]bool{}
+	for _, line := range strings.SplitAfter(stream, "\n") {
+		if ok && salientPattern.MatchString(line) && !seen[line] && len(out)+len(line) <= budget {
+			seen[line], out = true, out+line
+		}
+	}
+	return out
 }
 
 func FormatDeniedCommandResult(reply string) string {
@@ -56,34 +68,25 @@ func FormatDeniedCommandResult(reply string) string {
 }
 
 func FormatSkippedCommandResult(reason string) string {
-	reason = strings.TrimSpace(reason)
-	outcomeReason := "skipped"
-	stderr := "Command was not run."
-	switch reason {
+	switch reason = strings.TrimSpace(reason); reason {
 	case "max steps":
-		outcomeReason = "max_steps"
-		stderr = "Command was not run because the step limit was reached."
+		return FormatCommandResult(CommandResult{Stderr: "Command was not run because the step limit was reached.", Outcome: CommandOutcome{Type: CommandOutcomeSkipped, Reason: "max_steps"}})
 	case "previous command failed":
-		outcomeReason = "previous_command_failed"
-		stderr = "Command was not run because a previous command failed."
+		return FormatCommandResult(CommandResult{Stderr: "Command was not run because a previous command failed.", Outcome: CommandOutcome{Type: CommandOutcomeSkipped, Reason: "previous_command_failed"}})
 	case "":
+		return FormatCommandResult(CommandResult{Stderr: "Command was not run.", Outcome: CommandOutcome{Type: CommandOutcomeSkipped, Reason: "skipped"}})
 	default:
-		stderr += "\nReason: " + reason
+		return FormatCommandResult(CommandResult{Stderr: "Command was not run.\nReason: " + reason, Outcome: CommandOutcome{Type: CommandOutcomeSkipped, Reason: "skipped"}})
 	}
-	return FormatCommandResult(CommandResult{Stderr: stderr, Outcome: CommandOutcome{Type: CommandOutcomeSkipped, Reason: outcomeReason}})
 }
 
 func normalizedOutcome(outcome CommandOutcome, fallbackExitCode int) CommandOutcome {
 	if outcome.Type == "" {
-		return exitOutcome(fallbackExitCode)
+		return CommandOutcome{Type: CommandOutcomeExit, ExitCode: &fallbackExitCode}
 	}
 	if outcome.Type == CommandOutcomeExit && outcome.ExitCode == nil {
 		code := fallbackExitCode
 		outcome.ExitCode = &code
 	}
 	return outcome
-}
-
-func exitOutcome(code int) CommandOutcome {
-	return CommandOutcome{Type: CommandOutcomeExit, ExitCode: &code}
 }

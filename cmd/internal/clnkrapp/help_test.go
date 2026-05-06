@@ -25,6 +25,7 @@ func TestSharedHelpFragments(t *testing.T) {
 		"--base-url string",
 		"--provider-api string",
 		"--act-protocol string",
+		"auto|clnkr-inline|tool-calls",
 		"--effort string",
 		"--max-output-tokens int",
 		"--thinking-budget-tokens int",
@@ -48,6 +49,7 @@ func TestSharedHelpFragments(t *testing.T) {
 		"CLNKR_PROVIDER_API",
 		"CLNKR_MODEL",
 		"CLNKR_BASE_URL",
+		"CLNKR_ACT_PROTOCOL",
 	} {
 		if !strings.Contains(EnvironmentUsage, want) {
 			t.Fatalf("environment help missing %q", want)

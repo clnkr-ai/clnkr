@@ -25,6 +25,7 @@ Run `make _fmt` then `make check` before committing. Do not commit if either fai
 - CLI config resolution stays in `cmd/internal/providerconfig`: env/flag precedence, `CLNKR_*`, API keys, base URL parsing, provider detection, and user-facing config errors.
 - Provider request semantics stay in `internal/providers/providerconfig`: provider/API constants, request options, model capability checks, and provider-specific validation.
 - Provider adapters serialize validated options; they do not resolve CLI config.
+- Child-agent orchestration is prompt-guided Unix process composition. Bash may launch `clnkrd`; the host does not special-case child agents, `/delegate`, child counters, or child lifecycle events.
 - Wrap errors: `fmt.Errorf("context: %w", err)`. No bare returns or third-party error packages.
 - Adapter tests use external packages (`package anthropic_test`). Core tests use internal (`package clnkr`). CLI tests use internal (`package main`). Match the existing pattern.
 - `exhaustive` linter is enabled. Switch on sealed types must cover all cases. `default` counts as exhaustive.
@@ -32,7 +33,7 @@ Run `make _fmt` then `make check` before committing. Do not commit if either fai
 - Do not hand-edit generated files in `build/docs/`, `site/content/docs/clnkr.md`, `site/content/docs/clnkrd.md`, or `site/public/`.
 - Public-facing docs describe current behavior, not implementation history. No `in this pass`, `for now`, `currently deferred`.
 - SLOC gates count non-test Go only. Treat them as invariants and honesty constraints: do not shrink counted CLI help, diagnostics, UX, or error clarity to satisfy them, and do not weaken tests or docs to normalize that kind of regression. Agents must not raise SLOC limits unless the user explicitly gives a target number. If raising a gate is the only reasonable path, stop and ask for clarification.
-- For changes that touch clnkr's agent design, read `doc/clnkr.7.md` for current architecture context: act protocol, transcript, provider boundary, command execution, and 12-factor mapping. It is descriptive, not prescriptive. Verify behavior in code and follow this file for rules.
+- For changes that touch clnkr's agent design, read `doc/clnkr.7.md` for current architecture context: act protocol, transcript, provider boundary, and command execution. It is descriptive, not prescriptive. Verify behavior in code and follow this file for rules.
 - Repo-maintenance helpers live under `scripts/`. Read `scripts/README.md` before adding new ones.
 
 ## Architecture
@@ -40,6 +41,7 @@ Core importable library at module root. Two command adapters. `evaluations/` con
 ```
 clnkr/                  # core: types, Agent, events (stdlib only)
 ├── internal/providers/ # Anthropic/OpenAI adapters
+├── internal/session    # Session persistence runtime boundary
 ├── cmd/clnkr/          # Plain CLI (root go.mod, no external deps)
 ├── cmd/clnkrd/         # Stdio JSONL adapter
 └── evaluations/        # Eval suites for clankerval
@@ -49,9 +51,11 @@ clnkr/                  # core: types, Agent, events (stdlib only)
 
 **Act protocol:** Three turn types: `act`, `clarify`, `done`. Providers own wire translation. Root `ParseTurn` validates canonical internal JSON for replay/tests only.
 
-**Events:** Sealed interface, five types: `EventResponse`, `EventCommandStart`, `EventCommandDone`, `EventProtocolFailure`, `EventDebug`. Nil `Notify` = silent.
+**Events:** Sealed interface for typed agent notifications. Keep new event types explicit and exhaustive in adapters. Nil `Notify` = silent.
 
 **Command results (host→model):** JSON with `stdout`, `stderr`, `outcome`, and optional `feedback`. Exit outcomes include `exit_code`; non-exit outcomes include timeout, cancelled, denied, skipped, and error.
+
+**Child process boundary:** `clnkrd` is the composable process surface. The prompt teaches models when to launch `clnkrd` through bash for bounded child work and how to read stdout/stderr or event logs. `Driver`, provider adapters, `CommandExecutor`, and `Agent.Step()` do not participate in child-agent policy.
 
 ## Release
 Tag-driven. Push feature to `main`, wait for CI/evals/site to go green, then push the plain semantic version tag. Release workflow triggers from semver tags, updates `debian/main`, and generates Debian changelog. Remote `main` may move. Fetch and rebase before follow-up pushes.

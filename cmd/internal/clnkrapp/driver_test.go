@@ -134,6 +134,25 @@ func TestDriverTopLevelCompactDispatch(t *testing.T) {
 	}
 }
 
+func TestDriverDelegateTextReachesModelAsOrdinaryPrompt(t *testing.T) {
+	model := &fakeModel{responses: []clnkr.Response{
+		mustResponse(`{"type":"done","summary":"done"}`),
+	}}
+	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp/repo")
+	driver := NewDriver(agent, nil)
+
+	if err := driver.Prompt(context.Background(), "/delegate inspect README", PromptModeApproval); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+
+	if event := nextDriverEvent(t, driver); event != (EventDone{Summary: "done"}) {
+		t.Fatalf("event = %#v, want done", event)
+	}
+	if !hasUserMessage(agent.Messages(), "/delegate inspect README") {
+		t.Fatalf("delegate prompt did not reach transcript: %#v", agent.Messages())
+	}
+}
+
 func nextDriverEvent(t *testing.T, driver *Driver) DriverEvent {
 	t.Helper()
 

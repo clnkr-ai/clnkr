@@ -34,8 +34,8 @@ CLANKERVAL_PREFLIGHT = \
 	_hooks _check-docs _require-run-clnkr-tools _require-pandoc _require-readme-image-tools _site-sync _site-build
 
 PREFIX ?= /usr/local
-CORE_SLOC_LIMIT := 1750
-FRONTEND_SLOC_LIMIT := 1950
+CORE_SLOC_LIMIT := 2000
+FRONTEND_SLOC_LIMIT := 1800
 DOC_MAN_DIR := build/docs/man
 DOC_MAN_OUTPUTS := $(DOC_MAN_DIR)/clnkr.1 $(DOC_MAN_DIR)/clnkrd.1 $(DOC_MAN_DIR)/clnkr.3 $(DOC_MAN_DIR)/clnkr.7
 DOC_CONTENT_DIR := site/content/docs
@@ -127,12 +127,12 @@ _arch:
 
 # Repo-root only: counts repo-local Go files in the main-module dependency closure of `.`.
 sloc: ## Report core runtime graph SLOC and fail if it exceeds CORE_SLOC_LIMIT
-	@sloc="$$(cloc --quiet --csv $$(go list -deps -f '{{if .Module}}{{if .Module.Main}}{{range .GoFiles}}{{$$.Dir}}/{{.}}{{"\n"}}{{end}}{{end}}{{end}}' . | sort -u) | awk -F, 'END { print $$5 }')"; \
+	@sloc="$$(cloc --quiet --timeout 30 --csv $$(go list -deps -f '{{if .Module}}{{if .Module.Main}}{{range .GoFiles}}{{$$.Dir}}/{{.}}{{"\n"}}{{end}}{{end}}{{end}}' . | sort -u) | awk -F, 'END { print $$5 }')"; \
 	echo "core runtime graph: $$sloc / $(CORE_SLOC_LIMIT) SLOC"; \
 	test "$$sloc" -le "$(CORE_SLOC_LIMIT)" || { echo "error: core runtime graph exceeds $(CORE_SLOC_LIMIT) SLOC limit" >&2; exit 1; }
 
 frontend-sloc: ## Report non-test frontend SLOC and fail if it exceeds FRONTEND_SLOC_LIMIT
-	@sloc="$$(cloc --quiet --csv --not-match-f='_test\.go$$' cmd | awk -F, 'END { print $$5 }')"; \
+	@sloc="$$(cloc --quiet --timeout 30 --csv --not-match-f='_test\.go$$' cmd | awk -F, 'END { print $$5 }')"; \
 	echo "frontend: $$sloc / $(FRONTEND_SLOC_LIMIT) SLOC"; \
 	test "$$sloc" -le "$(FRONTEND_SLOC_LIMIT)" || { echo "error: frontend exceeds $(FRONTEND_SLOC_LIMIT) SLOC limit" >&2; exit 1; }
 

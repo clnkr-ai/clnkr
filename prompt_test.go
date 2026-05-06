@@ -25,6 +25,15 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, `Set type to exactly one of "act", "clarify", or "done".`) {
 			t.Error("prompt should describe type explicitly")
 		}
+		if !strings.Contains(prompt, `"verification"`) {
+			t.Error("prompt should require done verification")
+		}
+		if !strings.Contains(prompt, `"known_risks"`) {
+			t.Error("prompt should require known_risks")
+		}
+		if !strings.Contains(prompt, "verified, partially_verified, or not_verified") {
+			t.Error("prompt should describe verification statuses")
+		}
 		if strings.Contains(prompt, "```bash") {
 			t.Error("prompt should not instruct fenced bash blocks")
 		}
@@ -85,6 +94,9 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, `"stdout"`) || !strings.Contains(prompt, `"stderr"`) || !strings.Contains(prompt, `"outcome"`) {
 			t.Error("prompt should describe structured command-result JSON")
 		}
+		if !strings.Contains(prompt, `"observation" metadata when stdout/stderr were compressed`) {
+			t.Error("prompt should describe compressed command-result observation metadata")
+		}
 		if !strings.Contains(prompt, "clean pre-command git baseline") {
 			t.Error("prompt should explain feedback scope")
 		}
@@ -126,6 +138,27 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		}
 	})
 
+	t.Run("base prompt teaches clnkrd process autonomy", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		prompt := LoadPromptWithOptions(dir, PromptOptions{})
+
+		for _, want := range []string{
+			"<parallel-work>",
+			"Bash is your only tool. You may use bash to run `clnkrd` as another ordinary process whenever it would materially reduce uncertainty, parallelize independent work, verify a claim, or explore a non-blocking question.",
+			"If the user writes `/delegate ...`, treat it as an instruction to launch `clnkrd` through bash for that bounded child task; do not treat it as a host command.",
+			"children=$(mktemp -d /tmp/clnkr-children.$$.XXXXXX)",
+			`clnkrd --event-log "$children/prompt-review/events.jsonl"`,
+			`wait "$pid1" "$pid2"`,
+			"Treat child output as evidence to evaluate, not proof.",
+		} {
+			if !strings.Contains(prompt, want) {
+				t.Fatalf("prompt missing %q", want)
+			}
+		}
+	})
+
 	t.Run("unattended prompt omits clarify", func(t *testing.T) {
 		dir := t.TempDir()
 		t.Setenv("HOME", t.TempDir())
@@ -136,6 +169,9 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		}
 		if !strings.Contains(prompt, `Set type to exactly one of "act" or "done".`) {
 			t.Fatalf("unattended prompt should describe act/done contract")
+		}
+		if !strings.Contains(prompt, `"verification"`) || !strings.Contains(prompt, `"known_risks"`) {
+			t.Fatalf("unattended prompt should require structured done verification")
 		}
 	})
 
@@ -181,6 +217,26 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 			t.Error("prompt should not be empty without AGENTS.md")
 		}
 	})
+}
+
+func TestLoadPromptWithOptions_ToolCallsPromptTeachesClnkrdProcessAutonomy(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	prompt := LoadPromptWithOptions(dir, PromptOptions{ActProtocol: ActProtocolToolCalls})
+
+	for _, want := range []string{
+		"<parallel-work>",
+		"Bash is your only tool. You may use bash to run `clnkrd` as another ordinary process whenever it would materially reduce uncertainty, parallelize independent work, verify a claim, or explore a non-blocking question.",
+		"If the user writes `/delegate ...`, treat it as an instruction to launch `clnkrd` through bash for that bounded child task; do not treat it as a host command.",
+		"children=$(mktemp -d /tmp/clnkr-children.$$.XXXXXX)",
+		`clnkrd --event-log "$children/docs-review/events.jsonl"`,
+		"Do not use extra processes when a normal bash command, test, grep, or file read gives the answer directly.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("tool-call prompt missing %q", want)
+		}
+	}
 }
 
 func TestPromptExamplesParseSuccessfully(t *testing.T) {

@@ -1,0 +1,5 @@
+Create file result.txt containing exactly:
+
+agentic self verification works
+
+You are done only after verifying the file exists and contains exactly that text.

@@ -13,6 +13,7 @@ coverage.out
 # IDE
 .idea/
 .vscode/
+.direnv/
 *.swp
 *.swo
 *~

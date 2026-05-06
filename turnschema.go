@@ -9,23 +9,6 @@ import (
 	"strings"
 )
 
-type turnEnvelope struct {
-	Type      string            `json:"type"`
-	Bash      *turnBashEnvelope `json:"bash,omitempty"`
-	Question  string            `json:"question,omitempty"`
-	Summary   string            `json:"summary,omitempty"`
-	Reasoning string            `json:"reasoning,omitempty"`
-}
-
-type turnBashEnvelope struct {
-	Commands []turnBashAction `json:"commands"`
-}
-
-type turnBashAction struct {
-	Command string  `json:"command"`
-	Workdir *string `json:"workdir"`
-}
-
 // ParseTurn validates an exact canonical turn without recovery or prose extraction.
 func ParseTurn(raw string) (Turn, error) {
 	raw = strings.TrimSpace(raw)
@@ -33,7 +16,7 @@ func ParseTurn(raw string) (Turn, error) {
 		return nil, fmt.Errorf("%w: empty response", ErrInvalidJSON)
 	}
 
-	var env turnEnvelope
+	var env jsonEnvelope
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&env); err != nil {
@@ -53,10 +36,10 @@ func ParseTurn(raw string) (Turn, error) {
 	return strictTurnFromEnvelope(env, fields)
 }
 
-func strictTurnFromEnvelope(env turnEnvelope, fields map[string]json.RawMessage) (Turn, error) {
+func strictTurnFromEnvelope(env jsonEnvelope, fields map[string]json.RawMessage) (Turn, error) {
 	switch env.Type {
 	case "act":
-		if err := requireNestedArrayObjectFields(fields, "bash", "commands", "workdir"); err != nil {
+		if err := requireActCommandWorkdirs(fields); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
 		}
 		if env.Bash == nil || len(env.Bash.Commands) == 0 {
@@ -104,12 +87,66 @@ func strictTurnFromEnvelope(env turnEnvelope, fields map[string]json.RawMessage)
 		if err := rejectPresentField(fields, "question", "done turn only allows question when it is omitted"); err != nil {
 			return nil, err
 		}
-		return &DoneTurn{Summary: env.Summary, Reasoning: env.Reasoning}, nil
+		knownRisks, err := requireDoneArrayFields(fields)
+		if err != nil {
+			return nil, err
+		}
+		if env.Verification == nil {
+			return nil, fmt.Errorf("%w: missing required field %q", ErrInvalidJSON, "verification")
+		}
+		if err := validateDoneVerification(*env.Verification, knownRisks); err != nil {
+			return nil, err
+		}
+		return &DoneTurn{
+			Summary:      env.Summary,
+			Verification: *env.Verification,
+			KnownRisks:   knownRisks,
+			Reasoning:    env.Reasoning,
+		}, nil
 	case "":
 		return nil, fmt.Errorf("%w: missing type field", ErrUnknownTurnType)
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnknownTurnType, env.Type)
 	}
+}
+
+func requireDoneArrayFields(fields map[string]json.RawMessage) ([]string, error) {
+	rawVerification, ok := fields["verification"]
+	if !ok {
+		return nil, fmt.Errorf("%w: missing required field %q", ErrInvalidJSON, "verification")
+	}
+	var verificationFields map[string]json.RawMessage
+	if err := json.Unmarshal(rawVerification, &verificationFields); err != nil || verificationFields == nil {
+		return nil, fmt.Errorf("%w: verification must be an object", ErrInvalidJSON)
+	}
+	rawChecks, ok := verificationFields["checks"]
+	if !ok {
+		return nil, fmt.Errorf("%w: missing required field %q", ErrInvalidJSON, "verification.checks")
+	}
+	if string(rawChecks) == "null" {
+		return nil, fmt.Errorf("%w: verification.checks must be an array", ErrInvalidJSON)
+	}
+	var checks []json.RawMessage
+	if err := json.Unmarshal(rawChecks, &checks); err != nil {
+		return nil, fmt.Errorf("%w: verification.checks must be an array", ErrInvalidJSON)
+	}
+
+	rawRisks, ok := fields["known_risks"]
+	if !ok {
+		return nil, fmt.Errorf("%w: missing required field %q", ErrInvalidJSON, "known_risks")
+	}
+	if string(rawRisks) == "null" {
+		return nil, fmt.Errorf("%w: known_risks must be an array", ErrInvalidJSON)
+	}
+	var risks []string
+	if err := json.Unmarshal(rawRisks, &risks); err != nil {
+		return nil, fmt.Errorf("%w: known_risks must be an array", ErrInvalidJSON)
+	}
+	return risks, nil
+}
+
+func cloneStrings(values []string) []string {
+	return append([]string{}, values...)
 }
 
 func rejectPresentField(fields map[string]json.RawMessage, field, detail string) error {
@@ -130,35 +167,23 @@ func ensureSingleTurnJSONObject(dec *json.Decoder) error {
 	return nil
 }
 
-func requireNestedArrayObjectFields(fields map[string]json.RawMessage, field, nested string, required ...string) error {
-	raw, ok := fields[field]
+func requireActCommandWorkdirs(fields map[string]json.RawMessage) error {
+	raw, ok := fields["bash"]
 	if !ok {
-		return fmt.Errorf("missing required field %q", field)
+		return fmt.Errorf("missing required field %q", "bash")
 	}
-
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
-		return fmt.Errorf("field %q must be object", field)
+	var bash struct {
+		Commands []map[string]json.RawMessage `json:"commands"`
 	}
-
-	arrayRaw, ok := obj[nested]
-	if !ok {
-		return fmt.Errorf("missing required field %q", field+"."+nested)
+	if err := json.Unmarshal(raw, &bash); err != nil || bash.Commands == nil {
+		return fmt.Errorf("field %q must contain array %q", "bash", "commands")
 	}
-
-	var items []map[string]json.RawMessage
-	if err := json.Unmarshal(arrayRaw, &items); err != nil {
-		return fmt.Errorf("field %q must be array", field+"."+nested)
-	}
-
-	for i, item := range items {
+	for i, item := range bash.Commands {
 		if item == nil {
-			return fmt.Errorf("field %q must be object", fmt.Sprintf("%s.%s[%d]", field, nested, i))
+			return fmt.Errorf("field %q must be object", fmt.Sprintf("bash.commands[%d]", i))
 		}
-		for _, name := range required {
-			if _, ok := item[name]; !ok {
-				return fmt.Errorf("missing required field %q", fmt.Sprintf("%s.%s[%d].%s", field, nested, i, name))
-			}
+		if _, ok := item["workdir"]; !ok {
+			return fmt.Errorf("missing required field %q", fmt.Sprintf("bash.commands[%d].workdir", i))
 		}
 	}
 	return nil

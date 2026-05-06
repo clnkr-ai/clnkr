@@ -117,11 +117,19 @@ func ResolveProviderAPI(provider Provider, providerAPI ProviderAPI, model string
 	return providerAPI, nil
 }
 
+func SupportsBashToolCalls(provider Provider, providerAPI ProviderAPI) bool {
+	if provider == ProviderAnthropic {
+		return true
+	}
+	return provider == ProviderOpenAI && providerAPI == ProviderAPIOpenAIResponses
+}
+
 func ValidateRequestOptions(provider Provider, providerAPI ProviderAPI, model string, useBashToolCalls bool, opts ProviderRequestOptions) (ProviderRequestOptions, error) {
-	if useBashToolCalls {
-		if provider == ProviderOpenAI && providerAPI != ProviderAPIOpenAIResponses {
+	if useBashToolCalls && !SupportsBashToolCalls(provider, providerAPI) {
+		if provider == ProviderOpenAI {
 			return ProviderRequestOptions{}, fmt.Errorf("bash tool calls require provider-api %q for provider openai", ProviderAPIOpenAIResponses)
 		}
+		return ProviderRequestOptions{}, fmt.Errorf("bash tool calls are not supported for provider %q", provider)
 	}
 	opts.Effort.Level = strings.ToLower(strings.TrimSpace(opts.Effort.Level))
 	if opts.Effort.Set {

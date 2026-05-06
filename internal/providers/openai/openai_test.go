@@ -70,7 +70,7 @@ func TestModel(t *testing.T) {
 		var gotBody map[string]any
 		history := []clnkr.Message{
 			{Role: "user", Content: "first task"},
-			{Role: "assistant", Content: `{"type":"done","summary":"canonical transcript"}`},
+			{Role: "assistant", Content: `{"type":"done","summary":"canonical transcript","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 		}
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -104,7 +104,7 @@ func TestModel(t *testing.T) {
 		if !ok {
 			t.Fatalf("last message = %#v, want map", msgs[len(msgs)-1])
 		}
-		if got, want := last["content"], `{"type":"done","summary":"canonical transcript"}`; got != want {
+		if got, want := last["content"], `{"type":"done","summary":"canonical transcript","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`; got != want {
 			t.Fatalf("last assistant content = %#v, want %q", got, want)
 		}
 	})
@@ -162,8 +162,8 @@ func TestModel(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"hello back"}` {
-			t.Errorf("got %q, want %q", got, `{"type":"done","summary":"hello back"}`)
+		if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"hello back","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}` {
+			t.Errorf("got %q, want %q", got, `{"type":"done","summary":"hello back","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)
 		}
 		if resp.ProtocolErr != nil {
 			t.Fatalf("got protocol error %v, want nil", resp.ProtocolErr)
@@ -194,7 +194,7 @@ func TestModel(t *testing.T) {
 		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
 		_, err := m.Query(context.Background(), []clnkr.Message{
 			{Role: "user", Content: "hi"},
-			{Role: "assistant", Content: `{"type":"done","summary":"hello back"}`},
+			{Role: "assistant", Content: `{"type":"done","summary":"hello back","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -312,8 +312,8 @@ func TestModel(t *testing.T) {
 		if attempts != 2 {
 			t.Fatalf("attempt count = %d, want 2", attempts)
 		}
-		if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok after retry"}` {
-			t.Fatalf("content = %q, want %q", got, `{"type":"done","summary":"ok after retry"}`)
+		if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok after retry","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}` {
+			t.Fatalf("content = %q, want %q", got, `{"type":"done","summary":"ok after retry","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)
 		}
 	})
 
@@ -351,8 +351,8 @@ func TestModel(t *testing.T) {
 		if attempts != 2 {
 			t.Fatalf("attempt count = %d, want 2", attempts)
 		}
-		if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok after retry"}` {
-			t.Fatalf("content = %q, want %q", got, `{"type":"done","summary":"ok after retry"}`)
+		if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok after retry","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}` {
+			t.Fatalf("content = %q, want %q", got, `{"type":"done","summary":"ok after retry","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)
 		}
 	})
 
@@ -574,7 +574,7 @@ func TestModel(t *testing.T) {
 			want    string
 		}{
 			{name: "clarify", content: `{"turn":{"type":"clarify","question":"Which directory?"}}`, want: `{"type":"clarify","question":"Which directory?"}`},
-			{name: "done", content: `{"turn":{"type":"done","summary":"ignored schema"}}`, want: `{"type":"done","summary":"ignored schema"}`},
+			{name: "done", content: `{"turn":{"type":"done","summary":"ignored schema","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}}`, want: `{"type":"done","summary":"ignored schema","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
 		}
 
 		for _, tt := range tests {
@@ -605,7 +605,7 @@ func TestModel(t *testing.T) {
 	})
 
 	t.Run("returns raw payload plus protocol error when response format is ignored", func(t *testing.T) {
-		raw := `{"type":"done","summary":"ignored"}`
+		raw := `{"type":"done","summary":"ignored","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"choices": []map[string]interface{}{
@@ -652,7 +652,7 @@ func TestModel(t *testing.T) {
 }
 
 func openAIWrappedDone(summary string) string {
-	return `{"turn":{"type":"done","bash":null,"question":null,"summary":"` + summary + `","reasoning":null}}`
+	return `{"turn":{"type":"done","bash":null,"question":null,"summary":"` + summary + `","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`
 }
 
 func schemaContainsKey(node any, key string) bool {
@@ -711,7 +711,11 @@ func assertSchemaShape(t *testing.T, schema map[string]interface{}) {
 		if got := branch["additionalProperties"]; got != false {
 			t.Fatalf("%s branch additionalProperties = %v, want false", turnType, got)
 		}
-		if got, want := branch["required"], []string{"type", "bash", "question", "summary", "reasoning"}; !sameStringSlice(got, want) {
+		wantRequired := []string{"type", "bash", "question", "summary", "reasoning"}
+		if turnType == "done" {
+			wantRequired = []string{"type", "bash", "question", "summary", "verification", "known_risks", "reasoning"}
+		}
+		if got, want := branch["required"], wantRequired; !sameStringSlice(got, want) {
 			t.Fatalf("%s branch required = %#v, want %#v", turnType, got, want)
 		}
 		branchProperties, ok := branch["properties"].(map[string]interface{})
