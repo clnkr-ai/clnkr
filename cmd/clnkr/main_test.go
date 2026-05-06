@@ -255,7 +255,7 @@ func TestDumpSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
 }
 
 func TestDumpSystemPromptAllowsPromptFlagTextInAppend(t *testing.T) {
-	stdout, stderr, err := runMainHelper(t, "--system-prompt-append", "-p", "--dump-system-prompt")
+	stdout, stderr, err := runMainHelper(t, "--act-protocol", "clnkr-inline", "--system-prompt-append", "-p", "--dump-system-prompt")
 	if err != nil {
 		t.Fatalf("dump system prompt: %v\nstderr: %s", err, stderr.String())
 	}
@@ -296,12 +296,51 @@ func TestDumpToolCallsSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
 	}
 }
 
+func TestDumpAutoSystemPromptResolvesWithoutAPIKey(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t, "--provider", "openai", "--provider-api", "openai-responses", "--model", "gpt-5", "--dump-system-prompt")
+	if err != nil {
+		t.Fatalf("dump auto system prompt: %v\nstderr: %s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "call the bash tool") {
+		t.Fatalf("stdout missing tool-calls prompt: %q", stdout.String())
+	}
+	if strings.Contains(stderr.String(), "No API key found") || strings.Contains(stderr.String(), "api key is required") {
+		t.Fatalf("stderr = %q, API key validation ran for prompt dump", stderr.String())
+	}
+}
+
+func TestDumpAutoSystemPromptReportsMissingProviderContext(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t, "--dump-system-prompt")
+	if err == nil {
+		t.Fatalf("dump auto system prompt succeeded; stdout: %s stderr: %s", stdout.String(), stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "--act-protocol clnkr-inline") {
+		t.Fatalf("stderr = %q, want concrete act protocol hint", stderr.String())
+	}
+}
+
+func TestDumpInlineSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t, "--act-protocol", "clnkr-inline", "--dump-system-prompt")
+	if err != nil {
+		t.Fatalf("dump inline system prompt: %v\nstderr: %s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Every response must be exactly one JSON object") {
+		t.Fatalf("stdout missing inline prompt: %q", stdout.String())
+	}
+	if strings.Contains(stderr.String(), "provider is required") {
+		t.Fatalf("stderr = %q, provider validation ran first", stderr.String())
+	}
+}
+
 func TestPromptFlagDumpsUnattendedSystemPrompt(t *testing.T) {
 	for _, args := range [][]string{
-		{"-p", "fix it", "--dump-system-prompt"},
-		{"--prompt-mode-unattended", "fix it", "--dump-system-prompt"},
-		{"--dump-system-prompt", "-p"},
-		{"--dump-system-prompt", "--prompt-mode-unattended"},
+		{"--act-protocol", "clnkr-inline", "-p", "fix it", "--dump-system-prompt"},
+		{"--act-protocol", "clnkr-inline", "--prompt-mode-unattended", "fix it", "--dump-system-prompt"},
+		{"--act-protocol", "clnkr-inline", "--dump-system-prompt", "-p"},
+		{"--act-protocol", "clnkr-inline", "--dump-system-prompt", "--prompt-mode-unattended"},
 	} {
 		stdout, stderr, err := runMainHelper(t, args...)
 		if err != nil {

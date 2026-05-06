@@ -25,6 +25,7 @@ func TestSharedHelpFragments(t *testing.T) {
 		"--base-url string",
 		"--provider-api string",
 		"--act-protocol string",
+		"auto|clnkr-inline|tool-calls",
 		"--effort string",
 		"--max-output-tokens int",
 		"--thinking-budget-tokens int",

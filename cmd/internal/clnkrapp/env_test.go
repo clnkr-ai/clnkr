@@ -43,7 +43,7 @@ func TestCommandEnvFromProviderConfig(t *testing.T) {
 
 func TestActProtocolFlagValueUsesEnvWhenFlagUnset(t *testing.T) {
 	flags := flag.NewFlagSet("test", flag.ContinueOnError)
-	flagValue := flags.String("act-protocol", "clnkr-inline", "")
+	flagValue := flags.String("act-protocol", "auto", "")
 	if err := flags.Parse(nil); err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestActProtocolFlagValueUsesEnvWhenFlagUnset(t *testing.T) {
 
 func TestActProtocolFlagValuePrefersFlag(t *testing.T) {
 	flags := flag.NewFlagSet("test", flag.ContinueOnError)
-	flagValue := flags.String("act-protocol", "clnkr-inline", "")
+	flagValue := flags.String("act-protocol", "auto", "")
 	if err := flags.Parse([]string{"--act-protocol", "tool-calls"}); err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -71,6 +71,19 @@ func TestActProtocolFlagValuePrefersFlag(t *testing.T) {
 	})
 	if got != "tool-calls" {
 		t.Fatalf("act protocol = %q, want tool-calls", got)
+	}
+}
+
+func TestActProtocolFlagValueDefaultsAuto(t *testing.T) {
+	flags := flag.NewFlagSet("test", flag.ContinueOnError)
+	flagValue := flags.String("act-protocol", "auto", "")
+	if err := flags.Parse(nil); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	got := ActProtocolFlagValue(flags, *flagValue, func(string) string { return "" })
+	if got != "auto" {
+		t.Fatalf("act protocol = %q, want auto", got)
 	}
 }
 

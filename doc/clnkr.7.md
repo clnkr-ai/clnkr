@@ -141,11 +141,16 @@ after a provider adapter projects provider output into clnkr's turn space:
 **act**, **clarify**, or **done**. A **provider turn** is the provider-specific
 structured-output shape before that projection.
 
-The default act protocol is **clnkr-inline**. In that mode all accepted
-act turns arrive as provider-portable clnkr act JSON in assistant text.
-**tool-calls** is an explicit fail-closed protocol for Anthropic
-Messages and OpenAI Responses. In that mode provider-native **bash** tool calls
-become an **act** turn, while **clarify** and **done** remain text JSON.
+The default act protocol is **auto**. The CLI resolves **auto** after provider
+API selection. Anthropic Messages and OpenAI Responses resolve to
+**tool-calls** because they support provider-native **bash** tool calls. OpenAI
+Chat Completions and OpenAI-compatible fallback endpoints resolve to
+**clnkr-inline**. The resolved runtime protocol is always concrete:
+**clnkr-inline** or **tool-calls**.
+
+**clnkr-inline** accepts provider-portable clnkr act JSON in assistant text.
+**tool-calls** uses provider-native **bash** tool calls for **act** turns, while
+**clarify** and **done** remain text JSON.
 Single-task unattended runs use a schema that omits **clarify**.
 
 Provider request options such as effort and output-token limits change provider
@@ -429,8 +434,9 @@ explicit token budget.
 provider adapter request.
 
 **Act protocol**
-: How the model proposes command execution: **clnkr-inline** or
-**tool-calls**.
+: How the model proposes command execution. User config accepts **auto**,
+**clnkr-inline**, or **tool-calls**. Runtime surfaces receive only concrete
+**clnkr-inline** or **tool-calls**.
 
 **Provider base URL**
 : The configured provider API root that provider adapters join with their API

@@ -247,7 +247,7 @@ func main() {
 	baseURLShort := flags.String("u", "", "")
 	providerFlag := flags.String("provider", "", "")
 	providerAPIFlag := flags.String("provider-api", "", "")
-	actProtocolFlag := flags.String("act-protocol", "clnkr-inline", "")
+	actProtocolFlag := flags.String("act-protocol", "auto", "")
 	effortFlag := flags.String("effort", "", "")
 	thinkingBudgetTokens := flags.Int("thinking-budget-tokens", 0, "")
 	maxOutputTokens := flags.Int("max-output-tokens", 0, "")
@@ -332,10 +332,29 @@ func main() {
 	if singleTask {
 		*fullSend = true
 	}
+	if (*continueFlag || *continueShort) && *trajectory != "" {
+		fatalf("--continue and --trajectory are mutually exclusive")
+	}
+	if *trajectory != "" && !singleTask {
+		fatalf("--trajectory requires -p (single-task mode)")
+	}
 
-	actProtocol, err := clnkr.ParseActProtocol(clnkrapp.ActProtocolFlagValue(flags, *actProtocolFlag, os.Getenv))
+	actProtocolSetting, err := providerconfig.ParseActProtocolSetting(clnkrapp.ActProtocolFlagValue(flags, *actProtocolFlag, os.Getenv))
 	if err != nil {
 		fatalf("%v", err)
+	}
+	actProtocol := clnkr.ActProtocolClnkrInline
+	if !*noSystemPrompt && !*noSystemPromptShort {
+		actProtocol, err = providerconfig.ResolvePromptActProtocol(providerconfig.Inputs{
+			Provider:    *providerFlag,
+			ProviderAPI: *providerAPIFlag,
+			Model:       aliasedString(*modelShort, *modelFlag),
+			BaseURL:     aliasedString(*baseURLShort, *baseURLFlag),
+			ActProtocol: actProtocolSetting,
+		}, os.Getenv)
+		if err != nil {
+			fatalf("%v", err)
+		}
 	}
 
 	systemPrompt := clnkr.LoadPromptWithOptions(cwd, clnkr.PromptOptions{
@@ -350,16 +369,10 @@ func main() {
 		os.Exit(0)
 	}
 
-	if (*continueFlag || *continueShort) && *trajectory != "" {
-		fatalf("--continue and --trajectory are mutually exclusive")
-	}
-	if *trajectory != "" && !singleTask {
-		fatalf("--trajectory requires -p (single-task mode)")
-	}
 	cfg, err := providerconfig.ResolveConfig(providerconfig.Inputs{
 		Provider: *providerFlag, ProviderAPI: *providerAPIFlag,
 		Model: aliasedString(*modelShort, *modelFlag), BaseURL: aliasedString(*baseURLShort, *baseURLFlag),
-		ActProtocol:    actProtocol,
+		ActProtocol:    actProtocolSetting,
 		RequestOptions: clnkrapp.RequestOptions(*effortFlag, *maxOutputTokens, maxOutputTokensSet, *thinkingBudgetTokens, thinkingBudgetTokensSet),
 	}, os.Getenv)
 	if err != nil {

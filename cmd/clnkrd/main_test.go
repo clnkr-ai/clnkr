@@ -47,6 +47,34 @@ func TestHelpWritesRichUsageToStdout(t *testing.T) {
 	}
 }
 
+func TestDumpAutoSystemPromptResolvesWithoutAPIKey(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := runMain([]string{"--provider", "openai", "--provider-api", "openai-responses", "--model", "gpt-5", "--dump-system-prompt"}, strings.NewReader(""), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0\nstderr: %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "call the bash tool") {
+		t.Fatalf("stdout missing tool-calls prompt: %q", out.String())
+	}
+	if strings.Contains(errOut.String(), "api key is required") {
+		t.Fatalf("stderr = %q, API key validation ran for prompt dump", errOut.String())
+	}
+}
+
+func TestDumpConcreteSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := runMain([]string{"--act-protocol", "clnkr-inline", "--dump-system-prompt"}, strings.NewReader(""), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0\nstderr: %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "Every response must be exactly one JSON object") {
+		t.Fatalf("stdout missing inline prompt: %q", out.String())
+	}
+	if strings.Contains(errOut.String(), "provider is required") {
+		t.Fatalf("stderr = %q, provider validation ran first", errOut.String())
+	}
+}
+
 func TestRunJSONLPromptWritesResponseAndDone(t *testing.T) {
 	var out, errOut bytes.Buffer
 	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)}}

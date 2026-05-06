@@ -5,7 +5,7 @@ const ProviderOptionsUsage = `Provider options:
       --base-url string     LLM endpoint transport URL (env: $CLNKR_BASE_URL)
       --provider string     Provider adapter: anthropic|openai
       --provider-api string OpenAI API override
-      --act-protocol string Act protocol: clnkr-inline|tool-calls
+      --act-protocol string Command proposal mode: auto|clnkr-inline|tool-calls
       --effort string       Provider effort: auto|low|medium|high|xhigh|max
       --max-output-tokens int Maximum response output tokens
       --thinking-budget-tokens int
@@ -25,5 +25,5 @@ const EnvironmentUsage = `Environment:
   CLNKR_PROVIDER_API OpenAI-only API surface override
   CLNKR_MODEL        Model identifier override
   CLNKR_BASE_URL     Endpoint override; infers provider when provider is unset
-  CLNKR_ACT_PROTOCOL Act protocol override
+  CLNKR_ACT_PROTOCOL Command proposal mode override
 `
