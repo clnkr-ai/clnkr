@@ -43,7 +43,6 @@ Options:
       --continue            Resume most recent session for this project
       --load-messages file  Seed conversation from a JSON file
       --event-log file      Copy JSONL events to a file
-      --working-memory      Enable structured session working memory
       --version             Print version and exit
 
 ` + clnkrapp.ProviderOptionsUsage + `
@@ -84,7 +83,6 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 	continueFlag := flags.Bool("continue", false, "")
 	showVersion := flags.Bool("version", false, "")
 	eventLog := flags.String("event-log", "", "")
-	workingMemory := flags.Bool("working-memory", false, "")
 
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -146,9 +144,6 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 
 	agent := clnkr.NewAgent(clnkrapp.NewModelForConfig(cfg, systemPrompt), &clnkr.CommandExecutor{}, cwd)
 	agent.ActProtocol = cfg.ActProtocol
-	if clnkrapp.WorkingMemoryEnabled(*workingMemory, env) {
-		agent.SetWorkingMemoryUpdater(clnkrapp.MakeWorkingMemoryFactory(cfg)())
-	}
 	agent.Notify = func(event clnkr.Event) {
 		if err := clnkrapp.WriteJSONL(eventOut, event); err != nil {
 			fmt.Fprintf(errOut, "Error: write event: %v\n", err) //nolint:errcheck
@@ -183,10 +178,7 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 		return fail("%v", err)
 	}
 	if msgs := agent.Messages(); len(msgs) > 0 {
-		if err := agent.UpdateWorkingMemory(context.Background(), clnkr.WorkingMemoryUpdateReasonSave); err != nil {
-			fmt.Fprintf(errOut, "Warning: could not update working memory: %v\n", err) //nolint:errcheck
-		}
-		if err := session.SaveSessionEnvelope(cwd, msgs, agent.WorkingMemory(), runMetadata); err != nil {
+		if err := session.SaveSessionWithMetadata(cwd, msgs, runMetadata); err != nil {
 			fmt.Fprintf(errOut, "Warning: could not save session: %v\n", err) //nolint:errcheck
 		}
 	}

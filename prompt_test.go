@@ -85,9 +85,6 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		if !strings.Contains(prompt, `You may also receive JSON host state messages such as {"type":"state","source":"clnkr","cwd":"/repo"} and resource_state`) {
 			t.Error("prompt should explain host state messages")
 		}
-		if !strings.Contains(prompt, "[working_memory] blocks with clnkr-authored current session memory") {
-			t.Error("prompt should explain working memory blocks")
-		}
 		if !strings.Contains(prompt, "commands_used") || !strings.Contains(prompt, "commands_remaining") || !strings.Contains(prompt, "model_turns_used") {
 			t.Error("prompt should explain resource state fields")
 		}

@@ -22,12 +22,8 @@ func messageKind(msg Message) string {
 	switch {
 	case compactMessage(content):
 		return "compact"
-	case workingMemoryMessage(content):
-		return "working_memory"
 	case stateMessage(content):
 		return "state"
-	case resourceStateMessage(content):
-		return "resource_state"
 	case commandResultMessage(content):
 		return "command"
 	case strings.HasPrefix(content, "[protocol_error]") &&

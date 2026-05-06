@@ -22,23 +22,15 @@ type SessionInfo struct {
 	Messages int
 }
 
-type Session struct {
-	SessionInfo
-	Messages      []clnkr.Message
-	WorkingMemory clnkr.WorkingMemory
-}
-
 type sessionFile struct {
-	Created       string               `json:"created"`
-	Metadata      json.RawMessage      `json:"metadata,omitempty"`
-	WorkingMemory *clnkr.WorkingMemory `json:"working_memory,omitempty"`
-	Messages      []clnkr.Message      `json:"messages"`
+	Created  string          `json:"created"`
+	Metadata json.RawMessage `json:"metadata,omitempty"`
+	Messages []clnkr.Message `json:"messages"`
 }
 
 type loadedSession struct {
 	SessionInfo
-	messages      []clnkr.Message
-	workingMemory clnkr.WorkingMemory
+	messages []clnkr.Message
 }
 
 type sessionFileRef struct {
@@ -94,13 +86,6 @@ func SaveSession(pwd string, messages []clnkr.Message) error {
 
 // SaveSessionWithMetadata writes the message history and optional metadata to an atomic session file.
 func SaveSessionWithMetadata(pwd string, messages []clnkr.Message, metadata any) error {
-	return SaveSessionEnvelope(pwd, messages, clnkr.WorkingMemory{}, metadata)
-}
-
-func SaveSessionEnvelope(pwd string, messages []clnkr.Message, memory clnkr.WorkingMemory, metadata any) error {
-	if err := memory.Validate(); err != nil {
-		return fmt.Errorf("save session: validate working memory: %w", err)
-	}
 	dir, err := SessionDir(pwd)
 	if err != nil {
 		return fmt.Errorf("save session: %w", err)
@@ -121,10 +106,6 @@ func SaveSessionEnvelope(pwd string, messages []clnkr.Message, memory clnkr.Work
 		Created:  now.Format(time.RFC3339Nano),
 		Messages: messages,
 	}
-	if !memory.IsZero() {
-		cloned := memory.Clone()
-		data.WorkingMemory = &cloned
-	}
 	if metadata != nil {
 		encoded, err := json.Marshal(metadata)
 		if err != nil {
@@ -143,17 +124,6 @@ func SaveSessionEnvelope(pwd string, messages []clnkr.Message, memory clnkr.Work
 // LoadLatestSession loads the most recent session for the given working directory.
 // Returns nil, nil if no sessions exist.
 func LoadLatestSession(pwd string) ([]clnkr.Message, error) {
-	loaded, err := LoadLatestSessionEnvelope(pwd)
-	if err != nil {
-		return nil, err
-	}
-	if loaded == nil {
-		return nil, nil
-	}
-	return loaded.Messages, nil
-}
-
-func LoadLatestSessionEnvelope(pwd string) (*Session, error) {
 	sessions, err := loadSessions(pwd, true)
 	if err != nil {
 		return nil, fmt.Errorf("load latest session: %w", err)
@@ -161,11 +131,7 @@ func LoadLatestSessionEnvelope(pwd string) (*Session, error) {
 	if len(sessions) == 0 {
 		return nil, nil
 	}
-	return &Session{
-		SessionInfo:   sessions[0].SessionInfo,
-		Messages:      append([]clnkr.Message(nil), sessions[0].messages...),
-		WorkingMemory: sessions[0].workingMemory.Clone(),
-	}, nil
+	return sessions[0].messages, nil
 }
 
 // ListSessions lists all sessions for the given working directory.
@@ -197,21 +163,7 @@ func loadSessions(pwd string, failNewest bool) ([]loadedSession, error) {
 			}
 			continue
 		}
-		var memory clnkr.WorkingMemory
-		if sf.WorkingMemory != nil {
-			if err := sf.WorkingMemory.Validate(); err != nil {
-				if failNewest && len(sessions) == 0 {
-					return nil, fmt.Errorf("%s: working memory: %w", e.name, err)
-				}
-				continue
-			}
-			memory = sf.WorkingMemory.Clone()
-		}
-		sessions = append(sessions, loadedSession{
-			SessionInfo:   sessionInfo(e.name, sf),
-			messages:      sf.Messages,
-			workingMemory: memory,
-		})
+		sessions = append(sessions, loadedSession{SessionInfo: sessionInfo(e.name, sf), messages: sf.Messages})
 	}
 	sort.Slice(sessions, func(i, j int) bool { return newerSession(sessions[i].SessionInfo, sessions[j].SessionInfo) })
 	return sessions, nil

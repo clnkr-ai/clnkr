@@ -58,19 +58,14 @@ It is an ordinary Unix process, not a host-owned agent subtype.
 
 **Transcript formatter**
 : The **internal/core/transcript** boundary that formats host-authored
-transcript blocks, including state messages, compact blocks, working-memory
-blocks, and bounded command observations. Command-done events keep raw
+transcript blocks, including state messages, compact blocks, and bounded
+command observations. Command-done events keep raw
 stdout/stderr; the transcript receives bounded command result JSON.
 
 **Session persistence**
 : The **internal/session** boundary that stores and loads local saved-session
 envelopes for **cmd/clnkr** and **cmd/clnkrd**. A saved-session envelope
-contains transcript messages, optional working memory, and run metadata.
-
-**Working-memory updater**
-: The **internal/workingmemory** boundary that defines clnkr's structured
-memory schema, loads the memory update prompt, calls a freeform model for
-updates, and returns validated root **WorkingMemory** JSON.
+contains transcript messages and run metadata.
 
 **Driver**
 : The frontend coordinator around **RunWithPolicy**. It starts prompts,
@@ -104,14 +99,7 @@ coordinates frontend interaction around **RunWithPolicy** by turning approval
 and clarify policy hooks into frontend events and accepting replies. It does
 not query the Model, parse Turns, or execute commands directly. **cmd/clnkr**
 and **cmd/clnkrd** adapt terminal and stdio JSONL surfaces to the driver.
-Structured working memory is split between frontend runtime packages and the
-root **Agent**. **internal/workingmemory** owns the memory schema, update
-prompt, and provider-backed updater. **internal/session** owns saved-session
-file mechanics. Command adapters own the flags that enable working memory and
-the saved-session envelope. The root **Agent** stores validated opaque memory
-JSON, injects it into cloned query messages, and calls a configured
-**WorkingMemoryUpdater** from **RunWithPolicy** after prompt, command,
-compaction, step-limit, and save checkpoints.
+**internal/session** owns saved-session file mechanics for both frontends.
 
 The configuration ownership boundary is **CLI config resolver** versus
 **Provider request semantics**. The CLI resolver owns app inputs and user-facing
@@ -228,24 +216,12 @@ example **{"type":"state","source":"clnkr","cwd":"/repo"}**.
 records **commands_used** and **model_turns_used**. When a command budget is
 configured, it also records **commands_remaining** and **max_commands**.
 
-**Working memory block**
-: An optional host block containing clnkr-derived session memory.
-**internal/workingmemory** owns the structured schema, update prompt, and
-provider-backed updater. The root **Agent** treats memory as opaque JSON after
-envelope validation, injects it into model queries, and calls the configured
-updater from **RunWithPolicy** checkpoints. Working memory is not appended
-repeatedly to the durable transcript. clnkr places it before transcript content
-newer than the memory and before trailing state and resource-state messages so
-fresh evidence remains newer than memory.
-
 **Compact block**
 : A host block containing a summary of older transcript history.
 
 During compaction, clnkr replaces an older transcript prefix with one compact
 block. It keeps a recent tail of user-authored turns and any host state the
-next model call still needs. When working memory is enabled, successful manual
-compaction also asks the working-memory updater to align memory with the
-rewritten transcript.
+next model call still needs.
 
 Run metadata is not a transcript message. It is emitted as a debug event and
 persisted alongside session files so a run can be inspected without adding
@@ -505,10 +481,6 @@ final summary.
 
 **Turn**
 : One structured model instruction in the agent protocol.
-
-**Working memory**
-: clnkr-derived session memory stored beside saved transcript messages and
-injected into model queries as one host block.
 
 # SEE ALSO
 

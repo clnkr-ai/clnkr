@@ -10,8 +10,6 @@ const ProviderOptionsUsage = `Provider options:
       --max-output-tokens int Maximum response output tokens
       --thinking-budget-tokens int
                             Anthropic legacy/debug thinking budget override
-      --working-memory      Enable structured session working memory
-                            (env: $CLNKR_WORKING_MEMORY)
 `
 
 const SystemPromptUsage = `System prompt:
@@ -27,5 +25,4 @@ const EnvironmentUsage = `Environment:
   CLNKR_PROVIDER_API OpenAI-only API surface override
   CLNKR_MODEL        Model identifier override
   CLNKR_BASE_URL     Endpoint override; infers provider when provider is unset
-  CLNKR_WORKING_MEMORY Enable structured session working memory when true
 `

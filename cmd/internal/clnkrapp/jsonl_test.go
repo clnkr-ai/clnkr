@@ -87,10 +87,6 @@ func TestWriteJSONL(t *testing.T) {
 			Turn:  verifiedDone("done"),
 			Usage: clnkr.Usage{InputTokens: 1, OutputTokens: 2},
 		},
-		clnkr.EventWorkingMemoryUpdated{
-			Reason: "prompt",
-			Stats:  clnkr.WorkingMemoryStats{PreviousBytes: 0, UpdatedBytes: 42, DeltaMessages: 1},
-		},
 		clnkr.EventCommandStart{Command: "pwd", Dir: "/tmp"},
 		clnkr.EventCommandDone{Command: "echo hi", Stdout: "hi\n", ExitCode: 0},
 		EventClarificationRequest{Question: "Which repo?"},
@@ -124,7 +120,7 @@ func TestWriteJSONL(t *testing.T) {
 		t.Fatalf("events = %d, want %d", len(got), len(events))
 	}
 
-	wantTypes := []string{"response", "working_memory_updated", "command_start", "command_done", "clarify", "approval_request", "done", "compacted", "error"}
+	wantTypes := []string{"response", "command_start", "command_done", "clarify", "approval_request", "done", "compacted", "error"}
 	for i, want := range wantTypes {
 		if got[i]["type"] != want {
 			t.Fatalf("event %d type = %q, want %q", i, got[i]["type"], want)
@@ -137,12 +133,12 @@ func TestWriteJSONL(t *testing.T) {
 		}
 	}
 
-	clarifyPayload := got[4]["payload"].(map[string]any)
+	clarifyPayload := got[3]["payload"].(map[string]any)
 	if clarifyPayload["question"] != "Which repo?" {
 		t.Fatalf("clarify payload = %#v, want question", clarifyPayload)
 	}
 
-	approvalPayload := got[5]["payload"].(map[string]any)
+	approvalPayload := got[4]["payload"].(map[string]any)
 	if approvalPayload["prompt"] != "1. echo hi" {
 		t.Fatalf("approval payload = %#v, want prompt", approvalPayload)
 	}
@@ -154,12 +150,12 @@ func TestWriteJSONL(t *testing.T) {
 		t.Fatalf("second approval command = %#v, want command and workdir", commands[1])
 	}
 
-	compactedPayload := got[7]["payload"].(map[string]any)
+	compactedPayload := got[6]["payload"].(map[string]any)
 	if compactedPayload["compacted_messages"] != float64(4) || compactedPayload["kept_messages"] != float64(2) {
 		t.Fatalf("compacted payload = %#v, want explicit stats", compactedPayload)
 	}
 
-	errorPayload := got[8]["payload"].(map[string]any)
+	errorPayload := got[7]["payload"].(map[string]any)
 	if errorPayload["message"] != "boom" {
 		t.Fatalf("error payload = %#v, want message", errorPayload)
 	}

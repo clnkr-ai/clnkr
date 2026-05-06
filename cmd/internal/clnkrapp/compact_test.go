@@ -79,32 +79,6 @@ func TestHandleCompactCommandDoesNotAppendLiteralUserMessage(t *testing.T) {
 	}
 }
 
-func TestHandleCompactCommandUpdatesWorkingMemoryAfterSuccessfulCompaction(t *testing.T) {
-	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
-	if err := agent.AddMessages(compactableMessages()); err != nil {
-		t.Fatalf("AddMessages: %v", err)
-	}
-	updater := &fakeWorkingMemoryUpdater{}
-	agent.SetWorkingMemoryUpdater(updater)
-
-	compactor := &fakeCompactor{summary: "Older work summarized."}
-	factory := func(string) clnkr.Compactor { return compactor }
-
-	_, ran, err := HandleCompactCommand(context.Background(), agent, "/compact", factory)
-	if err != nil {
-		t.Fatalf("HandleCompactCommand: %v", err)
-	}
-	if !ran {
-		t.Fatal("HandleCompactCommand did not run compact command")
-	}
-	if updater.calls != 1 {
-		t.Fatalf("working memory updates = %d, want 1", updater.calls)
-	}
-	if updater.reasons[0] != clnkr.WorkingMemoryUpdateReasonCompact {
-		t.Fatalf("working memory update reason = %q, want compact", updater.reasons[0])
-	}
-}
-
 func TestHandleCompactCommandFailureLeavesMessagesUnchanged(t *testing.T) {
 	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
 	if err := agent.AddMessages(compactableMessages()); err != nil {
