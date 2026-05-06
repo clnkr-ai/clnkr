@@ -61,6 +61,20 @@ func TestDumpAutoSystemPromptResolvesWithoutAPIKey(t *testing.T) {
 	}
 }
 
+func TestDumpAutoSystemPromptReportsMissingProviderContext(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := runMain([]string{"--dump-system-prompt"}, strings.NewReader(""), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
+	if code == 0 {
+		t.Fatalf("exit code = 0, want failure\nstdout: %s stderr: %s", out.String(), errOut.String())
+	}
+	if out.String() != "" {
+		t.Fatalf("stdout = %q, want empty", out.String())
+	}
+	if !strings.Contains(errOut.String(), "--act-protocol clnkr-inline") {
+		t.Fatalf("stderr = %q, want concrete act protocol hint", errOut.String())
+	}
+}
+
 func TestDumpConcreteSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := runMain([]string{"--act-protocol", "clnkr-inline", "--dump-system-prompt"}, strings.NewReader(""), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
@@ -72,6 +86,23 @@ func TestDumpConcreteSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
 	}
 	if strings.Contains(errOut.String(), "provider is required") {
 		t.Fatalf("stderr = %q, provider validation ran first", errOut.String())
+	}
+}
+
+func TestNormalStartupMissingProviderDoesNotMentionPromptDump(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := runMain(nil, strings.NewReader(""), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
+	if code == 0 {
+		t.Fatalf("exit code = 0, want failure\nstdout: %s stderr: %s", out.String(), errOut.String())
+	}
+	if out.String() != "" {
+		t.Fatalf("stdout = %q, want empty", out.String())
+	}
+	if !strings.Contains(errOut.String(), "provider is required") {
+		t.Fatalf("stderr = %q, want provider context error", errOut.String())
+	}
+	if strings.Contains(errOut.String(), "dump") {
+		t.Fatalf("stderr = %q, want no prompt dump hint", errOut.String())
 	}
 }
 

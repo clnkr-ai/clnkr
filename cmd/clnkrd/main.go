@@ -115,7 +115,7 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 			Model:       *modelFlag,
 			BaseURL:     *baseURLFlag,
 			ActProtocol: actProtocolSetting,
-		}, env)
+		}, env, *dumpSystemPrompt)
 		if err != nil {
 			return fail("%v", err)
 		}

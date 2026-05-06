@@ -322,6 +322,22 @@ func TestDumpAutoSystemPromptReportsMissingProviderContext(t *testing.T) {
 	}
 }
 
+func TestNormalStartupMissingProviderDoesNotMentionPromptDump(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t)
+	if err == nil {
+		t.Fatalf("normal startup succeeded; stdout: %s stderr: %s", stdout.String(), stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "provider is required") {
+		t.Fatalf("stderr = %q, want provider context error", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "dump") {
+		t.Fatalf("stderr = %q, want no prompt dump hint", stderr.String())
+	}
+}
+
 func TestDumpInlineSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
 	stdout, stderr, err := runMainHelper(t, "--act-protocol", "clnkr-inline", "--dump-system-prompt")
 	if err != nil {

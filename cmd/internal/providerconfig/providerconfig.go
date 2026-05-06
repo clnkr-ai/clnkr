@@ -43,9 +43,8 @@ func ParseActProtocolSetting(raw string) (ActProtocolSetting, error) {
 		return ActProtocolSettingAuto, nil
 	case ActProtocolSettingAuto, ActProtocolSettingClnkrInline, ActProtocolSettingToolCalls:
 		return setting, nil
-	default:
-		return "", fmt.Errorf(`invalid act-protocol %q (allowed: auto, clnkr-inline, tool-calls)`, raw)
 	}
+	return "", fmt.Errorf(`invalid act-protocol %q (allowed: auto, clnkr-inline, tool-calls)`, raw)
 }
 
 func resolveActProtocol(setting ActProtocolSetting, provider providerdomain.Provider, providerAPI providerdomain.ProviderAPI) clnkr.ActProtocol {
@@ -79,7 +78,7 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 	return ResolvedProviderConfig{Provider: provider, ProviderAPI: providerAPI, Model: model, BaseURL: baseURL, APIKey: apiKey, ActProtocol: actProtocol, RequestOptions: requestOptions}, nil
 }
 
-func ResolvePromptActProtocol(inputs Inputs, env func(string) string) (clnkr.ActProtocol, error) {
+func ResolvePromptActProtocol(inputs Inputs, env func(string) string, dumpSystemPrompt bool) (clnkr.ActProtocol, error) {
 	actProtocolSetting, err := ParseActProtocolSetting(string(inputs.ActProtocol))
 	if err != nil {
 		return "", err
@@ -88,10 +87,10 @@ func ResolvePromptActProtocol(inputs Inputs, env func(string) string) (clnkr.Act
 		return resolveActProtocol(actProtocolSetting, "", ""), nil
 	}
 	provider, providerAPI, _, _, err := resolveContext(inputs, env)
-	if err != nil {
+	if err != nil && dumpSystemPrompt {
 		return "", fmt.Errorf("%w; pass --act-protocol clnkr-inline or --act-protocol tool-calls to dump a concrete prompt without provider/model context", err)
 	}
-	return resolveActProtocol(actProtocolSetting, provider, providerAPI), nil
+	return resolveActProtocol(actProtocolSetting, provider, providerAPI), err
 }
 
 func resolveContext(inputs Inputs, env func(string) string) (providerdomain.Provider, providerdomain.ProviderAPI, string, string, error) {

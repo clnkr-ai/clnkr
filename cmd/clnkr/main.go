@@ -351,7 +351,7 @@ func main() {
 			Model:       aliasedString(*modelShort, *modelFlag),
 			BaseURL:     aliasedString(*baseURLShort, *baseURLFlag),
 			ActProtocol: actProtocolSetting,
-		}, os.Getenv)
+		}, os.Getenv, *dumpSystemPrompt)
 		if err != nil {
 			fatalf("%v", err)
 		}
