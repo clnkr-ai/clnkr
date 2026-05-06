@@ -678,6 +678,10 @@ func TestModelQueryToolCalls(t *testing.T) {
 	if _, ok := gotBody["parallel_tool_calls"]; ok {
 		t.Fatalf("parallel_tool_calls = %#v, want omitted", gotBody["parallel_tool_calls"])
 	}
+	include, ok := gotBody["include"].([]any)
+	if !ok || len(include) != 1 || include[0] != "reasoning.encrypted_content" {
+		t.Fatalf("include = %#v, want reasoning.encrypted_content", gotBody["include"])
+	}
 	tools, ok := gotBody["tools"].([]any)
 	if !ok || len(tools) != 1 {
 		t.Fatalf("tools = %#v, want one bash tool", gotBody["tools"])
@@ -735,7 +739,7 @@ func TestModelQueryToolCallsReplayToolMessagesWithoutDuplicateText(t *testing.T)
 	model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{UseBashToolCalls: true})
 	_, err := model.Query(context.Background(), []clnkr.Message{
 		{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]}}`, BashToolCalls: []clnkr.BashToolCall{{ID: "call_1", Command: "pwd"}}, ProviderReplay: []clnkr.ProviderReplayItem{{
-			Provider: "openai", ProviderAPI: "openai-responses", Type: "reasoning", JSON: json.RawMessage(`{"type":"reasoning","id":"rs_1","summary":[]}`),
+			Provider: "openai", ProviderAPI: "openai-responses", Type: "reasoning", JSON: json.RawMessage(`{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"opaque"}`),
 		}}},
 		{Role: "user", Content: "payload", BashToolResult: &clnkr.BashToolResult{ID: "call_1", Content: "payload"}},
 	})
@@ -751,11 +755,53 @@ func TestModelQueryToolCallsReplayToolMessagesWithoutDuplicateText(t *testing.T)
 	if first["type"] != "reasoning" || first["id"] != "rs_1" {
 		t.Fatalf("first input = %#v, want opaque reasoning replay", first)
 	}
+	if first["encrypted_content"] != "opaque" {
+		t.Fatalf("first input encrypted_content = %#v, want opaque", first["encrypted_content"])
+	}
 	if second["type"] != "function_call" || second["call_id"] != "call_1" {
 		t.Fatalf("second input = %#v, want function_call", second)
 	}
 	if third["type"] != "function_call_output" || third["output"] != "payload" {
 		t.Fatalf("third input = %#v, want function_call_output", third)
+	}
+}
+
+func TestModelQueryToolCallsSkipsReasoningReplayWithoutEncryptedContent(t *testing.T) {
+	var gotInput []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		data, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(data, &body)
+		gotInput = body["input"].([]any)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": []map[string]any{{
+				"type": "message", "role": "assistant",
+				"content": []map[string]any{{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`}},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{UseBashToolCalls: true})
+	_, err := model.Query(context.Background(), []clnkr.Message{
+		{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]}}`, BashToolCalls: []clnkr.BashToolCall{{ID: "call_1", Command: "pwd"}}, ProviderReplay: []clnkr.ProviderReplayItem{{
+			Provider: "openai", ProviderAPI: "openai-responses", Type: "reasoning", JSON: json.RawMessage(`{"type":"reasoning","id":"rs_1","summary":[]}`),
+		}}},
+		{Role: "user", Content: "payload", BashToolResult: &clnkr.BashToolResult{ID: "call_1", Content: "payload"}},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(gotInput) != 2 {
+		t.Fatalf("input = %#v, want function call and output only", gotInput)
+	}
+	first := gotInput[0].(map[string]any)
+	second := gotInput[1].(map[string]any)
+	if first["type"] != "function_call" || first["call_id"] != "call_1" {
+		t.Fatalf("first input = %#v, want function_call", first)
+	}
+	if second["type"] != "function_call_output" || second["output"] != "payload" {
+		t.Fatalf("second input = %#v, want function_call_output", second)
 	}
 }
 

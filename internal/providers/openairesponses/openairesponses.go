@@ -64,6 +64,7 @@ type request struct {
 	Model           string               `json:"model"`
 	Instructions    string               `json:"instructions,omitempty"`
 	Input           []responsesInputItem `json:"input"`
+	Include         []string             `json:"include,omitempty"`
 	Text            *textOptions         `json:"text,omitempty"`
 	Reasoning       *reasoningOptions    `json:"reasoning,omitempty"`
 	MaxOutputTokens *int                 `json:"max_output_tokens,omitempty"`
@@ -153,6 +154,7 @@ const (
 	baseRetryDelay    = time.Second
 	replayProvider    = "openai"
 	replayProviderAPI = "openai-responses"
+	includeReasoning  = "reasoning.encrypted_content"
 )
 
 func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
@@ -183,6 +185,7 @@ func (m *Model) queryStructured(ctx context.Context, input []responsesInputItem,
 		Model:           m.model,
 		Instructions:    m.systemPrompt,
 		Input:           input,
+		Include:         includeOptions(tools),
 		Reasoning:       m.reasoningOptions(),
 		MaxOutputTokens: m.maxOutputTokensValue(),
 		Tools:           tools,
@@ -313,9 +316,7 @@ func mapToolCallMessages(messages []clnkr.Message) []responsesInputItem {
 	for _, msg := range normalized {
 		if msg.Role == "assistant" && len(msg.BashToolCalls) > 0 {
 			for _, item := range msg.ProviderReplay {
-				if item.Provider == replayProvider && item.ProviderAPI == replayProviderAPI && len(item.JSON) > 0 {
-					input = append(input, responsesInputItem{Raw: append(json.RawMessage(nil), item.JSON...)})
-				}
+				input = appendProviderReplayInput(input, item)
 			}
 			for _, call := range msg.BashToolCalls {
 				knownCalls[call.ID] = struct{}{}
@@ -359,6 +360,33 @@ func mapToolCallMessages(messages []clnkr.Message) []responsesInputItem {
 		})
 	}
 	return input
+}
+
+func includeOptions(tools []openAITool) []string {
+	if len(tools) == 0 {
+		return nil
+	}
+	return []string{includeReasoning}
+}
+
+func appendProviderReplayInput(input []responsesInputItem, item clnkr.ProviderReplayItem) []responsesInputItem {
+	if item.Provider != replayProvider || item.ProviderAPI != replayProviderAPI || len(item.JSON) == 0 {
+		return input
+	}
+	if item.Type == "reasoning" && !hasEncryptedReasoning(item.JSON) {
+		return input
+	}
+	return append(input, responsesInputItem{Raw: append(json.RawMessage(nil), item.JSON...)})
+}
+
+func hasEncryptedReasoning(raw json.RawMessage) bool {
+	var item struct {
+		EncryptedContent string `json:"encrypted_content"`
+	}
+	if err := json.Unmarshal(raw, &item); err != nil {
+		return false
+	}
+	return strings.TrimSpace(item.EncryptedContent) != ""
 }
 
 func functionCallInput(call clnkr.BashToolCall) responsesInputItem {
