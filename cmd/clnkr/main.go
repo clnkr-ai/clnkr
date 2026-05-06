@@ -12,13 +12,11 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
-	"github.com/clnkr-ai/clnkr/internal/delegation"
 	"github.com/clnkr-ai/clnkr/internal/session"
 )
 
@@ -30,6 +28,7 @@ func usageText() string {
 
 Usage:
   clnkr                     Start conversational mode
+  Models may run clnkrd through bash for bounded child work.
 
 Options:
   -p, --prompt string       Task to run unattended and exit
@@ -45,17 +44,6 @@ Options:
 Sessions:
   -c, --continue            Resume most recent session for this project
   -l, --list-sessions       List saved sessions for this project
-
-Delegation:
-      --delegate            Enable manual /delegate child probes
-      --delegate-max-children int
-                            Limit child probes per session (default: 3)
-      --delegate-max-commands int
-                            Limit executed commands per child (default: 10)
-      --delegate-timeout duration
-                            Limit wall clock time per child (default: 10m)
-      --delegate-artifact-dir string
-                            Directory for child probe artifacts
 
 Debugging:
       --load-messages string   Seed conversation from a JSON file
@@ -98,7 +86,7 @@ func dumpPromptMarker(args []string, i int) bool {
 
 func valueFlag(arg string) bool {
 	switch arg {
-	case "-p", "--prompt", "--prompt-mode-unattended", "-m", "--model", "-u", "--base-url", "--provider", "--provider-api", "--act-protocol", "--effort", "--thinking-budget-tokens", "--max-output-tokens", "--max-steps", "--event-log", "--trajectory", "--load-messages", "--system-prompt-append", "--delegate-max-children", "--delegate-max-commands", "--delegate-timeout", "--delegate-artifact-dir", "--delegate-depth":
+	case "-p", "--prompt", "--prompt-mode-unattended", "-m", "--model", "-u", "--base-url", "--provider", "--provider-api", "--act-protocol", "--effort", "--thinking-budget-tokens", "--max-output-tokens", "--max-steps", "--event-log", "--trajectory", "--load-messages", "--system-prompt-append":
 		return true
 	}
 	return false
@@ -210,15 +198,6 @@ func handleTerminalDriverEvent(ctx context.Context, driver *clnkrapp.Driver, rea
 		return nil, replyToTerminalRequest(ctx, driver, reader, event.Question, "Clarify: ")
 	case clnkrapp.EventCompacted:
 		fmt.Fprintf(os.Stderr, "[Session compacted: %d messages summarized, %d kept]\n", event.Stats.CompactedMessages, event.Stats.KeptMessages) //nolint:errcheck
-	case clnkrapp.EventChildProbeStart:
-		fmt.Fprintf(os.Stderr, "[delegate %s started: %s]\n", event.Request.ChildID, event.Request.Task) //nolint:errcheck
-	case clnkrapp.EventChildProbeDone:
-		fmt.Fprintf(os.Stderr, "[delegate %s %s]\n", event.Result.ChildID, event.Result.Status) //nolint:errcheck
-		if event.Result.Summary != "" {
-			fmt.Fprintln(os.Stdout, event.Result.Summary) //nolint:errcheck
-		}
-	case clnkrapp.EventChildProbeDenied:
-		fmt.Fprintf(os.Stderr, "[delegate denied: %s]\n", event.Reason) //nolint:errcheck
 	case clnkrapp.EventDone:
 	default:
 		return nil, fmt.Errorf("unhandled driver event %T", event)
@@ -275,13 +254,6 @@ func main() {
 	maxOutputTokens := flags.Int("max-output-tokens", 0, "")
 	workingMemory := flags.Bool("working-memory", false, "")
 	maxSteps := flags.Int("max-steps", 0, "")
-	delegateEnabled := flags.Bool("delegate", false, "")
-	delegateMaxChildren := flags.Int("delegate-max-children", 3, "")
-	delegateMaxCommands := flags.Int("delegate-max-commands", 10, "")
-	delegateTimeout := flags.Duration("delegate-timeout", 10*time.Minute, "")
-	delegateArtifactDir := flags.String("delegate-artifact-dir", "", "")
-	delegateChildReadOnly := flags.Bool("delegate-child-read-only", false, "")
-	delegateDepth := flags.Int("delegate-depth", 0, "")
 	fullSend := new(bool)
 	explicitFullSendFalse := false
 	flags.BoolFunc("full-send", "", func(s string) error {
@@ -386,10 +358,6 @@ func main() {
 	if *trajectory != "" && !singleTask {
 		fatalf("--trajectory requires -p (single-task mode)")
 	}
-	if *delegateDepth > 1 {
-		fatalf("delegate depth %d exceeds max depth 1", *delegateDepth)
-	}
-
 	cfg, err := providerconfig.ResolveConfig(providerconfig.Inputs{
 		Provider: *providerFlag, ProviderAPI: *providerAPIFlag,
 		Model: aliasedString(*modelShort, *modelFlag), BaseURL: aliasedString(*baseURLShort, *baseURLFlag),
@@ -414,11 +382,7 @@ func main() {
 		defer eventLogFile.Close() //nolint:errcheck
 	}
 
-	executor := clnkr.Executor(&clnkr.CommandExecutor{})
-	if *delegateChildReadOnly {
-		executor = delegation.NewReadOnlyExecutor(executor)
-	}
-	agent := clnkr.NewAgent(clnkrapp.NewModelForConfigWithOptions(cfg, systemPrompt, clnkrapp.ModelOptions{Unattended: singleTask}), executor, cwd)
+	agent := clnkr.NewAgent(clnkrapp.NewModelForConfigWithOptions(cfg, systemPrompt, clnkrapp.ModelOptions{Unattended: singleTask}), &clnkr.CommandExecutor{}, cwd)
 	agent.ActProtocol = cfg.ActProtocol
 	if clnkrapp.WorkingMemoryEnabled(*workingMemory, os.Getenv) {
 		agent.SetWorkingMemoryUpdater(clnkrapp.MakeWorkingMemoryFactory(cfg)())
@@ -496,49 +460,12 @@ func main() {
 	}
 
 	driver := clnkrapp.NewDriver(agent, clnkrapp.MakeCompactorFactory(cfg))
-	if *delegateEnabled {
-		executable := os.Getenv("CLNKR_DELEGATE_EXECUTABLE")
-		if executable == "" {
-			var err error
-			executable, err = os.Executable()
-			if err != nil {
-				fatalf("cannot find clnkr executable for delegation: %v", err)
-			}
-		}
-		delegateConfig := clnkrapp.DefaultDelegateConfig()
-		delegateConfig.Enabled = true
-		delegateConfig.MaxChildren = *delegateMaxChildren
-		delegateConfig.MaxCommands = *delegateMaxCommands
-		delegateConfig.Timeout = *delegateTimeout
-		delegateConfig.ArtifactDir = *delegateArtifactDir
-		driver.SetDelegateRunner(clnkrapp.ExecChildProbeRunner{
-			Executable: executable,
-			BaseArgs: childProviderArgs(
-				*providerFlag,
-				*providerAPIFlag,
-				aliasedString(*modelShort, *modelFlag),
-				aliasedString(*baseURLShort, *baseURLFlag),
-				*actProtocolFlag,
-				*effortFlag,
-				*maxOutputTokens,
-				maxOutputTokensSet,
-				*thinkingBudgetTokens,
-				thinkingBudgetTokensSet,
-				*noSystemPrompt || *noSystemPromptShort,
-			),
-		}, delegateConfig)
-	}
 
 	if singleTask {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
 		if err := clnkrapp.RejectCompactCommand(taskPrompt); err != nil {
 			fatalf("%v", err)
-		}
-		if !*delegateEnabled {
-			if err := clnkrapp.RejectDelegateCommand(taskPrompt); err != nil {
-				fatalf("%v", err)
-			}
 		}
 		runErr := runDriverPrompt(ctx, driver, newLineReader(strings.NewReader("")), taskPrompt, clnkrapp.PromptModeFullSend, eventLogFile)
 		if *trajectory != "" {
@@ -620,29 +547,4 @@ func summarizeCommand(cmd string) string {
 		return fmt.Sprintf("%s ... (%d lines)", cmd[:idx], strings.Count(cmd, "\n")+1)
 	}
 	return cmd
-}
-
-func childProviderArgs(provider, providerAPI, model, baseURL, actProtocol, effort string, maxOutputTokens int, maxOutputTokensSet bool, thinkingBudgetTokens int, thinkingBudgetTokensSet bool, noSystemPrompt bool) []string {
-	var args []string
-	appendString := func(name, value string) {
-		if strings.TrimSpace(value) != "" {
-			args = append(args, name, value)
-		}
-	}
-	appendString("--provider", provider)
-	appendString("--provider-api", providerAPI)
-	appendString("--model", model)
-	appendString("--base-url", baseURL)
-	appendString("--act-protocol", actProtocol)
-	appendString("--effort", effort)
-	if maxOutputTokensSet {
-		args = append(args, "--max-output-tokens", strconv.Itoa(maxOutputTokens))
-	}
-	if thinkingBudgetTokensSet {
-		args = append(args, "--thinking-budget-tokens", strconv.Itoa(thinkingBudgetTokens))
-	}
-	if noSystemPrompt {
-		args = append(args, "--no-system-prompt")
-	}
-	return args
 }

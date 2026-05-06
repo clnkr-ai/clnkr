@@ -141,6 +141,27 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		}
 	})
 
+	t.Run("base prompt teaches clnkrd process autonomy", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		prompt := LoadPromptWithOptions(dir, PromptOptions{})
+
+		for _, want := range []string{
+			"<parallel-work>",
+			"Bash is your only tool. You may use bash to run `clnkrd` as another ordinary process whenever it would materially reduce uncertainty, parallelize independent work, verify a claim, or explore a non-blocking question.",
+			"If the user writes `/delegate ...`, treat it as an instruction to launch `clnkrd` through bash for that bounded child task; do not treat it as a host command.",
+			"children=$(mktemp -d /tmp/clnkr-children.$$.XXXXXX)",
+			`clnkrd --event-log "$children/prompt-review/events.jsonl"`,
+			`wait "$pid1" "$pid2"`,
+			"Treat child output as evidence to evaluate, not proof.",
+		} {
+			if !strings.Contains(prompt, want) {
+				t.Fatalf("prompt missing %q", want)
+			}
+		}
+	})
+
 	t.Run("unattended prompt omits clarify", func(t *testing.T) {
 		dir := t.TempDir()
 		t.Setenv("HOME", t.TempDir())
@@ -199,6 +220,26 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 			t.Error("prompt should not be empty without AGENTS.md")
 		}
 	})
+}
+
+func TestLoadPromptWithOptions_ToolCallsPromptTeachesClnkrdProcessAutonomy(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	prompt := LoadPromptWithOptions(dir, PromptOptions{ActProtocol: ActProtocolToolCalls})
+
+	for _, want := range []string{
+		"<parallel-work>",
+		"Bash is your only tool. You may use bash to run `clnkrd` as another ordinary process whenever it would materially reduce uncertainty, parallelize independent work, verify a claim, or explore a non-blocking question.",
+		"If the user writes `/delegate ...`, treat it as an instruction to launch `clnkrd` through bash for that bounded child task; do not treat it as a host command.",
+		"children=$(mktemp -d /tmp/clnkr-children.$$.XXXXXX)",
+		`clnkrd --event-log "$children/docs-review/events.jsonl"`,
+		"Do not use extra processes when a normal bash command, test, grep, or file read gives the answer directly.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("tool-call prompt missing %q", want)
+		}
+	}
 }
 
 func TestPromptExamplesParseSuccessfully(t *testing.T) {

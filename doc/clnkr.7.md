@@ -12,7 +12,7 @@ them, append the result, and repeat.
 
 The user-facing command is documented in **clnkr**(1). This page documents
 clnkr's act protocol, transcript structure, provider boundary, command
-execution model, run metadata, and 12-factor-agent mapping.
+execution model, run metadata, and domain vocabulary.
 
 # ARCHITECTURE
 
@@ -48,14 +48,10 @@ request options, model capability checks, and request-option validation.
 : The host component that runs one bash action and returns a structured command
 result.
 
-**Child probe**
-: A bounded child **clnkr** run launched by the frontend for a narrow
-inspection or verification task. The parent remains the only coordinator.
-
-**Child probe runtime**
-: The **internal/delegation** boundary that runs bounded child probes and owns
-subprocess execution, read-only child execution, request and result artifacts,
-and child artifact paths.
+**Child process**
+: A **clnkrd** process launched through bash for bounded work such as
+research, codebase exploration, log analysis, test investigation, or review.
+It is an ordinary Unix process, not a host-owned agent subtype.
 
 **Transcript**
 : The ordered message history sent to the model.
@@ -108,12 +104,6 @@ coordinates frontend interaction around **RunWithPolicy** by turning approval
 and clarify policy hooks into frontend events and accepting replies. It does
 not query the Model, parse Turns, or execute commands directly. **cmd/clnkr**
 and **cmd/clnkrd** adapt terminal and stdio JSONL surfaces to the driver.
-Manual delegation policy also lives at this boundary: **Driver** handles
-**/delegate** before model execution, emits child lifecycle events, and appends
-a host-authored child result block to the parent transcript. The
-**internal/delegation** runtime runs the child as a separate **clnkr**
-subprocess and owns the child request, result, event log, and trajectory
-artifacts. Terminal, TUI, CLI, and JSONL adaptation remain frontend-owned.
 Structured working memory is split between frontend runtime packages and the
 root **Agent**. **internal/workingmemory** owns the memory schema, update
 prompt, and provider-backed updater. **internal/session** owns saved-session
@@ -130,11 +120,13 @@ unsupported provider/model/request combinations before adapters serialize a
 request. Provider structured-output schemas and adapters own provider-specific
 response shapes and projection into canonical turns.
 
-The delegation ownership boundary is **Driver** versus
-**internal/delegation**. **Driver** owns slash-command policy, child lifecycle
-events, transcript insertion, and frontend adaptation. **internal/delegation**
-owns runtime mechanics for child probes. Provider adapters, provider request
-semantics, canonical turns, and **Agent.Step** are unchanged by delegation.
+Child-agent orchestration is deliberately outside host policy. Bash is the
+model's only tool; the built-in prompt teaches the model when to launch
+**clnkrd** as another ordinary process and how to read stdout, stderr, and
+event-log artifacts. **/delegate** is ordinary user prompt text that instructs
+the model to run **clnkrd** for the bounded child task. **Driver**,
+**CommandExecutor**, provider adapters, provider request semantics, canonical
+turns, and **Agent.Step** are unchanged by child-process orchestration.
 
 # ACT PROTOCOL
 
@@ -248,12 +240,6 @@ fresh evidence remains newer than memory.
 
 **Compact block**
 : A host block containing a summary of older transcript history.
-
-**Child result block**
-: A host block containing child probe status, summary, evidence pointers, and
-artifact paths. It is untrusted child output. The parent treats it as evidence
-requiring verification. The full child transcript is stored as a child artifact
-and is not inserted into the parent transcript.
 
 During compaction, clnkr replaces an older transcript prefix with one compact
 block. It keeps a recent tail of user-authored turns and any host state the
@@ -434,9 +420,10 @@ cancelled, denied, skipped, or error.
 : The frontend coordinator that turns policy hooks and top-level frontend
 requests into terminal or JSONL interaction.
 
-**Child probe runtime**
-: The **internal/delegation** boundary that runs bounded child probes and writes
-child request, result, event log, and trajectory artifacts.
+**Child process**
+: A **clnkrd** process launched by bash for bounded child work. Its stdout,
+stderr, and event logs are ordinary process artifacts that the model must read
+and synthesize.
 
 **Effective request metadata**
 : The provider request state after validation, defaults, and provider-specific

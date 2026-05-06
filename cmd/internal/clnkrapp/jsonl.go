@@ -55,27 +55,6 @@ func WriteJSONL(w io.Writer, event any) error {
 			"compacted_messages": event.Stats.CompactedMessages,
 			"kept_messages":      event.Stats.KeptMessages,
 		})
-	case EventChildProbeStart:
-		return writeEvent(w, "child_probe_start", map[string]any{
-			"child_id":     event.Request.ChildID,
-			"task":         event.Request.Task,
-			"depth":        event.Request.Depth,
-			"mode":         "read-only",
-			"max_commands": event.Request.MaxCommands,
-			"artifact_dir": event.Request.ArtifactDir,
-		})
-	case EventChildProbeDone:
-		return writeEvent(w, "child_probe_done", map[string]any{
-			"child_id":  event.Result.ChildID,
-			"status":    event.Result.Status,
-			"summary":   event.Result.Summary,
-			"artifacts": event.Result.Artifacts,
-		})
-	case EventChildProbeDenied:
-		return writeEvent(w, "child_probe_denied", map[string]string{
-			"child_id": event.ChildID,
-			"reason":   event.Reason,
-		})
 	case EventError:
 		return writeEvent(w, "error", map[string]string{"message": errorMessage(event.Err)})
 	default:

@@ -130,6 +130,12 @@ func TestWriteJSONL(t *testing.T) {
 			t.Fatalf("event %d type = %q, want %q", i, got[i]["type"], want)
 		}
 	}
+	for _, gotEvent := range got {
+		switch gotEvent["type"] {
+		case "child_probe_start", "child_probe_done", "child_probe_denied":
+			t.Fatalf("child probe event leaked into JSONL output: %#v", gotEvent)
+		}
+	}
 
 	clarifyPayload := got[4]["payload"].(map[string]any)
 	if clarifyPayload["question"] != "Which repo?" {
@@ -156,57 +162,5 @@ func TestWriteJSONL(t *testing.T) {
 	errorPayload := got[8]["payload"].(map[string]any)
 	if errorPayload["message"] != "boom" {
 		t.Fatalf("error payload = %#v, want message", errorPayload)
-	}
-}
-
-func TestWriteJSONLChildProbeEvents(t *testing.T) {
-	var b bytes.Buffer
-
-	events := []any{
-		EventChildProbeStart{Request: ChildProbeRequest{
-			ChildID:     "child-001",
-			Task:        "inspect README",
-			Depth:       1,
-			MaxCommands: 10,
-			ArtifactDir: "/tmp/delegates/child-001",
-		}},
-		EventChildProbeDone{Result: ChildProbeResult{
-			ChildID: "child-001",
-			Status:  ChildProbeStatusDone,
-			Summary: "README inspected.",
-			Artifacts: ChildProbeArtifacts{
-				EventLog: "/tmp/delegates/child-001/event-log.jsonl",
-			},
-		}},
-		EventChildProbeDenied{ChildID: "child-002", Reason: "depth limit reached"},
-	}
-	for _, event := range events {
-		if err := WriteJSONL(&b, event); err != nil {
-			t.Fatalf("WriteJSONL(%T): %v", event, err)
-		}
-	}
-
-	decoder := json.NewDecoder(&b)
-	var got []map[string]any
-	for decoder.More() {
-		var event map[string]any
-		if err := decoder.Decode(&event); err != nil {
-			t.Fatalf("decode event: %v", err)
-		}
-		got = append(got, event)
-	}
-	wantTypes := []string{"child_probe_start", "child_probe_done", "child_probe_denied"}
-	for i, want := range wantTypes {
-		if got[i]["type"] != want {
-			t.Fatalf("event %d type = %q, want %q", i, got[i]["type"], want)
-		}
-	}
-	startPayload := got[0]["payload"].(map[string]any)
-	if startPayload["child_id"] != "child-001" || startPayload["mode"] != "read-only" {
-		t.Fatalf("start payload = %#v, want child identity and mode", startPayload)
-	}
-	donePayload := got[1]["payload"].(map[string]any)
-	if donePayload["summary"] != "README inspected." || donePayload["status"] != "done" {
-		t.Fatalf("done payload = %#v, want summary and status", donePayload)
 	}
 }

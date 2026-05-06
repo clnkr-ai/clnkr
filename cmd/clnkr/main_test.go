@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -183,24 +182,26 @@ func TestHelpWritesRichUsageToStdout(t *testing.T) {
 	}
 }
 
-func TestHelpIncludesDelegateFlags(t *testing.T) {
+func TestHelpMentionsClnkrdProcessAutonomyWithoutChildFlags(t *testing.T) {
 	stdout, stderr, err := runMainHelper(t, "--help")
 	if err != nil {
 		t.Fatalf("help command: %v\nstderr: %s", err, stderr.String())
 	}
-	for _, want := range []string{
-		"--delegate",
-		"--delegate-max-children int",
-		"--delegate-max-commands int",
-		"--delegate-timeout duration",
-		"--delegate-artifact-dir string",
+	if !strings.Contains(stdout.String(), "Models may run clnkrd through bash for bounded child work.") {
+		t.Fatalf("stdout missing clnkrd process autonomy sentence:\n%s", stdout.String())
+	}
+	for _, removed := range []string{
+		"Child probes:",
+		"--child-max",
+		"--child",
+		"CLNKR_DELEGATE_EXECUTABLE",
 	} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		if strings.Contains(stdout.String(), removed) {
+			t.Fatalf("removed child surface %q leaked into help:\n%s", removed, stdout.String())
 		}
 	}
-	if strings.Contains(stdout.String(), "--delegate-child-read-only") {
-		t.Fatalf("hidden child flag leaked into help:\n%s", stdout.String())
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 }
 
@@ -363,58 +364,6 @@ func TestPromptModeUnattendedRunsSingleTask(t *testing.T) {
 	}
 }
 
-func TestManualDelegateWritesLifecycleEventsAndSummary(t *testing.T) {
-	eventLog := filepath.Join(t.TempDir(), "events.jsonl")
-	childExe := helperMainExecutable(t)
-	stdin := strings.NewReader("/delegate inspect README\n")
-	stdout, stderr, err := runMainHelperWithEnvAndInput(t,
-		[]string{
-			"CLNKR_FAKE_DELEGATE_CHILD=1",
-			"CLNKR_DELEGATE_EXECUTABLE=" + childExe,
-			"CLNKR_PROVIDER=openai",
-			"CLNKR_PROVIDER_API=openai-chat-completions",
-			"CLNKR_MODEL=fake",
-			"CLNKR_API_KEY=fake",
-		},
-		stdin,
-		"--delegate",
-		"--full-send=true",
-		"--event-log", eventLog,
-	)
-	if err != nil {
-		t.Fatalf("manual delegate: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "child inspected README") {
-		t.Fatalf("stdout = %q, want child summary", stdout.String())
-	}
-	if !strings.Contains(stderr.String(), "[delegate") {
-		t.Fatalf("stderr = %q, want delegate lifecycle", stderr.String())
-	}
-	data, err := os.ReadFile(eventLog)
-	if err != nil {
-		t.Fatalf("ReadFile event log: %v", err)
-	}
-	if !strings.Contains(string(data), `"type":"child_probe_start"`) || !strings.Contains(string(data), `"type":"child_probe_done"`) {
-		t.Fatalf("event log = %s, want child lifecycle events", data)
-	}
-}
-
-func helperMainExecutable(t *testing.T) string {
-	t.Helper()
-
-	path := filepath.Join(t.TempDir(), "clnkr-helper")
-	script := "#!/usr/bin/env bash\n" +
-		"exec " + shellQuote(os.Args[0]) + " -test.run=TestMainHelper -- \"$@\"\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("WriteFile helper executable: %v", err)
-	}
-	return path
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-}
-
 func TestTrajectoryRequiresPromptBeforeProviderConfig(t *testing.T) {
 	stdout, stderr, err := runMainHelper(t, "--trajectory", filepath.Join(t.TempDir(), "trajectory.json"))
 	if err == nil {
@@ -435,10 +384,6 @@ func TestMainHelper(t *testing.T) {
 	if os.Getenv("CLNKR_HELPER_MAIN") == "" {
 		return
 	}
-	if os.Getenv("CLNKR_FAKE_DELEGATE_CHILD") == "1" && argsContain(os.Args, "--delegate-child-read-only") {
-		runFakeDelegateChild()
-		os.Exit(0)
-	}
 	for i, arg := range os.Args {
 		if arg == "--" {
 			os.Args = append([]string{"clnkr"}, os.Args[i+1:]...)
@@ -449,37 +394,36 @@ func TestMainHelper(t *testing.T) {
 	t.Fatal("missing helper arg separator")
 }
 
-func argsContain(args []string, want string) bool {
-	for _, arg := range args {
-		if arg == want {
-			return true
-		}
-	}
-	return false
-}
+func TestPromptModePassesDelegateTextToModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"role": "assistant", "content": openAIWrappedDone("ok")}},
+			},
+			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
+		})
+	}))
+	defer server.Close()
 
-func runFakeDelegateChild() {
-	eventLog := ""
-	trajectory := ""
-	for i := 0; i < len(os.Args); i++ {
-		switch os.Args[i] {
-		case "--event-log":
-			eventLog = os.Args[i+1]
-			i++
-		case "--trajectory":
-			trajectory = os.Args[i+1]
-			i++
-		}
+	stdout, stderr, err := runMainHelperWithEnv(t,
+		[]string{
+			"CLNKR_API_KEY=test-key",
+		},
+		"--provider", "openai",
+		"--provider-api", "openai-chat-completions",
+		"--base-url", server.URL,
+		"--model", "gpt-test",
+		"-p", "/delegate inspect README",
+	)
+	if err != nil {
+		t.Fatalf("run main: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
 	}
-	doneTurn := `{"type":"done","summary":"child inspected README","verification":{"status":"verified","checks":[{"command":"fake","outcome":"passed","evidence":"fake delegate child"}]},"known_risks":[]}`
-	if eventLog != "" {
-		line := `{"type":"response","payload":{"turn":` + doneTurn + `,"usage":{"input_tokens":1,"output_tokens":1}}}` + "\n"
-		_ = os.WriteFile(eventLog, []byte(line), 0o644)
+	if !strings.Contains(stdout.String(), "ok") {
+		t.Fatalf("stdout = %q, want fake model completion", stdout.String())
 	}
-	if trajectory != "" {
-		_ = os.WriteFile(trajectory, []byte(`[{"role":"assistant","content":`+strconv.Quote(doneTurn)+`}]`), 0o644)
+	if strings.Contains(stderr.String(), "/delegate is only available") {
+		t.Fatalf("stderr = %q, want no delegate rejection", stderr.String())
 	}
-	fmt.Println("child inspected README")
 }
 
 func TestAliasedStringPrefersExplicitPreferredValue(t *testing.T) {

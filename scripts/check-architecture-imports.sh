@@ -12,7 +12,6 @@ kind_of() {
   case "$1" in
     "$module") echo root ;;
     "$module"/internal/core/*) echo core ;;
-    "$module"/internal/delegation) echo frontend_runtime ;;
     "$module"/internal/session) echo frontend_runtime ;;
     "$module"/internal/workingmemory) echo frontend_runtime ;;
     "$module"/internal/providers/*) echo provider ;;
@@ -39,7 +38,7 @@ check_edge() {
       esac
       ;;
     compaction) [[ "$target" == "$module" ]] || { echo "error: $importer -> $target: cmd/internal/compaction should keep repo-local imports to root clnkr only" >&2; return 1; } ;;
-    cmd) case "$target" in "$module"|"$module"/cmd/internal/*|"$module"/internal/delegation|"$module"/internal/session|"$module"/internal/workingmemory|"$module"/internal/providers/*) ;; *) echo "error: $importer -> $target: cmd/... may import only root clnkr, cmd/internal/..., frontend runtime packages, or internal/providers/..." >&2; return 1 ;; esac ;;
+    cmd) case "$target" in "$module"|"$module"/cmd/internal/*|"$module"/internal/session|"$module"/internal/workingmemory|"$module"/internal/providers/*) ;; *) echo "error: $importer -> $target: cmd/... may import only root clnkr, cmd/internal/..., frontend runtime packages, or internal/providers/..." >&2; return 1 ;; esac ;;
     other) echo "error: $importer -> $target: unclassified repo-local importer" >&2; return 1 ;;
   esac
 }

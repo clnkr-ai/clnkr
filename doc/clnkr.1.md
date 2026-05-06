@@ -6,7 +6,7 @@ clnkr - a minimal coding agent (plain CLI)
 
 # SYNOPSIS
 
-**clnkr** [**-p**|**--prompt**|**--prompt-mode-unattended** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--provider** *mode*] [**--provider-api** *surface*] [**--act-protocol** *protocol*] [**--effort** *level*] [**--thinking-budget-tokens** *n*] [**--max-output-tokens** *n*] [**--max-steps** *n*] [**--full-send**] [**--delegate**] [**--delegate-max-children** *n*] [**--delegate-max-commands** *n*] [**--delegate-timeout** *duration*] [**--delegate-artifact-dir** *path*] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
+**clnkr** [**-p**|**--prompt**|**--prompt-mode-unattended** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--provider** *mode*] [**--provider-api** *surface*] [**--act-protocol** *protocol*] [**--effort** *level*] [**--thinking-budget-tokens** *n*] [**--max-output-tokens** *n*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
 
 # DESCRIPTION
 
@@ -16,11 +16,10 @@ In default mode, **clnkr** starts an interactive REPL. With **-p**, it runs a si
 
 At the main idle conversational prompt, **/compact** summarizes older transcript history while keeping recent context intact for the current working thread.
 
-With **--delegate**, the main idle prompt also accepts **/delegate** *task*.
-Delegation runs a bounded read-only child clnkr probe for a narrow inspection or
-verification task. The child writes separate artifacts; the parent transcript
-receives only a structured result block with the child summary and artifact
-paths.
+The built-in prompt teaches the model when to launch **clnkrd** through bash for
+bounded child work. A child is an ordinary process with stdout, stderr, and
+optional **--event-log** artifacts. **/delegate** *task* is ordinary prompt text;
+the host does not intercept it.
 
 **clnkr** has no external dependencies beyond the Go standard library.
 
@@ -76,21 +75,6 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 **--full-send**
 : Execute every **act** turn immediately. Without this flag, clnkr asks for approval before each command batch in conversational mode. Implied by **-p**.
 
-**--delegate**
-: Enable manual **/delegate** child probes.
-
-**--delegate-max-children** *n*
-: Limit child probes for the parent process. The default is 3.
-
-**--delegate-max-commands** *n*
-: Limit executed commands in each child. The default is 10.
-
-**--delegate-timeout** *duration*
-: Limit wall clock time for each child. The default is 10m.
-
-**--delegate-artifact-dir** *path*
-: Store child artifacts under *path* instead of the default temporary delegate directory.
-
 **-c**, **--continue**
 : Resume the most recent session for the current project directory. Saved JSON state messages restore the last persisted working directory. Mutually exclusive with **--trajectory**.
 
@@ -129,11 +113,11 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 This command is only available at the top-level conversational prompt. In single-task mode, approval replies, and clarification replies, the literal text is treated as normal input or rejected with an error rather than triggering compaction.
 
 **/delegate** *task*
-: Run a bounded child clnkr probe for *task*. Delegation is available only when
-**--delegate** is set. Child probes run read-only, use a separate command
-budget, write their own event log and trajectory artifacts, and return a
-summary block to the parent. Treat child output as evidence, not authority;
-verify child claims before using them for edits or final answers.
+: Ask the model to launch **clnkrd** through bash for a bounded child task.
+The text reaches the model like any other prompt. The model is expected to use
+ordinary shell redirection, temporary directories, **--event-log**, and **wait**
+when it runs child processes. Treat child output as evidence, not authority;
+verify important child claims before using them for edits or final answers.
 
 # ENVIRONMENT
 

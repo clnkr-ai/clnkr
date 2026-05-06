@@ -81,12 +81,31 @@ Compact older transcript history:
 /compact focus on failing tests and edited files
 ```
 
+Ask the model to launch a bounded child process through bash:
+
+```text
+/delegate inspect cmd/clnkrd and summarize the JSONL contract
+```
+
+The host treats `/delegate` as ordinary prompt text. The built-in prompt teaches
+the model to run `clnkrd` as a normal process, keep child artifacts under `/tmp`,
+read stdout/stderr or event logs, and verify important child claims locally.
+
 Emit events or reuse transcripts:
 
 ```bash
 clnkr -p "fix the build" --event-log /tmp/events.jsonl
 clnkr -p "investigate the bug" --trajectory /tmp/investigation.json
 clnkr -p "write a fix based on the investigation" --load-messages /tmp/investigation.json
+```
+
+Launch `clnkrd` directly from bash:
+
+```bash
+children=$(mktemp -d /tmp/clnkr-children.$$.XXXXXX)
+printf '%s\n' '{"type":"prompt","text":"inspect README.md; do not edit","mode":"full_send"}' |
+  clnkrd --event-log "$children/events.jsonl" > "$children/out.jsonl" 2> "$children/err"
+sed -n '1,200p' "$children/out.jsonl"
 ```
 
 OpenAI-compatible endpoint:
