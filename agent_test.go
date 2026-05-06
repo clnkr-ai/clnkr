@@ -2648,6 +2648,44 @@ func TestRunWithPolicy(t *testing.T) {
 		}
 	})
 
+	t.Run("unattended resets completion rejections after act progress", func(t *testing.T) {
+		rejected := &DoneTurn{
+			Summary: "Protocol correction: need to continue.",
+			Verification: CompletionVerification{
+				Status: VerificationVerified,
+				Checks: []VerificationCheck{{Command: "true", Outcome: "passed", Evidence: "true exited zero"}},
+			},
+			KnownRisks: []string{},
+		}
+		model := &fakeModel{responses: []Response{
+			{Turn: rejected},
+			mustResponse(actJSON("pwd")),
+			{Turn: rejected},
+			mustResponse(actJSON("pwd")),
+			{Turn: rejected},
+			{Turn: &DoneTurn{
+				Summary: "Created result.txt.",
+				Verification: CompletionVerification{
+					Status: VerificationVerified,
+					Checks: []VerificationCheck{{Command: "test -f result.txt && cat result.txt", Outcome: "passed", Evidence: "result.txt exists and contains expected text"}},
+				},
+				KnownRisks: []string{},
+			}},
+		}}
+		executor := &fakeExecutor{results: []CommandResult{
+			{Command: "pwd", Stdout: "/tmp\n", ExitCode: 0},
+			{Command: "pwd", Stdout: "/tmp\n", ExitCode: 0},
+		}}
+
+		agent := NewAgent(model, executor, "/tmp")
+		if err := agent.Run(context.Background(), "finish"); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if executor.calls != 2 {
+			t.Fatalf("executor calls = %d, want 2", executor.calls)
+		}
+	})
+
 	t.Run("interactive accepts weak structured done without challenge", func(t *testing.T) {
 		model := &fakeModel{responses: []Response{{Turn: &DoneTurn{
 			Summary: "Created result.txt.",

@@ -390,8 +390,22 @@ func validateWrappedTurnShape(raw string) error {
 			}
 		}
 		var risks []string
+		if string(fields["known_risks"]) == "null" {
+			return fmt.Errorf("%w: structured output field %q must be array of strings", clnkr.ErrInvalidJSON, "known_risks")
+		}
 		if err := json.Unmarshal(fields["known_risks"], &risks); err != nil {
 			return fmt.Errorf("%w: structured output field %q must be array of strings", clnkr.ErrInvalidJSON, "known_risks")
+		}
+		var verificationFields map[string]json.RawMessage
+		if err := json.Unmarshal(fields["verification"], &verificationFields); err != nil || verificationFields == nil {
+			return fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, "verification")
+		}
+		rawChecks, ok := verificationFields["checks"]
+		if !ok {
+			return fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, "verification.checks")
+		}
+		if string(rawChecks) == "null" {
+			return fmt.Errorf("%w: structured output field %q must be array", clnkr.ErrInvalidJSON, "verification.checks")
 		}
 	}
 	return nil

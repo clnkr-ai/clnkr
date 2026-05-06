@@ -170,6 +170,61 @@ func TestParseTurn(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects done with null known risks", func(t *testing.T) {
+		raw := `{"type":"done","summary":"Could not verify.","verification":{"status":"not_verified","checks":[]},"known_risks":null}`
+		_, err := clnkr.ParseTurn(raw)
+		if !errors.Is(err, clnkr.ErrInvalidJSON) {
+			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
+		}
+		if !strings.Contains(err.Error(), `known_risks must be an array`) {
+			t.Fatalf("ParseTurn(%q) error = %v, want known_risks array detail", raw, err)
+		}
+	})
+
+	t.Run("rejects done with null verification checks", func(t *testing.T) {
+		raw := `{"type":"done","summary":"Could not verify.","verification":{"status":"not_verified","checks":null},"known_risks":[]}`
+		_, err := clnkr.ParseTurn(raw)
+		if !errors.Is(err, clnkr.ErrInvalidJSON) {
+			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
+		}
+		if !strings.Contains(err.Error(), `verification.checks must be an array`) {
+			t.Fatalf("ParseTurn(%q) error = %v, want verification checks array detail", raw, err)
+		}
+	})
+
+	t.Run("rejects done without known risks", func(t *testing.T) {
+		raw := `{"type":"done","summary":"Finished.","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"tests passed"}]}}`
+		_, err := clnkr.ParseTurn(raw)
+		if !errors.Is(err, clnkr.ErrInvalidJSON) {
+			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
+		}
+		if !strings.Contains(err.Error(), `missing required field "known_risks"`) {
+			t.Fatalf("ParseTurn(%q) error = %v, want missing known_risks detail", raw, err)
+		}
+	})
+
+	t.Run("rejects done without verification checks", func(t *testing.T) {
+		raw := `{"type":"done","summary":"Could not verify.","verification":{"status":"not_verified"},"known_risks":["not run"]}`
+		_, err := clnkr.ParseTurn(raw)
+		if !errors.Is(err, clnkr.ErrInvalidJSON) {
+			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
+		}
+		if !strings.Contains(err.Error(), `missing required field "verification.checks"`) {
+			t.Fatalf("ParseTurn(%q) error = %v, want missing verification checks detail", raw, err)
+		}
+	})
+
+	t.Run("rejects done with non-object verification", func(t *testing.T) {
+		raw := `{"type":"done","summary":"Could not verify.","verification":[],"known_risks":["not run"]}`
+		_, err := clnkr.ParseTurn(raw)
+		if !errors.Is(err, clnkr.ErrInvalidJSON) {
+			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
+		}
+		if !strings.Contains(err.Error(), `cannot unmarshal array`) {
+			t.Fatalf("ParseTurn(%q) error = %v, want unmarshal detail", raw, err)
+		}
+	})
+
 	t.Run("accepts partially verified done with risks", func(t *testing.T) {
 		raw := `{"type":"done","summary":"Implemented the parser change.","verification":{"status":"partially_verified","checks":[{"command":"go test ./...","outcome":"failed","evidence":"one unrelated fixture failed"}]},"known_risks":["full suite still has an unrelated fixture failure"]}`
 		turn, err := clnkr.ParseTurn(raw)

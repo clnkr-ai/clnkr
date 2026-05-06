@@ -31,6 +31,18 @@ func NewAgent(model Model, executor Executor, cwd string) *Agent {
 	return &Agent{model: model, executor: executor, cwd: cwd, MaxSteps: DefaultMaxSteps}
 }
 
+// SetEnv replaces the shell environment snapshot used for future commands.
+func (a *Agent) SetEnv(env map[string]string) {
+	if env == nil {
+		a.env = nil
+		return
+	}
+	a.env = make(map[string]string, len(env))
+	for k, v := range env {
+		a.env[k] = v
+	}
+}
+
 func cloneProviderReplay(items []ProviderReplayItem) []ProviderReplayItem {
 	if len(items) == 0 {
 		return nil
@@ -438,6 +450,7 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 			if err != nil {
 				return a.notifyRunError(fmt.Errorf("clarify: %w", err), steps, modelTurns)
 			}
+			completionRejects = 0
 			a.AppendUserMessage(reply)
 		case *ActTurn:
 			var skipped []BashAction
@@ -468,6 +481,7 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 			if err != nil {
 				return a.notifyRunError(err, steps, modelTurns)
 			}
+			completionRejects = 0
 			steps += execResult.ExecCount
 			a.notify(EventDebug{Message: fmt.Sprintf("step %d/%d", steps, a.MaxSteps)})
 			if a.MaxSteps > 0 && steps >= a.MaxSteps {

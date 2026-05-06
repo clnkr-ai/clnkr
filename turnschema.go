@@ -117,6 +117,9 @@ func strictTurnFromEnvelope(env turnEnvelope, fields map[string]json.RawMessage)
 		if err := rejectPresentField(fields, "question", "done turn only allows question when it is omitted"); err != nil {
 			return nil, err
 		}
+		if err := requireDoneArrayFields(fields); err != nil {
+			return nil, err
+		}
 		verification, err := canonicalCompletionVerification(env.Verification, env.KnownRisks)
 		if err != nil {
 			return nil, err
@@ -132,6 +135,41 @@ func strictTurnFromEnvelope(env turnEnvelope, fields map[string]json.RawMessage)
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnknownTurnType, env.Type)
 	}
+}
+
+func requireDoneArrayFields(fields map[string]json.RawMessage) error {
+	rawVerification, ok := fields["verification"]
+	if !ok {
+		return fmt.Errorf("%w: missing required field %q", ErrInvalidJSON, "verification")
+	}
+	var verificationFields map[string]json.RawMessage
+	if err := json.Unmarshal(rawVerification, &verificationFields); err != nil || verificationFields == nil {
+		return fmt.Errorf("%w: verification must be an object", ErrInvalidJSON)
+	}
+	rawChecks, ok := verificationFields["checks"]
+	if !ok {
+		return fmt.Errorf("%w: missing required field %q", ErrInvalidJSON, "verification.checks")
+	}
+	if string(rawChecks) == "null" {
+		return fmt.Errorf("%w: verification.checks must be an array", ErrInvalidJSON)
+	}
+	var checks []json.RawMessage
+	if err := json.Unmarshal(rawChecks, &checks); err != nil {
+		return fmt.Errorf("%w: verification.checks must be an array", ErrInvalidJSON)
+	}
+
+	rawRisks, ok := fields["known_risks"]
+	if !ok {
+		return fmt.Errorf("%w: missing required field %q", ErrInvalidJSON, "known_risks")
+	}
+	if string(rawRisks) == "null" {
+		return fmt.Errorf("%w: known_risks must be an array", ErrInvalidJSON)
+	}
+	var risks []string
+	if err := json.Unmarshal(rawRisks, &risks); err != nil {
+		return fmt.Errorf("%w: known_risks must be an array", ErrInvalidJSON)
+	}
+	return nil
 }
 
 func canonicalCompletionVerification(raw *completionVerification, knownRisks []string) (CompletionVerification, error) {

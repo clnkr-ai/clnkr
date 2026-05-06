@@ -168,6 +168,16 @@ func TestParseProviderTurn(t *testing.T) {
 			wantErr: clnkr.ErrInvalidJSON,
 		},
 		{
+			name:    "done with null known risks",
+			raw:     `{"turn":{"type":"done","bash":null,"question":null,"summary":"complete","verification":{"status":"not_verified","checks":[]},"known_risks":null,"reasoning":null}}`,
+			wantErr: clnkr.ErrInvalidJSON,
+		},
+		{
+			name:    "done with null verification checks",
+			raw:     `{"turn":{"type":"done","bash":null,"question":null,"summary":"complete","verification":{"status":"not_verified","checks":null},"known_risks":[],"reasoning":null}}`,
+			wantErr: clnkr.ErrInvalidJSON,
+		},
+		{
 			name:    "malformed wrapped act shape",
 			raw:     `{"turn":{"type":"act","bash":{"command":"pwd","workdir":null},"question":null,"summary":null,"reasoning":null}}`,
 			wantErr: clnkr.ErrInvalidJSON,
