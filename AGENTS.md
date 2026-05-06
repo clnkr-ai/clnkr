@@ -56,7 +56,7 @@ clnkr/                  # core: types, Agent, events (stdlib only)
 
 **Act protocol:** Three turn types: `act`, `clarify`, `done`. Providers own wire translation. Root `ParseTurn` validates canonical internal JSON for replay/tests only.
 
-**Events:** Sealed interface, five types: `EventResponse`, `EventCommandStart`, `EventCommandDone`, `EventProtocolFailure`, `EventDebug`. Nil `Notify` = silent.
+**Events:** Sealed interface for typed agent notifications. Keep new event types explicit and exhaustive in adapters. Nil `Notify` = silent.
 
 **Command results (host→model):** JSON with `stdout`, `stderr`, `outcome`, and optional `feedback`. Exit outcomes include `exit_code`; non-exit outcomes include timeout, cancelled, denied, skipped, and error.
 
