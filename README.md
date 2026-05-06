@@ -27,6 +27,7 @@ sudo dpkg -i ./clnkr_<VERSION>-1_<ARCH>.deb
 
 ```bash
 go install github.com/clnkr-ai/clnkr/cmd/clnkr@latest
+go install github.com/clnkr-ai/clnkr/cmd/clnkrd@latest
 ```
 
 Set a provider and run:

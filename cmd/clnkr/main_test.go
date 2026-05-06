@@ -742,6 +742,39 @@ func TestSingleTaskPromptImpliesFullSend(t *testing.T) {
 	}
 }
 
+func TestSingleTaskSeedsCommandEnvFromResolvedProviderFlags(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		content := openAIWrappedDone("Printed resolved provider config.")
+		if calls == 1 {
+			content = `{"turn":{"type":"act","bash":{"commands":[{"command":"printf '%s|%s|%s|%s' \"$CLNKR_PROVIDER\" \"$CLNKR_PROVIDER_API\" \"$CLNKR_MODEL\" \"$CLNKR_BASE_URL\"","workdir":null}]},"question":null,"summary":null,"reasoning":"inspect child env"}}`
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"role": "assistant", "content": content}},
+			},
+			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
+		})
+	}))
+	defer server.Close()
+
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
+		"--provider", "openai",
+		"--provider-api", "openai-chat-completions",
+		"--base-url", server.URL,
+		"--model", "gpt-test",
+		"-p", "print provider env",
+	)
+	if err != nil {
+		t.Fatalf("run main: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+	}
+	want := "openai|openai-chat-completions|gpt-test|" + server.URL
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("stdout = %q, want command output containing %q", stdout.String(), want)
+	}
+}
+
 func TestOpenAIResponsesHarnessFlagsReachRequestAndMetadata(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

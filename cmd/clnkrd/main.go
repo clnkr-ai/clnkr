@@ -55,10 +55,10 @@ Examples:
 }
 
 func main() {
-	os.Exit(runMain(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv))
+	os.Exit(runMain(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv, os.Environ))
 }
 
-func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env func(string) string) int {
+func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env func(string) string, environ func() []string) int {
 	flags := flag.NewFlagSet("clnkrd", flag.ContinueOnError)
 	flags.Usage = func() {}
 	flags.SetOutput(io.Discard)
@@ -143,6 +143,7 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 	}
 
 	agent := clnkr.NewAgent(clnkrapp.NewModelForConfig(cfg, systemPrompt), &clnkr.CommandExecutor{}, cwd)
+	agent.SetEnv(clnkrapp.CommandEnvFromProviderConfig(cfg, environ()))
 	agent.ActProtocol = cfg.ActProtocol
 	agent.Notify = func(event clnkr.Event) {
 		if err := clnkrapp.WriteJSONL(eventOut, event); err != nil {

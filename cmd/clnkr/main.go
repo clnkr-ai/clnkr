@@ -381,6 +381,7 @@ func main() {
 	}
 
 	agent := clnkr.NewAgent(clnkrapp.NewModelForConfigWithOptions(cfg, systemPrompt, clnkrapp.ModelOptions{Unattended: singleTask}), &clnkr.CommandExecutor{}, cwd)
+	agent.SetEnv(clnkrapp.CommandEnvFromProviderConfig(cfg, os.Environ()))
 	agent.ActProtocol = cfg.ActProtocol
 
 	showDebug := *verbose || *verboseShort

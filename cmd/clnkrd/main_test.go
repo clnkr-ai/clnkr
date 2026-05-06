@@ -18,7 +18,7 @@ import (
 
 func TestHelpWritesRichUsageToStdout(t *testing.T) {
 	var out, errOut bytes.Buffer
-	code := runMain([]string{"--help"}, strings.NewReader(""), &out, &errOut, func(string) string { return "" })
+	code := runMain([]string{"--help"}, strings.NewReader(""), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0\nstderr: %s", code, errOut.String())
 	}
