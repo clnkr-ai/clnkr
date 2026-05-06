@@ -35,7 +35,7 @@ type EventProtocolFailure struct {
 // EventCompletionGate fires when unattended completion policy accepts, rejects,
 // or challenges a done turn.
 type EventCompletionGate struct {
-	Decision CompletionDecisionKind
+	Decision string
 	Reasons  []string
 	Summary  string
 }

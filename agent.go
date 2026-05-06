@@ -423,25 +423,25 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 		switch turn := result.Turn.(type) {
 		case *DoneTurn:
 			if gateCompletions {
-				decision := completionGate.Decide(turn, steps, a.MaxSteps)
+				decision, reasons, guidance := completionGate.Decide(turn, steps, a.MaxSteps)
 				a.notify(EventCompletionGate{
-					Decision: decision.Kind,
-					Reasons:  cloneStrings(decision.Reasons),
+					Decision: decision,
+					Reasons:  cloneStrings(reasons),
 					Summary:  turn.Summary,
 				})
-				if decision.Kind == CompletionAccept {
+				if decision == CompletionAccept {
 					return nil
 				}
-				if decision.Kind == CompletionReject {
+				if decision == CompletionReject {
 					completionRejects++
 					if completionRejects >= 3 {
 						return a.notifyRunError(fmt.Errorf("consecutive completion gate rejections, exiting"), steps, modelTurns)
 					}
 				}
-				if decision.Kind == CompletionChallenge {
+				if decision == CompletionChallenge {
 					completionRejects = 0
 				}
-				a.AppendUserMessage(decision.Guidance)
+				a.AppendUserMessage(guidance)
 				continue
 			}
 			return nil

@@ -333,7 +333,7 @@ func main() {
 		*fullSend = true
 	}
 
-	actProtocol, err := clnkr.ParseActProtocol(*actProtocolFlag)
+	actProtocol, err := clnkr.ParseActProtocol(clnkrapp.ActProtocolFlagValue(flags, *actProtocolFlag, os.Getenv))
 	if err != nil {
 		fatalf("%v", err)
 	}

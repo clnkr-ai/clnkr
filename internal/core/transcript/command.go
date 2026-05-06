@@ -35,7 +35,7 @@ func compressCommandStream(name, stream string, salient bool) (string, map[strin
 	if len(stream) <= commandStreamBudget {
 		return stream, nil
 	}
-	marker := "[clnkr: " + name + " compressed; original " + strconv.Itoa(len(stream)) + " bytes, omitted about " + strconv.Itoa(len(stream)-commandStreamBudget) + " bytes]\n"
+	marker := "[clnkr: " + name + " compressed; original " + strconv.Itoa(len(stream)) + " bytes, omitted bytes recorded in observation metadata]\n"
 	keep := max(0, commandStreamBudget-len(marker)-len("\n[head]\n\n[tail]\n\n[salient]\n"))
 	head, tail := keep/3, keep/3
 	middle := salientLines(stream[head:len(stream)-tail], keep-head-tail, salient)

@@ -36,7 +36,7 @@ JSONL commands:
 
 JSONL events:
   debug response protocol_failure approval_request clarify command_start
-  command_done compacted done error
+  command_done completion_gate compacted done error
 
 Options:
       --max-steps int       Limit executed commands before summary
@@ -103,7 +103,7 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 		return fail("cannot get working directory: %v", err)
 	}
 
-	actProtocol, err := clnkr.ParseActProtocol(*actProtocolFlag)
+	actProtocol, err := clnkr.ParseActProtocol(clnkrapp.ActProtocolFlagValue(flags, *actProtocolFlag, env))
 	if err != nil {
 		return fail("%v", err)
 	}

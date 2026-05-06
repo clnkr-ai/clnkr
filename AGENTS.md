@@ -42,7 +42,6 @@ Core importable library at module root. Two command adapters. `evaluations/` con
 clnkr/                  # core: types, Agent, events (stdlib only)
 ├── internal/providers/ # Anthropic/OpenAI adapters
 ├── internal/session    # Session persistence runtime boundary
-├── internal/delegation # Child probe runtime boundary
 ├── cmd/clnkr/          # Plain CLI (root go.mod, no external deps)
 ├── cmd/clnkrd/         # Stdio JSONL adapter
 └── evaluations/        # Eval suites for clankerval

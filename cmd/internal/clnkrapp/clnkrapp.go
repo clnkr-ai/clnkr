@@ -108,6 +108,22 @@ func RequestOptionFlagsSet(flags *flag.FlagSet) (maxOutputTokensSet, thinkingBud
 	return maxOutputTokensSet, thinkingBudgetTokensSet
 }
 
+func ActProtocolFlagValue(flags *flag.FlagSet, flagValue string, env func(string) string) string {
+	flagSet := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "act-protocol" {
+			flagSet = true
+		}
+	})
+	if flagSet {
+		return flagValue
+	}
+	if value := strings.TrimSpace(env("CLNKR_ACT_PROTOCOL")); value != "" {
+		return value
+	}
+	return flagValue
+}
+
 func WriteEventLog(w io.Writer, e clnkr.Event) error {
 	switch e := e.(type) {
 	case clnkr.EventResponse:

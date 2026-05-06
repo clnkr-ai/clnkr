@@ -319,3 +319,24 @@ func TestCanonicalTurnJSONAllowsMoreThanThreeCommands(t *testing.T) {
 		t.Fatalf("commands = %d, want 4", got)
 	}
 }
+
+func TestCanonicalTurnJSONUsesEmptyArraysForNilDoneSlices(t *testing.T) {
+	raw, err := clnkr.CanonicalTurnJSON(&clnkr.DoneTurn{
+		Summary: "Could not verify.",
+		Verification: clnkr.CompletionVerification{
+			Status: clnkr.VerificationNotVerified,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CanonicalTurnJSON error = %v", err)
+	}
+	if !strings.Contains(raw, `"checks":[]`) {
+		t.Fatalf("canonical JSON = %q, want empty checks array", raw)
+	}
+	if !strings.Contains(raw, `"known_risks":[]`) {
+		t.Fatalf("canonical JSON = %q, want empty known_risks array", raw)
+	}
+	if _, err := clnkr.ParseTurn(raw); err != nil {
+		t.Fatalf("ParseTurn(%q) error = %v", raw, err)
+	}
+}

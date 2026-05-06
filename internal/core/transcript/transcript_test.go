@@ -361,6 +361,9 @@ func TestFormatCommandResultReportsActualOmittedBytes(t *testing.T) {
 	if !strings.Contains(payload.Stdout, "[clnkr: stdout compressed; original ") {
 		t.Fatalf("stdout missing compression marker: %q", payload.Stdout)
 	}
+	if strings.Contains(payload.Stdout, "omitted about ") {
+		t.Fatalf("stdout marker has estimated omitted byte count: %q", payload.Stdout)
+	}
 	if payload.Observation.Stdout.Mode != "compressed" {
 		t.Fatalf("stdout mode = %q, want compressed", payload.Observation.Stdout.Mode)
 	}

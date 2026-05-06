@@ -2,49 +2,38 @@ package clnkr
 
 import "strings"
 
-type CompletionDecisionKind string
-
-const (
-	CompletionAccept    CompletionDecisionKind = "accept"
-	CompletionReject    CompletionDecisionKind = "reject"
-	CompletionChallenge CompletionDecisionKind = "challenge"
-)
-
-type CompletionDecision struct {
-	Kind     CompletionDecisionKind
-	Reasons  []string
-	Guidance string
-}
+const CompletionAccept, CompletionReject, CompletionChallenge = "accept", "reject", "challenge"
 
 type CompletionGate struct{ challengesUsed int }
 
-func (g *CompletionGate) Decide(done *DoneTurn, commandsUsed, maxSteps int) CompletionDecision {
+func (g *CompletionGate) Decide(done *DoneTurn, commandsUsed, maxSteps int) (string, []string, string) {
 	if reasons := completionRejectReasons(done, commandsUsed, maxSteps); len(reasons) > 0 {
-		return CompletionDecision{Kind: CompletionReject, Reasons: reasons, Guidance: completionRejectGuidance(reasons[0])}
+		return CompletionReject, reasons, completionRejectGuidance(reasons[0])
 	}
 	if reasons := completionChallengeReasons(done, commandsUsed); len(reasons) > 0 {
 		if g.challengesUsed > 0 {
-			return CompletionDecision{Kind: CompletionAccept, Reasons: []string{"challenge_limit_reached"}}
+			return CompletionAccept, []string{"challenge_limit_reached"}, ""
 		}
 		g.challengesUsed++
-		return CompletionDecision{Kind: CompletionChallenge, Reasons: reasons, Guidance: completionChallengeGuidance()}
+		return CompletionChallenge, reasons, completionChallengeGuidance()
 	}
-	return CompletionDecision{Kind: CompletionAccept}
+	return CompletionAccept, nil, ""
 }
 
 func completionRejectReasons(done *DoneTurn, commandsUsed, maxSteps int) []string {
 	if done == nil {
 		return []string{"missing_done_turn"}
 	}
-	reasons := reasonIf(strings.TrimSpace(done.Summary) == "", "empty_summary")
-	reasons = append(reasons, reasonIf(containsAny(strings.ToLower(done.Summary), incompleteSummaryPhrases), "incomplete_summary")...)
+	var reasons []string
+	reasons = appendReason(reasons, strings.TrimSpace(done.Summary) == "", "empty_summary")
+	reasons = appendReason(reasons, containsAny(strings.ToLower(done.Summary), incompleteSummaryPhrases), "incomplete_summary")
 	switch done.Verification.Status {
 	case VerificationVerified:
-		reasons = append(reasons, reasonIf(len(done.Verification.Checks) == 0, "verified_without_checks")...)
+		reasons = appendReason(reasons, len(done.Verification.Checks) == 0, "verified_without_checks")
 	case VerificationPartiallyVerified:
-		reasons = append(reasons, reasonIf(len(done.KnownRisks) == 0, "partial_without_risks")...)
+		reasons = appendReason(reasons, len(done.KnownRisks) == 0, "partial_without_risks")
 	case VerificationNotVerified:
-		reasons = append(reasons, reasonIf(maxSteps <= 0 || commandsUsed < maxSteps, "not_verified_with_budget_remaining")...)
+		reasons = appendReason(reasons, maxSteps <= 0 || commandsUsed < maxSteps, "not_verified_with_budget_remaining")
 	default:
 		reasons = append(reasons, "invalid_verification_status")
 	}
@@ -53,6 +42,17 @@ func completionRejectReasons(done *DoneTurn, commandsUsed, maxSteps int) []strin
 
 var incompleteSummaryPhrases = []string{"protocol correction", "cannot proceed", "need to continue", "ready to run", "no file changes have been made", "need create"}
 
+type completionChallengeRule struct {
+	claims, checks []string
+	reason         string
+}
+
+var completionChallengeRules = []completionChallengeRule{
+	{[]string{"created ", "wrote ", "saved ", "/", ".go", ".md", ".json", ".txt"}, []string{"test -f", "cat ", "ls ", "stat ", "grep ", "exists", "contains"}, "artifact_claim_without_check"},
+	{[]string{"server", "service", "daemon", "listening"}, []string{"curl ", "nc ", "ss ", "lsof ", "listening", "responded"}, "service_claim_without_liveness_check"},
+	{[]string{"implemented", "fixed", "updated", "changed"}, []string{"test", "go test", "pytest", "npm test", "make check", "passed"}, "implementation_claim_without_behavior_check"},
+}
+
 func completionChallengeReasons(done *DoneTurn, commandsUsed int) []string {
 	if done == nil {
 		return nil
@@ -60,17 +60,10 @@ func completionChallengeReasons(done *DoneTurn, commandsUsed int) []string {
 	summary := strings.ToLower(done.Summary)
 	checks := checksText(done.Verification.Checks)
 	var reasons []string
-	if containsAny(summary, []string{"created ", "wrote ", "saved ", "/", ".go", ".md", ".json", ".txt"}) &&
-		!containsAny(checks, []string{"test -f", "cat ", "ls ", "stat ", "grep ", "exists", "contains"}) {
-		reasons = append(reasons, "artifact_claim_without_check")
-	}
-	if containsAny(summary, []string{"server", "service", "daemon", "listening"}) &&
-		!containsAny(checks, []string{"curl ", "nc ", "ss ", "lsof ", "listening", "responded"}) {
-		reasons = append(reasons, "service_claim_without_liveness_check")
-	}
-	if containsAny(summary, []string{"implemented", "fixed", "updated", "changed"}) &&
-		!containsAny(checks, []string{"test", "go test", "pytest", "npm test", "make check", "passed"}) {
-		reasons = append(reasons, "implementation_claim_without_behavior_check")
+	for _, rule := range completionChallengeRules {
+		if containsAny(summary, rule.claims) && !containsAny(checks, rule.checks) {
+			reasons = append(reasons, rule.reason)
+		}
 	}
 	if commandsUsed == 0 && thinChecks(done.Verification.Checks) {
 		reasons = append(reasons, "early_completion_thin_evidence")
@@ -98,11 +91,11 @@ func containsAny(haystack string, needles []string) bool {
 	return false
 }
 
-func reasonIf(ok bool, reason string) []string {
+func appendReason(reasons []string, ok bool, reason string) []string {
 	if ok {
-		return []string{reason}
+		return append(reasons, reason)
 	}
-	return nil
+	return reasons
 }
 
 func thinChecks(checks []VerificationCheck) bool {

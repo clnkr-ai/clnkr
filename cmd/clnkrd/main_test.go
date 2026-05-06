@@ -28,6 +28,7 @@ func TestHelpWritesRichUsageToStdout(t *testing.T) {
 		"Usage:",
 		"JSONL commands:",
 		"JSONL events:",
+		"completion_gate",
 		"Options:",
 		"Environment:",
 		"Examples:",

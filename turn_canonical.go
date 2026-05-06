@@ -48,10 +48,12 @@ func CanonicalTurnJSON(turn Turn) (string, error) {
 		if err := validateDoneVerification(v.Verification, v.KnownRisks); err != nil {
 			return "", fmt.Errorf("canonical turn json: %w", err)
 		}
+		verification := v.Verification
+		verification.Checks = append([]VerificationCheck{}, verification.Checks...)
 		env = jsonEnvelope{
 			Type:         "done",
 			Summary:      v.Summary,
-			Verification: &v.Verification,
+			Verification: &verification,
 			KnownRisks:   cloneStrings(v.KnownRisks),
 			Reasoning:    v.Reasoning,
 		}
