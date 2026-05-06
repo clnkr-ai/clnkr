@@ -387,7 +387,8 @@ cancelled, denied, skipped, or error.
 **done** turns before accepting completion.
 
 **Clarify turn**
-: A turn that asks the user a non-empty question and stops the run.
+: A turn that asks the user a non-empty question. Policies may answer and
+continue, or stop when no answer is available.
 
 **Done turn**
 : A turn that summarizes completion and stops the run successfully.
