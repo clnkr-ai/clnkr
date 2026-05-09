@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	clnkr "github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
@@ -1132,6 +1133,192 @@ func TestRunSingleTaskRejectsCompactCommandInFullSend(t *testing.T) {
 	}
 }
 
+func TestModelWaitIndicatorPromptModeGating(t *testing.T) {
+	tests := []struct {
+		name       string
+		showPrompt bool
+		singleTask bool
+		verbose    bool
+		stderrTTY  bool
+		wantOutput bool
+	}{
+		{name: "interactive", showPrompt: true, stderrTTY: true, wantOutput: true},
+		{name: "verbose", showPrompt: true, verbose: true, stderrTTY: true},
+		{name: "single task", showPrompt: true, singleTask: true, stderrTTY: true},
+		{name: "piped full send", stderrTTY: true},
+		{name: "non tty stderr", showPrompt: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := &guardedBuffer{}
+			indicator := testModelWaitIndicator(tt.showPrompt && !tt.singleTask && !tt.verbose && tt.stderrTTY, out, time.Millisecond, time.Hour, func() time.Time { return time.Unix(0, 0) })
+
+			updateModelWaitForAgentEvent(indicator, clnkr.EventDebug{Message: modelWaitQueryDebugMessage})
+			if tt.wantOutput {
+				waitForOutput(t, out, "waiting for model")
+			}
+			if indicator != nil {
+				indicator.Stop()
+			}
+
+			if tt.wantOutput && out.Len() == 0 {
+				t.Fatalf("output = %q, want indicator output", out.String())
+			}
+			if !tt.wantOutput && out.Len() != 0 {
+				t.Fatalf("output = %q, want empty", out.String())
+			}
+		})
+	}
+}
+
+func TestModelWaitIndicatorAgentEventsStartAndStop(t *testing.T) {
+	tests := []struct {
+		name  string
+		start clnkr.Event
+		stop  clnkr.Event
+	}{
+		{
+			name:  "query response",
+			start: clnkr.EventDebug{Message: modelWaitQueryDebugMessage},
+			stop:  clnkr.EventResponse{Turn: verifiedDone("done")},
+		},
+		{
+			name:  "step limit summary protocol failure",
+			start: clnkr.EventDebug{Message: modelWaitSummaryDebugMessage},
+			stop:  clnkr.EventProtocolFailure{Reason: "bad json"},
+		},
+		{
+			name:  "usage debug",
+			start: clnkr.EventDebug{Message: modelWaitQueryDebugMessage},
+			stop:  clnkr.EventDebug{Message: "usage: 1 input, 2 output tokens"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := &guardedBuffer{}
+			indicator := testModelWaitIndicator(true, out, time.Millisecond, time.Hour, func() time.Time { return time.Unix(0, 0) })
+
+			updateModelWaitForAgentEvent(indicator, tt.start)
+			waitForOutput(t, out, "waiting for model")
+			updateModelWaitForAgentEvent(indicator, tt.stop)
+
+			if !strings.HasSuffix(out.String(), "\r\x1b[2K") {
+				t.Fatalf("output = %q, want clear after stop event", out.String())
+			}
+		})
+	}
+}
+
+func TestHandleTerminalDriverEventStopsModelWaitBeforeOutput(t *testing.T) {
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	driver := clnkrapp.NewDriver(agent, nil)
+	reader := newLineReader(strings.NewReader("y\n"))
+
+	stderr := captureStderr(t, func() {
+		stop := func() { fmt.Fprint(os.Stderr, "STOP\n") }
+		_, _ = handleTerminalDriverEvent(context.Background(), driver, reader, clnkrapp.EventApprovalRequest{
+			Prompt: "1. printf hi",
+		}, nil, nil, stop)
+	})
+
+	if !strings.HasPrefix(stderr, "STOP\n1. printf hi") {
+		t.Fatalf("stderr = %q, want stop before approval output", stderr)
+	}
+}
+
+func TestHandleTerminalDriverEventStopsModelWaitBeforeErrorReturn(t *testing.T) {
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	driver := clnkrapp.NewDriver(agent, nil)
+	called := false
+
+	pending, err := handleTerminalDriverEvent(context.Background(), driver, newLineReader(strings.NewReader("")), clnkrapp.EventError{
+		Err: errors.New("boom"),
+	}, nil, nil, func() { called = true })
+
+	if !called {
+		t.Fatal("stop hook was not called")
+	}
+	if pending == nil || pending.Error() != "boom" {
+		t.Fatalf("pending error = %v, want boom", pending)
+	}
+	if err != nil {
+		t.Fatalf("handler error = %v, want nil", err)
+	}
+}
+
+func TestRunDriverPromptStopsModelWaitAfterDone(t *testing.T) {
+	out := &guardedBuffer{}
+	modelWait := testModelWaitIndicator(true, out, time.Millisecond, time.Millisecond, func() time.Time { return time.Now() })
+	agent := clnkr.NewAgent(&slowDoneModel{}, &fakeExecutor{}, "/tmp")
+	agent.Notify = func(event clnkr.Event) {
+		updateModelWaitForAgentEvent(modelWait, event)
+	}
+	driver := clnkrapp.NewDriver(agent, nil)
+
+	err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("")), "finish", clnkrapp.PromptModeFullSend, nil, modelWait.Stop)
+	if err != nil {
+		t.Fatalf("runDriverPrompt: %v", err)
+	}
+	before := out.String()
+	time.Sleep(5 * time.Millisecond)
+	if after := out.String(); after != before {
+		t.Fatalf("indicator wrote after run returned:\nbefore=%q\nafter=%q", before, after)
+	}
+}
+
+func TestRunDriverPromptCancelDoesNotRestartModelWait(t *testing.T) {
+	out := &guardedBuffer{}
+	modelWait := testModelWaitIndicator(true, out, time.Millisecond, time.Millisecond, func() time.Time { return time.Now() })
+	model := &cancelThenProtocolFailureModel{release: make(chan struct{}), queried: make(chan struct{})}
+	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
+	agent.Notify = func(event clnkr.Event) {
+		updateModelWaitForAgentEvent(modelWait, event)
+	}
+	driver := clnkrapp.NewDriver(agent, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- runDriverPrompt(ctx, driver, newLineReader(strings.NewReader("")), "finish", clnkrapp.PromptModeFullSend, nil, modelWait.Stop)
+	}()
+
+	<-model.queried
+	waitForOutput(t, out, "waiting for model")
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("runDriverPrompt error = %v, want context.Canceled", err)
+	}
+	before := out.String()
+	close(model.release)
+	time.Sleep(10 * time.Millisecond)
+	if after := out.String(); after != before {
+		t.Fatalf("indicator wrote after canceled run returned:\nbefore=%q\nafter=%q", before, after)
+	}
+}
+
+type slowDoneModel struct{}
+
+func (m *slowDoneModel) Query(context.Context, []clnkr.Message) (clnkr.Response, error) {
+	time.Sleep(5 * time.Millisecond)
+	return clnkr.Response{Turn: verifiedDone("done")}, nil
+}
+
+type cancelThenProtocolFailureModel struct {
+	release chan struct{}
+	queried chan struct{}
+}
+
+func (m *cancelThenProtocolFailureModel) Query(context.Context, []clnkr.Message) (clnkr.Response, error) {
+	select {
+	case <-m.queried:
+	default:
+		close(m.queried)
+	}
+	<-m.release
+	return clnkr.Response{ProtocolErr: errors.New("bad turn")}, nil
+}
+
 func TestRunDriverPromptApprovalReadsReplyAndExecutesCommand(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
 		mustResponse(`{"type":"act","bash":{"commands":[{"command":"printf hi","workdir":null}]}}`),
@@ -1142,7 +1329,7 @@ func TestRunDriverPromptApprovalReadsReplyAndExecutesCommand(t *testing.T) {
 	driver := clnkrapp.NewDriver(agent, nil)
 
 	stderr := captureStderr(t, func() {
-		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("y\n")), "say hi", clnkrapp.PromptModeApproval, nil)
+		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("y\n")), "say hi", clnkrapp.PromptModeApproval, nil, func() {})
 		if err != nil {
 			t.Fatalf("runDriverPrompt: %v", err)
 		}
@@ -1169,7 +1356,7 @@ func TestRunDriverPromptApprovalShowsWorkdir(t *testing.T) {
 	driver := clnkrapp.NewDriver(agent, nil)
 
 	stderr := captureStderr(t, func() {
-		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("y\n")), "clean up", clnkrapp.PromptModeApproval, nil)
+		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("y\n")), "clean up", clnkrapp.PromptModeApproval, nil, func() {})
 		if err != nil {
 			t.Fatalf("runDriverPrompt: %v", err)
 		}
@@ -1189,7 +1376,7 @@ func TestRunDriverPromptClarificationReadsReplyAndContinues(t *testing.T) {
 	driver := clnkrapp.NewDriver(agent, nil)
 
 	stderr := captureStderr(t, func() {
-		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("/tmp/repo\n")), "inspect", clnkrapp.PromptModeApproval, nil)
+		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("/tmp/repo\n")), "inspect", clnkrapp.PromptModeApproval, nil, func() {})
 		if err != nil {
 			t.Fatalf("runDriverPrompt: %v", err)
 		}
@@ -1219,7 +1406,7 @@ func TestRunDriverPromptApprovalCanBeCanceled(t *testing.T) {
 	driver := clnkrapp.NewDriver(agent, nil)
 
 	captureStderr(t, func() {
-		err := runDriverPrompt(ctx, driver, &lineReader{lines: make(chan lineResult)}, "clean up", clnkrapp.PromptModeApproval, nil)
+		err := runDriverPrompt(ctx, driver, &lineReader{lines: make(chan lineResult)}, "clean up", clnkrapp.PromptModeApproval, nil, func() {})
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("got %v, want context.Canceled", err)
 		}

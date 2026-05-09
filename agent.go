@@ -401,7 +401,7 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 	completionRejects := 0
 	gateCompletions := policyUsesCompletionGate(policy)
 
-	for {
+	for ctx.Err() == nil {
 		a.appendStateMessageIfNeeded()
 		a.appendResourceStateMessage(steps, modelTurns)
 		result, err := a.Step(ctx)
@@ -497,6 +497,7 @@ func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy
 			return a.notifyRunError(fmt.Errorf("unhandled turn type %T", turn), steps, modelTurns)
 		}
 	}
+	return a.notifyRunError(ctx.Err(), steps, modelTurns)
 }
 
 func policyUsesCompletionGate(policy RunPolicy) bool {
