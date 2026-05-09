@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/clnkr-ai/clnkr"
@@ -136,7 +137,9 @@ func (r *lineReader) ReadLine(ctx context.Context) (string, error) {
 	}
 }
 
-func runDriverPrompt(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, input string, mode string, eventLog io.Writer) error {
+func runDriverPrompt(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, input string, mode string, eventLog io.Writer, stopModelWait func()) error {
+	defer stopModelWait()
+
 	promptCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -150,13 +153,13 @@ func runDriverPrompt(ctx context.Context, driver *clnkrapp.Driver, reader *lineR
 		select {
 		case event := <-driver.Events():
 			var err error
-			pendingErr, err = handleTerminalDriverEvent(promptCtx, driver, reader, event, pendingErr, eventLog)
+			pendingErr, err = handleTerminalDriverEvent(promptCtx, driver, reader, event, pendingErr, eventLog, stopModelWait)
 			if err != nil {
 				cancel()
 				return err
 			}
 		case err := <-errCh:
-			return drainDriverEvents(promptCtx, driver, reader, pendingErr, err, eventLog)
+			return drainDriverEvents(promptCtx, driver, reader, pendingErr, err, eventLog, stopModelWait)
 		case <-ctx.Done():
 			cancel()
 			return ctx.Err()
@@ -164,12 +167,12 @@ func runDriverPrompt(ctx context.Context, driver *clnkrapp.Driver, reader *lineR
 	}
 }
 
-func drainDriverEvents(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, pendingErr error, runErr error, eventLog io.Writer) error {
+func drainDriverEvents(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, pendingErr error, runErr error, eventLog io.Writer, stopModelWait func()) error {
 	for {
 		select {
 		case event := <-driver.Events():
 			var err error
-			pendingErr, err = handleTerminalDriverEvent(ctx, driver, reader, event, pendingErr, eventLog)
+			pendingErr, err = handleTerminalDriverEvent(ctx, driver, reader, event, pendingErr, eventLog, stopModelWait)
 			if err != nil && runErr == nil {
 				runErr = err
 			}
@@ -179,7 +182,8 @@ func drainDriverEvents(ctx context.Context, driver *clnkrapp.Driver, reader *lin
 	}
 }
 
-func handleTerminalDriverEvent(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, event clnkrapp.DriverEvent, pendingErr error, eventLog io.Writer) (error, error) {
+func handleTerminalDriverEvent(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, event clnkrapp.DriverEvent, pendingErr error, eventLog io.Writer, stopModelWait func()) (error, error) {
+	stopModelWait()
 	if eventErr, ok := event.(clnkrapp.EventError); ok {
 		return eventErr.Err, nil
 	}
@@ -398,7 +402,9 @@ func main() {
 	agent.ActProtocol = cfg.ActProtocol
 
 	showDebug := *verbose || *verboseShort
+	var modelWait *modelWaitIndicator
 	agent.Notify = func(e clnkr.Event) {
+		updateModelWaitForAgentEvent(modelWait, e)
 		switch e := e.(type) {
 		case clnkr.EventResponse:
 			switch turn := e.Turn.(type) {
@@ -476,7 +482,7 @@ func main() {
 		if err := clnkrapp.RejectCompactCommand(taskPrompt); err != nil {
 			fatalf("%v", err)
 		}
-		runErr := runDriverPrompt(ctx, driver, newLineReader(strings.NewReader("")), taskPrompt, clnkrapp.PromptModeFullSend, eventLogFile)
+		runErr := runDriverPrompt(ctx, driver, newLineReader(strings.NewReader("")), taskPrompt, clnkrapp.PromptModeFullSend, eventLogFile, func() {})
 		if *trajectory != "" {
 			if err := clnkrapp.WriteTrajectory(*trajectory, agent.Messages()); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -505,6 +511,9 @@ func main() {
 	if *fullSend {
 		mode = clnkrapp.PromptModeFullSend
 	}
+	if showPrompt && !singleTask && !showDebug && isTerminal(os.Stderr.Fd()) {
+		modelWait = &modelWaitIndicator{out: os.Stderr, delay: time.Second, tick: 250 * time.Millisecond, now: time.Now}
+	}
 	var loopErr error
 	for {
 		if showPrompt {
@@ -522,7 +531,7 @@ func main() {
 			continue
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-		if err := runDriverPrompt(ctx, driver, reader, input, mode, eventLogFile); err != nil {
+		if err := runDriverPrompt(ctx, driver, reader, input, mode, eventLogFile, modelWait.Stop); err != nil {
 			if !showPrompt {
 				stop()
 				loopErr = err
