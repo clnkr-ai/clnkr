@@ -4,7 +4,7 @@
 
 A minimal coding agent CLI.
 
-<img width="719" alt="clnkr terminal mascot" src="site/static/readme-terminal.png">
+<img width="1388" height="826" alt="alacritty-2026-05-09-220219" src="https://github.com/user-attachments/assets/74370dc6-d954-4697-8080-fec8f49a9acd" />
 
 Warning: `clnkr` executes bash directly. There is no permission system and no sandbox. Run it only in environments you are willing to trust and break.
 
