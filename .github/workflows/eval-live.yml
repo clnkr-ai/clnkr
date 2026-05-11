@@ -13,9 +13,8 @@ jobs:
         id: config
         run: |
           if [ -z "${CLNKR_EVALUATION_API_KEY}" ]; then
-            echo "Live evaluation skipped: OPENAI_API_KEY secret is not set."
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "Live evaluation failed: OPENAI_API_KEY secret is not set." >&2
+            exit 1
           fi
           echo "configured=true" >> "$GITHUB_OUTPUT"
         env:
@@ -105,9 +104,8 @@ jobs:
         id: config
         run: |
           if [ -z "${CLNKR_EVALUATION_API_KEY}" ]; then
-            echo "Live evaluation skipped: ANTHROPIC_API_KEY secret is not set."
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "Live evaluation failed: ANTHROPIC_API_KEY secret is not set." >&2
+            exit 1
           fi
           echo "configured=true" >> "$GITHUB_OUTPUT"
         env:
