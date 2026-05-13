@@ -13,9 +13,7 @@ import (
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/compaction"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
-	"github.com/clnkr-ai/clnkr/internal/providers/anthropic"
-	"github.com/clnkr-ai/clnkr/internal/providers/openai"
-	"github.com/clnkr-ai/clnkr/internal/providers/openairesponses"
+	"github.com/clnkr-ai/clnkr/internal/providerfactory"
 	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
 	"github.com/clnkr-ai/clnkr/internal/session"
 )
@@ -36,38 +34,18 @@ func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt s
 
 // NewModelForConfigWithOptions creates the provider model for a resolved config.
 func NewModelForConfigWithOptions(cfg providerconfig.ResolvedProviderConfig, systemPrompt string, modelOpts ModelOptions) model {
-	opts := cfg.RequestOptions
-	switch {
-	case cfg.Provider == providerdomain.ProviderAnthropic:
-		anthropicOpts := anthropic.Options{}
-		if opts.Output.MaxOutputTokens.Set {
-			anthropicOpts.MaxTokens = opts.Output.MaxOutputTokens.Value
-		}
-		if opts.AnthropicManual.ThinkingBudgetTokens.Set {
-			anthropicOpts.ThinkingBudgetTokens = opts.AnthropicManual.ThinkingBudgetTokens.Value
-			anthropicOpts.ThinkingMode = anthropic.ThinkingModeManual
-		}
-		if opts.Effort.Set && opts.Effort.Level != "auto" {
-			anthropicOpts.Effort = opts.Effort.Level
-			anthropicOpts.ThinkingMode = anthropic.ThinkingModeAdaptive
-		}
-		anthropicOpts.UseBashToolCalls = cfg.ActProtocol == clnkr.ActProtocolToolCalls
-		anthropicOpts.Unattended = modelOpts.Unattended
-		return anthropic.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, anthropicOpts)
-	case cfg.ProviderAPI == providerdomain.ProviderAPIOpenAIResponses:
-		var effort string
-		if opts.Effort.Set && opts.Effort.Level != "auto" {
-			effort = opts.Effort.Level
-		}
-		return openairesponses.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, openairesponses.Options{
-			ReasoningEffort:    effort,
-			MaxOutputTokens:    opts.Output.MaxOutputTokens.Value,
-			HasMaxOutputTokens: opts.Output.MaxOutputTokens.Set,
-			UseBashToolCalls:   cfg.ActProtocol == clnkr.ActProtocolToolCalls,
-			Unattended:         modelOpts.Unattended,
-		})
-	default:
-		return openai.NewModelWithOptions(cfg.BaseURL, cfg.APIKey, cfg.Model, systemPrompt, openai.Options{Unattended: modelOpts.Unattended})
+	return providerfactory.NewModelWithOptions(providerFactoryConfig(cfg), systemPrompt, providerfactory.Options{Unattended: modelOpts.Unattended})
+}
+
+func providerFactoryConfig(cfg providerconfig.ResolvedProviderConfig) providerfactory.Config {
+	return providerfactory.Config{
+		Provider:       cfg.Provider,
+		ProviderAPI:    cfg.ProviderAPI,
+		Model:          cfg.Model,
+		BaseURL:        cfg.BaseURL,
+		APIKey:         cfg.APIKey,
+		ActProtocol:    cfg.ActProtocol,
+		RequestOptions: cfg.RequestOptions,
 	}
 }
 

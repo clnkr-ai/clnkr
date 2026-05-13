@@ -30,7 +30,7 @@ CLANKERVAL_PREFLIGHT = \
 	check test evaluations evaluations-live evaluations-live-openai evaluations-live-anthropic \
 	help man docs docs-serve \
 	_build-clnkr _build-clnkrd \
-	_fmt _fmt-check _vet _lint _arch sloc frontend-sloc _workflow-make-targets \
+	_fmt _fmt-check _vet _lint _arch _script-tests sloc frontend-sloc _workflow-make-targets \
 	_hooks _check-docs _require-run-clnkr-tools _require-pandoc _require-readme-image-tools _site-sync _site-build
 
 PREFIX ?= /usr/local
@@ -79,7 +79,7 @@ _build-clnkrd:
 	go build -trimpath -ldflags '$(LDFLAGS)' -o clnkrd ./cmd/clnkrd/
 
 ##@ Quality
-check: _fmt-check _vet _lint _arch sloc frontend-sloc _workflow-make-targets _check-docs test evaluations ## Run formatting, vet, lint, architecture, SLOC, workflow, docs, test, and evaluation checks
+check: _fmt-check _vet _lint _arch _script-tests sloc frontend-sloc _workflow-make-targets _check-docs test evaluations ## Run formatting, vet, lint, architecture, script tests, SLOC, workflow, docs, test, and evaluation checks
 
 test: ## Run all tests
 	go test ./... -v
@@ -124,6 +124,9 @@ _lint:
 
 _arch:
 	@./scripts/check-architecture-imports.sh
+
+_script-tests:
+	./scripts/test/check-architecture-imports.sh
 
 # Repo-root only: counts repo-local Go files in the main-module dependency closure of `.`.
 sloc: ## Report core runtime graph SLOC and fail if it exceeds CORE_SLOC_LIMIT
