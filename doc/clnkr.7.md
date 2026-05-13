@@ -82,6 +82,37 @@ exit status.
 agent and driver, reads JSONL commands from stdin, writes JSONL events to
 stdout, and writes diagnostics to stderr.
 
+At the highest level, the object interactions look like this:
+
+```text
+                    +------------------+
+                    |     Frontend     |
+                    | clnkr / clnkrd   |
+                    +---------+--------+
+                              |
+                              | prompts, approvals,
+                              | clarify replies, events
+                              v
+                    +------------------+
+                    |      Driver      |
+                    | frontend policy  |
+                    +---------+--------+
+                              |
+                              | run policy hooks
+                              v
++------------------+    +-----+------------+    +------------------+
+| Provider adapter |<-->|      Agent       |<-->|    Executor      |
+| Anthropic/OpenAI |    | run + transcript |    | bash on host     |
++------------------+    +-----+------------+    +------------------+
+                              |
+                              | owns/appends
+                              v
+                    +------------------+
+                    |   Transcript     |
+                    | canonical history|
+                    +------------------+
+```
+
 The main boundary is **Step** versus **RunWithPolicy**. **Step** performs one
 model query and protocol parse. **RunWithPolicy** owns the control loop:
 appending resource-state messages before queries, retrying after protocol
