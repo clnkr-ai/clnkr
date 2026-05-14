@@ -149,6 +149,202 @@ done
 
 rm -rf cmd/clnkr
 
+mkdir -p cmd/clnkr cmd/internal/clnkrapp
+cat > cmd/internal/clnkrapp/clnkrapp.go <<'GO'
+package clnkrapp
+GO
+cat > cmd/clnkr/cli_options.go <<'GO'
+package main
+
+import _ "example.test/clnkr/cmd/internal/clnkrapp"
+GO
+
+set +e
+output="$(./check-architecture-imports.sh 2>&1)"
+status=$?
+set -e
+
+if [[ $status -ne 1 ]]; then
+  echo "expected CLI parser app import to fail with status 1, got $status" >&2
+  echo "$output" >&2
+  exit 1
+fi
+
+for expected in \
+  "error: architecture import boundary violation" \
+  "rule: ARCH012 cli-parser-boundary" \
+  "importer: cmd/clnkr/cli_options.go" \
+  "target: example.test/clnkr/cmd/internal/clnkrapp" \
+  "import_source: file_imports" \
+  "trusted_rule: CLI option parsing must stay local and stdlib-only." \
+  "source_fact: file import scan reported importer imports target." \
+  "guidance: keep cmd/clnkr/cli_*.go parser-only; move app-service and config-resolution calls out of the parser."
+do
+  if [[ "$output" != *"$expected"* ]]; then
+    echo "missing expected output: $expected" >&2
+    echo "$output" >&2
+    exit 1
+  fi
+done
+
+cat > cmd/clnkr/cli_options.go <<'GO'
+package main
+
+import "flag"
+
+func valueFlag(arg string) bool {
+	switch arg {
+	case "-p":
+		return true
+	default:
+		return false
+	}
+}
+
+var _ = flag.ContinueOnError
+GO
+
+cat >> go.mod <<'MOD'
+
+require foo v0.0.0
+
+replace foo => ./foo
+MOD
+mkdir -p foo/pkg
+cat > foo/go.mod <<'MOD'
+module foo
+
+go 1.24
+MOD
+cat > foo/pkg/pkg.go <<'GO'
+package pkg
+GO
+cat > cmd/clnkr/cli_options.go <<'GO'
+package main
+
+import _ "foo/pkg"
+GO
+
+set +e
+output="$(./check-architecture-imports.sh 2>&1)"
+status=$?
+set -e
+
+if [[ $status -ne 1 ]]; then
+  echo "expected CLI parser no-dot non-stdlib import to fail with status 1, got $status" >&2
+  echo "$output" >&2
+  exit 1
+fi
+
+for expected in \
+  "error: architecture import boundary violation" \
+  "rule: ARCH012 cli-parser-boundary" \
+  "importer: cmd/clnkr/cli_options.go" \
+  "target: foo/pkg" \
+  "import_source: file_imports"
+do
+  if [[ "$output" != *"$expected"* ]]; then
+    echo "missing expected output: $expected" >&2
+    echo "$output" >&2
+    exit 1
+  fi
+done
+
+cat > cmd/clnkr/cli_options.go <<'GO'
+package main
+
+import "flag"
+
+var _ = flag.ContinueOnError
+GO
+
+cat >> go.mod <<'MOD'
+
+require example.com/notstdlib v0.0.0
+
+replace example.com/notstdlib => ./notstdlib
+MOD
+mkdir -p notstdlib/pkg
+cat > notstdlib/go.mod <<'MOD'
+module example.com/notstdlib
+
+go 1.24
+MOD
+cat > notstdlib/pkg/pkg.go <<'GO'
+package pkg
+GO
+cat > cmd/clnkr/cli_options.go <<'GO'
+package main
+
+import _ "example.com/notstdlib/pkg"
+GO
+
+set +e
+output="$(./check-architecture-imports.sh 2>&1)"
+status=$?
+set -e
+
+if [[ $status -ne 1 ]]; then
+  echo "expected CLI parser non-stdlib import to fail with status 1, got $status" >&2
+  echo "$output" >&2
+  exit 1
+fi
+
+for expected in \
+  "error: architecture import boundary violation" \
+  "rule: ARCH012 cli-parser-boundary" \
+  "importer: cmd/clnkr/cli_options.go" \
+  "target: example.com/notstdlib/pkg" \
+  "import_source: file_imports"
+do
+  if [[ "$output" != *"$expected"* ]]; then
+    echo "missing expected output: $expected" >&2
+    echo "$output" >&2
+    exit 1
+  fi
+done
+
+cat > cmd/clnkr/cli_options.go <<'GO'
+package main
+
+import "flag"
+
+var _ = flag.ContinueOnError
+GO
+
+cat > cmd/clnkr/cli_helper.go <<'GO'
+package main
+
+import _ "example.com/notstdlib/pkg"
+GO
+
+set +e
+output="$(./check-architecture-imports.sh 2>&1)"
+status=$?
+set -e
+
+if [[ $status -ne 1 ]]; then
+  echo "expected CLI parser helper non-stdlib import to fail with status 1, got $status" >&2
+  echo "$output" >&2
+  exit 1
+fi
+
+for expected in \
+  "error: architecture import boundary violation" \
+  "rule: ARCH012 cli-parser-boundary" \
+  "importer: cmd/clnkr/cli_helper.go" \
+  "target: example.com/notstdlib/pkg" \
+  "import_source: file_imports"
+do
+  if [[ "$output" != *"$expected"* ]]; then
+    echo "missing expected output: $expected" >&2
+    echo "$output" >&2
+    exit 1
+  fi
+done
+
+rm -f cmd/clnkr/cli_helper.go
+
 output="$(./check-architecture-imports.sh 2>&1)"
 if [[ "$output" != *"target architecture import checks passed"* ]]; then
   echo "missing success output" >&2

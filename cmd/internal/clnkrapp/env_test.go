@@ -1,7 +1,6 @@
 package clnkrapp
 
 import (
-	"flag"
 	"testing"
 
 	"github.com/clnkr-ai/clnkr"
@@ -38,52 +37,6 @@ func TestCommandEnvFromProviderConfig(t *testing.T) {
 	}
 	if _, ok := got["malformed"]; ok {
 		t.Fatalf("malformed env entry was preserved: %#v", got)
-	}
-}
-
-func TestActProtocolFlagValueUsesEnvWhenFlagUnset(t *testing.T) {
-	flags := flag.NewFlagSet("test", flag.ContinueOnError)
-	flagValue := flags.String("act-protocol", "auto", "")
-	if err := flags.Parse(nil); err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-
-	got := ActProtocolFlagValue(flags, *flagValue, func(key string) string {
-		if key == "CLNKR_ACT_PROTOCOL" {
-			return "tool-calls"
-		}
-		return ""
-	})
-	if got != "tool-calls" {
-		t.Fatalf("act protocol = %q, want tool-calls", got)
-	}
-}
-
-func TestActProtocolFlagValuePrefersFlag(t *testing.T) {
-	flags := flag.NewFlagSet("test", flag.ContinueOnError)
-	flagValue := flags.String("act-protocol", "auto", "")
-	if err := flags.Parse([]string{"--act-protocol", "tool-calls"}); err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-
-	got := ActProtocolFlagValue(flags, *flagValue, func(string) string {
-		return "clnkr-inline"
-	})
-	if got != "tool-calls" {
-		t.Fatalf("act protocol = %q, want tool-calls", got)
-	}
-}
-
-func TestActProtocolFlagValueDefaultsAuto(t *testing.T) {
-	flags := flag.NewFlagSet("test", flag.ContinueOnError)
-	flagValue := flags.String("act-protocol", "auto", "")
-	if err := flags.Parse(nil); err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-
-	got := ActProtocolFlagValue(flags, *flagValue, func(string) string { return "" })
-	if got != "auto" {
-		t.Fatalf("act protocol = %q, want auto", got)
 	}
 }
 

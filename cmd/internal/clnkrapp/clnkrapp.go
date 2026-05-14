@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -71,34 +70,6 @@ func RequestOptions(effort string, maxOutputTokens int, maxOutputTokensSet bool,
 
 func requestInt(value int, set bool) providerdomain.OptionalInt {
 	return providerdomain.OptionalInt{Value: value, Set: set}
-}
-
-func RequestOptionFlagsSet(flags *flag.FlagSet) (maxOutputTokensSet, thinkingBudgetTokensSet bool) {
-	flags.Visit(func(f *flag.Flag) {
-		switch f.Name {
-		case "max-output-tokens":
-			maxOutputTokensSet = true
-		case "thinking-budget-tokens":
-			thinkingBudgetTokensSet = true
-		}
-	})
-	return maxOutputTokensSet, thinkingBudgetTokensSet
-}
-
-func ActProtocolFlagValue(flags *flag.FlagSet, flagValue string, env func(string) string) string {
-	flagSet := false
-	flags.Visit(func(f *flag.Flag) {
-		if f.Name == "act-protocol" {
-			flagSet = true
-		}
-	})
-	if flagSet {
-		return flagValue
-	}
-	if value := strings.TrimSpace(env("CLNKR_ACT_PROTOCOL")); value != "" {
-		return value
-	}
-	return flagValue
 }
 
 func WriteEventLog(w io.Writer, e clnkr.Event) error {

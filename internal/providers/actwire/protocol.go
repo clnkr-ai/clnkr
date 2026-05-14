@@ -308,68 +308,14 @@ func validateWrappedTurnShape(raw string) error {
 	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
 		return fmt.Errorf("%w: %v", clnkr.ErrInvalidJSON, err)
 	}
-	if _, ok := fields["type"]; !ok {
-		return fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, "type")
-	}
-
-	var turnType string
-	if err := json.Unmarshal(fields["type"], &turnType); err != nil {
-		return fmt.Errorf("%w: structured output field %q must be string", clnkr.ErrInvalidJSON, "type")
+	turnType, err := stringField(fields, "type", "type")
+	if err != nil {
+		return err
 	}
 
 	switch turnType {
 	case "act":
-		rawBash, ok := fields["bash"]
-		if !ok {
-			return fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, "bash")
-		}
-		var bashFields map[string]json.RawMessage
-		if err := json.Unmarshal(rawBash, &bashFields); err != nil {
-			return fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, "bash")
-		}
-		if bashFields == nil {
-			return fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, "bash")
-		}
-		if _, ok := bashFields["commands"]; !ok {
-			return fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, "bash.commands")
-		}
-		var commands []json.RawMessage
-		if err := json.Unmarshal(bashFields["commands"], &commands); err != nil {
-			return fmt.Errorf("%w: structured output field %q must be array", clnkr.ErrInvalidJSON, "bash.commands")
-		}
-		if len(commands) == 0 {
-			return fmt.Errorf("%w: structured output field %q must contain at least 1 item", clnkr.ErrInvalidJSON, "bash.commands")
-		}
-		for i, rawCommand := range commands {
-			var commandFields map[string]json.RawMessage
-			if err := json.Unmarshal(rawCommand, &commandFields); err != nil {
-				return fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, fmt.Sprintf("bash.commands[%d]", i))
-			}
-			if commandFields == nil {
-				return fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, fmt.Sprintf("bash.commands[%d]", i))
-			}
-			for _, field := range []string{"command", "workdir"} {
-				if _, ok := commandFields[field]; !ok {
-					return fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, fmt.Sprintf("bash.commands[%d].%s", i, field))
-				}
-			}
-			var command string
-			if err := json.Unmarshal(commandFields["command"], &command); err != nil {
-				return fmt.Errorf("%w: structured output field %q must be string", clnkr.ErrInvalidJSON, fmt.Sprintf("bash.commands[%d].command", i))
-			}
-			if string(commandFields["workdir"]) != "null" {
-				var workdir string
-				if err := json.Unmarshal(commandFields["workdir"], &workdir); err != nil {
-					return fmt.Errorf("%w: structured output field %q must be string or null", clnkr.ErrInvalidJSON, fmt.Sprintf("bash.commands[%d].workdir", i))
-				}
-			}
-		}
-		if err := rejectNonNullField(fields, "question", "act turn only allows question when it is null or omitted"); err != nil {
-			return err
-		}
-		if err := rejectNonNullField(fields, "summary", "act turn only allows summary when it is null or omitted"); err != nil {
-			return err
-		}
+		return validateActShape(fields)
 	case "clarify":
 		if err := rejectNonNullField(fields, "bash", "clarify turn only allows bash when it is null or omitted"); err != nil {
 			return err
@@ -378,35 +324,157 @@ func validateWrappedTurnShape(raw string) error {
 			return err
 		}
 	case "done":
-		if err := rejectNonNullField(fields, "bash", "done turn only allows bash when it is null or omitted"); err != nil {
+		return validateDoneShape(fields)
+	}
+	return nil
+}
+
+func validateActShape(fields map[string]json.RawMessage) error {
+	bashFields, err := objectField(fields, "bash", "bash")
+	if err != nil {
+		return err
+	}
+	commands, err := rawArrayField(bashFields, "commands", "bash.commands")
+	if err != nil {
+		return err
+	}
+	if len(commands) == 0 {
+		return fmt.Errorf("%w: structured output field %q must contain at least 1 item", clnkr.ErrInvalidJSON, "bash.commands")
+	}
+	for i, rawCommand := range commands {
+		if err := validateCommandShape(rawCommand, i); err != nil {
 			return err
 		}
-		if err := rejectNonNullField(fields, "question", "done turn only allows question when it is null or omitted"); err != nil {
+	}
+	if err := rejectNonNullField(fields, "question", "act turn only allows question when it is null or omitted"); err != nil {
+		return err
+	}
+	return rejectNonNullField(fields, "summary", "act turn only allows summary when it is null or omitted")
+}
+
+func validateCommandShape(raw json.RawMessage, index int) error {
+	field := fmt.Sprintf("bash.commands[%d]", index)
+	commandFields, err := objectValue(raw, field)
+	if err != nil {
+		return err
+	}
+	for _, name := range []string{"command", "workdir"} {
+		if _, err := requiredField(commandFields, name, fmt.Sprintf("%s.%s", field, name)); err != nil {
 			return err
 		}
-		for _, field := range []string{"summary", "verification", "known_risks"} {
-			if _, ok := fields[field]; !ok {
-				return fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, field)
-			}
+	}
+	if _, err := stringField(commandFields, "command", field+".command"); err != nil {
+		return err
+	}
+	return nullableStringField(commandFields, "workdir", field+".workdir")
+}
+
+func validateDoneShape(fields map[string]json.RawMessage) error {
+	if err := rejectNonNullField(fields, "bash", "done turn only allows bash when it is null or omitted"); err != nil {
+		return err
+	}
+	if err := rejectNonNullField(fields, "question", "done turn only allows question when it is null or omitted"); err != nil {
+		return err
+	}
+	for _, field := range []string{"summary", "verification", "known_risks"} {
+		if _, err := requiredField(fields, field, field); err != nil {
+			return err
 		}
-		var risks []string
-		if string(fields["known_risks"]) == "null" {
-			return fmt.Errorf("%w: structured output field %q must be array of strings", clnkr.ErrInvalidJSON, "known_risks")
-		}
-		if err := json.Unmarshal(fields["known_risks"], &risks); err != nil {
-			return fmt.Errorf("%w: structured output field %q must be array of strings", clnkr.ErrInvalidJSON, "known_risks")
-		}
-		var verificationFields map[string]json.RawMessage
-		if err := json.Unmarshal(fields["verification"], &verificationFields); err != nil || verificationFields == nil {
-			return fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, "verification")
-		}
-		rawChecks, ok := verificationFields["checks"]
-		if !ok {
-			return fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, "verification.checks")
-		}
-		if string(rawChecks) == "null" {
-			return fmt.Errorf("%w: structured output field %q must be array", clnkr.ErrInvalidJSON, "verification.checks")
-		}
+	}
+	if err := stringArrayField(fields, "known_risks", "known_risks"); err != nil {
+		return err
+	}
+	verificationFields, err := objectField(fields, "verification", "verification")
+	if err != nil {
+		return err
+	}
+	rawChecks, err := requiredField(verificationFields, "checks", "verification.checks")
+	if err != nil {
+		return err
+	}
+	if string(rawChecks) == "null" {
+		return fmt.Errorf("%w: structured output field %q must be array", clnkr.ErrInvalidJSON, "verification.checks")
+	}
+	return nil
+}
+
+func requiredField(fields map[string]json.RawMessage, key, label string) (json.RawMessage, error) {
+	raw, ok := fields[key]
+	if !ok {
+		return nil, fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, label)
+	}
+	return raw, nil
+}
+
+func stringField(fields map[string]json.RawMessage, key, label string) (string, error) {
+	raw, err := requiredField(fields, key, label)
+	if err != nil {
+		return "", err
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", fmt.Errorf("%w: structured output field %q must be string", clnkr.ErrInvalidJSON, label)
+	}
+	return value, nil
+}
+
+func nullableStringField(fields map[string]json.RawMessage, key, label string) error {
+	raw, err := requiredField(fields, key, label)
+	if err != nil {
+		return err
+	}
+	if string(raw) == "null" {
+		return nil
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return fmt.Errorf("%w: structured output field %q must be string or null", clnkr.ErrInvalidJSON, label)
+	}
+	return nil
+}
+
+func objectField(fields map[string]json.RawMessage, key, label string) (map[string]json.RawMessage, error) {
+	raw, err := requiredField(fields, key, label)
+	if err != nil {
+		return nil, err
+	}
+	return objectValue(raw, label)
+}
+
+func objectValue(raw json.RawMessage, field string) (map[string]json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, field)
+	}
+	if fields == nil {
+		return nil, fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, field)
+	}
+	return fields, nil
+}
+
+func rawArrayField(fields map[string]json.RawMessage, key, label string) ([]json.RawMessage, error) {
+	raw, err := requiredField(fields, key, label)
+	if err != nil {
+		return nil, err
+	}
+	var values []json.RawMessage
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, fmt.Errorf("%w: structured output field %q must be array", clnkr.ErrInvalidJSON, label)
+	}
+	return values, nil
+}
+
+func stringArrayField(fields map[string]json.RawMessage, key, label string) error {
+	raw, err := requiredField(fields, key, label)
+	if err != nil {
+		return err
+	}
+	if string(raw) == "null" {
+		return fmt.Errorf("%w: structured output field %q must be array of strings", clnkr.ErrInvalidJSON, label)
+	}
+	var values []string
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return fmt.Errorf("%w: structured output field %q must be array of strings", clnkr.ErrInvalidJSON, label)
 	}
 	return nil
 }

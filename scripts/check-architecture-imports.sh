@@ -13,6 +13,7 @@ internal_session="$module/internal/session"
 ACTIVE_RULES=(
   "ARCH010 frontend-provider-construction"
   "ARCH011 frontend-session-boundary"
+  "ARCH012 cli-parser-boundary"
 )
 
 readonly RULE_FRONTEND_PROVIDER="ARCH010 frontend-provider-construction"
@@ -21,6 +22,9 @@ readonly RULE_FRONTEND_PROVIDER_GUIDANCE="move provider construction behind inte
 readonly RULE_FRONTEND_SESSION="ARCH011 frontend-session-boundary"
 readonly RULE_FRONTEND_SESSION_TEXT="frontend adapters must use cmd/internal/clnkrapp instead of importing internal/session directly."
 readonly RULE_FRONTEND_SESSION_GUIDANCE="move session persistence calls behind cmd/internal/clnkrapp; do not import internal/session from cmd/... outside cmd/internal/clnkrapp."
+readonly RULE_CLI_PARSER="ARCH012 cli-parser-boundary"
+readonly RULE_CLI_PARSER_TEXT="CLI option parsing must stay local and stdlib-only."
+readonly RULE_CLI_PARSER_GUIDANCE="keep cmd/clnkr/cli_*.go parser-only; move app-service and config-resolution calls out of the parser."
 
 emit_violation() {
   local rule="$1" importer="$2" target="$3" import_source="$4" trusted_rule="$5" guidance="$6"
@@ -32,6 +36,21 @@ emit_violation() {
     echo "import_source: $import_source"
     echo "trusted_rule: $trusted_rule"
     echo "source_fact: go list reported importer imports target."
+    echo "guidance: $guidance"
+    echo
+  } >&2
+}
+
+emit_file_import_violation() {
+  local rule="$1" importer="$2" target="$3" trusted_rule="$4" guidance="$5"
+  {
+    echo "error: architecture import boundary violation"
+    echo "rule: $rule"
+    echo "importer: $importer"
+    echo "target: $target"
+    echo "import_source: file_imports"
+    echo "trusted_rule: $trusted_rule"
+    echo "source_fact: file import scan reported importer imports target."
     echo "guidance: $guidance"
     echo
   } >&2
@@ -123,10 +142,78 @@ check_frontend_session_boundary() {
   return "$bad"
 }
 
+cli_parser_imports() {
+  local scanner_dir scanner status
+  scanner_dir="$(mktemp -d "${TMPDIR:-/tmp}/cli-parser-imports.XXXXXX")"
+  scanner="$scanner_dir/scanner.go"
+  cat > "$scanner" <<'GO'
+package main
+
+import (
+	"fmt"
+	"go/parser"
+	"go/token"
+	"os"
+	"strconv"
+)
+
+func main() {
+	path := os.Getenv("CLI_PARSER_SCAN_FILE")
+	if path == "" {
+		fmt.Fprintln(os.Stderr, "CLI_PARSER_SCAN_FILE is required")
+		os.Exit(2)
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	for _, spec := range file.Imports {
+		path, err := strconv.Unquote(spec.Path.Value)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		fmt.Println(path)
+	}
+}
+GO
+  CLI_PARSER_SCAN_FILE="$1" go run "$scanner"
+  status=$?
+  rm -rf "$scanner_dir"
+  return "$status"
+}
+
+is_standard_import() {
+  local target="$1" standard
+  standard="$(go list -f '{{.Standard}}' "$target" 2>/dev/null)" || return 1
+  [[ "$standard" == "true" ]]
+}
+
+check_cli_parser_boundary() {
+  local bad=0 file target imports_output
+  for file in cmd/clnkr/cli_*.go; do
+    [[ -f "$file" ]] || continue
+    if ! imports_output="$(cli_parser_imports "$file")"; then
+      echo "error: cannot scan imports for $file" >&2
+      return 1
+    fi
+    while IFS= read -r target; do
+      [[ -n "$target" ]] || continue
+      if ! is_standard_import "$target"; then
+        emit_file_import_violation "$RULE_CLI_PARSER" "$file" "$target" "$RULE_CLI_PARSER_TEXT" "$RULE_CLI_PARSER_GUIDANCE"
+        bad=1
+      fi
+    done <<<"$imports_output"
+  done
+  return "$bad"
+}
+
 run_active_rule() {
   case "$1" in
     "$RULE_FRONTEND_PROVIDER") check_frontend_provider_construction ;;
     "$RULE_FRONTEND_SESSION") check_frontend_session_boundary ;;
+    "$RULE_CLI_PARSER") check_cli_parser_boundary ;;
     *) echo "error: unknown architecture rule: $1" >&2; exit 2 ;;
   esac
 }

@@ -21,6 +21,15 @@ import (
 // version is set at build time via -ldflags.
 var version = "dev"
 
+type cliOptions struct {
+	taskPrompt, model, baseURL, provider, providerAPI, actProtocol, effort string
+	eventLog, trajectory, loadMessages, systemPromptAppend                 string
+	thinkingBudgetTokens, maxOutputTokens, maxSteps                        int
+	fullSend, verbose, showVersion, continueSession, listSessions          bool
+	noSystemPrompt, dumpSystemPrompt, singleTask                           bool
+	actProtocolSet, maxOutputTokensSet, thinkingBudgetSet                  bool
+}
+
 var usageText = `clnkr - a minimal coding agent
 
 Usage:
@@ -57,35 +66,6 @@ Defaults:
   anthropic base URL  https://api.anthropic.com
   openai base URL     https://api.openai.com/v1
 `
-
-func aliasedString(preferred, fallback string) string {
-	if strings.TrimSpace(preferred) != "" {
-		return preferred
-	}
-	return fallback
-}
-
-func promptModeMarker(args []string, i int) bool {
-	if i > 0 && valueFlag(args[i-1]) {
-		return false
-	}
-	return args[i] == "-p" || args[i] == "--prompt" || args[i] == "--prompt-mode-unattended"
-}
-
-func dumpPromptMarker(args []string, i int) bool {
-	if i > 0 && valueFlag(args[i-1]) {
-		return false
-	}
-	return args[i] == "--dump-system-prompt"
-}
-
-func valueFlag(arg string) bool {
-	switch arg {
-	case "-p", "--prompt", "--prompt-mode-unattended", "-m", "--model", "-u", "--base-url", "--provider", "--provider-api", "--act-protocol", "--effort", "--thinking-budget-tokens", "--max-output-tokens", "--max-steps", "--event-log", "--trajectory", "--load-messages", "--system-prompt-append":
-		return true
-	}
-	return false
-}
 
 func isTerminal(fd uintptr) bool {
 	var winsize [4]uint16
@@ -241,7 +221,7 @@ func exitRunErr(err error) {
 }
 
 func main() {
-	opts := parseCLIOptions(os.Args[1:])
+	opts := parseCLIOptions(os.Args[1:], usageText)
 
 	if opts.showVersion {
 		fmt.Printf("clnkr %s\n", version)
@@ -276,7 +256,7 @@ func main() {
 		fatalf("--trajectory requires -p (single-task mode)")
 	}
 
-	actProtocolSetting, err := providerconfig.ParseActProtocolSetting(actProtocolFlagValue(opts, os.Getenv))
+	actProtocolSetting, err := providerconfig.ParseActProtocolSetting(providerconfig.ActProtocolFlagValue(opts.actProtocol, opts.actProtocolSet, os.Getenv))
 	if err != nil {
 		fatalf("%v", err)
 	}
@@ -327,53 +307,13 @@ func main() {
 	agent.SetEnv(clnkrapp.CommandEnvFromProviderConfig(cfg, os.Environ()))
 	agent.ActProtocol = cfg.ActProtocol
 	var modelWait *modelWaitIndicator
-	agent.Notify = func(e clnkr.Event) {
-		updateModelWaitForAgentEvent(modelWait, e)
-		switch e := e.(type) {
-		case clnkr.EventResponse:
-			switch turn := e.Turn.(type) {
-			case *clnkr.DoneTurn:
-				_, _ = fmt.Fprintln(os.Stdout, turn.Summary)
-			case *clnkr.ClarifyTurn:
-				if opts.fullSend && !opts.singleTask {
-					_, _ = fmt.Fprintln(os.Stderr, turn.Question)
-				}
-			default:
-				if opts.verbose {
-					if text, err := clnkr.CanonicalTurnJSON(e.Turn); err == nil {
-						_, _ = fmt.Fprintln(os.Stderr, text)
-					}
-				}
-			}
-		case clnkr.EventCommandStart:
-			command := summarizeCommand(e.Command)
-			if e.Dir != "" && e.Dir != cwd {
-				command += " in " + e.Dir
-			}
-			_, _ = fmt.Fprintf(os.Stderr, "--- running: %s ---\n", command)
-		case clnkr.EventCommandDone:
-			_, _ = fmt.Fprint(os.Stdout, e.Stdout)
-			if e.Stdout != "" && !strings.HasSuffix(e.Stdout, "\n") {
-				_, _ = fmt.Fprintln(os.Stdout)
-			}
-			_, _ = fmt.Fprint(os.Stderr, e.Stderr)
-			if e.Stderr != "" && !strings.HasSuffix(e.Stderr, "\n") {
-				_, _ = fmt.Fprintln(os.Stderr)
-			}
-			_, _ = fmt.Fprintln(os.Stderr, "--- done ---")
-		case clnkr.EventProtocolFailure:
-			if opts.verbose {
-				_, _ = fmt.Fprintf(os.Stderr, "[clnkr] protocol error: %s\n", e.Reason)
-			}
-		case clnkr.EventDebug:
-			if opts.verbose {
-				_, _ = fmt.Fprintf(os.Stderr, "[clnkr] %s\n", e.Message)
-			}
-		}
-		if eventLogFile != nil {
-			_ = clnkrapp.WriteEventLog(eventLogFile, e)
-		}
-	}
+	installAgentNotify(agent, &modelWait, notifyOptions{
+		cwd:        cwd,
+		fullSend:   opts.fullSend,
+		singleTask: opts.singleTask,
+		verbose:    opts.verbose,
+		eventLog:   eventLogFile,
+	})
 	agent.Notify(clnkrapp.RunMetadataDebugEvent(runMetadata))
 
 	if opts.maxSteps > 0 {
@@ -399,16 +339,94 @@ func main() {
 	}
 
 	driver := clnkrapp.NewDriver(agent, clnkrapp.MakeCompactorFactory(cfg))
+	singleTaskOpts := singleTaskRunOptions{taskPrompt: opts.taskPrompt, trajectory: opts.trajectory}
+	replOpts := replRunOptions{fullSend: opts.fullSend, verbose: opts.verbose}
 
 	if opts.singleTask {
-		runSingleTask(agent, driver, opts, eventLogFile)
+		runSingleTask(agent, driver, singleTaskOpts, eventLogFile)
 		return
 	}
 
-	runREPL(agent, driver, &modelWait, cwd, runMetadata, opts, eventLogFile)
+	runREPL(agent, driver, &modelWait, cwd, runMetadata, replOpts, eventLogFile)
 }
 
-func runSingleTask(agent *clnkr.Agent, driver *clnkrapp.Driver, opts cliOptions, eventLog io.Writer) {
+type singleTaskRunOptions struct {
+	taskPrompt string
+	trajectory string
+}
+
+type replRunOptions struct {
+	fullSend bool
+	verbose  bool
+}
+
+type notifyOptions struct {
+	cwd        string
+	fullSend   bool
+	singleTask bool
+	verbose    bool
+	eventLog   io.Writer
+}
+
+func installAgentNotify(agent *clnkr.Agent, modelWait **modelWaitIndicator, opts notifyOptions) {
+	agent.Notify = func(e clnkr.Event) {
+		updateModelWaitForAgentEvent(*modelWait, e)
+		switch e := e.(type) {
+		case clnkr.EventResponse:
+			handleResponseEvent(e, opts)
+		case clnkr.EventCommandStart:
+			command := summarizeCommand(e.Command)
+			if e.Dir != "" && e.Dir != opts.cwd {
+				command += " in " + e.Dir
+			}
+			_, _ = fmt.Fprintf(os.Stderr, "--- running: %s ---\n", command)
+		case clnkr.EventCommandDone:
+			writeCommandResult(e)
+		case clnkr.EventProtocolFailure:
+			if opts.verbose {
+				_, _ = fmt.Fprintf(os.Stderr, "[clnkr] protocol error: %s\n", e.Reason)
+			}
+		case clnkr.EventDebug:
+			if opts.verbose {
+				_, _ = fmt.Fprintf(os.Stderr, "[clnkr] %s\n", e.Message)
+			}
+		}
+		if opts.eventLog != nil {
+			_ = clnkrapp.WriteEventLog(opts.eventLog, e)
+		}
+	}
+}
+
+func handleResponseEvent(e clnkr.EventResponse, opts notifyOptions) {
+	switch turn := e.Turn.(type) {
+	case *clnkr.DoneTurn:
+		_, _ = fmt.Fprintln(os.Stdout, turn.Summary)
+	case *clnkr.ClarifyTurn:
+		if opts.fullSend && !opts.singleTask {
+			_, _ = fmt.Fprintln(os.Stderr, turn.Question)
+		}
+	default:
+		if opts.verbose {
+			if text, err := clnkr.CanonicalTurnJSON(e.Turn); err == nil {
+				_, _ = fmt.Fprintln(os.Stderr, text)
+			}
+		}
+	}
+}
+
+func writeCommandResult(e clnkr.EventCommandDone) {
+	_, _ = fmt.Fprint(os.Stdout, e.Stdout)
+	if e.Stdout != "" && !strings.HasSuffix(e.Stdout, "\n") {
+		_, _ = fmt.Fprintln(os.Stdout)
+	}
+	_, _ = fmt.Fprint(os.Stderr, e.Stderr)
+	if e.Stderr != "" && !strings.HasSuffix(e.Stderr, "\n") {
+		_, _ = fmt.Fprintln(os.Stderr)
+	}
+	_, _ = fmt.Fprintln(os.Stderr, "--- done ---")
+}
+
+func runSingleTask(agent *clnkr.Agent, driver *clnkrapp.Driver, opts singleTaskRunOptions, eventLog io.Writer) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	fatalIfErr(clnkrapp.RejectCompactCommand(opts.taskPrompt))
@@ -429,14 +447,14 @@ func runSingleTask(agent *clnkr.Agent, driver *clnkrapp.Driver, opts cliOptions,
 	exitRunErr(runErr)
 }
 
-func runREPL(agent *clnkr.Agent, driver *clnkrapp.Driver, modelWait **modelWaitIndicator, cwd string, runMetadata clnkrapp.RunMetadata, opts cliOptions, eventLog io.Writer) {
+func runREPL(agent *clnkr.Agent, driver *clnkrapp.Driver, modelWait **modelWaitIndicator, cwd string, runMetadata clnkrapp.RunMetadata, opts replRunOptions, eventLog io.Writer) {
 	showPrompt := isTerminal(os.Stdin.Fd())
 	fatalWhen(!opts.fullSend && !showPrompt, "approval mode requires interactive stdin; pass --full-send=true to bypass approval")
 	reader, mode := newLineReader(os.Stdin), clnkrapp.PromptModeApproval
 	if opts.fullSend {
 		mode = clnkrapp.PromptModeFullSend
 	}
-	if showPrompt && !opts.singleTask && !opts.verbose && isTerminal(os.Stderr.Fd()) {
+	if showPrompt && !opts.verbose && isTerminal(os.Stderr.Fd()) {
 		*modelWait = &modelWaitIndicator{out: os.Stderr, delay: time.Second, tick: 250 * time.Millisecond, now: time.Now}
 	}
 	loopErr := runPromptLoop(driver, reader, *modelWait, showPrompt, mode, eventLog)

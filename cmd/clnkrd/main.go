@@ -90,7 +90,7 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 		}
 		return fail("%v\nSee clnkrd(1) for available options.", err)
 	}
-	maxOutputTokensSet, thinkingBudgetTokensSet := clnkrapp.RequestOptionFlagsSet(flags)
+	maxOutputTokensSet, thinkingBudgetTokensSet := requestOptionFlagsSet(flags)
 
 	if *showVersion {
 		fmt.Fprintf(out, "clnkrd %s\n", version) //nolint:errcheck
@@ -102,7 +102,8 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 		return fail("cannot get working directory: %v", err)
 	}
 
-	actProtocolSetting, err := providerconfig.ParseActProtocolSetting(clnkrapp.ActProtocolFlagValue(flags, *actProtocolFlag, env))
+	actProtocolSet := flagIsSet(flags, "act-protocol")
+	actProtocolSetting, err := providerconfig.ParseActProtocolSetting(providerconfig.ActProtocolFlagValue(*actProtocolFlag, actProtocolSet, env))
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -196,6 +197,28 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 		}
 	}
 	return 0
+}
+
+func flagIsSet(flags *flag.FlagSet, name string) bool {
+	found := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
+}
+
+func requestOptionFlagsSet(flags *flag.FlagSet) (maxOutputTokensSet, thinkingBudgetTokensSet bool) {
+	flags.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "max-output-tokens":
+			maxOutputTokensSet = true
+		case "thinking-budget-tokens":
+			thinkingBudgetTokensSet = true
+		}
+	})
+	return maxOutputTokensSet, thinkingBudgetTokensSet
 }
 
 type lockedWriter struct {
