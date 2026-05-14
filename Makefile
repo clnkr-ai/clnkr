@@ -28,6 +28,7 @@ CLANKERVAL_PREFLIGHT = \
 	build clean install run \
 	clnkr send readme-image \
 	check test evaluations evaluations-live evaluations-live-openai evaluations-live-anthropic \
+	architecture-shape-report semantic-cohesion-report test-fidelity-report \
 	help man docs docs-serve \
 	_build-clnkr _build-clnkrd \
 	_fmt _fmt-check _vet _lint _arch _script-tests sloc frontend-sloc _workflow-make-targets \
@@ -138,6 +139,15 @@ frontend-sloc: ## Report non-test frontend SLOC and fail if it exceeds FRONTEND_
 	@sloc="$$(cloc --quiet --timeout 30 --csv --not-match-f='_test\.go$$' cmd | awk -F, 'END { print $$5 }')"; \
 	echo "frontend: $$sloc / $(FRONTEND_SLOC_LIMIT) SLOC"; \
 	test "$$sloc" -le "$(FRONTEND_SLOC_LIMIT)" || { echo "error: frontend exceeds $(FRONTEND_SLOC_LIMIT) SLOC limit" >&2; exit 1; }
+
+architecture-shape-report: ## Manually report thoth architecture shape; requires thoth in PATH or THOTH_BIN
+	./scripts/architecture-shape-report.sh .
+
+semantic-cohesion-report: ## Manually report thoth semantic cohesion; requires thoth in PATH or THOTH_BIN
+	./scripts/semantic-cohesion-report.sh .
+
+test-fidelity-report: ## Manually report test shape, fixtures, and mock/fake usage
+	./scripts/test-fidelity-report.sh
 
 _workflow-make-targets:
 	./scripts/check-workflow-make-targets.sh
