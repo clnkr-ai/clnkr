@@ -8,14 +8,19 @@ module="$(go list -m)"
 provider_actwire="$module/internal/providers/actwire"
 provider_openaiwire="$module/internal/providers/openaiwire"
 provider_factory="$module/internal/providerfactory"
+internal_session="$module/internal/session"
 
 ACTIVE_RULES=(
   "ARCH010 frontend-provider-construction"
+  "ARCH011 frontend-session-boundary"
 )
 
 readonly RULE_FRONTEND_PROVIDER="ARCH010 frontend-provider-construction"
 readonly RULE_FRONTEND_PROVIDER_TEXT="frontend coordinator must use internal/providerfactory instead of concrete provider adapters."
 readonly RULE_FRONTEND_PROVIDER_GUIDANCE="move provider construction behind internal/providerfactory; do not import concrete provider adapters from frontend packages."
+readonly RULE_FRONTEND_SESSION="ARCH011 frontend-session-boundary"
+readonly RULE_FRONTEND_SESSION_TEXT="frontend adapters must use cmd/internal/clnkrapp instead of importing internal/session directly."
+readonly RULE_FRONTEND_SESSION_GUIDANCE="move session persistence calls behind cmd/internal/clnkrapp; do not import internal/session from cmd/... outside cmd/internal/clnkrapp."
 
 emit_violation() {
   local rule="$1" importer="$2" target="$3" import_source="$4" trusted_rule="$5" guidance="$6"
@@ -36,7 +41,7 @@ kind_of() {
   case "$1" in
     "$module") echo root ;;
     "$module"/internal/core/*) echo core ;;
-    "$module"/internal/session) echo frontend_runtime ;;
+    "$internal_session") echo frontend_runtime ;;
     "$provider_factory") echo provider_factory ;;
     "$module"/internal/providers/*) echo provider ;;
     "$module"/cmd/internal/compaction) echo compaction ;;
@@ -69,9 +74,10 @@ check_edge() {
     compaction) [[ "$target" == "$module" ]] || { echo "error: $importer -> $target: cmd/internal/compaction should keep repo-local imports to root clnkr only" >&2; return 1; } ;;
     cmd)
       case "$target" in
-        "$module"|"$module"/cmd/internal/*|"$module"/internal/session|"$module"/internal/providers/providerconfig) ;;
+        "$module"|"$module"/cmd/internal/*|"$module"/internal/providers/providerconfig) ;;
+        "$internal_session") [[ "$importer" == "$module/cmd/internal/clnkrapp" ]] || { echo "error: $importer -> $target: only cmd/internal/clnkrapp may import internal/session" >&2; return 1; } ;;
         "$provider_factory") [[ "$importer" == "$module/cmd/internal/clnkrapp" ]] || { echo "error: $importer -> $target: only cmd/internal/clnkrapp may import internal/providerfactory" >&2; return 1; } ;;
-        *) echo "error: $importer -> $target: cmd/... may import only root clnkr, cmd/internal/..., frontend runtime packages, internal/providers/providerconfig, or internal/providerfactory from clnkrapp" >&2; return 1 ;;
+        *) echo "error: $importer -> $target: cmd/... may import only root clnkr, cmd/internal/..., internal/providers/providerconfig, internal/session from cmd/internal/clnkrapp, or internal/providerfactory from clnkrapp" >&2; return 1 ;;
       esac
       ;;
     other) echo "error: $importer -> $target: unclassified repo-local importer" >&2; return 1 ;;
@@ -89,6 +95,10 @@ is_concrete_provider_adapter() {
   esac
 }
 
+is_session_boundary_target() {
+  [[ "$1" == "$internal_session" ]]
+}
+
 check_frontend_provider_construction() {
   local bad=0 edge importer target import_source
   for edge in "${import_edges[@]}"; do
@@ -101,9 +111,22 @@ check_frontend_provider_construction() {
   return "$bad"
 }
 
+check_frontend_session_boundary() {
+  local bad=0 edge importer target import_source
+  for edge in "${import_edges[@]}"; do
+    IFS=$'\t' read -r importer target import_source <<<"$edge"
+    if [[ "$importer" == "$module"/cmd/* && "$importer" != "$module/cmd/internal/clnkrapp" ]] && is_session_boundary_target "$target"; then
+      emit_violation "$RULE_FRONTEND_SESSION" "$importer" "$target" "$import_source" "$RULE_FRONTEND_SESSION_TEXT" "$RULE_FRONTEND_SESSION_GUIDANCE"
+      bad=1
+    fi
+  done
+  return "$bad"
+}
+
 run_active_rule() {
   case "$1" in
     "$RULE_FRONTEND_PROVIDER") check_frontend_provider_construction ;;
+    "$RULE_FRONTEND_SESSION") check_frontend_session_boundary ;;
     *) echo "error: unknown architecture rule: $1" >&2; exit 2 ;;
   esac
 }

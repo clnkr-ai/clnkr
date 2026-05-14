@@ -14,7 +14,6 @@ import (
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
-	"github.com/clnkr-ai/clnkr/internal/session"
 )
 
 // version is set at build time via -ldflags.
@@ -192,7 +191,7 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 		return fail("%v", err)
 	}
 	if msgs := agent.Messages(); len(msgs) > 0 {
-		if err := session.SaveSessionWithMetadata(cwd, msgs, runMetadata); err != nil {
+		if _, err := clnkrapp.SaveSession(cwd, msgs, runMetadata); err != nil {
 			fmt.Fprintf(errOut, "Warning: could not save session: %v\n", err) //nolint:errcheck
 		}
 	}

@@ -76,7 +76,10 @@ GO
 cat > cmd/internal/clnkrapp/clnkrapp.go <<'GO'
 package clnkrapp
 
-import _ "example.test/clnkr/internal/providerfactory"
+import (
+	_ "example.test/clnkr/internal/providerfactory"
+	_ "example.test/clnkr/internal/session"
+)
 GO
 
 mkdir -p cmd/internal/other
@@ -97,7 +100,7 @@ if [[ $status -ne 1 ]]; then
   exit 1
 fi
 
-expected="cmd/... may import only root clnkr, cmd/internal/..., frontend runtime packages, internal/providers/providerconfig, or internal/providerfactory from clnkrapp"
+expected="cmd/... may import only root clnkr, cmd/internal/..., internal/providers/providerconfig, internal/session from cmd/internal/clnkrapp, or internal/providerfactory from clnkrapp"
 if [[ "$output" != *"$expected"* ]]; then
   echo "missing expected output: $expected" >&2
   echo "$output" >&2
@@ -105,6 +108,46 @@ if [[ "$output" != *"$expected"* ]]; then
 fi
 
 rm -rf cmd/internal/other
+
+mkdir -p cmd/clnkr internal/session
+cat > internal/session/session.go <<'GO'
+package session
+GO
+cat > cmd/clnkr/main.go <<'GO'
+package main
+
+import _ "example.test/clnkr/internal/session"
+GO
+
+set +e
+output="$(./check-architecture-imports.sh 2>&1)"
+status=$?
+set -e
+
+if [[ $status -ne 1 ]]; then
+  echo "expected frontend session import to fail with status 1, got $status" >&2
+  echo "$output" >&2
+  exit 1
+fi
+
+for expected in \
+  "error: architecture import boundary violation" \
+  "rule: ARCH011 frontend-session-boundary" \
+  "importer: example.test/clnkr/cmd/clnkr" \
+  "target: example.test/clnkr/internal/session" \
+  "import_source: imports" \
+  "trusted_rule: frontend adapters must use cmd/internal/clnkrapp instead of importing internal/session directly." \
+  "source_fact: go list reported importer imports target." \
+  "guidance: move session persistence calls behind cmd/internal/clnkrapp; do not import internal/session from cmd/... outside cmd/internal/clnkrapp."
+do
+  if [[ "$output" != *"$expected"* ]]; then
+    echo "missing expected output: $expected" >&2
+    echo "$output" >&2
+    exit 1
+  fi
+done
+
+rm -rf cmd/clnkr
 
 output="$(./check-architecture-imports.sh 2>&1)"
 if [[ "$output" != *"target architecture import checks passed"* ]]; then

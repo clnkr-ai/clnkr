@@ -63,9 +63,11 @@ command observations. Command-done events keep raw
 stdout/stderr; the transcript receives bounded command result JSON.
 
 **Session persistence**
-: The **internal/session** boundary that stores and loads local saved-session
-envelopes for **cmd/clnkr** and **cmd/clnkrd**. A saved-session envelope
-contains transcript messages and run metadata.
+: The **cmd/internal/clnkrapp** boundary service for frontend saved-session
+operations. **cmd/clnkr** lists, saves, and resumes sessions; **cmd/clnkrd**
+saves and resumes sessions. **internal/session** owns the local saved-session
+file mechanics. A saved-session envelope contains transcript messages and run
+metadata.
 
 **Driver**
 : The frontend coordinator around **RunWithPolicy**. It starts prompts,
@@ -129,8 +131,9 @@ The frontend boundary is **Driver** versus command adapters. **Driver**
 coordinates frontend interaction around **RunWithPolicy** by turning approval
 and clarify policy hooks into frontend events and accepting replies. It does
 not query the Model, parse Turns, or execute commands directly. **cmd/clnkr**
-and **cmd/clnkrd** adapt terminal and stdio JSONL surfaces to the driver.
-**internal/session** owns saved-session file mechanics for both frontends.
+and **cmd/clnkrd** adapt terminal and stdio JSONL surfaces to the driver. The
+command adapters use **cmd/internal/clnkrapp** for session persistence;
+**internal/session** owns the saved-session file mechanics behind that boundary.
 
 The configuration ownership boundary is **CLI config resolver** versus
 **Provider request semantics**. The CLI resolver owns app inputs and user-facing

@@ -16,7 +16,6 @@ import (
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
-	"github.com/clnkr-ai/clnkr/internal/session"
 )
 
 // version is set at build time via -ldflags.
@@ -255,7 +254,7 @@ func main() {
 	}
 
 	if opts.listSessions {
-		sessions, err := session.ListSessions(cwd)
+		sessions, err := clnkrapp.ListSessions(cwd)
 		if err != nil {
 			fatalf("cannot list sessions: %v", err)
 		}
@@ -442,9 +441,9 @@ func runREPL(agent *clnkr.Agent, driver *clnkrapp.Driver, modelWait **modelWaitI
 	}
 	loopErr := runPromptLoop(driver, reader, *modelWait, showPrompt, mode, eventLog)
 	if msgs := agent.Messages(); len(msgs) > 0 {
-		if err := session.SaveSessionWithMetadata(cwd, msgs, runMetadata); err != nil {
+		if dir, err := clnkrapp.SaveSession(cwd, msgs, runMetadata); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", err)
-		} else if dir, err := session.SessionDir(cwd); err == nil {
+		} else {
 			_, _ = fmt.Fprintf(os.Stderr, "[Session saved to %s]\n", dir)
 		}
 	}

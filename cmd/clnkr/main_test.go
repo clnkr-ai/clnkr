@@ -19,7 +19,6 @@ import (
 
 	clnkr "github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
-	"github.com/clnkr-ai/clnkr/internal/session"
 )
 
 func openAIWrappedDone(summary string) string {
@@ -698,7 +697,7 @@ func TestFullSendPipeClarificationExitsNonzeroWithoutStdout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := session.ListSessions(cwd)
+	sessions, err := clnkrapp.ListSessions(cwd)
 	if err != nil {
 		t.Fatalf("list sessions: %v", err)
 	}

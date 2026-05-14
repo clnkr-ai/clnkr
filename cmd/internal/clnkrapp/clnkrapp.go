@@ -15,7 +15,6 @@ import (
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
 	"github.com/clnkr-ai/clnkr/internal/providerfactory"
 	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
-	"github.com/clnkr-ai/clnkr/internal/session"
 )
 
 type model interface {
@@ -283,20 +282,6 @@ func AddMessagesFile(agent *clnkr.Agent, path string) error {
 		return fmt.Errorf("cannot load messages: %w", err)
 	}
 	return nil
-}
-
-func ResumeLatestSession(agent *clnkr.Agent, cwd string) (int, bool, error) {
-	msgs, err := session.LoadLatestSession(cwd)
-	if err != nil {
-		return 0, false, fmt.Errorf("cannot load session: %w", err)
-	}
-	if msgs == nil {
-		return 0, false, nil
-	}
-	if err := agent.AddMessages(msgs); err != nil {
-		return 0, false, fmt.Errorf("cannot resume session: %w", err)
-	}
-	return len(msgs), true, nil
 }
 
 func ParseCompactCommand(input string) (instructions string, ok bool) {
