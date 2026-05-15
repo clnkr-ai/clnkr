@@ -54,6 +54,34 @@ func TestResolveConfigRequiresProviderModelAndAPIKey(t *testing.T) {
 	})
 }
 
+func TestActProtocolFlagValueUsesEnvWhenFlagUnset(t *testing.T) {
+	got := ActProtocolFlagValue("auto", false, func(key string) string {
+		if key == "CLNKR_ACT_PROTOCOL" {
+			return "tool-calls"
+		}
+		return ""
+	})
+	if got != "tool-calls" {
+		t.Fatalf("ActProtocolFlagValue() = %q, want tool-calls", got)
+	}
+}
+
+func TestActProtocolFlagValuePrefersFlag(t *testing.T) {
+	got := ActProtocolFlagValue("clnkr-inline", true, func(string) string {
+		return "tool-calls"
+	})
+	if got != "clnkr-inline" {
+		t.Fatalf("ActProtocolFlagValue() = %q, want clnkr-inline", got)
+	}
+}
+
+func TestActProtocolFlagValueDefaultsAuto(t *testing.T) {
+	got := ActProtocolFlagValue("auto", false, func(string) string { return "" })
+	if got != "auto" {
+		t.Fatalf("ActProtocolFlagValue() = %q, want auto", got)
+	}
+}
+
 func TestResolveConfigPrefersFlagsOverEnv(t *testing.T) {
 	cfg, err := ResolveConfig(Inputs{
 		Provider:    "openai",

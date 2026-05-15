@@ -4,12 +4,10 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -18,14 +16,21 @@ import (
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
 	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
-	"github.com/clnkr-ai/clnkr/internal/session"
 )
 
 // version is set at build time via -ldflags.
 var version = "dev"
 
-func usageText() string {
-	return `clnkr - a minimal coding agent
+type cliOptions struct {
+	taskPrompt, model, baseURL, provider, providerAPI, actProtocol, effort string
+	eventLog, trajectory, loadMessages, systemPromptAppend                 string
+	thinkingBudgetTokens, maxOutputTokens, maxSteps                        int
+	fullSend, verbose, showVersion, continueSession, listSessions          bool
+	noSystemPrompt, dumpSystemPrompt, singleTask                           bool
+	actProtocolSet, maxOutputTokensSet, thinkingBudgetSet                  bool
+}
+
+var usageText = `clnkr - a minimal coding agent
 
 Usage:
   clnkr                     Start conversational mode
@@ -61,36 +66,6 @@ Defaults:
   anthropic base URL  https://api.anthropic.com
   openai base URL     https://api.openai.com/v1
 `
-}
-
-func aliasedString(preferred, fallback string) string {
-	if strings.TrimSpace(preferred) != "" {
-		return preferred
-	}
-	return fallback
-}
-
-func promptModeMarker(args []string, i int) bool {
-	if i > 0 && valueFlag(args[i-1]) {
-		return false
-	}
-	return args[i] == "-p" || args[i] == "--prompt" || args[i] == "--prompt-mode-unattended"
-}
-
-func dumpPromptMarker(args []string, i int) bool {
-	if i > 0 && valueFlag(args[i-1]) {
-		return false
-	}
-	return args[i] == "--dump-system-prompt"
-}
-
-func valueFlag(arg string) bool {
-	switch arg {
-	case "-p", "--prompt", "--prompt-mode-unattended", "-m", "--model", "-u", "--base-url", "--provider", "--provider-api", "--act-protocol", "--effort", "--thinking-budget-tokens", "--max-output-tokens", "--max-steps", "--event-log", "--trajectory", "--load-messages", "--system-prompt-append":
-		return true
-	}
-	return false
-}
 
 func isTerminal(fd uintptr) bool {
 	var winsize [4]uint16
@@ -108,7 +83,7 @@ type lineReader struct {
 }
 
 func newLineReader(r io.Reader) *lineReader {
-	lr := &lineReader{lines: make(chan lineResult)}
+	lr := &lineReader{lines: make(chan lineResult, 1024)}
 	go func() {
 		scanner := bufio.NewScanner(r)
 		for scanner.Scan() {
@@ -134,6 +109,31 @@ func (r *lineReader) ReadLine(ctx context.Context) (string, error) {
 			return "", line.err
 		}
 		return line.text, nil
+	}
+}
+
+func (r *lineReader) ReadQueuedLines() ([]string, error) {
+	timer := time.NewTimer(10 * time.Millisecond)
+	defer timer.Stop()
+
+	var lines []string
+	for {
+		select {
+		case line, ok := <-r.lines:
+			if !ok {
+				return lines, nil
+			}
+			if line.err != nil {
+				return lines, line.err
+			}
+			lines = append(lines, line.text)
+			if !timer.Stop() {
+				<-timer.C
+			}
+			timer.Reset(time.Millisecond)
+		case <-timer.C:
+			return lines, nil
+		}
 	}
 }
 
@@ -210,17 +210,31 @@ func handleTerminalDriverEvent(ctx context.Context, driver *clnkrapp.Driver, rea
 
 func replyToTerminalRequest(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, text, prompt string) error {
 	fmt.Fprintln(os.Stderr, text) //nolint:errcheck
-	fmt.Fprint(os.Stderr, prompt) //nolint:errcheck
-	reply, err := reader.ReadLine(ctx)
-	if err != nil {
-		return err
+	for {
+		fmt.Fprint(os.Stderr, prompt) //nolint:errcheck
+		reply, err := reader.ReadLine(ctx)
+		if err != nil {
+			return err
+		}
+		reply = strings.TrimSpace(reply)
+		if reply == "" {
+			continue
+		}
+		return driver.Reply(ctx, reply)
 	}
-	return driver.Reply(ctx, strings.TrimSpace(reply))
 }
 
 func fatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+func fatalIfErr(err error) { fatalWhen(err != nil, "%v", err) }
+
+func fatalWhen(cond bool, format string, args ...any) {
+	if cond {
+		fatalf(format, args...)
+	}
 }
 
 func exitRunErr(err error) {
@@ -238,71 +252,9 @@ func exitRunErr(err error) {
 }
 
 func main() {
-	flags := flag.NewFlagSet("clnkr", flag.ContinueOnError)
-	flags.Usage = func() {}
-	flags.SetOutput(io.Discard)
+	opts := parseCLIOptions(os.Args[1:], usageText)
 
-	taskPromptFlag := flags.String("p", "", "")
-	promptLong := flags.String("prompt", "", "")
-	promptModeUnattended := flags.String("prompt-mode-unattended", "", "")
-	modelFlag := flags.String("model", "", "")
-	modelShort := flags.String("m", "", "")
-	baseURLFlag := flags.String("base-url", "", "")
-	baseURLShort := flags.String("u", "", "")
-	providerFlag := flags.String("provider", "", "")
-	providerAPIFlag := flags.String("provider-api", "", "")
-	actProtocolFlag := flags.String("act-protocol", "auto", "")
-	effortFlag := flags.String("effort", "", "")
-	thinkingBudgetTokens := flags.Int("thinking-budget-tokens", 0, "")
-	maxOutputTokens := flags.Int("max-output-tokens", 0, "")
-	maxSteps := flags.Int("max-steps", 0, "")
-	fullSend := new(bool)
-	explicitFullSendFalse := false
-	flags.BoolFunc("full-send", "", func(s string) error {
-		value, err := strconv.ParseBool(s)
-		if err != nil {
-			return err
-		}
-		*fullSend = value
-		explicitFullSendFalse = explicitFullSendFalse || !value
-		return nil
-	})
-	verbose := flags.Bool("verbose", false, "")
-	verboseShort := flags.Bool("v", false, "")
-	showVersion := flags.Bool("version", false, "")
-	showVersionShort := flags.Bool("V", false, "")
-	eventLog := flags.String("event-log", "", "")
-	trajectory := flags.String("trajectory", "", "")
-	loadMessages := flags.String("load-messages", "", "")
-	continueFlag := flags.Bool("continue", false, "")
-	continueShort := flags.Bool("c", false, "")
-	listSessions := flags.Bool("list-sessions", false, "")
-	listSessionsShort := flags.Bool("l", false, "")
-	noSystemPrompt := flags.Bool("no-system-prompt", false, "")
-	noSystemPromptShort := flags.Bool("S", false, "")
-	systemPromptAppend := flags.String("system-prompt-append", "", "")
-	dumpSystemPrompt := flags.Bool("dump-system-prompt", false, "")
-
-	args, dumpUnattendedPrompt := os.Args[1:], false
-	if n := len(args); n >= 2 && dumpPromptMarker(args, n-2) && promptModeMarker(args, n-1) {
-		args, dumpUnattendedPrompt = args[:n-1], true
-	}
-	for i := 0; i+1 < len(args); i++ {
-		if promptModeMarker(args, i) && args[i+1] == "--dump-system-prompt" {
-			fatalf("%s requires a task. To dump the unattended prompt, use: clnkr --dump-system-prompt %s", args[i], args[i])
-		}
-	}
-	if err := flags.Parse(args); err != nil {
-		if err == flag.ErrHelp {
-			fmt.Fprint(os.Stdout, usageText()) //nolint:errcheck
-			os.Exit(0)
-		}
-		fmt.Fprintf(os.Stderr, "Error: %v\nSee clnkr(1) for available options.\n", err)
-		os.Exit(1)
-	}
-	maxOutputTokensSet, thinkingBudgetTokensSet := clnkrapp.RequestOptionFlagsSet(flags)
-
-	if *showVersion || *showVersionShort {
+	if opts.showVersion {
 		fmt.Printf("clnkr %s\n", version)
 		os.Exit(0)
 	}
@@ -312,76 +264,61 @@ func main() {
 		fatalf("cannot get working directory: %v", err)
 	}
 
-	if *listSessions || *listSessionsShort {
-		sessions, err := session.ListSessions(cwd)
+	if opts.listSessions {
+		sessions, err := clnkrapp.ListSessions(cwd)
 		if err != nil {
 			fatalf("cannot list sessions: %v", err)
 		}
 		if len(sessions) == 0 {
-			fmt.Println("No sessions found for this project.")
+			_, _ = fmt.Fprintln(os.Stdout, "No sessions found for this project.")
 			os.Exit(0)
 		}
-		fmt.Println("Saved sessions:")
+		_, _ = fmt.Fprintln(os.Stdout, "Saved sessions:")
 		for i, s := range sessions {
-			fmt.Printf("  %d. %s (%d messages) - %s\n", i+1, s.Filename, s.Messages, s.Created.Format("2006-01-02 15:04:05"))
+			_, _ = fmt.Fprintf(os.Stdout, "  %d. %s (%d messages) - %s\n", i+1, s.Filename, s.Messages, s.Created.Format("2006-01-02 15:04:05"))
 		}
 		os.Exit(0)
 	}
 
-	taskPrompt := aliasedString(*promptModeUnattended, aliasedString(*promptLong, *taskPromptFlag))
-	singleTask := taskPrompt != "" || dumpUnattendedPrompt
-	if singleTask && explicitFullSendFalse {
-		fatalf("--full-send=false conflicts with -p")
-	}
-	if singleTask {
-		*fullSend = true
-	}
-	if (*continueFlag || *continueShort) && *trajectory != "" {
+	if opts.continueSession && opts.trajectory != "" {
 		fatalf("--continue and --trajectory are mutually exclusive")
 	}
-	if *trajectory != "" && !singleTask {
+	if opts.trajectory != "" && !opts.singleTask {
 		fatalf("--trajectory requires -p (single-task mode)")
 	}
 
-	actProtocolSetting, err := providerconfig.ParseActProtocolSetting(clnkrapp.ActProtocolFlagValue(flags, *actProtocolFlag, os.Getenv))
+	actProtocolSetting, err := providerconfig.ParseActProtocolSetting(providerconfig.ActProtocolFlagValue(opts.actProtocol, opts.actProtocolSet, os.Getenv))
 	if err != nil {
 		fatalf("%v", err)
 	}
 	actProtocol := clnkr.ActProtocolClnkrInline
-	if !*noSystemPrompt && !*noSystemPromptShort {
+	if !opts.noSystemPrompt {
 		actProtocol, err = providerconfig.ResolvePromptActProtocol(providerconfig.Inputs{
-			Provider:    *providerFlag,
-			ProviderAPI: *providerAPIFlag,
-			Model:       aliasedString(*modelShort, *modelFlag),
-			BaseURL:     aliasedString(*baseURLShort, *baseURLFlag),
+			Provider: opts.provider, ProviderAPI: opts.providerAPI, Model: opts.model, BaseURL: opts.baseURL,
 			ActProtocol: actProtocolSetting,
-		}, os.Getenv, *dumpSystemPrompt)
+		}, os.Getenv, opts.dumpSystemPrompt)
 		if err != nil {
 			fatalf("%v", err)
 		}
 	}
 
 	systemPrompt := clnkr.LoadPromptWithOptions(cwd, clnkr.PromptOptions{
-		OmitSystemPrompt:   *noSystemPrompt || *noSystemPromptShort,
-		SystemPromptAppend: *systemPromptAppend,
-		ActProtocol:        actProtocol,
-		Unattended:         singleTask,
+		OmitSystemPrompt: opts.noSystemPrompt, SystemPromptAppend: opts.systemPromptAppend,
+		ActProtocol: actProtocol, Unattended: opts.singleTask,
 	})
-
-	if *dumpSystemPrompt {
-		fmt.Print(systemPrompt)
+	if opts.dumpSystemPrompt {
+		_, _ = fmt.Fprint(os.Stdout, systemPrompt)
 		os.Exit(0)
 	}
 
 	cfg, err := providerconfig.ResolveConfig(providerconfig.Inputs{
-		Provider: *providerFlag, ProviderAPI: *providerAPIFlag,
-		Model: aliasedString(*modelShort, *modelFlag), BaseURL: aliasedString(*baseURLShort, *baseURLFlag),
-		ActProtocol:    actProtocolSetting,
-		RequestOptions: clnkrapp.RequestOptions(*effortFlag, *maxOutputTokens, maxOutputTokensSet, *thinkingBudgetTokens, thinkingBudgetTokensSet),
+		Provider: opts.provider, ProviderAPI: opts.providerAPI,
+		Model: opts.model, BaseURL: opts.baseURL, ActProtocol: actProtocolSetting,
+		RequestOptions: clnkrapp.RequestOptions(opts.effort, opts.maxOutputTokens, opts.maxOutputTokensSet, opts.thinkingBudgetTokens, opts.thinkingBudgetSet),
 	}, os.Getenv)
 	if err != nil {
 		if strings.Contains(err.Error(), "api key is required") {
-			fmt.Fprintln(os.Stderr, "Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key")
+			_, _ = fmt.Fprintln(os.Stderr, "Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key")
 			os.Exit(1)
 		}
 		fatalf("%v", err)
@@ -389,135 +326,183 @@ func main() {
 	runMetadata := clnkrapp.NewRunMetadata(version, cfg, systemPrompt)
 
 	var eventLogFile *os.File
-	if *eventLog != "" {
-		eventLogFile, err = os.OpenFile(*eventLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if opts.eventLog != "" {
+		eventLogFile, err = os.OpenFile(opts.eventLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
-			fatalf("cannot open event log %q: %v", *eventLog, err)
+			fatalf("cannot open event log %q: %v", opts.eventLog, err)
 		}
 		defer eventLogFile.Close() //nolint:errcheck
 	}
 
-	agent := clnkr.NewAgent(clnkrapp.NewModelForConfigWithOptions(cfg, systemPrompt, clnkrapp.ModelOptions{Unattended: singleTask}), &clnkr.CommandExecutor{}, cwd)
+	agent := clnkr.NewAgent(clnkrapp.NewModelForConfigWithOptions(cfg, systemPrompt, clnkrapp.ModelOptions{Unattended: opts.singleTask}), &clnkr.CommandExecutor{}, cwd)
 	agent.SetEnv(clnkrapp.CommandEnvFromProviderConfig(cfg, os.Environ()))
 	agent.ActProtocol = cfg.ActProtocol
-
-	showDebug := *verbose || *verboseShort
 	var modelWait *modelWaitIndicator
-	agent.Notify = func(e clnkr.Event) {
-		updateModelWaitForAgentEvent(modelWait, e)
-		switch e := e.(type) {
-		case clnkr.EventResponse:
-			switch turn := e.Turn.(type) {
-			case *clnkr.DoneTurn:
-				fmt.Fprintln(os.Stdout, turn.Summary) //nolint:errcheck
-			case *clnkr.ClarifyTurn:
-				if *fullSend && !singleTask {
-					fmt.Fprintln(os.Stderr, turn.Question) //nolint:errcheck
-				}
-			default:
-				if showDebug {
-					if text, err := clnkr.CanonicalTurnJSON(e.Turn); err == nil {
-						fmt.Fprintln(os.Stderr, text) //nolint:errcheck
-					}
-				}
-			}
-		case clnkr.EventCommandStart:
-			command := summarizeCommand(e.Command)
-			if e.Dir != "" && e.Dir != cwd {
-				command += " in " + e.Dir
-			}
-			fmt.Fprintf(os.Stderr, "--- running: %s ---\n", command) //nolint:errcheck
-		case clnkr.EventCommandDone:
-			fmt.Fprint(os.Stdout, e.Stdout) //nolint:errcheck
-			if e.Stdout != "" && !strings.HasSuffix(e.Stdout, "\n") {
-				fmt.Fprintln(os.Stdout) //nolint:errcheck
-			}
-			fmt.Fprint(os.Stderr, e.Stderr) //nolint:errcheck
-			if e.Stderr != "" && !strings.HasSuffix(e.Stderr, "\n") {
-				fmt.Fprintln(os.Stderr) //nolint:errcheck
-			}
-			fmt.Fprintln(os.Stderr, "--- done ---") //nolint:errcheck
-		case clnkr.EventProtocolFailure:
-			if showDebug {
-				fmt.Fprintf(os.Stderr, "[clnkr] protocol error: %s\n", e.Reason) //nolint:errcheck
-			}
-		case clnkr.EventDebug:
-			if showDebug {
-				fmt.Fprintf(os.Stderr, "[clnkr] %s\n", e.Message)
-			}
-		}
-		if eventLogFile != nil {
-			_ = clnkrapp.WriteEventLog(eventLogFile, e)
-		}
-	}
+	installAgentNotify(agent, &modelWait, notifyOptions{
+		cwd:        cwd,
+		fullSend:   opts.fullSend,
+		singleTask: opts.singleTask,
+		verbose:    opts.verbose,
+		eventLog:   eventLogFile,
+	})
 	agent.Notify(clnkrapp.RunMetadataDebugEvent(runMetadata))
 
-	if *maxSteps > 0 {
-		agent.MaxSteps = *maxSteps
+	if opts.maxSteps > 0 {
+		agent.MaxSteps = opts.maxSteps
 	}
 
-	if *loadMessages != "" {
-		if err := clnkrapp.AddMessagesFile(agent, *loadMessages); err != nil {
+	if opts.loadMessages != "" {
+		if err := clnkrapp.AddMessagesFile(agent, opts.loadMessages); err != nil {
 			fatalf("%v", err)
 		}
 	}
 
-	if *continueFlag || *continueShort {
+	if opts.continueSession {
 		count, ok, err := clnkrapp.ResumeLatestSession(agent, cwd)
 		if err != nil {
 			fatalf("%v", err)
 		}
 		if !ok {
-			fmt.Fprintf(os.Stderr, "Error: no session found for this project.\nRun 'clnkr --list-sessions' to see available sessions.\n")
+			_, _ = fmt.Fprintf(os.Stderr, "Error: no session found for this project.\nRun 'clnkr --list-sessions' to see available sessions.\n")
 			os.Exit(1)
 		}
-		fmt.Fprintf(os.Stderr, "[Resumed session with %d messages]\n", count)
+		_, _ = fmt.Fprintf(os.Stderr, "[Resumed session with %d messages]\n", count)
 	}
 
 	driver := clnkrapp.NewDriver(agent, clnkrapp.MakeCompactorFactory(cfg))
+	singleTaskOpts := singleTaskRunOptions{taskPrompt: opts.taskPrompt, trajectory: opts.trajectory}
+	replOpts := replRunOptions{fullSend: opts.fullSend, verbose: opts.verbose}
 
-	if singleTask {
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-		defer stop()
-		if err := clnkrapp.RejectCompactCommand(taskPrompt); err != nil {
-			fatalf("%v", err)
-		}
-		runErr := runDriverPrompt(ctx, driver, newLineReader(strings.NewReader("")), taskPrompt, clnkrapp.PromptModeFullSend, eventLogFile, func() {})
-		if *trajectory != "" {
-			if err := clnkrapp.WriteTrajectory(*trajectory, agent.Messages()); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				if runErr != nil {
-					fmt.Fprintf(os.Stderr, "Error: %v\n", runErr)
-				}
-				os.Exit(1)
-			}
-		}
-		if errors.Is(runErr, clnkr.ErrClarificationNeeded) {
-			fmt.Fprintln(os.Stderr, "clarify not allowed in unattended mode")
-			os.Exit(2)
-		}
-		exitRunErr(runErr)
+	if opts.singleTask {
+		runSingleTask(agent, driver, singleTaskOpts, eventLogFile)
 		return
 	}
 
-	// REPL mode — fresh context per run so Ctrl-C cancels the current
-	// operation without killing the REPL.
-	showPrompt := isTerminal(os.Stdin.Fd())
-	if !*fullSend && !showPrompt {
-		fatalf("%v", "approval mode requires interactive stdin; pass --full-send=true to bypass approval")
+	runREPL(agent, driver, &modelWait, cwd, runMetadata, replOpts, eventLogFile)
+}
+
+type singleTaskRunOptions struct {
+	taskPrompt string
+	trajectory string
+}
+
+type replRunOptions struct {
+	fullSend bool
+	verbose  bool
+}
+
+type notifyOptions struct {
+	cwd        string
+	fullSend   bool
+	singleTask bool
+	verbose    bool
+	eventLog   io.Writer
+}
+
+func installAgentNotify(agent *clnkr.Agent, modelWait **modelWaitIndicator, opts notifyOptions) {
+	agent.Notify = func(e clnkr.Event) {
+		updateModelWaitForAgentEvent(*modelWait, e)
+		switch e := e.(type) {
+		case clnkr.EventResponse:
+			handleResponseEvent(e, opts)
+		case clnkr.EventCommandStart:
+			command := summarizeCommand(e.Command)
+			if e.Dir != "" && e.Dir != opts.cwd {
+				command += " in " + e.Dir
+			}
+			_, _ = fmt.Fprintf(os.Stderr, "--- running: %s ---\n", command)
+		case clnkr.EventCommandDone:
+			writeCommandResult(e)
+		case clnkr.EventProtocolFailure:
+			if opts.verbose {
+				_, _ = fmt.Fprintf(os.Stderr, "[clnkr] protocol error: %s\n", e.Reason)
+			}
+		case clnkr.EventDebug:
+			if opts.verbose {
+				_, _ = fmt.Fprintf(os.Stderr, "[clnkr] %s\n", e.Message)
+			}
+		}
+		if opts.eventLog != nil {
+			_ = clnkrapp.WriteEventLog(opts.eventLog, e)
+		}
 	}
-	reader := newLineReader(os.Stdin)
-	mode := clnkrapp.PromptModeApproval
-	if *fullSend {
+}
+
+func handleResponseEvent(e clnkr.EventResponse, opts notifyOptions) {
+	switch turn := e.Turn.(type) {
+	case *clnkr.DoneTurn:
+		_, _ = fmt.Fprintln(os.Stdout, turn.Summary)
+	case *clnkr.ClarifyTurn:
+		if opts.fullSend && !opts.singleTask {
+			_, _ = fmt.Fprintln(os.Stderr, turn.Question)
+		}
+	default:
+		if opts.verbose {
+			if text, err := clnkr.CanonicalTurnJSON(e.Turn); err == nil {
+				_, _ = fmt.Fprintln(os.Stderr, text)
+			}
+		}
+	}
+}
+
+func writeCommandResult(e clnkr.EventCommandDone) {
+	_, _ = fmt.Fprint(os.Stdout, e.Stdout)
+	if e.Stdout != "" && !strings.HasSuffix(e.Stdout, "\n") {
+		_, _ = fmt.Fprintln(os.Stdout)
+	}
+	_, _ = fmt.Fprint(os.Stderr, e.Stderr)
+	if e.Stderr != "" && !strings.HasSuffix(e.Stderr, "\n") {
+		_, _ = fmt.Fprintln(os.Stderr)
+	}
+	_, _ = fmt.Fprintln(os.Stderr, "--- done ---")
+}
+
+func runSingleTask(agent *clnkr.Agent, driver *clnkrapp.Driver, opts singleTaskRunOptions, eventLog io.Writer) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	fatalIfErr(clnkrapp.RejectCompactCommand(opts.taskPrompt))
+	runErr := runDriverPrompt(ctx, driver, newLineReader(strings.NewReader("")), opts.taskPrompt, clnkrapp.PromptModeFullSend, eventLog, func() {})
+	if opts.trajectory != "" {
+		if err := clnkrapp.WriteTrajectory(opts.trajectory, agent.Messages()); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			if runErr != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", runErr)
+			}
+			os.Exit(1)
+		}
+	}
+	if errors.Is(runErr, clnkr.ErrClarificationNeeded) {
+		_, _ = fmt.Fprintln(os.Stderr, "clarify not allowed in unattended mode")
+		os.Exit(2)
+	}
+	exitRunErr(runErr)
+}
+
+func runREPL(agent *clnkr.Agent, driver *clnkrapp.Driver, modelWait **modelWaitIndicator, cwd string, runMetadata clnkrapp.RunMetadata, opts replRunOptions, eventLog io.Writer) {
+	showPrompt := isTerminal(os.Stdin.Fd())
+	fatalWhen(!opts.fullSend && !showPrompt, "approval mode requires interactive stdin; pass --full-send=true to bypass approval")
+	reader, mode := newLineReader(os.Stdin), clnkrapp.PromptModeApproval
+	if opts.fullSend {
 		mode = clnkrapp.PromptModeFullSend
 	}
-	if showPrompt && !singleTask && !showDebug && isTerminal(os.Stderr.Fd()) {
-		modelWait = &modelWaitIndicator{out: os.Stderr, delay: time.Second, tick: 250 * time.Millisecond, now: time.Now}
+	if showPrompt && !opts.verbose && isTerminal(os.Stderr.Fd()) {
+		*modelWait = &modelWaitIndicator{out: os.Stderr, delay: time.Second, tick: 250 * time.Millisecond, now: time.Now}
 	}
-	var loopErr error
+	loopErr := runPromptLoop(driver, reader, *modelWait, showPrompt, mode, eventLog)
+	if msgs := agent.Messages(); len(msgs) > 0 {
+		if dir, err := clnkrapp.SaveSession(cwd, msgs, runMetadata); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", err)
+		} else {
+			_, _ = fmt.Fprintf(os.Stderr, "[Session saved to %s]\n", dir)
+		}
+	}
+	exitRunErr(loopErr)
+}
+
+func runPromptLoop(driver *clnkrapp.Driver, reader *lineReader, modelWait *modelWaitIndicator, showPrompt bool, mode string, eventLog io.Writer) error {
 	for {
 		if showPrompt {
-			fmt.Fprint(os.Stderr, "clnkr> ") //nolint:errcheck
+			_, _ = fmt.Fprint(os.Stderr, "clnkr> ")
 		}
 		input, err := reader.ReadLine(context.Background())
 		if err != nil {
@@ -526,35 +511,30 @@ func main() {
 			}
 			fatalf("%v", err)
 		}
+		if lines, err := reader.ReadQueuedLines(); err != nil {
+			fatalf("%v", err)
+		} else if len(lines) > 0 {
+			input = strings.Join(append([]string{input}, lines...), "\n")
+		}
 		input = strings.TrimSpace(input)
 		if input == "" {
 			continue
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-		if err := runDriverPrompt(ctx, driver, reader, input, mode, eventLogFile, modelWait.Stop); err != nil {
+		if err := runDriverPrompt(ctx, driver, reader, input, mode, eventLog, modelWait.Stop); err != nil {
 			if !showPrompt {
 				stop()
-				loopErr = err
-				break
+				return err
 			}
 			if errors.Is(err, clnkr.ErrClarificationNeeded) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				stop()
 				continue
 			}
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		}
 		stop()
 	}
-	// Auto-save session on exit (conversational mode)
-	if msgs := agent.Messages(); len(msgs) > 0 {
-		if err := session.SaveSessionWithMetadata(cwd, msgs, runMetadata); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", err)
-		} else if dir, err := session.SessionDir(cwd); err == nil {
-			fmt.Fprintf(os.Stderr, "[Session saved to %s]\n", dir)
-		}
-	}
-	exitRunErr(loopErr)
-
+	return nil
 }
 
 func summarizeCommand(cmd string) string {

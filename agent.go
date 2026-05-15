@@ -390,123 +390,19 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 // RunWithPolicy loops Step until done, clarify, or step limit. The policy
 // decides whether act turns execute and supplies clarification replies.
 func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy) error {
-	if policy == nil {
-		policy = FullSendPolicy{}
-	}
+	run := newRunPolicyState(policy)
 	a.AppendUserMessage(task)
-	steps := 0
-	modelTurns := 0
-	protocolErrors := 0
-	completionGate := CompletionGate{}
-	completionRejects := 0
-	gateCompletions := policyUsesCompletionGate(policy)
 
 	for ctx.Err() == nil {
-		a.appendStateMessageIfNeeded()
-		a.appendResourceStateMessage(steps, modelTurns)
-		result, err := a.Step(ctx)
-		modelTurns++
+		done, err := run.step(ctx, a)
 		if err != nil {
-			return a.notifyRunError(err, steps, modelTurns)
+			return err
 		}
-
-		if result.ParseErr != nil {
-			protocolErrors++
-			a.notify(EventDebug{Message: fmt.Sprintf("consecutive protocol errors: %d", protocolErrors)})
-			if protocolErrors >= 3 {
-				return a.notifyRunError(fmt.Errorf("consecutive protocol failures, exiting"), steps, modelTurns)
-			}
-			continue
-		}
-		protocolErrors = 0
-
-		switch turn := result.Turn.(type) {
-		case *DoneTurn:
-			if gateCompletions {
-				decision, reasons, guidance := completionGate.Decide(turn, steps, a.MaxSteps)
-				a.notify(EventCompletionGate{
-					Decision: decision,
-					Reasons:  cloneStrings(reasons),
-					Summary:  turn.Summary,
-				})
-				if decision == CompletionAccept {
-					return nil
-				}
-				if decision == CompletionReject {
-					completionRejects++
-					if completionRejects >= 3 {
-						return a.notifyRunError(fmt.Errorf("consecutive completion gate rejections, exiting"), steps, modelTurns)
-					}
-				}
-				if decision == CompletionChallenge {
-					completionRejects = 0
-				}
-				a.AppendUserMessage(guidance)
-				continue
-			}
+		if done {
 			return nil
-		case *ClarifyTurn:
-			reply, err := policy.Clarify(ctx, turn.Question)
-			if err != nil {
-				return a.notifyRunError(fmt.Errorf("clarify: %w", err), steps, modelTurns)
-			}
-			completionRejects = 0
-			a.AppendUserMessage(reply)
-		case *ActTurn:
-			var skipped []BashAction
-			if remaining := a.MaxSteps - steps; a.MaxSteps > 0 && len(turn.Bash.Commands) > remaining {
-				skipped = append([]BashAction(nil), turn.Bash.Commands[remaining:]...)
-				turn = &ActTurn{Bash: BashBatch{Commands: turn.Bash.Commands[:remaining]}, Reasoning: turn.Reasoning}
-			}
-			commands := cloneBashActions(turn.Bash.Commands)
-			decision, err := policy.DecideAct(ctx, ActProposal{
-				Turn:     &ActTurn{Bash: BashBatch{Commands: cloneBashActions(commands)}, Reasoning: turn.Reasoning},
-				Skipped:  cloneBashActions(skipped),
-				Commands: commands,
-				Prompt:   formatActProposal(commands),
-			})
-			if err != nil {
-				return a.notifyRunError(fmt.Errorf("decide act: %w", err), steps, modelTurns)
-			}
-			switch decision.Kind {
-			case ActDecisionReject:
-				allCommands := append(cloneBashActions(turn.Bash.Commands), skipped...)
-				a.RejectTurn(&ActTurn{Bash: BashBatch{Commands: allCommands}, Reasoning: turn.Reasoning}, decision.Guidance)
-				continue
-			case ActDecisionApprove:
-			default:
-				return a.notifyRunError(fmt.Errorf("decide act: unknown decision %q", decision.Kind), steps, modelTurns)
-			}
-			execResult, err := a.ExecuteTurnWithSkipped(ctx, turn, skipped)
-			if err != nil {
-				return a.notifyRunError(err, steps, modelTurns)
-			}
-			completionRejects = 0
-			steps += execResult.ExecCount
-			a.notify(EventDebug{Message: fmt.Sprintf("step %d/%d", steps, a.MaxSteps)})
-			if a.MaxSteps > 0 && steps >= a.MaxSteps {
-				a.appendResourceStateMessage(steps, modelTurns)
-				if err := a.RequestStepLimitSummary(ctx); err != nil {
-					modelTurns++
-					return a.notifyRunError(err, steps, modelTurns)
-				}
-				modelTurns++
-				return nil
-			}
-		default:
-			return a.notifyRunError(fmt.Errorf("unhandled turn type %T", turn), steps, modelTurns)
 		}
 	}
-	return a.notifyRunError(ctx.Err(), steps, modelTurns)
-}
-
-func policyUsesCompletionGate(policy RunPolicy) bool {
-	switch policy.(type) {
-	case FullSendPolicy, *FullSendPolicy:
-		return true
-	default:
-		return false
-	}
+	return run.runError(a, ctx.Err())
 }
 
 func cloneBashActions(actions []BashAction) []BashAction {

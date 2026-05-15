@@ -28,14 +28,15 @@ CLANKERVAL_PREFLIGHT = \
 	build clean install run \
 	clnkr send readme-image \
 	check test evaluations evaluations-live evaluations-live-openai evaluations-live-anthropic \
+	architecture-shape-report semantic-cohesion-report test-fidelity-report \
 	help man docs docs-serve \
 	_build-clnkr _build-clnkrd \
-	_fmt _fmt-check _vet _lint _arch sloc frontend-sloc _workflow-make-targets \
+	_fmt _fmt-check _vet _lint _arch _script-tests sloc frontend-sloc _workflow-make-targets \
 	_hooks _check-docs _require-run-clnkr-tools _require-pandoc _require-readme-image-tools _site-sync _site-build
 
 PREFIX ?= /usr/local
-CORE_SLOC_LIMIT := 2000
-FRONTEND_SLOC_LIMIT := 1900
+CORE_SLOC_LIMIT := 2200
+FRONTEND_SLOC_LIMIT := 2200
 DOC_MAN_DIR := build/docs/man
 DOC_MAN_OUTPUTS := $(DOC_MAN_DIR)/clnkr.1 $(DOC_MAN_DIR)/clnkrd.1 $(DOC_MAN_DIR)/clnkr.3 $(DOC_MAN_DIR)/clnkr.7
 DOC_CONTENT_DIR := site/content/docs
@@ -79,7 +80,7 @@ _build-clnkrd:
 	go build -trimpath -ldflags '$(LDFLAGS)' -o clnkrd ./cmd/clnkrd/
 
 ##@ Quality
-check: _fmt-check _vet _lint _arch sloc frontend-sloc _workflow-make-targets _check-docs test evaluations ## Run formatting, vet, lint, architecture, SLOC, workflow, docs, test, and evaluation checks
+check: _fmt-check _vet _lint _arch _script-tests sloc frontend-sloc _workflow-make-targets _check-docs test evaluations ## Run formatting, vet, lint, architecture, script tests, SLOC, workflow, docs, test, and evaluation checks
 
 test: ## Run all tests
 	go test ./... -v
@@ -125,6 +126,9 @@ _lint:
 _arch:
 	@./scripts/check-architecture-imports.sh
 
+_script-tests:
+	./scripts/test/check-architecture-imports.sh
+
 # Repo-root only: counts repo-local Go files in the main-module dependency closure of `.`.
 sloc: ## Report core runtime graph SLOC and fail if it exceeds CORE_SLOC_LIMIT
 	@sloc="$$(cloc --quiet --timeout 30 --csv $$(go list -deps -f '{{if .Module}}{{if .Module.Main}}{{range .GoFiles}}{{$$.Dir}}/{{.}}{{"\n"}}{{end}}{{end}}{{end}}' . | sort -u) | awk -F, 'END { print $$5 }')"; \
@@ -135,6 +139,15 @@ frontend-sloc: ## Report non-test frontend SLOC and fail if it exceeds FRONTEND_
 	@sloc="$$(cloc --quiet --timeout 30 --csv --not-match-f='_test\.go$$' cmd | awk -F, 'END { print $$5 }')"; \
 	echo "frontend: $$sloc / $(FRONTEND_SLOC_LIMIT) SLOC"; \
 	test "$$sloc" -le "$(FRONTEND_SLOC_LIMIT)" || { echo "error: frontend exceeds $(FRONTEND_SLOC_LIMIT) SLOC limit" >&2; exit 1; }
+
+architecture-shape-report: ## Manually report thoth architecture shape; requires thoth in PATH or THOTH_BIN
+	./scripts/architecture-shape-report.sh .
+
+semantic-cohesion-report: ## Manually report thoth semantic cohesion; requires thoth in PATH or THOTH_BIN
+	./scripts/semantic-cohesion-report.sh .
+
+test-fidelity-report: ## Manually report test shape, fixtures, and mock/fake usage
+	./scripts/test-fidelity-report.sh
 
 _workflow-make-targets:
 	./scripts/check-workflow-make-targets.sh

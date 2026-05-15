@@ -47,6 +47,16 @@ func ParseActProtocolSetting(raw string) (ActProtocolSetting, error) {
 	return "", fmt.Errorf(`invalid act-protocol %q (allowed: auto, clnkr-inline, tool-calls)`, raw)
 }
 
+func ActProtocolFlagValue(flagValue string, flagSet bool, env func(string) string) string {
+	if flagSet {
+		return flagValue
+	}
+	if value := strings.TrimSpace(env("CLNKR_ACT_PROTOCOL")); value != "" {
+		return value
+	}
+	return flagValue
+}
+
 func resolveActProtocol(setting ActProtocolSetting, provider providerdomain.Provider, providerAPI providerdomain.ProviderAPI) clnkr.ActProtocol {
 	if setting == ActProtocolSettingAuto {
 		if providerdomain.SupportsBashToolCalls(provider, providerAPI) {
