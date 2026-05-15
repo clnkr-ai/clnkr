@@ -28,7 +28,7 @@ CLANKERVAL_PREFLIGHT = \
 	build clean install run \
 	clnkr send readme-image \
 	check test evaluations evaluations-live evaluations-live-openai evaluations-live-anthropic \
-	architecture-shape-report semantic-cohesion-report test-fidelity-report \
+	thoth-critical-check architecture-shape-report semantic-cohesion-report test-fidelity-report \
 	help man docs docs-serve \
 	_build-clnkr _build-clnkrd \
 	_fmt _fmt-check _vet _lint _arch _script-tests sloc frontend-sloc _workflow-make-targets \
@@ -128,6 +128,7 @@ _arch:
 
 _script-tests:
 	./scripts/test/check-architecture-imports.sh
+	./scripts/test/check-thoth-critical.sh
 
 # Repo-root only: counts repo-local Go files in the main-module dependency closure of `.`.
 sloc: ## Report core runtime graph SLOC and fail if it exceeds CORE_SLOC_LIMIT
@@ -142,6 +143,9 @@ frontend-sloc: ## Report non-test frontend SLOC and fail if it exceeds FRONTEND_
 
 architecture-shape-report: ## Manually report thoth architecture shape; requires thoth in PATH or THOTH_BIN
 	./scripts/architecture-shape-report.sh .
+
+thoth-critical-check: ## Fail when thoth reports any critical file risk; requires thoth in PATH or THOTH_BIN
+	./scripts/check-thoth-critical.sh .
 
 semantic-cohesion-report: ## Manually report thoth semantic cohesion; requires thoth in PATH or THOTH_BIN
 	./scripts/semantic-cohesion-report.sh .
