@@ -1,6 +1,7 @@
 package providerconfig
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -27,6 +28,12 @@ type ResolvedProviderConfig struct {
 	ActProtocol            clnkr.ActProtocol
 	RequestOptions         providerdomain.ProviderRequestOptions
 }
+
+type missingAPIKeyError struct{}
+
+func (missingAPIKeyError) Error() string { return "api key is required; set CLNKR_API_KEY" }
+
+func IsMissingAPIKey(err error) bool { return errors.As(err, new(missingAPIKeyError)) }
 
 type ActProtocolSetting string
 
@@ -79,7 +86,7 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 	actProtocol := resolveActProtocol(actProtocolSetting, provider, providerAPI)
 	apiKey := strings.TrimSpace(env("CLNKR_API_KEY"))
 	if apiKey == "" {
-		return ResolvedProviderConfig{}, fmt.Errorf("api key is required; set CLNKR_API_KEY")
+		return ResolvedProviderConfig{}, missingAPIKeyError{}
 	}
 	requestOptions, err := providerdomain.ValidateRequestOptions(provider, providerAPI, model, actProtocol == clnkr.ActProtocolToolCalls, inputs.RequestOptions)
 	if err != nil {

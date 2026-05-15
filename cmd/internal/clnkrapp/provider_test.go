@@ -38,7 +38,7 @@ func TestNewModelForConfigUsesOpenAIResponsesWhenConfigured(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
+	model := newModelForConfig(providerconfig.ResolvedProviderConfig{
 		Provider:    "openai",
 		ProviderAPI: "openai-responses",
 		Model:       "gpt-5.4",
@@ -76,7 +76,7 @@ func TestNewModelForConfigPassesOpenAIResponsesRequestOptions(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
+	model := newModelForConfig(providerconfig.ResolvedProviderConfig{
 		Provider:    providerdomain.ProviderOpenAI,
 		ProviderAPI: providerdomain.ProviderAPIOpenAIResponses,
 		Model:       "gpt-5.1",
@@ -113,7 +113,7 @@ func TestNewModelForConfigPassesAnthropicRequestOptions(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
+	model := newModelForConfig(providerconfig.ResolvedProviderConfig{
 		Provider: providerdomain.ProviderAnthropic,
 		Model:    "claude-sonnet-4-20250514",
 		BaseURL:  server.URL,
@@ -155,7 +155,7 @@ func TestNewModelForConfigPassesBashToolCallOption(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
+	model := newModelForConfig(providerconfig.ResolvedProviderConfig{
 		Provider:    providerdomain.ProviderAnthropic,
 		Model:       "claude-sonnet-4-20250514",
 		BaseURL:     server.URL,
@@ -186,7 +186,7 @@ func TestNewModelForConfigPassesAnthropicEffortWithAdaptiveThinking(t *testing.T
 	}))
 	defer server.Close()
 
-	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
+	model := newModelForConfig(providerconfig.ResolvedProviderConfig{
 		Provider: providerdomain.ProviderAnthropic,
 		Model:    "claude-sonnet-4-20250514",
 		BaseURL:  server.URL,
@@ -233,7 +233,7 @@ func TestMakeCompactorFactoryUsesOpenAIWhenProviderSelected(t *testing.T) {
 	}))
 	defer server.Close()
 
-	compactor := MakeCompactorFactory(providerconfig.ResolvedProviderConfig{
+	compactor := makeCompactorFactory(providerconfig.ResolvedProviderConfig{
 		Provider:    "openai",
 		ProviderAPI: "openai-chat-completions",
 		BaseURL:     server.URL,
@@ -274,7 +274,7 @@ func TestMakeCompactorFactoryUsesOpenAIResponsesWhenConfigured(t *testing.T) {
 	}))
 	defer server.Close()
 
-	compactor := MakeCompactorFactory(providerconfig.ResolvedProviderConfig{
+	compactor := makeCompactorFactory(providerconfig.ResolvedProviderConfig{
 		Provider:    "openai",
 		ProviderAPI: "openai-responses",
 		BaseURL:     server.URL,
@@ -312,7 +312,7 @@ func TestMakeCompactorFactoryUsesAnthropicWhenProviderSelected(t *testing.T) {
 	}))
 	defer server.Close()
 
-	compactor := MakeCompactorFactory(providerconfig.ResolvedProviderConfig{
+	compactor := makeCompactorFactory(providerconfig.ResolvedProviderConfig{
 		Provider: "anthropic",
 		BaseURL:  server.URL,
 		APIKey:   "test-key",

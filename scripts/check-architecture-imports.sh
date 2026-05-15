@@ -14,6 +14,7 @@ ACTIVE_RULES=(
   "ARCH010 frontend-provider-construction"
   "ARCH011 frontend-session-boundary"
   "ARCH012 cli-parser-boundary"
+  "ARCH013 frontend-providerconfig-boundary"
 )
 
 readonly RULE_FRONTEND_PROVIDER="ARCH010 frontend-provider-construction"
@@ -25,6 +26,9 @@ readonly RULE_FRONTEND_SESSION_GUIDANCE="move session persistence calls behind c
 readonly RULE_CLI_PARSER="ARCH012 cli-parser-boundary"
 readonly RULE_CLI_PARSER_TEXT="CLI option parsing must stay local and stdlib-only."
 readonly RULE_CLI_PARSER_GUIDANCE="keep cmd/clnkr/cli_*.go parser-only; move app-service and config-resolution calls out of the parser."
+readonly RULE_FRONTEND_PROVIDERCONFIG="ARCH013 frontend-providerconfig-boundary"
+readonly RULE_FRONTEND_PROVIDERCONFIG_TEXT="frontend adapters must use cmd/internal/clnkrapp instead of importing cmd/internal/providerconfig directly."
+readonly RULE_FRONTEND_PROVIDERCONFIG_GUIDANCE="move provider config and startup construction behind cmd/internal/clnkrapp; do not import cmd/internal/providerconfig from cmd/... outside cmd/internal/clnkrapp."
 
 emit_violation() {
   local rule="$1" importer="$2" target="$3" import_source="$4" trusted_rule="$5" guidance="$6"
@@ -118,6 +122,10 @@ is_session_boundary_target() {
   [[ "$1" == "$internal_session" ]]
 }
 
+is_providerconfig_boundary_target() {
+  [[ "$1" == "$module/cmd/internal/providerconfig" ]]
+}
+
 check_frontend_provider_construction() {
   local bad=0 edge importer target import_source
   for edge in "${import_edges[@]}"; do
@@ -190,6 +198,18 @@ is_standard_import() {
   [[ "$standard" == "true" ]]
 }
 
+check_frontend_providerconfig_boundary() {
+  local bad=0 edge importer target import_source
+  for edge in "${import_edges[@]}"; do
+    IFS=$'	' read -r importer target import_source <<<"$edge"
+    if [[ "$importer" == "$module"/cmd/* && "$importer" != "$module/cmd/internal/clnkrapp" ]] && is_providerconfig_boundary_target "$target"; then
+      emit_violation "$RULE_FRONTEND_PROVIDERCONFIG" "$importer" "$target" "$import_source" "$RULE_FRONTEND_PROVIDERCONFIG_TEXT" "$RULE_FRONTEND_PROVIDERCONFIG_GUIDANCE"
+      bad=1
+    fi
+  done
+  return "$bad"
+}
+
 check_cli_parser_boundary() {
   local bad=0 file target imports_output
   for file in cmd/clnkr/cli_*.go; do
@@ -214,6 +234,7 @@ run_active_rule() {
     "$RULE_FRONTEND_PROVIDER") check_frontend_provider_construction ;;
     "$RULE_FRONTEND_SESSION") check_frontend_session_boundary ;;
     "$RULE_CLI_PARSER") check_cli_parser_boundary ;;
+    "$RULE_FRONTEND_PROVIDERCONFIG") check_frontend_providerconfig_boundary ;;
     *) echo "error: unknown architecture rule: $1" >&2; exit 2 ;;
   esac
 }

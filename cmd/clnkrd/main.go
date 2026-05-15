@@ -13,7 +13,6 @@ import (
 
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
-	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
 )
 
 // version is set at build time via -ldflags.
@@ -102,49 +101,27 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 		return fail("cannot get working directory: %v", err)
 	}
 
-	actProtocolSet := flagIsSet(flags, "act-protocol")
-	actProtocolSetting, err := providerconfig.ParseActProtocolSetting(providerconfig.ActProtocolFlagValue(*actProtocolFlag, actProtocolSet, env))
-	if err != nil {
-		return fail("%v", err)
-	}
-	actProtocol := clnkr.ActProtocolClnkrInline
-	if !*noSystemPrompt {
-		actProtocol, err = providerconfig.ResolvePromptActProtocol(providerconfig.Inputs{
-			Provider:    *providerFlag,
-			ProviderAPI: *providerAPIFlag,
-			Model:       *modelFlag,
-			BaseURL:     *baseURLFlag,
-			ActProtocol: actProtocolSetting,
-		}, env, *dumpSystemPrompt)
+	startupInputs := clnkrapp.StartupInputs{CWD: cwd, Version: version, Env: env, Environ: environ(), Provider: *providerFlag, ProviderAPI: *providerAPIFlag, Model: *modelFlag, BaseURL: *baseURLFlag, ActProtocol: *actProtocolFlag, ActProtocolSet: flagIsSet(flags, "act-protocol"), Effort: *effortFlag, MaxOutputTokens: *maxOutputTokens, MaxOutputTokensSet: maxOutputTokensSet, ThinkingBudgetTokens: *thinkingBudgetTokens, ThinkingBudgetTokensSet: thinkingBudgetTokensSet, OmitSystemPrompt: *noSystemPrompt, SystemPromptAppend: *systemPromptAppend, DumpSystemPrompt: *dumpSystemPrompt, Unattended: false}
+	if *dumpSystemPrompt {
+		systemPrompt, err := clnkrapp.LoadStartupPrompt(startupInputs)
 		if err != nil {
 			return fail("%v", err)
 		}
-	}
-	systemPrompt := clnkr.LoadPromptWithOptions(cwd, clnkr.PromptOptions{
-		OmitSystemPrompt:   *noSystemPrompt,
-		SystemPromptAppend: *systemPromptAppend,
-		ActProtocol:        actProtocol,
-	})
-	if *dumpSystemPrompt {
 		fmt.Fprint(out, systemPrompt) //nolint:errcheck
 		return 0
 	}
 
-	cfg, err := providerconfig.ResolveConfig(providerconfig.Inputs{
-		Provider: *providerFlag, ProviderAPI: *providerAPIFlag,
-		Model: *modelFlag, BaseURL: *baseURLFlag,
-		ActProtocol:    actProtocolSetting,
-		RequestOptions: clnkrapp.RequestOptions(*effortFlag, *maxOutputTokens, maxOutputTokensSet, *thinkingBudgetTokens, thinkingBudgetTokensSet),
-	}, env)
+	startup, err := clnkrapp.PrepareStartup(startupInputs)
 	if err != nil {
-		if strings.Contains(err.Error(), "api key is required") {
+		if clnkrapp.IsMissingAPIKey(err) {
 			fmt.Fprintln(errOut, "Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key") //nolint:errcheck
 			return 1
 		}
 		return fail("%v", err)
 	}
+	runMetadata := startup.Metadata
+	agent := startup.Agent
 
-	runMetadata := clnkrapp.NewRunMetadata(version, cfg, systemPrompt)
 	eventOut := &lockedWriter{w: out}
 	if *eventLog != "" {
 		eventLogFile, err := os.OpenFile(*eventLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
@@ -155,9 +132,6 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 		eventOut.w = io.MultiWriter(out, eventLogFile)
 	}
 
-	agent := clnkr.NewAgent(clnkrapp.NewModelForConfig(cfg, systemPrompt), &clnkr.CommandExecutor{}, cwd)
-	agent.SetEnv(clnkrapp.CommandEnvFromProviderConfig(cfg, environ()))
-	agent.ActProtocol = cfg.ActProtocol
 	agent.Notify = func(event clnkr.Event) {
 		if err := clnkrapp.WriteJSONL(eventOut, event); err != nil {
 			fmt.Fprintf(errOut, "Error: write event: %v\n", err) //nolint:errcheck
@@ -182,7 +156,7 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 		}
 	}
 
-	driver := clnkrapp.NewDriver(agent, clnkrapp.MakeCompactorFactory(cfg))
+	driver := startup.Driver
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	if err := runJSONL(ctx, in, eventOut, errOut, driver); err != nil {
