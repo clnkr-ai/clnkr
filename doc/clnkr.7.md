@@ -463,12 +463,6 @@ requests into terminal or JSONL interaction.
 : The interface for running one shell command and returning a structured
 command result.
 
-**ShellExecutor**
-: The built-in Unix bash executor.
-
-**CommandExecutor**
-: Compatibility alias for **ShellExecutor**.
-
 **Child process**
 : A **clnkrd** process launched by bash for bounded child work. Its stdout,
 stderr, and event logs are ordinary process artifacts that the model must read
