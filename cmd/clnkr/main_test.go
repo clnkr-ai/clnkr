@@ -1396,6 +1396,63 @@ func TestRunDriverPromptClarificationReadsReplyAndContinues(t *testing.T) {
 	}
 }
 
+func TestRunDriverPromptClarificationBlankLineDoesNotRepeatQuestion(t *testing.T) {
+	model := &fakeModel{responses: []clnkr.Response{
+		mustResponse(`{"type":"clarify","question":"Which repo?"}`),
+		mustResponse(`{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`),
+	}}
+	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
+	driver := clnkrapp.NewDriver(agent, nil)
+
+	stderr := captureStderr(t, func() {
+		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("\n/tmp/repo\n")), "inspect", clnkrapp.PromptModeApproval, nil, func() {})
+		if err != nil {
+			t.Fatalf("runDriverPrompt: %v", err)
+		}
+	})
+
+	if got := strings.Count(stderr, "Which repo?"); got != 1 {
+		t.Fatalf("clarification question printed %d times, want 1:\n%s", got, stderr)
+	}
+	foundReply := false
+	for _, msg := range agent.Messages() {
+		if msg.Role == "user" && msg.Content == "/tmp/repo" {
+			foundReply = true
+			break
+		}
+	}
+	if !foundReply {
+		t.Fatalf("clarification reply not appended: %#v", agent.Messages())
+	}
+}
+
+func TestRunPromptLoopTreatsQueuedPasteLinesAsOnePrompt(t *testing.T) {
+	model := &fakeModel{responses: []clnkr.Response{
+		mustResponse(`{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`),
+	}}
+	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
+	driver := clnkrapp.NewDriver(agent, nil)
+	reader := newLineReader(strings.NewReader("first line\nsecond line\nthird line\n"))
+
+	err := runPromptLoop(driver, reader, nil, false, clnkrapp.PromptModeApproval, nil)
+	if err != nil {
+		t.Fatalf("runPromptLoop: %v", err)
+	}
+
+	userMessages := make([]string, 0)
+	for _, msg := range agent.Messages() {
+		if msg.Role == "user" && !strings.Contains(msg.Content, `"source":"clnkr"`) {
+			userMessages = append(userMessages, msg.Content)
+		}
+	}
+	if len(userMessages) != 1 {
+		t.Fatalf("user messages = %#v, want one pasted prompt", userMessages)
+	}
+	if userMessages[0] != "first line\nsecond line\nthird line" {
+		t.Fatalf("prompt = %q, want pasted lines joined", userMessages[0])
+	}
+}
+
 func TestRunDriverPromptApprovalCanBeCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

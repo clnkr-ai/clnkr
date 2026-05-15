@@ -83,7 +83,7 @@ type lineReader struct {
 }
 
 func newLineReader(r io.Reader) *lineReader {
-	lr := &lineReader{lines: make(chan lineResult)}
+	lr := &lineReader{lines: make(chan lineResult, 1024)}
 	go func() {
 		scanner := bufio.NewScanner(r)
 		for scanner.Scan() {
@@ -109,6 +109,31 @@ func (r *lineReader) ReadLine(ctx context.Context) (string, error) {
 			return "", line.err
 		}
 		return line.text, nil
+	}
+}
+
+func (r *lineReader) ReadQueuedLines() ([]string, error) {
+	timer := time.NewTimer(10 * time.Millisecond)
+	defer timer.Stop()
+
+	var lines []string
+	for {
+		select {
+		case line, ok := <-r.lines:
+			if !ok {
+				return lines, nil
+			}
+			if line.err != nil {
+				return lines, line.err
+			}
+			lines = append(lines, line.text)
+			if !timer.Stop() {
+				<-timer.C
+			}
+			timer.Reset(time.Millisecond)
+		case <-timer.C:
+			return lines, nil
+		}
 	}
 }
 
@@ -185,12 +210,18 @@ func handleTerminalDriverEvent(ctx context.Context, driver *clnkrapp.Driver, rea
 
 func replyToTerminalRequest(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, text, prompt string) error {
 	fmt.Fprintln(os.Stderr, text) //nolint:errcheck
-	fmt.Fprint(os.Stderr, prompt) //nolint:errcheck
-	reply, err := reader.ReadLine(ctx)
-	if err != nil {
-		return err
+	for {
+		fmt.Fprint(os.Stderr, prompt) //nolint:errcheck
+		reply, err := reader.ReadLine(ctx)
+		if err != nil {
+			return err
+		}
+		reply = strings.TrimSpace(reply)
+		if reply == "" {
+			continue
+		}
+		return driver.Reply(ctx, reply)
 	}
-	return driver.Reply(ctx, strings.TrimSpace(reply))
 }
 
 func fatalf(format string, args ...any) {
@@ -479,6 +510,11 @@ func runPromptLoop(driver *clnkrapp.Driver, reader *lineReader, modelWait *model
 				break
 			}
 			fatalf("%v", err)
+		}
+		if lines, err := reader.ReadQueuedLines(); err != nil {
+			fatalf("%v", err)
+		} else if len(lines) > 0 {
+			input = strings.Join(append([]string{input}, lines...), "\n")
 		}
 		input = strings.TrimSpace(input)
 		if input == "" {
