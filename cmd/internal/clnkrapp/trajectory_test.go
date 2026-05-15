@@ -1,11 +1,9 @@
 package clnkrapp
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 
 	"github.com/clnkr-ai/clnkr"
@@ -15,41 +13,27 @@ import (
 
 func TestWriteTrajectoryWritesIndentedMessages(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "trajectory.json")
-	messages := []clnkr.Message{{Role: "user", Content: "hello"}}
 
-	if err := WriteTrajectory(path, messages); err != nil {
+	if err := WriteTrajectory(path, []clnkr.Message{{Role: "user", Content: "hello"}}); err != nil {
 		t.Fatalf("WriteTrajectory: %v", err)
 	}
-
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	if !bytes.Contains(data, []byte("\n  ")) {
-		t.Fatalf("trajectory was not indented: %q", data)
-	}
-
-	var got []clnkr.Message
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-	if !reflect.DeepEqual(got, messages) {
-		t.Fatalf("messages = %#v, want %#v", got, messages)
+	want := `[
+  {
+    "role": "user",
+    "content": "hello"
+  }
+]`
+	if string(data) != want {
+		t.Fatalf("trajectory = %q, want %q", data, want)
 	}
 }
 
 func TestRunMetadataDebugEventFormatsJSON(t *testing.T) {
-	meta := newRunMetadata("test-version", providerconfig.ResolvedProviderConfig{
-		Provider:    providerdomain.ProviderOpenAI,
-		ProviderAPI: providerdomain.ProviderAPIOpenAIResponses,
-		Model:       "gpt-5.1",
-		RequestOptions: providerdomain.ProviderRequestOptions{
-			Effort: providerdomain.ProviderEffortOptions{Level: "high", Set: true},
-			Output: providerdomain.ProviderOutputOptions{
-				MaxOutputTokens: providerdomain.OptionalInt{Value: 8000, Set: true},
-			},
-		},
-	}, "system prompt")
+	meta := newRunMetadata("test-version", openAIResponsesConfig("high"), "system prompt")
 
 	event := RunMetadataDebugEvent(meta)
 	var got RunMetadata
@@ -68,20 +52,9 @@ func TestRunMetadataDebugEventFormatsJSON(t *testing.T) {
 }
 
 func TestRunMetadataMirrorsProviderRequestShape(t *testing.T) {
-	meta := newRunMetadata("test-version", providerconfig.ResolvedProviderConfig{
-		Provider:    providerdomain.ProviderOpenAI,
-		ProviderAPI: providerdomain.ProviderAPIOpenAIResponses,
-		Model:       "gpt-5.1",
-		ActProtocol: clnkr.ActProtocolToolCalls,
-		RequestOptions: providerdomain.ProviderRequestOptions{
-			Effort: providerdomain.ProviderEffortOptions{Level: "auto", Set: true},
-			Output: providerdomain.ProviderOutputOptions{
-				MaxOutputTokens: providerdomain.OptionalInt{Value: 8000, Set: true},
-			},
-		},
-	}, "system prompt")
-
-	data, err := json.Marshal(meta)
+	cfg := openAIResponsesConfig("auto")
+	cfg.ActProtocol = clnkr.ActProtocolToolCalls
+	data, err := json.Marshal(newRunMetadata("test-version", cfg, "system prompt"))
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -94,8 +67,7 @@ func TestRunMetadataMirrorsProviderRequestShape(t *testing.T) {
 				Level        *string `json:"level"`
 			} `json:"effort"`
 			Output struct {
-				MaxOutputTokensOmitted bool `json:"max_output_tokens_omitted"`
-				MaxOutputTokens        *int `json:"max_output_tokens"`
+				MaxOutputTokens *int `json:"max_output_tokens"`
 			} `json:"output"`
 		} `json:"requested"`
 		Effective struct {
@@ -114,13 +86,10 @@ func TestRunMetadataMirrorsProviderRequestShape(t *testing.T) {
 	if got.TurnProtocol != nil {
 		t.Fatalf("turn_protocol = %s, want omitted", got.TurnProtocol)
 	}
-	if got.Requested.Effort.LevelOmitted {
-		t.Fatalf("requested.effort.level_omitted = true, want false for explicit auto")
+	if got.Requested.Effort.LevelOmitted || got.Requested.Effort.Level == nil || *got.Requested.Effort.Level != "auto" {
+		t.Fatalf("requested.effort = %#v, want explicit auto", got.Requested.Effort)
 	}
-	if got.Requested.Effort.Level == nil || *got.Requested.Effort.Level != "auto" {
-		t.Fatalf("requested.effort.level = %#v, want auto", got.Requested.Effort.Level)
-	}
-	if got.Effective.Effort.LevelOmitted != true || got.Effective.Effort.Level != nil {
+	if !got.Effective.Effort.LevelOmitted || got.Effective.Effort.Level != nil {
 		t.Fatalf("effective.effort = %#v, want omitted level for auto", got.Effective.Effort)
 	}
 	if got.Requested.Output.MaxOutputTokens == nil || *got.Requested.Output.MaxOutputTokens != 8000 {
@@ -128,39 +97,44 @@ func TestRunMetadataMirrorsProviderRequestShape(t *testing.T) {
 	}
 }
 
-func TestLoadMessagesAcceptsLegacyArrayAndEnvelope(t *testing.T) {
-	messages := []clnkr.Message{{Role: "user", Content: "hello"}}
-	legacy, err := json.Marshal(messages)
-	if err != nil {
-		t.Fatalf("Marshal legacy: %v", err)
-	}
-	got, err := LoadMessages(legacy)
-	if err != nil {
-		t.Fatalf("LoadMessages legacy: %v", err)
-	}
-	if !reflect.DeepEqual(got, messages) {
-		t.Fatalf("legacy messages = %#v, want %#v", got, messages)
-	}
-
-	envelope, err := json.Marshal(struct {
-		Metadata map[string]string `json:"metadata"`
-		Messages []clnkr.Message   `json:"messages"`
-	}{Metadata: map[string]string{"version": "dev"}, Messages: messages})
-	if err != nil {
-		t.Fatalf("Marshal envelope: %v", err)
-	}
-	got, err = LoadMessages(envelope)
-	if err != nil {
-		t.Fatalf("LoadMessages envelope: %v", err)
-	}
-	if !reflect.DeepEqual(got, messages) {
-		t.Fatalf("envelope messages = %#v, want %#v", got, messages)
+func TestLoadMessages(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		input   string
+		wantErr string
+	}{
+		{name: "legacy array", input: `[{"role":"user","content":"hello"}]`},
+		{name: "envelope", input: `{"metadata":{"version":"dev"},"messages":[{"role":"user","content":"hello"}]}`},
+		{name: "envelope without messages", input: `{"metadata":{"version":"dev"}}`, wantErr: "parse messages: missing messages"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := LoadMessages([]byte(tc.input))
+			if tc.wantErr != "" {
+				if err == nil || err.Error() != tc.wantErr {
+					t.Fatalf("LoadMessages error = %v, want %s", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadMessages: %v", err)
+			}
+			if len(got) != 1 || got[0].Role != "user" || got[0].Content != "hello" {
+				t.Fatalf("messages = %#v, want user hello", got)
+			}
+		})
 	}
 }
 
-func TestLoadMessagesRejectsEnvelopeWithoutMessages(t *testing.T) {
-	_, err := LoadMessages([]byte(`{"metadata":{"version":"dev"}}`))
-	if err == nil || err.Error() != "parse messages: missing messages" {
-		t.Fatalf("LoadMessages error = %v, want missing messages", err)
+func openAIResponsesConfig(effort string) providerconfig.ResolvedProviderConfig {
+	return providerconfig.ResolvedProviderConfig{
+		Provider:    providerdomain.ProviderOpenAI,
+		ProviderAPI: providerdomain.ProviderAPIOpenAIResponses,
+		Model:       "gpt-5.1",
+		RequestOptions: providerdomain.ProviderRequestOptions{
+			Effort: providerdomain.ProviderEffortOptions{Level: effort, Set: true},
+			Output: providerdomain.ProviderOutputOptions{
+				MaxOutputTokens: providerdomain.OptionalInt{Value: 8000, Set: true},
+			},
+		},
 	}
 }

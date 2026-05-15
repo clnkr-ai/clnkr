@@ -9,18 +9,13 @@ import (
 )
 
 func TestDriverApprovalRequestReplyExecutesCommand(t *testing.T) {
-	model := &fakeModel{responses: []clnkr.Response{
+	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
+	agent := clnkr.NewAgent(&fakeModel{responses: []clnkr.Response{
 		mustResponse(actJSON("echo hi")),
 		mustResponse(`{"type":"done","summary":"done"}`),
-	}}
-	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
-	agent := clnkr.NewAgent(model, executor, "/tmp")
+	}}, executor, "/tmp")
 	driver := NewDriver(agent, nil)
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- driver.Prompt(context.Background(), "say hi", PromptModeApproval)
-	}()
+	errCh := promptAsync(driver, "say hi")
 
 	event := nextDriverEvent(t, driver)
 	request, ok := event.(EventApprovalRequest)
@@ -40,13 +35,8 @@ func TestDriverApprovalRequestReplyExecutesCommand(t *testing.T) {
 	if err := driver.Reply(context.Background(), "y"); err != nil {
 		t.Fatalf("Reply: %v", err)
 	}
-
-	done, ok := nextDriverEvent(t, driver).(EventDone)
-	if !ok {
-		t.Fatalf("next event = %T, want EventDone", done)
-	}
-	if done.Summary != "done" {
-		t.Fatalf("summary = %q, want done", done.Summary)
+	if event := nextDriverEvent(t, driver); event != (EventDone{Summary: "done"}) {
+		t.Fatalf("event = %#v, want done", event)
 	}
 	if err := <-errCh; err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -60,17 +50,12 @@ func TestDriverApprovalRequestReplyExecutesCommand(t *testing.T) {
 }
 
 func TestDriverClarificationReplyContinuesRun(t *testing.T) {
-	model := &fakeModel{responses: []clnkr.Response{
+	agent := clnkr.NewAgent(&fakeModel{responses: []clnkr.Response{
 		mustResponse(`{"type":"clarify","question":"Which repo?"}`),
 		mustResponse(`{"type":"done","summary":"done"}`),
-	}}
-	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
+	}}, &fakeExecutor{}, "/tmp")
 	driver := NewDriver(agent, nil)
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- driver.Prompt(context.Background(), "inspect", PromptModeApproval)
-	}()
+	errCh := promptAsync(driver, "inspect")
 
 	event := nextDriverEvent(t, driver)
 	request, ok := event.(EventClarificationRequest)
@@ -135,22 +120,28 @@ func TestDriverTopLevelCompactDispatch(t *testing.T) {
 }
 
 func TestDriverDelegateTextReachesModelAsOrdinaryPrompt(t *testing.T) {
-	model := &fakeModel{responses: []clnkr.Response{
+	agent := clnkr.NewAgent(&fakeModel{responses: []clnkr.Response{
 		mustResponse(`{"type":"done","summary":"done"}`),
-	}}
-	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp/repo")
+	}}, &fakeExecutor{}, "/tmp/repo")
 	driver := NewDriver(agent, nil)
 
 	if err := driver.Prompt(context.Background(), "/delegate inspect README", PromptModeApproval); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
-
 	if event := nextDriverEvent(t, driver); event != (EventDone{Summary: "done"}) {
 		t.Fatalf("event = %#v, want done", event)
 	}
 	if !hasUserMessage(agent.Messages(), "/delegate inspect README") {
 		t.Fatalf("delegate prompt did not reach transcript: %#v", agent.Messages())
 	}
+}
+
+func promptAsync(driver *Driver, prompt string) <-chan error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- driver.Prompt(context.Background(), prompt, PromptModeApproval)
+	}()
+	return errCh
 }
 
 func nextDriverEvent(t *testing.T, driver *Driver) DriverEvent {

@@ -8,255 +8,214 @@ import (
 	clnkr "github.com/clnkr-ai/clnkr"
 )
 
-func TestParseTurn(t *testing.T) {
-	t.Run("accepts canonical turns", func(t *testing.T) {
-		tests := []struct {
-			name  string
-			input string
-		}{
-			{name: "act", input: `{"type":"act","bash":{"commands":[{"command":"ls -la","workdir":null}]},"reasoning":"inspect files"}`},
-			{name: "clarify", input: `{"type":"clarify","question":"Which directory?"}`},
-			{name: "done", input: `{"type":"done","summary":"Finished the task.","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"test suite passed"}]},"known_risks":[]}`},
-		}
-
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				turn, err := clnkr.ParseTurn(tt.input)
-				if err != nil {
-					t.Fatalf("ParseTurn(%q) error = %v", tt.input, err)
+func TestParseTurnAcceptsCanonicalTurns(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		check func(*testing.T, clnkr.Turn)
+	}{
+		{
+			name:  "act",
+			input: `{"type":"act","bash":{"commands":[{"command":"ls -la","workdir":null}]},"reasoning":"inspect files"}`,
+		},
+		{
+			name:  "act with more than three commands",
+			input: `{"type":"act","bash":{"commands":[{"command":"one","workdir":null},{"command":"two","workdir":null},{"command":"three","workdir":null},{"command":"four","workdir":null}]},"reasoning":"batch"}`,
+			check: func(t *testing.T, turn clnkr.Turn) {
+				act, ok := turn.(*clnkr.ActTurn)
+				if !ok {
+					t.Fatalf("turn = %T, want *ActTurn", turn)
 				}
-				if turn == nil {
-					t.Fatalf("ParseTurn(%q) returned nil turn", tt.input)
+				if got := len(act.Bash.Commands); got != 4 {
+					t.Fatalf("commands = %d, want 4", got)
 				}
-			})
-		}
-	})
+			},
+		},
+		{
+			name:  "clarify",
+			input: `{"type":"clarify","question":"Which directory?"}`,
+		},
+		{
+			name:  "done verified",
+			input: `{"type":"done","summary":"Finished the task.","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"test suite passed"}]},"known_risks":[]}`,
+		},
+		{
+			name:  "done partially verified with risks",
+			input: `{"type":"done","summary":"Implemented the parser change.","verification":{"status":"partially_verified","checks":[{"command":"go test ./...","outcome":"failed","evidence":"one unrelated fixture failed"}]},"known_risks":["full suite still has an unrelated fixture failure"]}`,
+			check: func(t *testing.T, turn clnkr.Turn) {
+				done, ok := turn.(*clnkr.DoneTurn)
+				if !ok {
+					t.Fatalf("turn = %T, want *DoneTurn", turn)
+				}
+				if done.Verification.Status != clnkr.VerificationPartiallyVerified {
+					t.Fatalf("status = %q, want %q", done.Verification.Status, clnkr.VerificationPartiallyVerified)
+				}
+				if len(done.KnownRisks) != 1 {
+					t.Fatalf("known risks = %#v, want one risk", done.KnownRisks)
+				}
+			},
+		},
+		{
+			name:  "done not verified with risks and no checks",
+			input: `{"type":"done","summary":"Could not verify because the command budget was exhausted.","verification":{"status":"not_verified","checks":[]},"known_risks":["command budget exhausted before verification"]}`,
+			check: func(t *testing.T, turn clnkr.Turn) {
+				done, ok := turn.(*clnkr.DoneTurn)
+				if !ok {
+					t.Fatalf("turn = %T, want *DoneTurn", turn)
+				}
+				if done.Verification.Status != clnkr.VerificationNotVerified {
+					t.Fatalf("status = %q, want %q", done.Verification.Status, clnkr.VerificationNotVerified)
+				}
+			},
+		},
+	}
 
-	t.Run("accepts more than three commands", func(t *testing.T) {
-		raw := `{"type":"act","bash":{"commands":[{"command":"one","workdir":null},{"command":"two","workdir":null},{"command":"three","workdir":null},{"command":"four","workdir":null}]},"reasoning":"batch"}`
-		turn, err := clnkr.ParseTurn(raw)
-		if err != nil {
-			t.Fatalf("ParseTurn(%q) error = %v", raw, err)
-		}
-		act, ok := turn.(*clnkr.ActTurn)
-		if !ok {
-			t.Fatalf("turn = %T, want *ActTurn", turn)
-		}
-		if got := len(act.Bash.Commands); got != 4 {
-			t.Fatalf("commands = %d, want 4", got)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			turn, err := clnkr.ParseTurn(tt.input)
+			if err != nil {
+				t.Fatalf("ParseTurn(%q) error = %v", tt.input, err)
+			}
+			if turn == nil {
+				t.Fatalf("ParseTurn(%q) returned nil turn", tt.input)
+			}
+			if tt.check != nil {
+				tt.check(t, turn)
+			}
+		})
+	}
+}
 
-	t.Run("rejects prose wrapped json", func(t *testing.T) {
-		raw := "Here is the turn:\n{\"type\":\"act\",\"bash\":{\"commands\":[{\"command\":\"pwd\",\"workdir\":null}]}}\nThanks."
-		_, err := clnkr.ParseTurn(raw)
-		if !errors.Is(err, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
-		}
-	})
+func TestParseTurnRejectsInvalidTurns(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		want   error
+		detail string
+	}{
+		{
+			name:  "prose wrapped json",
+			input: "Here is the turn:\n{\"type\":\"act\",\"bash\":{\"commands\":[{\"command\":\"pwd\",\"workdir\":null}]}}\nThanks.",
+			want:  clnkr.ErrInvalidJSON,
+		},
+		{
+			name:  "wrapped provider turn so wrapper stays provider-owned",
+			input: `{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`,
+			want:  clnkr.ErrInvalidJSON,
+		},
+		{
+			name:   "unknown fields",
+			input:  `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"extra":"nope"}`,
+			want:   clnkr.ErrInvalidJSON,
+			detail: `unknown field "extra"`,
+		},
+		{
+			name:  "wrong turn specific fields",
+			input: `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"question":""}`,
+			want:  clnkr.ErrInvalidJSON,
+		},
+		{
+			name:   "provider-shaped act siblings",
+			input:  `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"question":null,"summary":null,"reasoning":null}`,
+			want:   clnkr.ErrInvalidJSON,
+			detail: "act turn only allows question when it is omitted",
+		},
+		{
+			name:  "missing command workdir in canonical act",
+			input: `{"type":"act","bash":{"commands":[{"command":"pwd"}]}}`,
+			want:  clnkr.ErrInvalidJSON,
+		},
+		{
+			name:  "whitespace only clarify question",
+			input: `{"type":"clarify","question":"   "}`,
+			want:  clnkr.ErrEmptyClarify,
+		},
+		{
+			name:  "whitespace only done summary",
+			input: `{"type":"done","summary":"\n\t"}`,
+			want:  clnkr.ErrEmptySummary,
+		},
+		{
+			name:   "summary-only done",
+			input:  `{"type":"done","summary":"Finished the task."}`,
+			want:   clnkr.ErrInvalidJSON,
+			detail: `missing required field "verification"`,
+		},
+		{
+			name:   "done with bad verification status",
+			input:  `{"type":"done","summary":"Finished.","verification":{"status":"sure","checks":[{"command":"go test ./...","outcome":"passed","evidence":"tests passed"}]},"known_risks":[]}`,
+			want:   clnkr.ErrInvalidJSON,
+			detail: `invalid verification status "sure"`,
+		},
+		{
+			name:   "verified done without checks",
+			input:  `{"type":"done","summary":"Finished.","verification":{"status":"verified","checks":[]},"known_risks":[]}`,
+			want:   clnkr.ErrInvalidJSON,
+			detail: "verified done requires at least one verification check",
+		},
+		{
+			name:   "done with null known risks",
+			input:  `{"type":"done","summary":"Could not verify.","verification":{"status":"not_verified","checks":[]},"known_risks":null}`,
+			want:   clnkr.ErrInvalidJSON,
+			detail: `known_risks must be an array`,
+		},
+		{
+			name:   "done with null verification checks",
+			input:  `{"type":"done","summary":"Could not verify.","verification":{"status":"not_verified","checks":null},"known_risks":[]}`,
+			want:   clnkr.ErrInvalidJSON,
+			detail: `verification.checks must be an array`,
+		},
+		{
+			name:   "done without known risks",
+			input:  `{"type":"done","summary":"Finished.","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"tests passed"}]}}`,
+			want:   clnkr.ErrInvalidJSON,
+			detail: `missing required field "known_risks"`,
+		},
+		{
+			name:   "done without verification checks",
+			input:  `{"type":"done","summary":"Could not verify.","verification":{"status":"not_verified"},"known_risks":["not run"]}`,
+			want:   clnkr.ErrInvalidJSON,
+			detail: `missing required field "verification.checks"`,
+		},
+		{
+			name:   "done with non-object verification",
+			input:  `{"type":"done","summary":"Could not verify.","verification":[],"known_risks":["not run"]}`,
+			want:   clnkr.ErrInvalidJSON,
+			detail: `cannot unmarshal array`,
+		},
+	}
 
-	t.Run("rejects wrapped provider turns so the wrapper stays provider-owned", func(t *testing.T) {
-		raw := `{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`
-		_, err := clnkr.ParseTurn(raw)
-		if !errors.Is(err, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := clnkr.ParseTurn(tt.input)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("ParseTurn(%q) error = %v, want %v", tt.input, err, tt.want)
+			}
+			if tt.detail != "" && !strings.Contains(err.Error(), tt.detail) {
+				t.Fatalf("ParseTurn(%q) error = %v, want detail %q", tt.input, err, tt.detail)
+			}
+		})
+	}
+}
 
-	t.Run("rejects unknown fields", func(t *testing.T) {
-		raw := `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"extra":"nope"}`
-		_, err := clnkr.ParseTurn(raw)
-		if !errors.Is(err, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
-		}
-		if !strings.Contains(err.Error(), `unknown field "extra"`) {
-			t.Fatalf("ParseTurn(%q) error = %v, want unknown field detail", raw, err)
-		}
-	})
-
-	t.Run("rejects wrong turn specific fields", func(t *testing.T) {
-		raw := `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"question":""}`
-		_, err := clnkr.ParseTurn(raw)
-		if !errors.Is(err, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
-		}
-	})
-
-	t.Run("rejects provider-shaped act siblings", func(t *testing.T) {
-		raw := `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"question":null,"summary":null,"reasoning":null}`
-		_, err := clnkr.ParseTurn(raw)
-		if !errors.Is(err, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
-		}
-		if !strings.Contains(err.Error(), "act turn only allows question when it is omitted") {
-			t.Fatalf("ParseTurn(%q) error = %v, want canonical-only detail", raw, err)
-		}
-	})
-
-	t.Run("rejects missing command workdir in canonical act", func(t *testing.T) {
-		raw := `{"type":"act","bash":{"commands":[{"command":"pwd"}]}}`
-		_, err := clnkr.ParseTurn(raw)
-		if !errors.Is(err, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
-		}
-	})
-
-	t.Run("normalizes escaped clarify text", func(t *testing.T) {
-		raw := `{"type":"clarify","question":"Here are the skills I found:\\n- **citations-agent**: Verify claims.\\\\- **humanizer**: Sound more natural.\\nWhat would you like to work on?","reasoning":"Need to list the available skills.\\\\nThen I can ask a follow-up."}`
-		turn, err := clnkr.ParseTurn(raw)
-		if err != nil {
-			t.Fatalf("ParseTurn(%q) error = %v", raw, err)
-		}
-		cl, ok := turn.(*clnkr.ClarifyTurn)
-		if !ok {
-			t.Fatalf("expected *ClarifyTurn, got %T", turn)
-		}
-		wantQuestion := "Here are the skills I found:\n- **citations-agent**: Verify claims.\n- **humanizer**: Sound more natural.\nWhat would you like to work on?"
-		if cl.Question != wantQuestion {
-			t.Fatalf("question = %q, want %q", cl.Question, wantQuestion)
-		}
-		wantReasoning := "Need to list the available skills.\nThen I can ask a follow-up."
-		if cl.Reasoning != wantReasoning {
-			t.Fatalf("reasoning = %q, want %q", cl.Reasoning, wantReasoning)
-		}
-	})
-
-	t.Run("rejects whitespace only clarify question", func(t *testing.T) {
-		raw := `{"type":"clarify","question":"   "}`
-		_, err := clnkr.ParseTurn(raw)
-		if !errors.Is(err, clnkr.ErrEmptyClarify) {
-			t.Fatalf("ParseTurn(%q) error = %v, want ErrEmptyClarify", raw, err)
-		}
-	})
-
-	t.Run("rejects whitespace only done summary", func(t *testing.T) {
-		raw := `{"type":"done","summary":"\n\t"}`
-		_, err := clnkr.ParseTurn(raw)
-		if !errors.Is(err, clnkr.ErrEmptySummary) {
-			t.Fatalf("ParseTurn(%q) error = %v, want ErrEmptySummary", raw, err)
-		}
-	})
-
-	t.Run("rejects summary-only done", func(t *testing.T) {
-		raw := `{"type":"done","summary":"Finished the task."}`
-		_, err := clnkr.ParseTurn(raw)
-		if !errors.Is(err, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
-		}
-		if !strings.Contains(err.Error(), `missing required field "verification"`) {
-			t.Fatalf("ParseTurn(%q) error = %v, want missing verification detail", raw, err)
-		}
-	})
-
-	t.Run("rejects done with bad verification status", func(t *testing.T) {
-		raw := `{"type":"done","summary":"Finished.","verification":{"status":"sure","checks":[{"command":"go test ./...","outcome":"passed","evidence":"tests passed"}]},"known_risks":[]}`
-		_, err := clnkr.ParseTurn(raw)
-		if !errors.Is(err, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
-		}
-		if !strings.Contains(err.Error(), `invalid verification status "sure"`) {
-			t.Fatalf("ParseTurn(%q) error = %v, want invalid status detail", raw, err)
-		}
-	})
-
-	t.Run("rejects verified done without checks", func(t *testing.T) {
-		raw := `{"type":"done","summary":"Finished.","verification":{"status":"verified","checks":[]},"known_risks":[]}`
-		_, err := clnkr.ParseTurn(raw)
-		if !errors.Is(err, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
-		}
-		if !strings.Contains(err.Error(), "verified done requires at least one verification check") {
-			t.Fatalf("ParseTurn(%q) error = %v, want verified checks detail", raw, err)
-		}
-	})
-
-	t.Run("rejects done with null known risks", func(t *testing.T) {
-		raw := `{"type":"done","summary":"Could not verify.","verification":{"status":"not_verified","checks":[]},"known_risks":null}`
-		_, err := clnkr.ParseTurn(raw)
-		if !errors.Is(err, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
-		}
-		if !strings.Contains(err.Error(), `known_risks must be an array`) {
-			t.Fatalf("ParseTurn(%q) error = %v, want known_risks array detail", raw, err)
-		}
-	})
-
-	t.Run("rejects done with null verification checks", func(t *testing.T) {
-		raw := `{"type":"done","summary":"Could not verify.","verification":{"status":"not_verified","checks":null},"known_risks":[]}`
-		_, err := clnkr.ParseTurn(raw)
-		if !errors.Is(err, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
-		}
-		if !strings.Contains(err.Error(), `verification.checks must be an array`) {
-			t.Fatalf("ParseTurn(%q) error = %v, want verification checks array detail", raw, err)
-		}
-	})
-
-	t.Run("rejects done without known risks", func(t *testing.T) {
-		raw := `{"type":"done","summary":"Finished.","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"tests passed"}]}}`
-		_, err := clnkr.ParseTurn(raw)
-		if !errors.Is(err, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
-		}
-		if !strings.Contains(err.Error(), `missing required field "known_risks"`) {
-			t.Fatalf("ParseTurn(%q) error = %v, want missing known_risks detail", raw, err)
-		}
-	})
-
-	t.Run("rejects done without verification checks", func(t *testing.T) {
-		raw := `{"type":"done","summary":"Could not verify.","verification":{"status":"not_verified"},"known_risks":["not run"]}`
-		_, err := clnkr.ParseTurn(raw)
-		if !errors.Is(err, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
-		}
-		if !strings.Contains(err.Error(), `missing required field "verification.checks"`) {
-			t.Fatalf("ParseTurn(%q) error = %v, want missing verification checks detail", raw, err)
-		}
-	})
-
-	t.Run("rejects done with non-object verification", func(t *testing.T) {
-		raw := `{"type":"done","summary":"Could not verify.","verification":[],"known_risks":["not run"]}`
-		_, err := clnkr.ParseTurn(raw)
-		if !errors.Is(err, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ParseTurn(%q) error = %v, want ErrInvalidJSON", raw, err)
-		}
-		if !strings.Contains(err.Error(), `cannot unmarshal array`) {
-			t.Fatalf("ParseTurn(%q) error = %v, want unmarshal detail", raw, err)
-		}
-	})
-
-	t.Run("accepts partially verified done with risks", func(t *testing.T) {
-		raw := `{"type":"done","summary":"Implemented the parser change.","verification":{"status":"partially_verified","checks":[{"command":"go test ./...","outcome":"failed","evidence":"one unrelated fixture failed"}]},"known_risks":["full suite still has an unrelated fixture failure"]}`
-		turn, err := clnkr.ParseTurn(raw)
-		if err != nil {
-			t.Fatalf("ParseTurn(%q) error = %v", raw, err)
-		}
-		done, ok := turn.(*clnkr.DoneTurn)
-		if !ok {
-			t.Fatalf("turn = %T, want *DoneTurn", turn)
-		}
-		if done.Verification.Status != clnkr.VerificationPartiallyVerified {
-			t.Fatalf("status = %q, want %q", done.Verification.Status, clnkr.VerificationPartiallyVerified)
-		}
-		if len(done.KnownRisks) != 1 {
-			t.Fatalf("known risks = %#v, want one risk", done.KnownRisks)
-		}
-	})
-
-	t.Run("accepts not verified done with risks and no checks", func(t *testing.T) {
-		raw := `{"type":"done","summary":"Could not verify because the command budget was exhausted.","verification":{"status":"not_verified","checks":[]},"known_risks":["command budget exhausted before verification"]}`
-		turn, err := clnkr.ParseTurn(raw)
-		if err != nil {
-			t.Fatalf("ParseTurn(%q) error = %v", raw, err)
-		}
-		done, ok := turn.(*clnkr.DoneTurn)
-		if !ok {
-			t.Fatalf("turn = %T, want *DoneTurn", turn)
-		}
-		if done.Verification.Status != clnkr.VerificationNotVerified {
-			t.Fatalf("status = %q, want %q", done.Verification.Status, clnkr.VerificationNotVerified)
-		}
-	})
+func TestParseTurnNormalizesEscapedClarifyText(t *testing.T) {
+	raw := `{"type":"clarify","question":"Here are the skills I found:\\n- **citations-agent**: Verify claims.\\\\- **humanizer**: Sound more natural.\\nWhat would you like to work on?","reasoning":"Need to list the available skills.\\\\nThen I can ask a follow-up."}`
+	turn, err := clnkr.ParseTurn(raw)
+	if err != nil {
+		t.Fatalf("ParseTurn(%q) error = %v", raw, err)
+	}
+	cl, ok := turn.(*clnkr.ClarifyTurn)
+	if !ok {
+		t.Fatalf("turn = %T, want *ClarifyTurn", turn)
+	}
+	wantQuestion := "Here are the skills I found:\n- **citations-agent**: Verify claims.\n- **humanizer**: Sound more natural.\nWhat would you like to work on?"
+	if cl.Question != wantQuestion {
+		t.Fatalf("question = %q, want %q", cl.Question, wantQuestion)
+	}
+	wantReasoning := "Need to list the available skills.\nThen I can ask a follow-up."
+	if cl.Reasoning != wantReasoning {
+		t.Fatalf("reasoning = %q, want %q", cl.Reasoning, wantReasoning)
+	}
 }
 
 func TestCanonicalRoundTrip(t *testing.T) {
@@ -282,7 +241,6 @@ func TestCanonicalRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CanonicalTurnJSON(%T) error = %v", original, err)
 		}
-
 		parsed, err := clnkr.ParseTurn(raw)
 		if err != nil {
 			t.Fatalf("ParseTurn(%q) error = %v", raw, err)

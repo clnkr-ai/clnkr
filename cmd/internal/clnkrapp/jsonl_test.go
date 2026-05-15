@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -18,46 +19,14 @@ func TestDecodeJSONLCommand(t *testing.T) {
 		want    JSONLCommand
 		wantErr string
 	}{
-		{
-			name: "prompt command",
-			line: `{"type":"prompt","text":"inspect","mode":"approval"}`,
-			want: JSONLCommand{Type: "prompt", Text: "inspect", Mode: "approval"},
-		},
-		{
-			name: "full send prompt command",
-			line: `{"type":"prompt","text":"ship it","mode":"full_send"}`,
-			want: JSONLCommand{Type: "prompt", Text: "ship it", Mode: "full_send"},
-		},
-		{
-			name: "reply command",
-			line: `{"type":"reply","text":"y"}`,
-			want: JSONLCommand{Type: "reply", Text: "y"},
-		},
-		{
-			name: "compact command",
-			line: `{"type":"compact","instructions":"focus on tests"}`,
-			want: JSONLCommand{Type: "compact", Instructions: "focus on tests"},
-		},
-		{
-			name: "shutdown command",
-			line: `{"type":"shutdown"}`,
-			want: JSONLCommand{Type: "shutdown"},
-		},
-		{
-			name:    "unknown command",
-			line:    `{"type":"bogus"}`,
-			wantErr: `unknown JSONL command type "bogus"`,
-		},
-		{
-			name:    "unknown prompt mode",
-			line:    `{"type":"prompt","text":"inspect","mode":"manual"}`,
-			wantErr: `unknown JSONL prompt mode "manual"`,
-		},
-		{
-			name:    "missing prompt mode",
-			line:    `{"type":"prompt","text":"inspect"}`,
-			wantErr: `unknown JSONL prompt mode ""`,
-		},
+		{"prompt command", `{"type":"prompt","text":"inspect","mode":"approval"}`, JSONLCommand{Type: "prompt", Text: "inspect", Mode: "approval"}, ""},
+		{"full send prompt command", `{"type":"prompt","text":"ship it","mode":"full_send"}`, JSONLCommand{Type: "prompt", Text: "ship it", Mode: "full_send"}, ""},
+		{"reply command", `{"type":"reply","text":"y"}`, JSONLCommand{Type: "reply", Text: "y"}, ""},
+		{"compact command", `{"type":"compact","instructions":"focus on tests"}`, JSONLCommand{Type: "compact", Instructions: "focus on tests"}, ""},
+		{"shutdown command", `{"type":"shutdown"}`, JSONLCommand{Type: "shutdown"}, ""},
+		{"unknown command", `{"type":"bogus"}`, JSONLCommand{}, `unknown JSONL command type "bogus"`},
+		{"unknown prompt mode", `{"type":"prompt","text":"inspect","mode":"manual"}`, JSONLCommand{}, `unknown JSONL prompt mode "manual"`},
+		{"missing prompt mode", `{"type":"prompt","text":"inspect"}`, JSONLCommand{}, `unknown JSONL prompt mode ""`},
 	}
 
 	for _, tt := range tests {
@@ -80,83 +49,85 @@ func TestDecodeJSONLCommand(t *testing.T) {
 }
 
 func TestWriteJSONL(t *testing.T) {
-	var b bytes.Buffer
-
-	events := []any{
-		clnkr.EventResponse{
-			Turn:  verifiedDone("done"),
-			Usage: clnkr.Usage{InputTokens: 1, OutputTokens: 2},
-		},
-		clnkr.EventCommandStart{Command: "pwd", Dir: "/tmp"},
-		clnkr.EventCommandDone{Command: "echo hi", Stdout: "hi\n", ExitCode: 0},
-		EventClarificationRequest{Question: "Which repo?"},
-		EventApprovalRequest{
-			Prompt: "1. echo hi",
-			Commands: []clnkr.BashAction{
-				{ID: "call_1", Command: "echo hi"},
-				{Command: "pwd", Workdir: "/tmp"},
+	tests := []struct {
+		name  string
+		event any
+		typ   string
+	}{
+		{
+			name: "core response event uses event log encoding",
+			event: clnkr.EventResponse{
+				Turn:  verifiedDone("done"),
+				Usage: clnkr.Usage{InputTokens: 1, OutputTokens: 2},
 			},
+			typ: "response",
 		},
-		EventDone{Summary: "done"},
-		EventCompacted{Stats: clnkr.CompactStats{CompactedMessages: 4, KeptMessages: 2}},
-		EventError{Err: errors.New("boom")},
+		{name: "core command start event uses event log encoding", event: clnkr.EventCommandStart{Command: "pwd", Dir: "/tmp"}, typ: "command_start"},
+		{name: "core command done event uses event log encoding", event: clnkr.EventCommandDone{Command: "echo hi", Stdout: "hi\n", ExitCode: 0}, typ: "command_done"},
+		{name: "clarification request", event: EventClarificationRequest{Question: "Which repo?"}, typ: "clarify"},
+		{
+			name: "approval request",
+			event: EventApprovalRequest{
+				Prompt: "1. echo hi",
+				Commands: []clnkr.BashAction{
+					{ID: "call_1", Command: "echo hi"},
+					{Command: "pwd", Workdir: "/tmp"},
+				},
+			},
+			typ: "approval_request",
+		},
+		{name: "done event", event: EventDone{Summary: "done"}, typ: "done"},
+		{name: "compacted event", event: EventCompacted{Stats: clnkr.CompactStats{CompactedMessages: 4, KeptMessages: 2}}, typ: "compacted"},
+		{name: "error event", event: EventError{Err: errors.New("boom")}, typ: "error"},
 	}
-	for _, event := range events {
-		if err := WriteJSONL(&b, event); err != nil {
-			t.Fatalf("WriteJSONL(%T): %v", event, err)
+
+	var b bytes.Buffer
+	for _, tt := range tests {
+		if err := WriteJSONL(&b, tt.event); err != nil {
+			t.Fatalf("WriteJSONL(%s): %v", tt.name, err)
 		}
 	}
 
 	decoder := json.NewDecoder(&b)
-	got := make([]map[string]any, 0, len(events))
-	for decoder.More() {
-		var event map[string]any
-		if err := decoder.Decode(&event); err != nil {
-			t.Fatalf("decode JSONL event: %v", err)
+	for i, tt := range tests {
+		var got struct {
+			Type    string         `json:"type"`
+			Payload map[string]any `json:"payload"`
 		}
-		got = append(got, event)
-	}
-	if len(got) != len(events) {
-		t.Fatalf("events = %d, want %d", len(got), len(events))
-	}
+		if err := decoder.Decode(&got); err != nil {
+			t.Fatalf("decode event %d: %v", i, err)
+		}
+		if got.Type != tt.typ {
+			t.Fatalf("event %d type = %q, want %q", i, got.Type, tt.typ)
+		}
 
-	wantTypes := []string{"response", "command_start", "command_done", "clarify", "approval_request", "done", "compacted", "error"}
-	for i, want := range wantTypes {
-		if got[i]["type"] != want {
-			t.Fatalf("event %d type = %q, want %q", i, got[i]["type"], want)
+		switch tt.typ {
+		case "clarify":
+			if got.Payload["question"] != "Which repo?" {
+				t.Fatalf("clarify payload = %#v, want question", got.Payload)
+			}
+		case "approval_request":
+			if got.Payload["prompt"] != "1. echo hi" {
+				t.Fatalf("approval payload = %#v, want prompt", got.Payload)
+			}
+			commands := got.Payload["commands"].([]any)
+			if !reflect.DeepEqual(commands[0], map[string]any{"command": "echo hi"}) {
+				t.Fatalf("first approval command = %#v, want command only", commands[0])
+			}
+			if !reflect.DeepEqual(commands[1], map[string]any{"command": "pwd", "workdir": "/tmp"}) {
+				t.Fatalf("second approval command = %#v, want command and workdir", commands[1])
+			}
+		case "compacted":
+			if got.Payload["compacted_messages"] != float64(4) || got.Payload["kept_messages"] != float64(2) {
+				t.Fatalf("compacted payload = %#v, want explicit stats", got.Payload)
+			}
+		case "error":
+			if got.Payload["message"] != "boom" {
+				t.Fatalf("error payload = %#v, want message", got.Payload)
+			}
 		}
 	}
-	for _, gotEvent := range got {
-		switch gotEvent["type"] {
-		case "child_probe_start", "child_probe_done", "child_probe_denied":
-			t.Fatalf("child probe event leaked into JSONL output: %#v", gotEvent)
-		}
-	}
-
-	clarifyPayload := got[3]["payload"].(map[string]any)
-	if clarifyPayload["question"] != "Which repo?" {
-		t.Fatalf("clarify payload = %#v, want question", clarifyPayload)
-	}
-
-	approvalPayload := got[4]["payload"].(map[string]any)
-	if approvalPayload["prompt"] != "1. echo hi" {
-		t.Fatalf("approval payload = %#v, want prompt", approvalPayload)
-	}
-	commands := approvalPayload["commands"].([]any)
-	if !reflect.DeepEqual(commands[0], map[string]any{"command": "echo hi"}) {
-		t.Fatalf("first approval command = %#v, want command only", commands[0])
-	}
-	if !reflect.DeepEqual(commands[1], map[string]any{"command": "pwd", "workdir": "/tmp"}) {
-		t.Fatalf("second approval command = %#v, want command and workdir", commands[1])
-	}
-
-	compactedPayload := got[6]["payload"].(map[string]any)
-	if compactedPayload["compacted_messages"] != float64(4) || compactedPayload["kept_messages"] != float64(2) {
-		t.Fatalf("compacted payload = %#v, want explicit stats", compactedPayload)
-	}
-
-	errorPayload := got[7]["payload"].(map[string]any)
-	if errorPayload["message"] != "boom" {
-		t.Fatalf("error payload = %#v, want message", errorPayload)
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		t.Fatalf("extra JSONL event decode error = %v, want EOF", err)
 	}
 }

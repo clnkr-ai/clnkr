@@ -15,17 +15,10 @@ import (
 
 func TestModel(t *testing.T) {
 	t.Run("uses structured output request body and prepends system message", func(t *testing.T) {
-		var gotBody map[string]interface{}
-
+		var gotBody map[string]any
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			body, _ := io.ReadAll(r.Body)
-			_ = json.Unmarshal(body, &gotBody)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"message": map[string]string{"role": "assistant", "content": openAIWrappedDone("ok")}},
-				},
-				"usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 20},
-			})
+			gotBody = readRequestBody(t, r)
+			writeChatResponse(t, w, openAIWrappedDone("ok"), 10, 20)
 		}))
 		defer server.Close()
 
@@ -34,28 +27,29 @@ func TestModel(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		msgs := gotBody["messages"].([]interface{})
-		first := msgs[0].(map[string]interface{})
+
+		msgs := gotBody["messages"].([]any)
+		first := msgs[0].(map[string]any)
 		if first["role"] != "system" || first["content"] != "sys prompt" {
 			t.Errorf("first message should be system prompt, got %v", first)
 		}
-		responseFormat, ok := gotBody["response_format"].(map[string]interface{})
+		responseFormat, ok := gotBody["response_format"].(map[string]any)
 		if !ok {
-			t.Fatalf("response_format = %T, want map[string]interface{}", gotBody["response_format"])
+			t.Fatalf("response_format = %T, want map[string]any", gotBody["response_format"])
 		}
 		if responseFormat["type"] != "json_schema" {
 			t.Fatalf("response_format.type = %v, want json_schema", responseFormat["type"])
 		}
-		jsonSchema, ok := responseFormat["json_schema"].(map[string]interface{})
+		jsonSchema, ok := responseFormat["json_schema"].(map[string]any)
 		if !ok {
-			t.Fatalf("response_format.json_schema = %T, want map[string]interface{}", responseFormat["json_schema"])
+			t.Fatalf("response_format.json_schema = %T, want map[string]any", responseFormat["json_schema"])
 		}
 		if jsonSchema["strict"] != true {
 			t.Fatalf("response_format.json_schema.strict = %v, want true", jsonSchema["strict"])
 		}
-		schema, ok := jsonSchema["schema"].(map[string]interface{})
+		schema, ok := jsonSchema["schema"].(map[string]any)
 		if !ok {
-			t.Fatalf("response_format.json_schema.schema = %T, want map[string]interface{}", jsonSchema["schema"])
+			t.Fatalf("response_format.json_schema.schema = %T, want map[string]any", jsonSchema["schema"])
 		}
 		if schemaContainsKey(schema, "maxItems") {
 			t.Fatal("response_format.json_schema.schema unexpectedly includes maxItems")
@@ -70,18 +64,11 @@ func TestModel(t *testing.T) {
 		var gotBody map[string]any
 		history := []clnkr.Message{
 			{Role: "user", Content: "first task"},
-			{Role: "assistant", Content: `{"type":"done","summary":"canonical transcript","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
+			{Role: "assistant", Content: doneTurn("canonical transcript")},
 		}
-
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			body, _ := io.ReadAll(r.Body)
-			_ = json.Unmarshal(body, &gotBody)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"message": map[string]string{"role": "assistant", "content": "Older work summarized."}},
-				},
-				"usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 20},
-			})
+			gotBody = readRequestBody(t, r)
+			writeChatResponse(t, w, "Older work summarized.", 10, 20)
 		}))
 		defer server.Close()
 
@@ -104,7 +91,7 @@ func TestModel(t *testing.T) {
 		if !ok {
 			t.Fatalf("last message = %#v, want map", msgs[len(msgs)-1])
 		}
-		if got, want := last["content"], `{"type":"done","summary":"canonical transcript","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`; got != want {
+		if got, want := last["content"], doneTurn("canonical transcript"); got != want {
 			t.Fatalf("last assistant content = %#v, want %q", got, want)
 		}
 	})
@@ -114,19 +101,10 @@ func TestModel(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			attempts++
 			if attempts == 1 {
-				w.Header().Set("Retry-After", "0")
-				w.WriteHeader(http.StatusBadGateway)
-				_ = json.NewEncoder(w).Encode(map[string]interface{}{
-					"error": map[string]interface{}{"message": "context deadline exceeded"},
-				})
+				writeAPIError(t, w, http.StatusBadGateway, "context deadline exceeded")
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"message": map[string]string{"role": "assistant", "content": "ok after retry"}},
-				},
-				"usage": map[string]int{"prompt_tokens": 2, "completion_tokens": 3},
-			})
+			writeChatResponse(t, w, "ok after retry", 2, 3)
 		}))
 		defer server.Close()
 
@@ -145,15 +123,7 @@ func TestModel(t *testing.T) {
 
 	t.Run("returns canonical json text", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"message": map[string]string{
-						"role":    "assistant",
-						"content": openAIWrappedDone("hello back"),
-					}},
-				},
-				"usage": map[string]int{"prompt_tokens": 15, "completion_tokens": 25},
-			})
+			writeChatResponse(t, w, openAIWrappedDone("hello back"), 15, 25)
 		}))
 		defer server.Close()
 
@@ -162,8 +132,8 @@ func TestModel(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"hello back","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}` {
-			t.Errorf("got %q, want %q", got, `{"type":"done","summary":"hello back","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)
+		if got, want := mustCanonicalTurn(t, resp.Turn), doneTurn("hello back"); got != want {
+			t.Errorf("got %q, want %q", got, want)
 		}
 		if resp.ProtocolErr != nil {
 			t.Fatalf("got protocol error %v, want nil", resp.ProtocolErr)
@@ -174,185 +144,126 @@ func TestModel(t *testing.T) {
 	})
 
 	t.Run("normalizes assistant history to wrapped provider json", func(t *testing.T) {
-		var gotBody map[string]interface{}
-
+		var gotBody map[string]any
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			body, _ := io.ReadAll(r.Body)
-			_ = json.Unmarshal(body, &gotBody)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"message": map[string]string{
-						"role":    "assistant",
-						"content": openAIWrappedDone("ok"),
-					}},
-				},
-				"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
-			})
+			gotBody = readRequestBody(t, r)
+			writeChatResponse(t, w, openAIWrappedDone("ok"), 1, 1)
 		}))
 		defer server.Close()
 
 		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
 		_, err := m.Query(context.Background(), []clnkr.Message{
 			{Role: "user", Content: "hi"},
-			{Role: "assistant", Content: `{"type":"done","summary":"hello back","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
+			{Role: "assistant", Content: doneTurn("hello back")},
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		msgs := gotBody["messages"].([]interface{})
-		last := msgs[len(msgs)-1].(map[string]interface{})
+		msgs := gotBody["messages"].([]any)
+		last := msgs[len(msgs)-1].(map[string]any)
 		if got, want := last["content"], openAIWrappedDone("hello back"); got != want {
 			t.Fatalf("assistant history content = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("posts to base URL plus chat/completions", func(t *testing.T) {
-		var gotPath string
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			gotPath = r.URL.Path
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"message": map[string]string{"role": "assistant", "content": openAIWrappedDone("ok")}},
-				},
-				"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
-			})
-		}))
-		defer server.Close()
-
-		m := openai.NewModel(server.URL+"/v1beta/openai", "test-key", "gemini-2.0-flash", "sys")
-		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+	t.Run("posts to joined chat completions endpoint", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			base     string
+			wantPath string
+		}{
+			{name: "nested base URL", base: "/v1beta/openai", wantPath: "/v1beta/openai/chat/completions"},
+			{name: "trailing slash base URL", base: "/v1/", wantPath: "/v1/chat/completions"},
 		}
-		if gotPath != "/v1beta/openai/chat/completions" {
-			t.Errorf("got path %q, want %q", gotPath, "/v1beta/openai/chat/completions")
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				var gotPath string
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					gotPath = r.URL.Path
+					writeChatResponse(t, w, openAIWrappedDone("ok"), 1, 1)
+				}))
+				defer server.Close()
+
+				m := openai.NewModel(server.URL+tt.base, "test-key", "gpt-test", "sys")
+				_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if gotPath != tt.wantPath {
+					t.Errorf("got path %q, want %q", gotPath, tt.wantPath)
+				}
+			})
 		}
 	})
 
-	t.Run("joins trailing slash base URL", func(t *testing.T) {
-		var gotPath string
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			gotPath = r.URL.Path
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"message": map[string]string{"role": "assistant", "content": openAIWrappedDone("ok")}},
-				},
-				"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
-			})
-		}))
-		defer server.Close()
-
-		m := openai.NewModel(server.URL+"/v1/", "test-key", "gpt-test", "sys")
-		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+	t.Run("extracts API error messages", func(t *testing.T) {
+		tests := []struct {
+			name string
+			body string
+			want string
+		}{
+			{name: "JSON error response", body: `{"error":{"code":429,"message":"Rate limit exceeded"}}`, want: "api error (status 429): Rate limit exceeded"},
+			{name: "array-wrapped response", body: `[{"error":{"code":429,"message":"Quota exceeded"}}]`, want: "api error (status 429): Quota exceeded"},
 		}
-		if gotPath != "/v1/chat/completions" {
-			t.Errorf("got path %q, want %q", gotPath, "/v1/chat/completions")
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Retry-After", "0")
+					w.WriteHeader(http.StatusTooManyRequests)
+					_, _ = w.Write([]byte(tt.body))
+				}))
+				defer server.Close()
+
+				m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+				_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+				if err == nil {
+					t.Fatal("expected error on 429")
+				}
+				if err.Error() != tt.want {
+					t.Errorf("got %q, want %q", err.Error(), tt.want)
+				}
+			})
 		}
 	})
 
-	t.Run("extracts error message from JSON error response", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Retry-After", "0")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"error": map[string]interface{}{
-					"code":    429,
-					"message": "Rate limit exceeded",
-				},
+	t.Run("retries Query errors and succeeds", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			status  int
+			message string
+		}{
+			{name: "rate limit response", status: http.StatusTooManyRequests, message: "Rate limit exceeded"},
+			{name: "transient server error", status: http.StatusBadGateway, message: "context deadline exceeded"},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				attempts := 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					attempts++
+					if attempts == 1 {
+						writeAPIError(t, w, tt.status, tt.message)
+						return
+					}
+					writeChatResponse(t, w, openAIWrappedDone("ok after retry"), 2, 3)
+				}))
+				defer server.Close()
+
+				m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+				resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if attempts != 2 {
+					t.Fatalf("attempt count = %d, want 2", attempts)
+				}
+				if got, want := mustCanonicalTurn(t, resp.Turn), doneTurn("ok after retry"); got != want {
+					t.Fatalf("content = %q, want %q", got, want)
+				}
 			})
-		}))
-		defer server.Close()
-
-		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-		if err == nil {
-			t.Fatal("expected error on 429")
-		}
-		want := "api error (status 429): Rate limit exceeded"
-		if err.Error() != want {
-			t.Errorf("got %q, want error containing %q", err.Error(), want)
-		}
-	})
-
-	t.Run("retries rate limit response and succeeds", func(t *testing.T) {
-		attempts := 0
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			attempts++
-			if attempts == 1 {
-				w.Header().Set("Retry-After", "0")
-				w.WriteHeader(http.StatusTooManyRequests)
-				_ = json.NewEncoder(w).Encode(map[string]interface{}{
-					"error": map[string]interface{}{
-						"code":    429,
-						"message": "Rate limit exceeded",
-					},
-				})
-				return
-			}
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"message": map[string]string{
-						"role":    "assistant",
-						"content": openAIWrappedDone("ok after retry"),
-					}},
-				},
-				"usage": map[string]int{"prompt_tokens": 2, "completion_tokens": 3},
-			})
-		}))
-		defer server.Close()
-
-		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-		resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if attempts != 2 {
-			t.Fatalf("attempt count = %d, want 2", attempts)
-		}
-		if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok after retry","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}` {
-			t.Fatalf("content = %q, want %q", got, `{"type":"done","summary":"ok after retry","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)
-		}
-	})
-
-	t.Run("retries transient server error and succeeds", func(t *testing.T) {
-		attempts := 0
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			attempts++
-			if attempts == 1 {
-				w.Header().Set("Retry-After", "0")
-				w.WriteHeader(http.StatusBadGateway)
-				_ = json.NewEncoder(w).Encode(map[string]interface{}{
-					"error": map[string]interface{}{
-						"message": "context deadline exceeded",
-					},
-				})
-				return
-			}
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"message": map[string]string{
-						"role":    "assistant",
-						"content": openAIWrappedDone("ok after retry"),
-					}},
-				},
-				"usage": map[string]int{"prompt_tokens": 2, "completion_tokens": 3},
-			})
-		}))
-		defer server.Close()
-
-		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-		resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if attempts != 2 {
-			t.Fatalf("attempt count = %d, want 2", attempts)
-		}
-		if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok after retry","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}` {
-			t.Fatalf("content = %q, want %q", got, `{"type":"done","summary":"ok after retry","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)
 		}
 	})
 
@@ -360,12 +271,7 @@ func TestModel(t *testing.T) {
 		attempts := 0
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			attempts++
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"error": map[string]interface{}{
-					"message": "response_format json_schema is not supported",
-				},
-			})
+			writeAPIError(t, w, http.StatusBadRequest, "response_format json_schema is not supported")
 		}))
 		defer server.Close()
 
@@ -379,75 +285,40 @@ func TestModel(t *testing.T) {
 		}
 	})
 
-	t.Run("extracts error message from array-wrapped response", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Retry-After", "0")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`[{"error":{"code":429,"message":"Quota exceeded"}}]`))
-		}))
-		defer server.Close()
-
-		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-		if err == nil {
-			t.Fatal("expected error on 429")
+	t.Run("stops after max attempts on repeated retryable errors", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			status int
+			body   string
+			want   string
+		}{
+			{name: "rate limits", status: http.StatusTooManyRequests, body: `{"error":{"code":429,"message":"Rate limit exceeded"}}`, want: "api error (status 429): Rate limit exceeded"},
+			{name: "non-JSON server errors", status: http.StatusBadGateway, body: "Bad Gateway", want: "api error (status 502): Bad Gateway"},
 		}
-		want := "api error (status 429): Quota exceeded"
-		if err.Error() != want {
-			t.Errorf("got %q, want %q", err.Error(), want)
-		}
-	})
 
-	t.Run("stops after max attempts on repeated rate limits", func(t *testing.T) {
-		attempts := 0
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			attempts++
-			w.Header().Set("Retry-After", "0")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"error": map[string]interface{}{
-					"code":    429,
-					"message": "Rate limit exceeded",
-				},
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				attempts := 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					attempts++
+					w.Header().Set("Retry-After", "0")
+					w.WriteHeader(tt.status)
+					_, _ = w.Write([]byte(tt.body))
+				}))
+				defer server.Close()
+
+				m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+				_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+				if err == nil {
+					t.Fatal("expected retryable error")
+				}
+				if err.Error() != tt.want {
+					t.Fatalf("got %q, want %q", err.Error(), tt.want)
+				}
+				if attempts != 5 {
+					t.Fatalf("attempt count = %d, want 5", attempts)
+				}
 			})
-		}))
-		defer server.Close()
-
-		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-		if err == nil {
-			t.Fatal("expected error on repeated 429")
-		}
-		if attempts != 5 {
-			t.Fatalf("attempt count = %d, want 5", attempts)
-		}
-		want := "api error (status 429): Rate limit exceeded"
-		if err.Error() != want {
-			t.Fatalf("got %q, want %q", err.Error(), want)
-		}
-	})
-
-	t.Run("retries non-JSON server errors then returns raw body", func(t *testing.T) {
-		attempts := 0
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			attempts++
-			w.Header().Set("Retry-After", "0")
-			w.WriteHeader(http.StatusBadGateway)
-			_, _ = w.Write([]byte("Bad Gateway"))
-		}))
-		defer server.Close()
-
-		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-		if err == nil {
-			t.Fatal("expected error on 502")
-		}
-		want := "api error (status 502): Bad Gateway"
-		if err.Error() != want {
-			t.Errorf("got %q, want error containing %q", err.Error(), want)
-		}
-		if attempts != 5 {
-			t.Fatalf("attempt count = %d, want 5", attempts)
 		}
 	})
 
@@ -456,19 +327,15 @@ func TestModel(t *testing.T) {
 		firstAttempt := make(chan struct{})
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			attempts++
-			if attempts == 1 {
-				close(firstAttempt)
-				w.Header().Set("Retry-After", "10")
-				w.WriteHeader(http.StatusTooManyRequests)
-				_ = json.NewEncoder(w).Encode(map[string]interface{}{
-					"error": map[string]interface{}{
-						"code":    429,
-						"message": "Rate limit exceeded",
-					},
-				})
-				return
+			if attempts != 1 {
+				t.Fatalf("unexpected retry after cancellation")
 			}
-			t.Fatalf("unexpected retry after cancellation")
+			close(firstAttempt)
+			w.Header().Set("Retry-After", "10")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{"code": 429, "message": "Rate limit exceeded"},
+			})
 		}))
 		defer server.Close()
 
@@ -492,37 +359,63 @@ func TestModel(t *testing.T) {
 		}
 	})
 
-	t.Run("returns error on empty choices", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"choices": []interface{}{},
-				"usage":   map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
-			})
-		}))
-		defer server.Close()
-
-		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-		if err == nil {
-			t.Error("expected error on empty choices")
-		}
-	})
-
-	t.Run("fails closed on empty choice content", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"message": map[string]string{"role": "assistant", "content": ""}},
+	t.Run("fails on unusable successful responses", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			response  map[string]any
+			assertErr func(*testing.T, error)
+		}{
+			{
+				name:     "empty choices",
+				response: map[string]any{"choices": []any{}, "usage": map[string]int{"prompt_tokens": 0, "completion_tokens": 0}},
+				assertErr: func(t *testing.T, err error) {
+					if err == nil {
+						t.Error("expected error on empty choices")
+					}
 				},
-				"usage": map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
-			})
-		}))
-		defer server.Close()
+			},
+			{
+				name: "empty choice content",
+				response: map[string]any{
+					"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": ""}}},
+					"usage":   map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
+				},
+				assertErr: func(t *testing.T, err error) {
+					if err == nil {
+						t.Fatal("expected empty content error")
+					}
+				},
+			},
+			{
+				name: "refusal",
+				response: map[string]any{
+					"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "refusal": "refused"}}},
+					"usage":   map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
+				},
+				assertErr: func(t *testing.T, err error) {
+					if err == nil {
+						t.Fatal("expected refusal error")
+					}
+					if err.Error() == "empty choice content" {
+						t.Fatal("expected refusal-specific error, got empty choice content")
+					}
+				},
+			},
+		}
 
-		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-		if err == nil {
-			t.Fatal("expected empty content error")
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if err := json.NewEncoder(w).Encode(tt.response); err != nil {
+						t.Fatalf("encode response: %v", err)
+					}
+				}))
+				defer server.Close()
+
+				m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+				_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+				tt.assertErr(t, err)
+			})
 		}
 	})
 
@@ -542,21 +435,7 @@ func TestModel(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					_ = json.NewEncoder(w).Encode(map[string]interface{}{
-						"choices": []map[string]interface{}{
-							{"message": map[string]string{"role": "assistant", "content": tt.content}},
-						},
-						"usage": map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
-					})
-				}))
-				defer server.Close()
-
-				m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-				resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
+				resp := queryContent(t, tt.content)
 				if resp.Raw != tt.content {
 					t.Fatalf("raw = %q, want %q", resp.Raw, tt.content)
 				}
@@ -574,26 +453,12 @@ func TestModel(t *testing.T) {
 			want    string
 		}{
 			{name: "clarify", content: `{"turn":{"type":"clarify","question":"Which directory?"}}`, want: `{"type":"clarify","question":"Which directory?"}`},
-			{name: "done", content: `{"turn":{"type":"done","summary":"ignored schema","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}}`, want: `{"type":"done","summary":"ignored schema","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
+			{name: "done", content: `{"turn":{"type":"done","summary":"ignored schema","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}}`, want: doneTurn("ignored schema")},
 		}
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					_ = json.NewEncoder(w).Encode(map[string]interface{}{
-						"choices": []map[string]interface{}{
-							{"message": map[string]string{"role": "assistant", "content": tt.content}},
-						},
-						"usage": map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
-					})
-				}))
-				defer server.Close()
-
-				m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-				resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
+				resp := queryContent(t, tt.content)
 				if got := mustCanonicalTurn(t, resp.Turn); got != tt.want {
 					t.Fatalf("content = %q, want %q", got, tt.want)
 				}
@@ -605,22 +470,8 @@ func TestModel(t *testing.T) {
 	})
 
 	t.Run("returns raw payload plus protocol error when response format is ignored", func(t *testing.T) {
-		raw := `{"type":"done","summary":"ignored","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"message": map[string]string{"role": "assistant", "content": raw}},
-				},
-				"usage": map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
-			})
-		}))
-		defer server.Close()
-
-		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-		resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		raw := doneTurn("ignored")
+		resp := queryContent(t, raw)
 		if resp.Raw != raw {
 			t.Fatalf("raw = %q, want %q", resp.Raw, raw)
 		}
@@ -628,27 +479,59 @@ func TestModel(t *testing.T) {
 			t.Fatalf("protocol error = %v, want ErrInvalidJSON", resp.ProtocolErr)
 		}
 	})
+}
 
-	t.Run("returns refusal as a distinct error", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"message": map[string]string{"role": "assistant", "refusal": "refused"}},
-				},
-				"usage": map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
-			})
-		}))
-		defer server.Close()
+func readRequestBody(t *testing.T, r *http.Request) map[string]any {
+	t.Helper()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatalf("read request body: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
+	return got
+}
 
-		m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-		_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-		if err == nil {
-			t.Fatal("expected refusal error")
-		}
-		if err.Error() == "empty choice content" {
-			t.Fatal("expected refusal-specific error, got empty choice content")
-		}
-	})
+func writeChatResponse(t *testing.T, w http.ResponseWriter, content string, inputTokens, outputTokens int) {
+	t.Helper()
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": content}}},
+		"usage":   map[string]int{"prompt_tokens": inputTokens, "completion_tokens": outputTokens},
+	}); err != nil {
+		t.Fatalf("encode response: %v", err)
+	}
+}
+
+func writeAPIError(t *testing.T, w http.ResponseWriter, status int, message string) {
+	t.Helper()
+	w.Header().Set("Retry-After", "0")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"error": map[string]any{"code": status, "message": message},
+	}); err != nil {
+		t.Fatalf("encode error response: %v", err)
+	}
+}
+
+func queryContent(t *testing.T, content string) clnkr.Response {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeChatResponse(t, w, content, 0, 0)
+	}))
+	defer server.Close()
+
+	m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+	resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return resp
+}
+
+func doneTurn(summary string) string {
+	return `{"type":"done","summary":"` + summary + `","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`
 }
 
 func openAIWrappedDone(summary string) string {
@@ -657,7 +540,7 @@ func openAIWrappedDone(summary string) string {
 
 func schemaContainsKey(node any, key string) bool {
 	switch v := node.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		if _, ok := v[key]; ok {
 			return true
 		}
@@ -666,7 +549,7 @@ func schemaContainsKey(node any, key string) bool {
 				return true
 			}
 		}
-	case []interface{}:
+	case []any:
 		for _, child := range v {
 			if schemaContainsKey(child, key) {
 				return true
@@ -677,7 +560,7 @@ func schemaContainsKey(node any, key string) bool {
 	return false
 }
 
-func assertSchemaShape(t *testing.T, schema map[string]interface{}) {
+func assertSchemaShape(t *testing.T, schema map[string]any) {
 	t.Helper()
 
 	if got := schema["type"]; got != "object" {
@@ -690,17 +573,17 @@ func assertSchemaShape(t *testing.T, schema map[string]interface{}) {
 		t.Fatalf("schema required = %#v, want %#v", got, want)
 	}
 
-	properties, ok := schema["properties"].(map[string]interface{})
+	properties, ok := schema["properties"].(map[string]any)
 	if !ok {
-		t.Fatalf("schema properties = %T, want map[string]interface{}", schema["properties"])
+		t.Fatalf("schema properties = %T, want map[string]any", schema["properties"])
 	}
-	turnProp, ok := properties["turn"].(map[string]interface{})
+	turnProp, ok := properties["turn"].(map[string]any)
 	if !ok {
-		t.Fatalf("schema properties[turn] = %T, want map[string]interface{}", properties["turn"])
+		t.Fatalf("schema properties[turn] = %T, want map[string]any", properties["turn"])
 	}
-	branches, ok := turnProp["anyOf"].([]interface{})
+	branches, ok := turnProp["anyOf"].([]any)
 	if !ok {
-		t.Fatalf("schema properties[turn].anyOf = %T, want []interface{}", turnProp["anyOf"])
+		t.Fatalf("schema properties[turn].anyOf = %T, want []any", turnProp["anyOf"])
 	}
 	if len(branches) != 3 {
 		t.Fatalf("len(schema properties[turn].anyOf) = %d, want 3", len(branches))
@@ -718,13 +601,13 @@ func assertSchemaShape(t *testing.T, schema map[string]interface{}) {
 		if got, want := branch["required"], wantRequired; !sameStringSlice(got, want) {
 			t.Fatalf("%s branch required = %#v, want %#v", turnType, got, want)
 		}
-		branchProperties, ok := branch["properties"].(map[string]interface{})
+		branchProperties, ok := branch["properties"].(map[string]any)
 		if !ok {
-			t.Fatalf("%s branch properties = %T, want map[string]interface{}", turnType, branch["properties"])
+			t.Fatalf("%s branch properties = %T, want map[string]any", turnType, branch["properties"])
 		}
-		typeProp, ok := branchProperties["type"].(map[string]interface{})
+		typeProp, ok := branchProperties["type"].(map[string]any)
 		if !ok {
-			t.Fatalf("%s branch properties[type] = %T, want map[string]interface{}", turnType, branchProperties["type"])
+			t.Fatalf("%s branch properties[type] = %T, want map[string]any", turnType, branchProperties["type"])
 		}
 		if got := typeProp["type"]; got != "string" {
 			t.Fatalf("%s branch properties[type].type = %v, want string", turnType, got)
@@ -736,19 +619,19 @@ func assertSchemaShape(t *testing.T, schema map[string]interface{}) {
 	}
 }
 
-func schemaBranchForType(t *testing.T, branches []interface{}, turnType string) map[string]interface{} {
+func schemaBranchForType(t *testing.T, branches []any, turnType string) map[string]any {
 	t.Helper()
 
 	for _, branch := range branches {
-		branchMap, ok := branch.(map[string]interface{})
+		branchMap, ok := branch.(map[string]any)
 		if !ok {
 			continue
 		}
-		properties, ok := branchMap["properties"].(map[string]interface{})
+		properties, ok := branchMap["properties"].(map[string]any)
 		if !ok {
 			continue
 		}
-		typeProp, ok := properties["type"].(map[string]interface{})
+		typeProp, ok := properties["type"].(map[string]any)
 		if !ok {
 			continue
 		}
@@ -764,13 +647,13 @@ func schemaBranchForType(t *testing.T, branches []interface{}, turnType string) 
 func assertNullableStringUnion(t *testing.T, raw any) {
 	t.Helper()
 
-	prop, ok := raw.(map[string]interface{})
+	prop, ok := raw.(map[string]any)
 	if !ok {
-		t.Fatalf("nullable property = %T, want map[string]interface{}", raw)
+		t.Fatalf("nullable property = %T, want map[string]any", raw)
 	}
-	branches, ok := prop["anyOf"].([]interface{})
+	branches, ok := prop["anyOf"].([]any)
 	if !ok {
-		t.Fatalf("nullable property anyOf = %T, want []interface{}", prop["anyOf"])
+		t.Fatalf("nullable property anyOf = %T, want []any", prop["anyOf"])
 	}
 	if len(branches) != 2 {
 		t.Fatalf("len(nullable property anyOf) = %d, want 2", len(branches))
@@ -780,11 +663,11 @@ func assertNullableStringUnion(t *testing.T, raw any) {
 	assertSchemaTypeBranch(t, branches, "null")
 }
 
-func assertSchemaTypeBranch(t *testing.T, branches []interface{}, wantType string) {
+func assertSchemaTypeBranch(t *testing.T, branches []any, wantType string) {
 	t.Helper()
 
 	for _, branch := range branches {
-		branchMap, ok := branch.(map[string]interface{})
+		branchMap, ok := branch.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -797,7 +680,7 @@ func assertSchemaTypeBranch(t *testing.T, branches []interface{}, wantType strin
 }
 
 func sameStringSlice(got any, want []string) bool {
-	gotSlice, ok := got.([]interface{})
+	gotSlice, ok := got.([]any)
 	if !ok || len(gotSlice) != len(want) {
 		return false
 	}

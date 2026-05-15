@@ -37,8 +37,8 @@ func TestStepRecordsModelTurnsAndProtocolFailures(t *testing.T) {
 		if _, ok := result.Turn.(*ActTurn); !ok {
 			t.Fatalf("turn = %T, want *ActTurn", result.Turn)
 		}
-		if executor.calls != 0 {
-			t.Fatalf("Step executed %d commands", executor.calls)
+		if len(executor.gotCmds) != 0 {
+			t.Fatalf("Step executed %d commands", len(executor.gotCmds))
 		}
 		if !hasMessage(model.got[0], "user", transcript.FormatStateMessage("/repo")) {
 			t.Fatalf("model query missing cwd state: %#v", model.got[0])
@@ -144,8 +144,8 @@ func TestExecuteTurnCoordinatesCommandBatch(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ExecuteTurn API error: %v", err)
 		}
-		if !errors.Is(result.ExecErr, execErr) || result.ExecCount != 1 || executor.calls != 1 {
-			t.Fatalf("result = %#v executor calls=%d", result, executor.calls)
+		if !errors.Is(result.ExecErr, execErr) || result.ExecCount != 1 || len(executor.gotCmds) != 1 {
+			t.Fatalf("result = %#v executor calls=%d", result, len(executor.gotCmds))
 		}
 		results := collectToolResults(agent.Messages())
 		if len(results) != 2 || !results[0].IsError || results[1].ID != "call_2" || !results[1].IsError {
@@ -196,8 +196,8 @@ func TestRunWithPolicyCoordinatesTheFacadeLoop(t *testing.T) {
 		if err := agent.RunWithPolicy(context.Background(), "inspect", policy); err != nil {
 			t.Fatalf("RunWithPolicy: %v", err)
 		}
-		if executor.calls != 0 {
-			t.Fatalf("executor calls = %d, want 0", executor.calls)
+		if len(executor.gotCmds) != 0 {
+			t.Fatalf("executor calls = %d, want 0", len(executor.gotCmds))
 		}
 		if len(policy.questions) != 1 || policy.questions[0] != "Which repo?" {
 			t.Fatalf("questions = %#v", policy.questions)
@@ -260,20 +260,15 @@ func TestRunWithPolicyStopsCleanlyOnPolicyErrors(t *testing.T) {
 	errApprovalPending := errors.New("approval pending")
 	model := &fakeModel{responses: []Response{{Turn: &ActTurn{Bash: BashBatch{Commands: []BashAction{{Command: "rm important.txt"}}}}}}}
 	executor := &fakeExecutor{}
-	policy := runPolicyFunc{
-		decideAct: func(context.Context, ActProposal) (ActDecision, error) {
-			return ActDecision{}, errApprovalPending
-		},
-		clarify: func(context.Context, string) (string, error) { return "", ErrClarificationNeeded },
-	}
+	policy := &scriptedPolicy{decideErr: errApprovalPending}
 	agent := NewAgent(model, executor, "/tmp")
 
 	err := agent.RunWithPolicy(context.Background(), "do it", policy)
 	if !errors.Is(err, errApprovalPending) {
 		t.Fatalf("RunWithPolicy error = %v", err)
 	}
-	if executor.calls != 0 || hasMessage(agent.Messages(), "user", "") {
-		t.Fatalf("executor calls=%d messages=%#v", executor.calls, agent.Messages())
+	if len(executor.gotCmds) != 0 || hasMessage(agent.Messages(), "user", "") {
+		t.Fatalf("executor calls=%d messages=%#v", len(executor.gotCmds), agent.Messages())
 	}
 }
 
@@ -366,23 +361,6 @@ func TestRunWithPolicyCompletionGateEvents(t *testing.T) {
 		}}},
 		KnownRisks: []string{},
 	}
-	fullSend := &fakeModel{responses: []Response{{Turn: weakDone}, {Turn: verifiedDone("Finished.")}}}
-	fullSendAgent := NewAgent(fullSend, &fakeExecutor{}, "/tmp")
-	notify, events := collectEvents()
-	fullSendAgent.Notify = notify
-	if err := fullSendAgent.Run(context.Background(), "finish"); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	rejectTurn := messagesText(fullSend.got[1])
-	if fullSend.calls != 2 ||
-		!strings.Contains(rejectTurn, "Completion rejected") ||
-		!strings.Contains(rejectTurn, "incomplete_summary") {
-		t.Fatalf("full-send queries = %#v", fullSend.got)
-	}
-	if got := strings.Join(eventDecisions(*events), ","); got != "reject,accept" {
-		t.Fatalf("completion gate decisions = %q", got)
-	}
-
 	challenge := &DoneTurn{
 		Summary: "Created result.txt.",
 		Verification: CompletionVerification{Status: VerificationVerified, Checks: []VerificationCheck{{
@@ -390,26 +368,36 @@ func TestRunWithPolicyCompletionGateEvents(t *testing.T) {
 		}}},
 		KnownRisks: []string{},
 	}
-	challenged := &fakeModel{responses: []Response{{Turn: challenge}, {Turn: challenge}}}
-	challengedAgent := NewAgent(challenged, &fakeExecutor{}, "/tmp")
-	notify, events = collectEvents()
-	challengedAgent.Notify = notify
-	if err := challengedAgent.Run(context.Background(), "finish"); err != nil {
-		t.Fatalf("challenge Run: %v", err)
-	}
-	challengeTurn := messagesText(challenged.got[1])
-	if challenged.calls != 2 ||
-		!strings.Contains(challengeTurn, "Completion challenged") ||
-		!strings.Contains(challengeTurn, "verification evidence") {
-		t.Fatalf("challenge queries = %#v", challenged.got)
-	}
-	if got := strings.Join(eventDecisions(*events), ","); got != "challenge,accept" {
-		t.Fatalf("completion gate decisions = %q", got)
+	for _, tc := range []struct {
+		name      string
+		turn      *DoneTurn
+		wantText  []string
+		wantEvent string
+	}{
+		{"reject", weakDone, []string{"Completion rejected", "incomplete_summary"}, "reject,accept"},
+		{"challenge", challenge, []string{"Completion challenged", "verification evidence"}, "challenge,accept"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := &fakeModel{responses: []Response{{Turn: tc.turn}, {Turn: verifiedDone("Finished.")}}}
+			agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+			notify, events := collectEvents()
+			agent.Notify = notify
+			if err := agent.Run(context.Background(), "finish"); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			guidance := messagesText(model.got[1])
+			if model.calls != 2 || !strings.Contains(guidance, tc.wantText[0]) || !strings.Contains(guidance, tc.wantText[1]) {
+				t.Fatalf("queries = %#v", model.got)
+			}
+			if got := strings.Join(eventDecisions(*events), ","); got != tc.wantEvent {
+				t.Fatalf("completion gate decisions = %q", got)
+			}
+		})
 	}
 
 	approval := &fakeModel{responses: []Response{{Turn: weakDone}}}
 	approvalAgent := NewAgent(approval, &fakeExecutor{}, "/tmp")
-	notify, events = collectEvents()
+	notify, events := collectEvents()
 	approvalAgent.Notify = notify
 	if err := approvalAgent.RunWithPolicy(context.Background(), "finish", &scriptedPolicy{}); err != nil {
 		t.Fatalf("RunWithPolicy: %v", err)
@@ -442,8 +430,8 @@ func TestAgentPublicAPIGuards(t *testing.T) {
 		if err := NewAgent(model, executor, "/tmp").Run(context.Background(), "pwd"); err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-		if executor.calls != 1 {
-			t.Fatalf("executor calls = %d, want 1", executor.calls)
+		if len(executor.gotCmds) != 1 {
+			t.Fatalf("executor calls = %d, want 1", len(executor.gotCmds))
 		}
 	})
 
@@ -610,7 +598,6 @@ func (c *fakeCompactor) Summarize(_ context.Context, messages []Message) (string
 type fakeExecutor struct {
 	results []CommandResult
 	errs    []error
-	calls   int
 	gotCmds []string
 	gotDirs []string
 	gotEnv  []map[string]string
@@ -619,18 +606,18 @@ type fakeExecutor struct {
 func (e *fakeExecutor) Execute(_ context.Context, command, dir string) (CommandResult, error) {
 	e.gotCmds = append(e.gotCmds, command)
 	e.gotDirs = append(e.gotDirs, dir)
-	if e.calls >= len(e.results) {
+	idx := len(e.gotCmds) - 1
+	if idx >= len(e.results) {
 		return CommandResult{}, fmt.Errorf("no more results")
 	}
-	result := e.results[e.calls]
+	result := e.results[idx]
 	if result.Command == "" {
 		result.Command = command
 	}
 	var err error
-	if e.calls < len(e.errs) {
-		err = e.errs[e.calls]
+	if idx < len(e.errs) {
+		err = e.errs[idx]
 	}
-	e.calls++
 	return result, err
 }
 
@@ -647,10 +634,14 @@ type scriptedPolicy struct {
 	clarifies []string
 	proposals []ActProposal
 	questions []string
+	decideErr error
 }
 
 func (p *scriptedPolicy) DecideAct(_ context.Context, proposal ActProposal) (ActDecision, error) {
 	p.proposals = append(p.proposals, proposal)
+	if p.decideErr != nil {
+		return ActDecision{}, p.decideErr
+	}
 	if len(p.decisions) == 0 {
 		return ActDecision{Kind: ActDecisionApprove}, nil
 	}
@@ -686,12 +677,8 @@ func collectEvents() (func(Event), *[]Event) {
 }
 
 func hasEvent[T Event](events []Event) bool {
-	for _, event := range events {
-		if _, ok := event.(T); ok {
-			return true
-		}
-	}
-	return false
+	_, ok := firstEvent[T](events)
+	return ok
 }
 
 func firstEvent[T Event](events []Event) (T, bool) {
@@ -751,17 +738,4 @@ func payloadOutcome(t *testing.T, raw string) CommandOutcomeType {
 		t.Fatalf("payload is not JSON: %v\n%s", err, raw)
 	}
 	return payload.Outcome.Type
-}
-
-type runPolicyFunc struct {
-	decideAct func(context.Context, ActProposal) (ActDecision, error)
-	clarify   func(context.Context, string) (string, error)
-}
-
-func (p runPolicyFunc) DecideAct(ctx context.Context, proposal ActProposal) (ActDecision, error) {
-	return p.decideAct(ctx, proposal)
-}
-
-func (p runPolicyFunc) Clarify(ctx context.Context, question string) (string, error) {
-	return p.clarify(ctx, question)
 }

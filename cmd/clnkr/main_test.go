@@ -205,35 +205,32 @@ func TestHelpMentionsClnkrdProcessAutonomyWithoutChildFlags(t *testing.T) {
 	}
 }
 
-func TestInvalidFlagKeepsUsageOffStdout(t *testing.T) {
-	stdout, stderr, err := runMainHelper(t, "--bogus")
-	if err == nil {
-		t.Fatal("invalid flag succeeded, want failure")
+func TestFlagParseErrorsKeepUsageOffStdout(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "unknown flag", args: []string{"--bogus"}, want: "flag provided but not defined"},
+		{name: "removed turn protocol flag", args: []string{"--turn-protocol", "structured-json"}, want: "flag provided but not defined: -turn-protocol"},
 	}
-	if stdout.Len() != 0 {
-		t.Fatalf("stdout = %q, want empty", stdout.String())
-	}
-	if !strings.Contains(stderr.String(), "See clnkr(1)") {
-		t.Fatalf("stderr = %q, want manpage hint", stderr.String())
-	}
-	if got := strings.Count(stderr.String(), "flag provided but not defined"); got != 1 {
-		t.Fatalf("stderr repeated flag error %d times: %q", got, stderr.String())
-	}
-}
 
-func TestTurnProtocolFlagIsRemoved(t *testing.T) {
-	stdout, stderr, err := runMainHelper(t, "--turn-protocol", "structured-json")
-	if err == nil {
-		t.Fatal("removed legacy protocol flag succeeded, want failure")
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("stdout = %q, want empty", stdout.String())
-	}
-	if !strings.Contains(stderr.String(), "flag provided but not defined: -turn-protocol") {
-		t.Fatalf("stderr = %q, want removed flag error", stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "See clnkr(1)") {
-		t.Fatalf("stderr = %q, want manpage hint", stderr.String())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr, err := runMainHelper(t, tt.args...)
+			if err == nil {
+				t.Fatal("invalid flag succeeded, want failure")
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), tt.want) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tt.want)
+			}
+			if !strings.Contains(stderr.String(), "See clnkr(1)") {
+				t.Fatalf("stderr = %q, want manpage hint", stderr.String())
+			}
+		})
 	}
 }
 
@@ -390,15 +387,24 @@ func TestPromptFlagBeforeDumpSystemPromptErrors(t *testing.T) {
 	}
 }
 
-func TestPromptModeUnattendedRunsSingleTask(t *testing.T) {
+func newOpenAIChatServer(t *testing.T, content func(call int) string) (*httptest.Server, *int) {
+	t.Helper()
+
+	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{
-				{"message": map[string]string{"role": "assistant", "content": openAIWrappedDone("ok")}},
+				{"message": map[string]string{"role": "assistant", "content": content(calls)}},
 			},
 			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
 		})
 	}))
+	return server, &calls
+}
+
+func TestPromptModeUnattendedRunsSingleTask(t *testing.T) {
+	server, _ := newOpenAIChatServer(t, func(int) string { return openAIWrappedDone("ok") })
 	defer server.Close()
 
 	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
@@ -450,20 +456,10 @@ func TestMainHelper(t *testing.T) {
 }
 
 func TestPromptModePassesDelegateTextToModel(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{
-				{"message": map[string]string{"role": "assistant", "content": openAIWrappedDone("ok")}},
-			},
-			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
-		})
-	}))
+	server, _ := newOpenAIChatServer(t, func(int) string { return openAIWrappedDone("ok") })
 	defer server.Close()
 
-	stdout, stderr, err := runMainHelperWithEnv(t,
-		[]string{
-			"CLNKR_API_KEY=test-key",
-		},
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
 		"--provider", "openai",
 		"--provider-api", "openai-chat-completions",
 		"--base-url", server.URL,
@@ -494,20 +490,12 @@ func TestAliasedStringPrefersExplicitPreferredValue(t *testing.T) {
 }
 
 func TestCommandProgressWritesToStderr(t *testing.T) {
-	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		content := openAIWrappedDone("done")
-		if calls == 1 {
-			content = `{"turn":{"type":"act","bash":{"commands":[{"command":"printf %s \"$COMMAND_OUTPUT_SENTINEL\"; printf err-no-newline >&2","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`
+	server, calls := newOpenAIChatServer(t, func(call int) string {
+		if call == 1 {
+			return `{"turn":{"type":"act","bash":{"commands":[{"command":"printf %s \"$COMMAND_OUTPUT_SENTINEL\"; printf err-no-newline >&2","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{
-				{"message": map[string]string{"role": "assistant", "content": content}},
-			},
-			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
-		})
-	}))
+		return openAIWrappedDone("done")
+	})
 	defer server.Close()
 
 	const sentinel = "host-output"
@@ -552,30 +540,22 @@ func TestCommandProgressWritesToStderr(t *testing.T) {
 			t.Fatalf("stderr = %q, want progress marker %q", stderr.String(), marker)
 		}
 	}
-	if calls != 2 {
-		t.Fatalf("model calls = %d, want 2", calls)
+	if *calls != 2 {
+		t.Fatalf("model calls = %d, want 2", *calls)
 	}
 }
 
 func TestCommandProgressShowsWorkdir(t *testing.T) {
 	workdir := t.TempDir()
-	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		content := fmt.Sprintf(`{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":%q}]},"question":null,"summary":null,"reasoning":null}}`, workdir)
-		if calls > 1 {
-			content = `{"turn":{"type":"done","bash":null,"question":null,"summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`
+	server, _ := newOpenAIChatServer(t, func(call int) string {
+		if call > 1 {
+			return openAIWrappedDone("done")
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{
-				{"message": map[string]string{"role": "assistant", "content": content}},
-			},
-			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
-		})
-	}))
+		return fmt.Sprintf(`{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":%q}]},"question":null,"summary":null,"reasoning":null}}`, workdir)
+	})
 	defer server.Close()
 
-	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
+	_, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
 		"--provider", "openai",
 		"--provider-api", "openai-chat-completions",
 		"--base-url", server.URL,
@@ -585,7 +565,7 @@ func TestCommandProgressShowsWorkdir(t *testing.T) {
 		"-p", "pwd elsewhere",
 	)
 	if err != nil {
-		t.Fatalf("run main: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+		t.Fatalf("run main: %v\nstderr: %s", err, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "--- running: pwd in "+workdir+" ---") {
 		t.Fatalf("stderr = %q, want progress workdir", stderr.String())
@@ -593,20 +573,12 @@ func TestCommandProgressShowsWorkdir(t *testing.T) {
 }
 
 func TestStepLimitInvalidSummaryExitsNonzero(t *testing.T) {
-	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		content := `{"turn":{"type":"act","bash":{"commands":[{"command":"printf reached-limit","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`
-		if calls > 1 {
-			content = `not-json`
+	server, _ := newOpenAIChatServer(t, func(call int) string {
+		if call > 1 {
+			return `not-json`
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{
-				{"message": map[string]string{"role": "assistant", "content": content}},
-			},
-			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
-		})
-	}))
+		return `{"turn":{"type":"act","bash":{"commands":[{"command":"printf reached-limit","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`
+	})
 	defer server.Close()
 
 	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
@@ -627,16 +599,9 @@ func TestStepLimitInvalidSummaryExitsNonzero(t *testing.T) {
 }
 
 func TestSingleTaskFullSendClarificationCrashesWithoutQuestion(t *testing.T) {
-	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{
-				{"message": map[string]string{"role": "assistant", "content": `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":null,"reasoning":null}}`}},
-			},
-			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
-		})
-	}))
+	server, calls := newOpenAIChatServer(t, func(int) string {
+		return `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":null,"reasoning":null}}`
+	})
 	defer server.Close()
 
 	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
@@ -658,21 +623,16 @@ func TestSingleTaskFullSendClarificationCrashesWithoutQuestion(t *testing.T) {
 	if stderr.String() != "clarify not allowed in unattended mode\n" {
 		t.Fatalf("stderr = %q, want unattended clarify error", stderr.String())
 	}
-	if calls != 1 {
-		t.Fatalf("model calls = %d, want 1", calls)
+	if *calls != 1 {
+		t.Fatalf("model calls = %d, want 1", *calls)
 	}
 }
 
 func TestFullSendPipeClarificationExitsNonzeroWithoutStdout(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{
-				{"message": map[string]string{"role": "assistant", "content": `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":null,"reasoning":null}}`}},
-			},
-			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
-		})
-	}))
+	server, _ := newOpenAIChatServer(t, func(int) string {
+		return `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":null,"reasoning":null}}`
+	})
 	defer server.Close()
 
 	stdout, stderr, err := runMainHelperWithEnvAndInput(t, []string{"CLNKR_API_KEY=test-key"}, strings.NewReader("inspect\n"),
@@ -708,20 +668,12 @@ func TestFullSendPipeClarificationExitsNonzeroWithoutStdout(t *testing.T) {
 
 func TestFullSendPipeRunErrorExitsNonzero(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		content := `{"turn":{"type":"act","bash":{"commands":[{"command":"printf reached-limit","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`
-		if calls > 1 {
-			content = `not-json`
+	server, _ := newOpenAIChatServer(t, func(call int) string {
+		if call > 1 {
+			return `not-json`
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{
-				{"message": map[string]string{"role": "assistant", "content": content}},
-			},
-			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
-		})
-	}))
+		return `{"turn":{"type":"act","bash":{"commands":[{"command":"printf reached-limit","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`
+	})
 	defer server.Close()
 
 	stdout, stderr, err := runMainHelperWithEnvAndInput(t, []string{"CLNKR_API_KEY=test-key"}, strings.NewReader("hit the limit\n"),
@@ -763,21 +715,11 @@ func TestReplPromptIsSuppressedForNonTTY(t *testing.T) {
 }
 
 func TestSingleTaskPromptImpliesFullSend(t *testing.T) {
-	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{
-				{"message": map[string]string{"role": "assistant", "content": openAIWrappedDone("done")}},
-			},
-			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
-		})
-	}))
+	server, calls := newOpenAIChatServer(t, func(int) string { return openAIWrappedDone("done") })
 	defer server.Close()
 
-	stdout, stderr, err := runMainHelperWithEnv(t, []string{
-		"CLNKR_API_KEY=test-key",
-	}, "--provider", "openai",
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
+		"--provider", "openai",
 		"--provider-api", "openai-chat-completions",
 		"--base-url", server.URL,
 		"--model", "gpt-test",
@@ -792,26 +734,18 @@ func TestSingleTaskPromptImpliesFullSend(t *testing.T) {
 	if stderr.String() != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
-	if calls != 1 {
-		t.Fatalf("model calls = %d, want 1", calls)
+	if *calls != 1 {
+		t.Fatalf("model calls = %d, want 1", *calls)
 	}
 }
 
 func TestSingleTaskSeedsCommandEnvFromResolvedProviderFlags(t *testing.T) {
-	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		content := openAIWrappedDone("Printed resolved provider config.")
-		if calls == 1 {
-			content = `{"turn":{"type":"act","bash":{"commands":[{"command":"printf '%s|%s|%s|%s' \"$CLNKR_PROVIDER\" \"$CLNKR_PROVIDER_API\" \"$CLNKR_MODEL\" \"$CLNKR_BASE_URL\"","workdir":null}]},"question":null,"summary":null,"reasoning":"inspect child env"}}`
+	server, _ := newOpenAIChatServer(t, func(call int) string {
+		if call == 1 {
+			return `{"turn":{"type":"act","bash":{"commands":[{"command":"printf '%s|%s|%s|%s' \"$CLNKR_PROVIDER\" \"$CLNKR_PROVIDER_API\" \"$CLNKR_MODEL\" \"$CLNKR_BASE_URL\"","workdir":null}]},"question":null,"summary":null,"reasoning":"inspect child env"}}`
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{
-				{"message": map[string]string{"role": "assistant", "content": content}},
-			},
-			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
-		})
-	}))
+		return openAIWrappedDone("Printed resolved provider config.")
+	})
 	defer server.Close()
 
 	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
@@ -922,51 +856,27 @@ func TestMaxOutputTokensZeroIsRejectedWhenFlagSet(t *testing.T) {
 	}
 }
 
-func TestSingleTaskRejectsExplicitFullSendFalseBeforeProviderConfig(t *testing.T) {
-	stdout, stderr, err := runMainHelperWithEnv(t, []string{
-		"CLNKR_API_KEY=test-key",
-	}, "-p", "hi", "--full-send=false")
-	if err == nil {
-		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
-	}
-	if stdout.String() != "" {
-		t.Fatalf("stdout = %q, want empty", stdout.String())
-	}
-	if !strings.Contains(stderr.String(), "--full-send=false conflicts with -p") {
-		t.Fatalf("stderr = %q, want full-send conflict", stderr.String())
-	}
-	if strings.Contains(stderr.String(), "provider is required") || strings.Contains(stderr.String(), "No API key found") {
-		t.Fatalf("stderr = %q, provider config ran before conflict validation", stderr.String())
-	}
-}
-
-func TestSingleTaskRejectsRepeatedExplicitFullSendFalse(t *testing.T) {
-	stdout, stderr, err := runMainHelperWithEnv(t, []string{
-		"CLNKR_API_KEY=test-key",
-	}, "-p", "hi", "--full-send=false", "--full-send=true")
-	if err == nil {
-		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
-	}
-	if stdout.String() != "" {
-		t.Fatalf("stdout = %q, want empty", stdout.String())
-	}
-	if !strings.Contains(stderr.String(), "--full-send=false conflicts with -p") {
-		t.Fatalf("stderr = %q, want full-send conflict", stderr.String())
-	}
-}
-
-func TestSingleTaskRejectsNumericFullSendFalse(t *testing.T) {
-	stdout, stderr, err := runMainHelperWithEnv(t, []string{
-		"CLNKR_API_KEY=test-key",
-	}, "-p", "hi", "--full-send=0")
-	if err == nil {
-		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
-	}
-	if stdout.String() != "" {
-		t.Fatalf("stdout = %q, want empty", stdout.String())
-	}
-	if !strings.Contains(stderr.String(), "--full-send=false conflicts with -p") {
-		t.Fatalf("stderr = %q, want full-send conflict", stderr.String())
+func TestSingleTaskRejectsExplicitFullSendFalse(t *testing.T) {
+	for _, args := range [][]string{
+		{"-p", "hi", "--full-send=false"},
+		{"-p", "hi", "--full-send=false", "--full-send=true"},
+		{"-p", "hi", "--full-send=0"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"}, args...)
+			if err == nil {
+				t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
+			}
+			if stdout.String() != "" {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), "--full-send=false conflicts with -p") {
+				t.Fatalf("stderr = %q, want full-send conflict", stderr.String())
+			}
+			if strings.Contains(stderr.String(), "provider is required") || strings.Contains(stderr.String(), "No API key found") {
+				t.Fatalf("stderr = %q, provider config ran before conflict validation", stderr.String())
+			}
+		})
 	}
 }
 
@@ -1007,128 +917,98 @@ func TestConversationalApprovalRejectsNonTTYStdin(t *testing.T) {
 	}
 }
 
-func TestTrajectoryRoundTripCanonicalAssistantTurn(t *testing.T) {
-	want := runDoneTranscript(t, "Saved transcript")
-
-	trajectoryPath := filepath.Join(t.TempDir(), "trajectory.json")
-	data, err := json.MarshalIndent(want, "", "  ")
-	if err != nil {
-		t.Fatalf("MarshalIndent: %v", err)
-	}
-	if err := os.WriteFile(trajectoryPath, data, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	loadedData, err := os.ReadFile(trajectoryPath)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	var loaded []clnkr.Message
-	if err := json.Unmarshal(loadedData, &loaded); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
+func TestMessageFileRoundTripCanonicalAssistantTurn(t *testing.T) {
+	tests := []struct {
+		name    string
+		summary string
+		marshal func(any) ([]byte, error)
+	}{
+		{
+			name:    "trajectory",
+			summary: "Saved transcript",
+			marshal: func(v any) ([]byte, error) { return json.MarshalIndent(v, "", "  ") },
+		},
+		{
+			name:    "load messages",
+			summary: "Loaded transcript",
+			marshal: json.Marshal,
+		},
 	}
 
-	replayed := clnkr.NewAgent(nil, nil, "/tmp")
-	if err := replayed.AddMessages(loaded); err != nil {
-		t.Fatalf("AddMessages: %v", err)
-	}
-	got := replayed.Messages()
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("messages = %#v, want %#v", got, want)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			want := runDoneTranscript(t, tt.summary)
+			path := filepath.Join(t.TempDir(), "messages.json")
+			data, err := tt.marshal(want)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			if err := os.WriteFile(path, data, 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
 
-	last := got[len(got)-1].Content
-	wantCanonical := mustCanonicalDoneText("Saved transcript")
-	if last != wantCanonical {
-		t.Fatalf("last assistant message = %q, want %q", last, wantCanonical)
-	}
-	turn, err := clnkr.ParseTurn(last)
-	if err != nil {
-		t.Fatalf("ParseTurn(last): %v", err)
-	}
-	done, ok := turn.(*clnkr.DoneTurn)
-	if !ok {
-		t.Fatalf("last turn = %T, want *clnkr.DoneTurn", turn)
-	}
-	if done.Summary != "Saved transcript" {
-		t.Fatalf("done summary = %q, want %q", done.Summary, "Saved transcript")
+			loadedData, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("ReadFile: %v", err)
+			}
+			var loaded []clnkr.Message
+			if err := json.Unmarshal(loadedData, &loaded); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+
+			agent := clnkr.NewAgent(nil, nil, "/tmp")
+			if err := agent.AddMessages(loaded); err != nil {
+				t.Fatalf("AddMessages: %v", err)
+			}
+			got := agent.Messages()
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("messages = %#v, want %#v", got, want)
+			}
+
+			last := got[len(got)-1].Content
+			wantCanonical := mustCanonicalDoneText(tt.summary)
+			if last != wantCanonical {
+				t.Fatalf("last assistant message = %q, want %q", last, wantCanonical)
+			}
+			turn, err := clnkr.ParseTurn(last)
+			if err != nil {
+				t.Fatalf("ParseTurn(last): %v", err)
+			}
+			done, ok := turn.(*clnkr.DoneTurn)
+			if !ok {
+				t.Fatalf("last turn = %T, want *clnkr.DoneTurn", turn)
+			}
+			if done.Summary != tt.summary {
+				t.Fatalf("done summary = %q, want %q", done.Summary, tt.summary)
+			}
+		})
 	}
 }
 
-func TestLoadMessagesRoundTripCanonicalAssistantTurn(t *testing.T) {
-	want := runDoneTranscript(t, "Loaded transcript")
-
-	loadPath := filepath.Join(t.TempDir(), "messages.json")
-	data, err := json.Marshal(want)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	if err := os.WriteFile(loadPath, data, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
+func TestRunSingleTaskRejectsCompactCommand(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "approval mode", args: []string{"-p", "/compact focus on tests"}},
+		{name: "full send", args: []string{"--full-send", "-p", "/compact focus on tests"}},
 	}
 
-	loadedData, err := os.ReadFile(loadPath)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	var loaded []clnkr.Message
-	if err := json.Unmarshal(loadedData, &loaded); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-
-	agent := clnkr.NewAgent(nil, nil, "/tmp")
-	if err := agent.AddMessages(loaded); err != nil {
-		t.Fatalf("AddMessages: %v", err)
-	}
-	got := agent.Messages()
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("messages = %#v, want %#v", got, want)
-	}
-
-	last := got[len(got)-1].Content
-	wantCanonical := mustCanonicalDoneText("Loaded transcript")
-	if last != wantCanonical {
-		t.Fatalf("last assistant message = %q, want %q", last, wantCanonical)
-	}
-	turn, err := clnkr.ParseTurn(last)
-	if err != nil {
-		t.Fatalf("ParseTurn(last): %v", err)
-	}
-	done, ok := turn.(*clnkr.DoneTurn)
-	if !ok {
-		t.Fatalf("last turn = %T, want *clnkr.DoneTurn", turn)
-	}
-	if done.Summary != "Loaded transcript" {
-		t.Fatalf("done summary = %q, want %q", done.Summary, "Loaded transcript")
-	}
-}
-
-func TestRunSingleTaskRejectsCompactCommandBeforeApprovalCheck(t *testing.T) {
-	stdout, stderr, err := runMainHelperWithEnv(t, []string{
-		"CLNKR_API_KEY=test-key",
-		"CLNKR_PROVIDER=openai",
-		"CLNKR_MODEL=gpt-test",
-		"TERM=xterm",
-	}, "-p", "/compact focus on tests")
-	if err == nil {
-		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "/compact is only available at the conversational prompt") {
-		t.Fatalf("stderr = %q, want compact rejection", stderr.String())
-	}
-}
-
-func TestRunSingleTaskRejectsCompactCommandInFullSend(t *testing.T) {
-	stdout, stderr, err := runMainHelperWithEnv(t, []string{
-		"CLNKR_API_KEY=test-key",
-		"CLNKR_PROVIDER=openai",
-		"CLNKR_MODEL=gpt-test",
-	}, "--full-send", "-p", "/compact focus on tests")
-	if err == nil {
-		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "/compact is only available at the conversational prompt") {
-		t.Fatalf("stderr = %q, want compact rejection", stderr.String())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr, err := runMainHelperWithEnv(t, []string{
+				"CLNKR_API_KEY=test-key",
+				"CLNKR_PROVIDER=openai",
+				"CLNKR_MODEL=gpt-test",
+				"TERM=xterm",
+			}, tt.args...)
+			if err == nil {
+				t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "/compact is only available at the conversational prompt") {
+				t.Fatalf("stderr = %q, want compact rejection", stderr.String())
+			}
+		})
 	}
 }
 

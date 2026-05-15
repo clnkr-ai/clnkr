@@ -16,108 +16,103 @@ import (
 )
 
 func TestNormalizeProjectPath(t *testing.T) {
-	// Deterministic: same path always gives same hash
-	got1, err := session.NormalizeProjectPath("/home/user/projects/myapp")
+	got, err := session.NormalizeProjectPath("/home/user/projects/myapp")
 	if err != nil {
 		t.Fatalf("NormalizeProjectPath: %v", err)
 	}
-	got2, err := session.NormalizeProjectPath("/home/user/projects/myapp")
+	again, err := session.NormalizeProjectPath("/home/user/projects/myapp")
 	if err != nil {
-		t.Fatalf("NormalizeProjectPath: %v", err)
+		t.Fatalf("NormalizeProjectPath again: %v", err)
 	}
-	if got1 != got2 {
-		t.Errorf("same path gave different hashes: %q vs %q", got1, got2)
+	if got != again || got != "ldz77nnq4ybk5nbc" || len(got) != 16 {
+		t.Fatalf("NormalizeProjectPath = %q then %q, want stable 16-char key ldz77nnq4ybk5nbc", got, again)
 	}
-	if len(got1) != 16 {
-		t.Errorf("expected 16-char hash, got %d: %q", len(got1), got1)
+	if got == regressionHexProjectKey("/home/user/projects/myapp") {
+		t.Fatalf("NormalizeProjectPath returned regression-window hex key %q", got)
 	}
-	if got1 != "ldz77nnq4ybk5nbc" {
-		t.Errorf("NormalizeProjectPath changed storage key: got %q", got1)
-	}
-	if got1 == regressionHexProjectKey("/home/user/projects/myapp") {
-		t.Errorf("NormalizeProjectPath returned regression-window hex key %q", got1)
-	}
-
-	// Different paths give different hashes
-	got3, err := session.NormalizeProjectPath("/tmp/foo")
+	different, err := session.NormalizeProjectPath("/tmp/foo")
 	if err != nil {
-		t.Fatalf("NormalizeProjectPath: %v", err)
+		t.Fatalf("NormalizeProjectPath different path: %v", err)
 	}
-	if got1 == got3 {
-		t.Errorf("different paths gave same hash: %q", got1)
-	}
-
-	// Relative path fails
-	_, err = session.NormalizeProjectPath("relative/path")
-	if err == nil {
-		t.Error("expected error for relative path")
+	if different == got {
+		t.Fatalf("different paths gave same hash %q", got)
 	}
 
-	// Empty path fails
-	_, err = session.NormalizeProjectPath("")
-	if err == nil {
-		t.Error("expected error for empty path")
+	for _, path := range []string{"relative/path", ""} {
+		if _, err := session.NormalizeProjectPath(path); err == nil {
+			t.Fatalf("NormalizeProjectPath(%q) succeeded, want error", path)
+		}
 	}
 }
 
 func TestSessionDir(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", "/tmp/test-state")
+	t.Run("uses XDG_STATE_HOME", func(t *testing.T) {
+		t.Setenv("XDG_STATE_HOME", "/tmp/test-state")
+		assertSessionDirPrefix(t, "/home/user/projects/myapp", "/tmp/test-state/clnkr/projects")
+	})
 
-	dir, err := session.SessionDir("/home/user/projects/myapp")
-	if err != nil {
-		t.Fatalf("SessionDir: %v", err)
-	}
+	t.Run("defaults to local state", func(t *testing.T) {
+		t.Setenv("XDG_STATE_HOME", "")
+		_ = os.Unsetenv("XDG_STATE_HOME")
 
-	want := "/tmp/test-state/clnkr/projects/"
-	if len(dir) <= len(want) || dir[:len(want)] != want {
-		t.Errorf("SessionDir: got %q, want prefix %q", dir, want)
-	}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			t.Fatalf("UserHomeDir: %v", err)
+		}
+		assertSessionDirPrefix(t, "/tmp/test", filepath.Join(home, ".local", "state", "clnkr", "projects"))
+	})
 }
 
-func TestSaveAndLoadSession(t *testing.T) {
+func TestSaveLoadAndListSessions(t *testing.T) {
 	tmpdir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", tmpdir)
-
 	projectDir := "/tmp/test-project-save"
 
-	// No sessions yet
-	msgs, err := session.LoadLatestSession(projectDir)
-	if err != nil {
-		t.Fatalf("LoadLatestSession (empty): %v", err)
-	}
-	if msgs != nil {
-		t.Errorf("LoadLatestSession (empty): got %v, want nil", msgs)
-	}
-
-	// Save a session
-	original := []clnkr.Message{
-		{Role: "user", Content: "hello"},
-		{Role: "assistant", Content: "hi there"},
-	}
-	if err := session.SaveSession(projectDir, original); err != nil {
-		t.Fatalf("SaveSession: %v", err)
-	}
-
-	// Verify file was created
-	dir, _ := session.SessionDir(projectDir)
-	files, err := filepath.Glob(filepath.Join(dir, "*.json"))
-	if err != nil || len(files) != 1 {
-		t.Fatalf("expected 1 session file, got %d (err: %v)", len(files), err)
-	}
-
-	// Load it back
 	loaded, err := session.LoadLatestSession(projectDir)
 	if err != nil {
-		t.Fatalf("LoadLatestSession: %v", err)
+		t.Fatalf("LoadLatestSession empty: %v", err)
 	}
-	if len(loaded) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(loaded))
+	if loaded != nil {
+		t.Fatalf("LoadLatestSession empty = %#v, want nil", loaded)
 	}
-	if loaded[0].Role != "user" || loaded[0].Content != "hello" {
-		t.Errorf("first message: got %+v", loaded[0])
+	listed, err := session.ListSessions(projectDir)
+	if err != nil {
+		t.Fatalf("ListSessions empty: %v", err)
 	}
-	if loaded[1].Role != "assistant" || loaded[1].Content != "hi there" {
-		t.Errorf("second message: got %+v", loaded[1])
+	if listed != nil {
+		t.Fatalf("ListSessions empty = %#v, want nil", listed)
+	}
+
+	first := []clnkr.Message{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "hi there"}}
+	if err := session.SaveSession(projectDir, first); err != nil {
+		t.Fatalf("SaveSession first: %v", err)
+	}
+	assertSessionFileCount(t, projectDir, 1)
+	loaded, err = session.LoadLatestSession(projectDir)
+	if err != nil {
+		t.Fatalf("LoadLatestSession first: %v", err)
+	}
+	if !reflect.DeepEqual(loaded, first) {
+		t.Fatalf("loaded = %#v, want %#v", loaded, first)
+	}
+
+	for i := 1; i < 3; i++ {
+		if err := session.SaveSession(projectDir, []clnkr.Message{{Role: "user", Content: fmt.Sprintf("msg %d", i)}}); err != nil {
+			t.Fatalf("SaveSession %d: %v", i, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	assertLatestContent(t, projectDir, "msg 2")
+
+	listed, err = session.ListSessions(projectDir)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(listed) != 3 {
+		t.Fatalf("ListSessions returned %d sessions, want 3: %#v", len(listed), listed)
+	}
+	if listed[0].Created.Before(listed[1].Created) {
+		t.Fatalf("ListSessions = %#v, want newest first", listed)
 	}
 }
 
@@ -127,30 +122,15 @@ func TestSaveSessionWithMetadataPreservesLoadCompatibility(t *testing.T) {
 
 	projectDir := "/tmp/test-project-save-metadata"
 	original := []clnkr.Message{{Role: "user", Content: "hello"}}
-	metadata := map[string]any{"provider": "openai", "max_output_tokens": 8000}
-	if err := session.SaveSessionWithMetadata(projectDir, original, metadata); err != nil {
+	if err := session.SaveSessionWithMetadata(projectDir, original, map[string]any{"provider": "openai", "max_output_tokens": 8000}); err != nil {
 		t.Fatalf("SaveSessionWithMetadata: %v", err)
 	}
 
-	dir, err := session.SessionDir(projectDir)
-	if err != nil {
-		t.Fatalf("SessionDir: %v", err)
-	}
-	files, err := filepath.Glob(filepath.Join(dir, "*.json"))
-	if err != nil || len(files) != 1 {
-		t.Fatalf("expected 1 session file, got %d (err: %v)", len(files), err)
-	}
-	data, err := os.ReadFile(files[0])
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
 	var gotFile struct {
 		Metadata map[string]any  `json:"metadata"`
 		Messages []clnkr.Message `json:"messages"`
 	}
-	if err := json.Unmarshal(data, &gotFile); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
+	readOnlySessionFile(t, projectDir, &gotFile)
 	if gotFile.Metadata["provider"] != "openai" || gotFile.Metadata["max_output_tokens"] != float64(8000) {
 		t.Fatalf("metadata = %#v, want provider and max_output_tokens", gotFile.Metadata)
 	}
@@ -159,231 +139,87 @@ func TestSaveSessionWithMetadataPreservesLoadCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLatestSession: %v", err)
 	}
-	if len(loaded) != 1 || !reflect.DeepEqual(loaded[0], original[0]) {
+	if !reflect.DeepEqual(loaded, original) {
 		t.Fatalf("loaded = %#v, want %#v", loaded, original)
 	}
 }
 
-func TestSaveMultipleAndLoadLatest(t *testing.T) {
-	tmpdir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", tmpdir)
-
-	projectDir := "/tmp/test-project-multi"
-
-	for i := 0; i < 3; i++ {
-		msgs := []clnkr.Message{
-			{Role: "user", Content: fmt.Sprintf("msg %d", i)},
-		}
-		if err := session.SaveSession(projectDir, msgs); err != nil {
-			t.Fatalf("SaveSession %d: %v", i, err)
-		}
-		time.Sleep(10 * time.Millisecond)
+func TestLoadLatestSessionOrdersBySessionFilename(t *testing.T) {
+	tests := []struct {
+		name            string
+		files           map[string]string
+		wantLatest      string
+		wantOrder       []string
+		wantCreatedZero bool
+	}{
+		{
+			name: "legacy equal created names use highest sequence",
+			files: map[string]string{
+				"9-2026-01-10T000000.000000Z.json":  sessionJSON("2026-01-10T00:00:00Z", "old"),
+				"10-2026-01-10T000000.000000Z.json": sessionJSON("2026-01-10T00:00:00Z", "new"),
+			},
+			wantLatest: "new",
+			wantOrder:  []string{"10-2026-01-10T000000.000000Z.json", "9-2026-01-10T000000.000000Z.json"},
+		},
+		{
+			name: "legacy filename sequence beats conflicting created metadata",
+			files: map[string]string{
+				"9-2026-01-10T000000.000000Z.json":  sessionJSON("2026-01-11T00:00:00Z", "old"),
+				"10-2026-01-10T000000.000000Z.json": sessionJSON("2026-01-10T00:00:00Z", "new"),
+			},
+			wantLatest: "new",
+			wantOrder:  []string{"10-2026-01-10T000000.000000Z.json", "9-2026-01-10T000000.000000Z.json"},
+		},
+		{
+			name: "mixed current and legacy names use filename time",
+			files: map[string]string{
+				"10-2026-01-01T000000.000000Z.json":     sessionJSON("2026-01-01T00:00:00Z", "legacy-high"),
+				"9-2026-01-03T000000.000000Z.json":      sessionJSON("2026-01-03T00:00:00Z", "legacy-low"),
+				"2026-01-02T000000.000000000Z-000.json": sessionJSON("2026-01-02T00:00:00Z", "current"),
+			},
+			wantLatest: "legacy-low",
+			wantOrder: []string{
+				"9-2026-01-03T000000.000000Z.json",
+				"2026-01-02T000000.000000000Z-000.json",
+				"10-2026-01-01T000000.000000Z.json",
+			},
+		},
+		{
+			name: "malformed created metadata does not override filename order",
+			files: map[string]string{
+				"2026-01-12T000000.000000000Z-000.json": sessionJSON("not-a-time", "new"),
+				"2026-01-11T000000.000000000Z-000.json": sessionJSON("2026-01-11T00:00:00Z", "old"),
+			},
+			wantLatest:      "new",
+			wantOrder:       []string{"2026-01-12T000000.000000000Z-000.json", "2026-01-11T000000.000000000Z-000.json"},
+			wantCreatedZero: true,
+		},
+		{
+			name: "current equal timestamp names use suffix sequence",
+			files: map[string]string{
+				"2026-01-10T000000.000000000Z-000.json": sessionJSON("2026-01-10T00:00:00Z", "old"),
+				"2026-01-10T000000.000000000Z-001.json": sessionJSON("2026-01-10T00:00:00Z", "new"),
+			},
+			wantLatest: "new",
+			wantOrder:  []string{"2026-01-10T000000.000000000Z-001.json", "2026-01-10T000000.000000000Z-000.json"},
+		},
 	}
 
-	// Load latest should get the last one (msg 2)
-	loaded, err := session.LoadLatestSession(projectDir)
-	if err != nil {
-		t.Fatalf("LoadLatestSession: %v", err)
-	}
-	if len(loaded) != 1 || loaded[0].Content != "msg 2" {
-		t.Errorf("expected latest session with 'msg 2', got %+v", loaded)
-	}
-}
-
-func TestLoadLatestSessionOrdersEqualCreatedLegacyNamesBySequence(t *testing.T) {
-	tmpdir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", tmpdir)
-
-	projectDir := "/tmp/test-project-legacy-order"
-	dir, err := session.SessionDir(projectDir)
-	if err != nil {
-		t.Fatalf("SessionDir: %v", err)
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	files := map[string]string{
-		"9-2026-01-10T000000.000000Z.json":  `{"created":"2026-01-10T00:00:00Z","messages":[{"role":"user","content":"old"}]}`,
-		"10-2026-01-10T000000.000000Z.json": `{"created":"2026-01-10T00:00:00Z","messages":[{"role":"user","content":"new"}]}`,
-	}
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-			t.Fatalf("WriteFile %s: %v", name, err)
-		}
-	}
-
-	loaded, err := session.LoadLatestSession(projectDir)
-	if err != nil {
-		t.Fatalf("LoadLatestSession: %v", err)
-	}
-	if len(loaded) != 1 || loaded[0].Content != "new" {
-		t.Fatalf("latest session = %#v, want new", loaded)
-	}
-	sessions, err := session.ListSessions(projectDir)
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
-	}
-	if len(sessions) != 2 || sessions[0].Filename != "10-2026-01-10T000000.000000Z.json" {
-		t.Fatalf("sessions = %#v, want highest legacy sequence first", sessions)
-	}
-}
-
-func TestLoadLatestSessionOrdersEqualTimestampLegacyNamesBySequenceBeforeCreatedTime(t *testing.T) {
-	tmpdir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", tmpdir)
-
-	projectDir := "/tmp/test-project-legacy-sequence"
-	dir, err := session.SessionDir(projectDir)
-	if err != nil {
-		t.Fatalf("SessionDir: %v", err)
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	files := map[string]string{
-		"9-2026-01-10T000000.000000Z.json":  `{"created":"2026-01-11T00:00:00Z","messages":[{"role":"user","content":"old"}]}`,
-		"10-2026-01-10T000000.000000Z.json": `{"created":"2026-01-10T00:00:00Z","messages":[{"role":"user","content":"new"}]}`,
-	}
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-			t.Fatalf("WriteFile %s: %v", name, err)
-		}
-	}
-
-	loaded, err := session.LoadLatestSession(projectDir)
-	if err != nil {
-		t.Fatalf("LoadLatestSession: %v", err)
-	}
-	if len(loaded) != 1 || loaded[0].Content != "new" {
-		t.Fatalf("latest session = %#v, want highest equal-timestamp legacy sequence", loaded)
-	}
-	sessions, err := session.ListSessions(projectDir)
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
-	}
-	if len(sessions) != 2 || sessions[0].Filename != "10-2026-01-10T000000.000000Z.json" {
-		t.Fatalf("sessions = %#v, want highest equal-timestamp legacy sequence first", sessions)
-	}
-}
-
-func TestLoadLatestSessionOrdersMixedFormatsByFilenameTime(t *testing.T) {
-	tmpdir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", tmpdir)
-
-	projectDir := "/tmp/test-project-mixed-transitive-order"
-	dir, err := session.SessionDir(projectDir)
-	if err != nil {
-		t.Fatalf("SessionDir: %v", err)
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	files := map[string]string{
-		"10-2026-01-01T000000.000000Z.json":     `{"created":"2026-01-01T00:00:00Z","messages":[{"role":"user","content":"legacy-high"}]}`,
-		"9-2026-01-03T000000.000000Z.json":      `{"created":"2026-01-03T00:00:00Z","messages":[{"role":"user","content":"legacy-low"}]}`,
-		"2026-01-02T000000.000000000Z-000.json": `{"created":"2026-01-02T00:00:00Z","messages":[{"role":"user","content":"current"}]}`,
-	}
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-			t.Fatalf("WriteFile %s: %v", name, err)
-		}
-	}
-
-	loaded, err := session.LoadLatestSession(projectDir)
-	if err != nil {
-		t.Fatalf("LoadLatestSession: %v", err)
-	}
-	if len(loaded) != 1 || loaded[0].Content != "legacy-low" {
-		t.Fatalf("latest session = %#v, want newest filename timestamp", loaded)
-	}
-	sessions, err := session.ListSessions(projectDir)
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
-	}
-	want := []string{
-		"9-2026-01-03T000000.000000Z.json",
-		"2026-01-02T000000.000000000Z-000.json",
-		"10-2026-01-01T000000.000000Z.json",
-	}
-	if len(sessions) != len(want) {
-		t.Fatalf("sessions = %#v, want %d sessions", sessions, len(want))
-	}
-	for i := range want {
-		if sessions[i].Filename != want[i] {
-			t.Fatalf("sessions[%d] = %q, want %q; sessions = %#v", i, sessions[i].Filename, want[i], sessions)
-		}
-	}
-}
-
-func TestLoadLatestSessionToleratesMalformedCreatedMetadata(t *testing.T) {
-	tmpdir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", tmpdir)
-
-	projectDir := "/tmp/test-project-bad-created"
-	dir, err := session.SessionDir(projectDir)
-	if err != nil {
-		t.Fatalf("SessionDir: %v", err)
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	files := map[string]string{
-		"2026-01-12T000000.000000000Z-000.json": `{"created":"not-a-time","messages":[{"role":"user","content":"new"}]}`,
-		"2026-01-11T000000.000000000Z-000.json": `{"created":"2026-01-11T00:00:00Z","messages":[{"role":"user","content":"old"}]}`,
-	}
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-			t.Fatalf("WriteFile %s: %v", name, err)
-		}
-	}
-
-	loaded, err := session.LoadLatestSession(projectDir)
-	if err != nil {
-		t.Fatalf("LoadLatestSession: %v", err)
-	}
-	if len(loaded) != 1 || loaded[0].Content != "new" {
-		t.Fatalf("latest session = %#v, want session with malformed created metadata", loaded)
-	}
-	sessions, err := session.ListSessions(projectDir)
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
-	}
-	if len(sessions) != 2 || sessions[0].Filename != "2026-01-12T000000.000000000Z-000.json" {
-		t.Fatalf("sessions = %#v, want malformed-created session listed first", sessions)
-	}
-	if !sessions[0].Created.IsZero() {
-		t.Fatalf("sessions[0].Created = %v, want zero time for malformed created metadata", sessions[0].Created)
-	}
-}
-
-func TestLoadLatestSessionOrdersCurrentNamesBySuffix(t *testing.T) {
-	tmpdir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", tmpdir)
-
-	projectDir := "/tmp/test-project-current-order"
-	dir, err := session.SessionDir(projectDir)
-	if err != nil {
-		t.Fatalf("SessionDir: %v", err)
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	files := map[string]string{
-		"2026-01-10T000000.000000000Z-000.json": `{"created":"2026-01-10T00:00:00Z","messages":[{"role":"user","content":"old"}]}`,
-		"2026-01-10T000000.000000000Z-001.json": `{"created":"2026-01-10T00:00:00Z","messages":[{"role":"user","content":"new"}]}`,
-	}
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-			t.Fatalf("WriteFile %s: %v", name, err)
-		}
-	}
-
-	loaded, err := session.LoadLatestSession(projectDir)
-	if err != nil {
-		t.Fatalf("LoadLatestSession: %v", err)
-	}
-	if len(loaded) != 1 || loaded[0].Content != "new" {
-		t.Fatalf("latest session = %#v, want new", loaded)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			projectDir := setupSessionFiles(t, tc.files)
+			assertLatestContent(t, projectDir, tc.wantLatest)
+			assertListOrder(t, projectDir, tc.wantOrder)
+			if tc.wantCreatedZero {
+				sessions, err := session.ListSessions(projectDir)
+				if err != nil {
+					t.Fatalf("ListSessions: %v", err)
+				}
+				if !sessions[0].Created.IsZero() {
+					t.Fatalf("sessions[0].Created = %v, want zero time for malformed created metadata", sessions[0].Created)
+				}
+			}
+		})
 	}
 }
 
@@ -393,29 +229,10 @@ func TestLoadLatestSessionReadsRegressionHexSessionDir(t *testing.T) {
 
 	projectDir := "/tmp/test-project-regression-hex"
 	dir := filepath.Join(tmpdir, "clnkr", "projects", regressionHexProjectKey(projectDir))
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	name := "2026-01-10T000000.000000000Z-000.json"
-	content := `{"created":"2026-01-10T00:00:00Z","messages":[{"role":"user","content":"hex"}]}`
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
+	writeFile(t, dir, "2026-01-10T000000.000000000Z-000.json", sessionJSON("2026-01-10T00:00:00Z", "hex"))
 
-	loaded, err := session.LoadLatestSession(projectDir)
-	if err != nil {
-		t.Fatalf("LoadLatestSession: %v", err)
-	}
-	if len(loaded) != 1 || loaded[0].Content != "hex" {
-		t.Fatalf("latest session = %#v, want regression hex session", loaded)
-	}
-	sessions, err := session.ListSessions(projectDir)
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
-	}
-	if len(sessions) != 1 || sessions[0].Filename != name {
-		t.Fatalf("sessions = %#v, want regression hex session", sessions)
-	}
+	assertLatestContent(t, projectDir, "hex")
+	assertListOrder(t, projectDir, []string{"2026-01-10T000000.000000000Z-000.json"})
 }
 
 func TestSaveSessionWritesCanonicalDirWhileReadingRegressionHexDir(t *testing.T) {
@@ -423,178 +240,173 @@ func TestSaveSessionWritesCanonicalDirWhileReadingRegressionHexDir(t *testing.T)
 	t.Setenv("XDG_STATE_HOME", tmpdir)
 
 	projectDir := "/tmp/test-project-save-canonical"
-	msgs := []clnkr.Message{{Role: "user", Content: "canonical"}}
-	if err := session.SaveSession(projectDir, msgs); err != nil {
+	if err := session.SaveSession(projectDir, []clnkr.Message{{Role: "user", Content: "canonical"}}); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
+	assertSessionFileCount(t, projectDir, 1)
 
-	canonicalDir, err := session.SessionDir(projectDir)
-	if err != nil {
-		t.Fatalf("SessionDir: %v", err)
-	}
-	canonicalFiles, err := filepath.Glob(filepath.Join(canonicalDir, "*.json"))
-	if err != nil || len(canonicalFiles) != 1 {
-		t.Fatalf("canonical files = %d, err = %v; want 1", len(canonicalFiles), err)
-	}
-
-	hexDir := filepath.Join(tmpdir, "clnkr", "projects", regressionHexProjectKey(projectDir))
-	hexFiles, err := filepath.Glob(filepath.Join(hexDir, "*.json"))
+	hexFiles, err := filepath.Glob(filepath.Join(tmpdir, "clnkr", "projects", regressionHexProjectKey(projectDir), "*.json"))
 	if err != nil || len(hexFiles) != 0 {
 		t.Fatalf("regression hex files = %d, err = %v; want 0", len(hexFiles), err)
 	}
 }
 
-func TestLoadLatestSessionIgnoresCorruptOlderLegacyWhenCurrentSessionIsNewest(t *testing.T) {
-	tmpdir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", tmpdir)
+func TestLoadLatestSessionCorruptFileHandling(t *testing.T) {
+	tests := []struct {
+		name       string
+		files      map[string]string
+		wantLatest string
+		wantErr    string
+	}{
+		{
+			name: "ignores corrupt older legacy when current is newest",
+			files: map[string]string{
+				"9-2026-01-10T000000.000000Z.json":      `{`,
+				"2026-01-11T000000.000000000Z-000.json": sessionJSON("2026-01-11T00:00:00Z", "new"),
+			},
+			wantLatest: "new",
+		},
+		{
+			name: "fails on corrupt newest",
+			files: map[string]string{
+				"2026-01-10T000000.000000000Z-000.json": sessionJSON("2026-01-10T00:00:00Z", "old"),
+				"2026-01-10T000000.000000000Z-001.json": `{`,
+			},
+			wantErr: "2026-01-10T000000.000000000Z-001.json",
+		},
+		{
+			name: "ignores corrupt older current session",
+			files: map[string]string{
+				"2026-01-10T000000.000000000Z-000.json": `{`,
+				"2026-01-10T000000.000000000Z-001.json": sessionJSON("2026-01-10T00:00:00Z", "new"),
+			},
+			wantLatest: "new",
+		},
+	}
 
-	projectDir := "/tmp/test-project-mixed-corrupt-legacy"
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			projectDir := setupSessionFiles(t, tc.files)
+			loaded, err := session.LoadLatestSession(projectDir)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("LoadLatestSession err = %v, want containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadLatestSession: %v", err)
+			}
+			if len(loaded) != 1 || loaded[0].Content != tc.wantLatest {
+				t.Fatalf("latest session = %#v, want %q", loaded, tc.wantLatest)
+			}
+		})
+	}
+}
+
+func assertSessionDirPrefix(t *testing.T, projectDir, wantPrefix string) {
+	t.Helper()
+
 	dir, err := session.SessionDir(projectDir)
 	if err != nil {
 		t.Fatalf("SessionDir: %v", err)
 	}
+	if !strings.HasPrefix(dir, wantPrefix+string(os.PathSeparator)) {
+		t.Fatalf("SessionDir = %q, want prefix %q", dir, wantPrefix)
+	}
+}
+
+func assertSessionFileCount(t *testing.T, projectDir string, want int) {
+	t.Helper()
+
+	dir, err := session.SessionDir(projectDir)
+	if err != nil {
+		t.Fatalf("SessionDir: %v", err)
+	}
+	files, err := filepath.Glob(filepath.Join(dir, "*.json"))
+	if err != nil || len(files) != want {
+		t.Fatalf("session files = %d, err = %v; want %d", len(files), err, want)
+	}
+}
+
+func readOnlySessionFile(t *testing.T, projectDir string, dest any) {
+	t.Helper()
+
+	dir, err := session.SessionDir(projectDir)
+	if err != nil {
+		t.Fatalf("SessionDir: %v", err)
+	}
+	files, err := filepath.Glob(filepath.Join(dir, "*.json"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("session files = %d, err = %v; want 1", len(files), err)
+	}
+	data, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if err := json.Unmarshal(data, dest); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+}
+
+func setupSessionFiles(t *testing.T, files map[string]string) string {
+	t.Helper()
+
+	tmpdir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", tmpdir)
+	projectDir := filepath.Join(tmpdir, "project")
+	dir, err := session.SessionDir(projectDir)
+	if err != nil {
+		t.Fatalf("SessionDir: %v", err)
+	}
+	for name, content := range files {
+		writeFile(t, dir, name, content)
+	}
+	return projectDir
+}
+
+func writeFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	files := map[string]string{
-		"9-2026-01-10T000000.000000Z.json":      `{`,
-		"2026-01-11T000000.000000000Z-000.json": `{"created":"2026-01-11T00:00:00Z","messages":[{"role":"user","content":"new"}]}`,
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile %s: %v", name, err)
 	}
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-			t.Fatalf("WriteFile %s: %v", name, err)
-		}
-	}
+}
+
+func assertLatestContent(t *testing.T, projectDir, want string) {
+	t.Helper()
 
 	loaded, err := session.LoadLatestSession(projectDir)
 	if err != nil {
 		t.Fatalf("LoadLatestSession: %v", err)
 	}
-	if len(loaded) != 1 || loaded[0].Content != "new" {
-		t.Fatalf("latest session = %#v, want current session", loaded)
+	if len(loaded) != 1 || loaded[0].Content != want {
+		t.Fatalf("latest session = %#v, want content %q", loaded, want)
 	}
 }
 
-func TestLoadLatestSessionFailsOnCorruptNewestSession(t *testing.T) {
-	tmpdir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", tmpdir)
-
-	projectDir := "/tmp/test-project-corrupt-latest"
-	dir, err := session.SessionDir(projectDir)
-	if err != nil {
-		t.Fatalf("SessionDir: %v", err)
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	files := map[string]string{
-		"2026-01-10T000000.000000000Z-000.json": `{"created":"2026-01-10T00:00:00Z","messages":[{"role":"user","content":"old"}]}`,
-		"2026-01-10T000000.000000000Z-001.json": `{`,
-	}
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-			t.Fatalf("WriteFile %s: %v", name, err)
-		}
-	}
-
-	_, err = session.LoadLatestSession(projectDir)
-	if err == nil {
-		t.Fatal("LoadLatestSession succeeded, want corrupt latest session error")
-	}
-	if !strings.Contains(err.Error(), "2026-01-10T000000.000000000Z-001.json") {
-		t.Fatalf("error = %v, want corrupt latest filename", err)
-	}
-}
-
-func TestLoadLatestSessionIgnoresCorruptOlderSession(t *testing.T) {
-	tmpdir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", tmpdir)
-
-	projectDir := "/tmp/test-project-corrupt-older"
-	dir, err := session.SessionDir(projectDir)
-	if err != nil {
-		t.Fatalf("SessionDir: %v", err)
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	files := map[string]string{
-		"2026-01-10T000000.000000000Z-000.json": `{`,
-		"2026-01-10T000000.000000000Z-001.json": `{"created":"2026-01-10T00:00:00Z","messages":[{"role":"user","content":"new"}]}`,
-	}
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-			t.Fatalf("WriteFile %s: %v", name, err)
-		}
-	}
-
-	loaded, err := session.LoadLatestSession(projectDir)
-	if err != nil {
-		t.Fatalf("LoadLatestSession: %v", err)
-	}
-	if len(loaded) != 1 || loaded[0].Content != "new" {
-		t.Fatalf("latest session = %#v, want new", loaded)
-	}
-}
-
-func TestListSessions(t *testing.T) {
-	tmpdir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", tmpdir)
-
-	projectDir := "/tmp/test-project-list"
-
-	for i := 0; i < 3; i++ {
-		msgs := []clnkr.Message{
-			{Role: "user", Content: fmt.Sprintf("msg %d", i)},
-		}
-		if err := session.SaveSession(projectDir, msgs); err != nil {
-			t.Fatalf("SaveSession %d: %v", i, err)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+func assertListOrder(t *testing.T, projectDir string, want []string) {
+	t.Helper()
 
 	sessions, err := session.ListSessions(projectDir)
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
-	if len(sessions) != 3 {
-		t.Errorf("expected 3 sessions, got %d", len(sessions))
+	if len(sessions) != len(want) {
+		t.Fatalf("sessions = %#v, want %d sessions", sessions, len(want))
 	}
-
-	// Should be sorted newest first
-	if len(sessions) >= 2 && sessions[0].Created.Before(sessions[1].Created) {
-		t.Error("sessions not sorted newest-first")
-	}
-}
-
-func TestListSessionsEmpty(t *testing.T) {
-	tmpdir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", tmpdir)
-
-	sessions, err := session.ListSessions("/tmp/nonexistent-project")
-	if err != nil {
-		t.Fatalf("ListSessions (empty): %v", err)
-	}
-	if sessions != nil {
-		t.Errorf("expected nil, got %v", sessions)
+	for i, filename := range want {
+		if sessions[i].Filename != filename {
+			t.Fatalf("sessions[%d] = %q, want %q; sessions = %#v", i, sessions[i].Filename, filename, sessions)
+		}
 	}
 }
 
-func TestSessionDirDefaultsToLocalState(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", "")
-	// Unset XDG_STATE_HOME to test fallback
-	_ = os.Unsetenv("XDG_STATE_HOME")
-
-	dir, err := session.SessionDir("/tmp/test")
-	if err != nil {
-		t.Fatalf("SessionDir: %v", err)
-	}
-
-	home, _ := os.UserHomeDir()
-	want := filepath.Join(home, ".local", "state", "clnkr", "projects")
-	if len(dir) <= len(want) || dir[:len(want)] != want {
-		t.Errorf("SessionDir without XDG: got %q, want prefix %q", dir, want)
-	}
+func sessionJSON(created, content string) string {
+	return fmt.Sprintf(`{"created":%q,"messages":[{"role":"user","content":%q}]}`, created, content)
 }
 
 func regressionHexProjectKey(path string) string {

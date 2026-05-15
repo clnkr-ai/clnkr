@@ -16,11 +16,12 @@ import (
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
 )
 
+const doneRaw = `{"type":"done","summary":"finished","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`
+
 func TestHelpWritesRichUsageToStdout(t *testing.T) {
-	var out, errOut bytes.Buffer
-	code := runMain([]string{"--help"}, strings.NewReader(""), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
+	code, out, errOut := runMainForTest([]string{"--help"}, "")
 	if code != 0 {
-		t.Fatalf("exit code = %d, want 0\nstderr: %s", code, errOut.String())
+		t.Fatalf("exit code = %d, want 0\nstderr: %s", code, errOut)
 	}
 	for _, want := range []string{
 		"clnkrd - stdio JSONL adapter for clnkr",
@@ -33,99 +34,110 @@ func TestHelpWritesRichUsageToStdout(t *testing.T) {
 		"Environment:",
 		"Examples:",
 	} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("stdout missing %q:\n%s", want, out.String())
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, out)
 		}
 	}
-	for _, line := range strings.Split(out.String(), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		if len(line) > 79 {
 			t.Fatalf("help line length = %d, want <= 79: %q", len(line), line)
 		}
 	}
-	if errOut.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty", errOut.String())
+	if errOut != "" {
+		t.Fatalf("stderr = %q, want empty", errOut)
 	}
 }
 
-func TestDumpAutoSystemPromptResolvesWithoutAPIKey(t *testing.T) {
-	var out, errOut bytes.Buffer
-	code := runMain([]string{"--provider", "openai", "--provider-api", "openai-responses", "--model", "gpt-5", "--dump-system-prompt"}, strings.NewReader(""), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0\nstderr: %s", code, errOut.String())
+func TestStartupSystemPromptModes(t *testing.T) {
+	tests := []struct {
+		name           string
+		args           []string
+		wantCode       int
+		wantOut        string
+		wantErr        string
+		forbiddenError string
+	}{
+		{
+			name:           "auto prompt dump resolves without API key",
+			args:           []string{"--provider", "openai", "--provider-api", "openai-responses", "--model", "gpt-5", "--dump-system-prompt"},
+			wantOut:        "call the bash tool",
+			forbiddenError: "api key is required",
+		},
+		{
+			name:     "auto prompt dump reports missing provider context",
+			args:     []string{"--dump-system-prompt"},
+			wantCode: 1,
+			wantErr:  "--act-protocol clnkr-inline",
+		},
+		{
+			name:           "concrete prompt dump does not require provider config",
+			args:           []string{"--act-protocol", "clnkr-inline", "--dump-system-prompt"},
+			wantOut:        "Every response must be exactly one JSON object",
+			forbiddenError: "provider is required",
+		},
+		{
+			name:           "normal startup missing provider does not mention prompt dump",
+			wantCode:       1,
+			wantErr:        "provider is required",
+			forbiddenError: "dump",
+		},
 	}
-	if !strings.Contains(out.String(), "call the bash tool") {
-		t.Fatalf("stdout missing tool-calls prompt: %q", out.String())
-	}
-	if strings.Contains(errOut.String(), "api key is required") {
-		t.Fatalf("stderr = %q, API key validation ran for prompt dump", errOut.String())
-	}
-}
-
-func TestDumpAutoSystemPromptReportsMissingProviderContext(t *testing.T) {
-	var out, errOut bytes.Buffer
-	code := runMain([]string{"--dump-system-prompt"}, strings.NewReader(""), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
-	if code == 0 {
-		t.Fatalf("exit code = 0, want failure\nstdout: %s stderr: %s", out.String(), errOut.String())
-	}
-	if out.String() != "" {
-		t.Fatalf("stdout = %q, want empty", out.String())
-	}
-	if !strings.Contains(errOut.String(), "--act-protocol clnkr-inline") {
-		t.Fatalf("stderr = %q, want concrete act protocol hint", errOut.String())
-	}
-}
-
-func TestDumpConcreteSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
-	var out, errOut bytes.Buffer
-	code := runMain([]string{"--act-protocol", "clnkr-inline", "--dump-system-prompt"}, strings.NewReader(""), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0\nstderr: %s", code, errOut.String())
-	}
-	if !strings.Contains(out.String(), "Every response must be exactly one JSON object") {
-		t.Fatalf("stdout missing inline prompt: %q", out.String())
-	}
-	if strings.Contains(errOut.String(), "provider is required") {
-		t.Fatalf("stderr = %q, provider validation ran first", errOut.String())
-	}
-}
-
-func TestNormalStartupMissingProviderDoesNotMentionPromptDump(t *testing.T) {
-	var out, errOut bytes.Buffer
-	code := runMain(nil, strings.NewReader(""), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
-	if code == 0 {
-		t.Fatalf("exit code = 0, want failure\nstdout: %s stderr: %s", out.String(), errOut.String())
-	}
-	if out.String() != "" {
-		t.Fatalf("stdout = %q, want empty", out.String())
-	}
-	if !strings.Contains(errOut.String(), "provider is required") {
-		t.Fatalf("stderr = %q, want provider context error", errOut.String())
-	}
-	if strings.Contains(errOut.String(), "dump") {
-		t.Fatalf("stderr = %q, want no prompt dump hint", errOut.String())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, out, errOut := runMainForTest(tt.args, "")
+			if code != tt.wantCode {
+				t.Fatalf("exit code = %d, want %d\nstdout: %s\nstderr: %s", code, tt.wantCode, out, errOut)
+			}
+			if tt.wantCode != 0 && out != "" {
+				t.Fatalf("stdout = %q, want empty", out)
+			}
+			if tt.wantOut != "" && !strings.Contains(out, tt.wantOut) {
+				t.Fatalf("stdout missing %q: %q", tt.wantOut, out)
+			}
+			if tt.wantErr != "" && !strings.Contains(errOut, tt.wantErr) {
+				t.Fatalf("stderr = %q, want %q", errOut, tt.wantErr)
+			}
+			if tt.forbiddenError != "" && strings.Contains(errOut, tt.forbiddenError) {
+				t.Fatalf("stderr = %q, want no %q", errOut, tt.forbiddenError)
+			}
+		})
 	}
 }
 
 func TestRunJSONLPromptWritesResponseAndDone(t *testing.T) {
-	var out, errOut bytes.Buffer
-	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)}}
-	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
-	agent.Notify = func(event clnkr.Event) {
-		if err := clnkrapp.WriteJSONL(&out, event); err != nil {
-			t.Fatalf("WriteJSONL: %v", err)
-		}
+	largePrompt := strings.Repeat("x", 70*1024)
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "ordinary prompt line",
+			input: `{"type":"prompt","text":"inspect","mode":"full_send"}` + "\n",
+		},
+		{
+			name: "large prompt line",
+			input: mustMarshalJSONLCommand(t, clnkrapp.JSONLCommand{
+				Type: "prompt",
+				Text: largePrompt,
+				Mode: string(clnkrapp.PromptModeFullSend),
+			}) + "\n",
+		},
 	}
-	driver := clnkrapp.NewDriver(agent, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			driver := newTestDriver(t, &out, []clnkr.Response{mustResponse(doneRaw)}, nil)
 
-	err := runJSONL(context.Background(), strings.NewReader(`{"type":"prompt","text":"inspect","mode":"full_send"}`+"\n"), &out, &errOut, driver)
-	if err != nil {
-		t.Fatalf("runJSONL: %v", err)
-	}
+			err := runJSONL(context.Background(), strings.NewReader(tt.input), &out, &errOut, driver)
+			if err != nil {
+				t.Fatalf("runJSONL: %v\nstderr:\n%s", err, errOut.String())
+			}
 
-	gotTypes := jsonlTypes(t, out.String())
-	assertTypesContainInOrder(t, gotTypes, []string{"response", "done"}, out.String())
-	if errOut.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty", errOut.String())
+			assertTypesContainInOrder(t, jsonlTypes(t, out.String()), []string{"response", "done"}, out.String())
+			if errOut.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty", errOut.String())
+			}
+		})
 	}
 }
 
@@ -133,30 +145,16 @@ func TestRunJSONLReplyApprovesPendingCommand(t *testing.T) {
 	var out, errOut bytes.Buffer
 	reader, writer := io.Pipe()
 	defer writer.Close() //nolint:errcheck
-	model := &fakeModel{responses: []clnkr.Response{
-		mustResponse(`{"type":"act","bash":{"commands":[{"command":"echo hi","workdir":null}]}}`),
-		mustResponse(`{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`),
-	}}
 	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
-	agent := clnkr.NewAgent(model, executor, "/tmp")
-	agent.Notify = func(event clnkr.Event) {
-		if err := clnkrapp.WriteJSONL(&out, event); err != nil {
-			t.Fatalf("WriteJSONL: %v", err)
-		}
-	}
-	driver := clnkrapp.NewDriver(agent, nil)
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- runJSONL(context.Background(), reader, &out, &errOut, driver)
-	}()
+	driver := newTestDriver(t, &out, []clnkr.Response{
+		mustResponse(`{"type":"act","bash":{"commands":[{"command":"echo hi","workdir":null}]}}`),
+		mustResponse(doneRaw),
+	}, executor)
+	errCh := runJSONLAsync(reader, &out, &errOut, driver)
 
-	if _, err := writer.Write([]byte(`{"type":"prompt","text":"say hi","mode":"approval"}` + "\n")); err != nil {
-		t.Fatalf("write prompt: %v", err)
-	}
+	writeJSONL(t, writer, `{"type":"prompt","text":"say hi","mode":"approval"}`)
 	waitForPending(t, driver, clnkrapp.PendingApproval)
-	if _, err := writer.Write([]byte(`{"type":"reply","text":"y"}` + "\n")); err != nil {
-		t.Fatalf("write reply: %v", err)
-	}
+	writeJSONL(t, writer, `{"type":"reply","text":"y"}`)
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close input: %v", err)
 	}
@@ -164,8 +162,7 @@ func TestRunJSONLReplyApprovesPendingCommand(t *testing.T) {
 		t.Fatalf("runJSONL: %v", err)
 	}
 
-	gotTypes := jsonlTypes(t, out.String())
-	assertTypesContainInOrder(t, gotTypes, []string{"response", "approval_request", "command_start", "command_done", "response", "done"}, out.String())
+	assertTypesContainInOrder(t, jsonlTypes(t, out.String()), []string{"response", "approval_request", "command_start", "command_done", "response", "done"}, out.String())
 	if fmt.Sprint(executor.gotCmds) != "[echo hi]" {
 		t.Fatalf("commands = %v, want [echo hi]", executor.gotCmds)
 	}
@@ -175,42 +172,21 @@ func TestRunJSONLShutdownReturnsWithoutClosingInput(t *testing.T) {
 	var out, errOut bytes.Buffer
 	reader, writer := io.Pipe()
 	defer writer.Close() //nolint:errcheck
-
-	model := blockingModel{}
-	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
+	agent := clnkr.NewAgent(blockingModel{}, &fakeExecutor{}, "/tmp")
 	driver := clnkrapp.NewDriver(agent, nil)
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- runJSONL(context.Background(), reader, &out, &errOut, driver)
-	}()
+	errCh := runJSONLAsync(reader, &out, &errOut, driver)
 
-	if _, err := writer.Write([]byte(`{"type":"prompt","text":"wait","mode":"full_send"}` + "\n")); err != nil {
-		t.Fatalf("write prompt: %v", err)
-	}
-	if _, err := writer.Write([]byte(`{"type":"shutdown"}` + "\n")); err != nil {
-		t.Fatalf("write shutdown: %v", err)
-	}
+	writeJSONL(t, writer, `{"type":"prompt","text":"wait","mode":"full_send"}`)
+	writeJSONL(t, writer, `{"type":"shutdown"}`)
 
-	select {
-	case err := <-errCh:
-		if err != nil {
-			t.Fatalf("runJSONL: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("runJSONL did not return after shutdown with open input")
+	if err := waitForRunJSONL(t, errCh); err != nil {
+		t.Fatalf("runJSONL: %v", err)
 	}
 }
 
 func TestRunJSONLReplyWithoutPendingRequestDoesNotCarryAcrossRuns(t *testing.T) {
 	var out, errOut bytes.Buffer
-	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)}}
-	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
-	agent.Notify = func(event clnkr.Event) {
-		if err := clnkrapp.WriteJSONL(&out, event); err != nil {
-			t.Fatalf("WriteJSONL: %v", err)
-		}
-	}
-	driver := clnkrapp.NewDriver(agent, nil)
+	driver := newTestDriver(t, &out, []clnkr.Response{mustResponse(doneRaw)}, nil)
 	input := strings.Join([]string{
 		`{"type":"prompt","text":"inspect","mode":"full_send"}`,
 		`{"type":"reply","text":"stale"}`,
@@ -228,32 +204,6 @@ func TestRunJSONLReplyWithoutPendingRequestDoesNotCarryAcrossRuns(t *testing.T) 
 	if strings.Contains(out.String(), "approval_request") {
 		t.Fatalf("stale reply carried into next run:\n%s", out.String())
 	}
-}
-
-func TestRunJSONLAcceptsLargePromptLines(t *testing.T) {
-	var out, errOut bytes.Buffer
-	model := &fakeModel{responses: []clnkr.Response{mustResponse(`{"type":"done","summary":"finished","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)}}
-	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
-	agent.Notify = func(event clnkr.Event) {
-		if err := clnkrapp.WriteJSONL(&out, event); err != nil {
-			t.Fatalf("WriteJSONL: %v", err)
-		}
-	}
-	driver := clnkrapp.NewDriver(agent, nil)
-	prompt := strings.Repeat("x", 70*1024)
-	input := fmt.Sprintf("%s\n", mustMarshalJSONLCommand(t, clnkrapp.JSONLCommand{
-		Type: "prompt",
-		Text: prompt,
-		Mode: string(clnkrapp.PromptModeFullSend),
-	}))
-
-	err := runJSONL(context.Background(), strings.NewReader(input), &out, &errOut, driver)
-	if err != nil {
-		t.Fatalf("runJSONL: %v\nstderr:\n%s", err, errOut.String())
-	}
-
-	gotTypes := jsonlTypes(t, out.String())
-	assertTypesContainInOrder(t, gotTypes, []string{"response", "done"}, out.String())
 }
 
 func TestRunJSONLCompactRoutesInstructionsThroughDriver(t *testing.T) {
@@ -275,9 +225,8 @@ func TestRunJSONLCompactRoutesInstructionsThroughDriver(t *testing.T) {
 		t.Fatalf("runJSONL: %v", err)
 	}
 
-	gotTypes := jsonlTypes(t, out.String())
 	wantTypes := []string{"compacted"}
-	if !slices.Equal(gotTypes, wantTypes) {
+	if gotTypes := jsonlTypes(t, out.String()); !slices.Equal(gotTypes, wantTypes) {
 		t.Fatalf("event types = %v, want %v\nstdout:\n%s", gotTypes, wantTypes, out.String())
 	}
 }
@@ -299,27 +248,19 @@ func TestRunJSONLCommandErrorWaitsForActivePrompt(t *testing.T) {
 	var out, errOut bytes.Buffer
 	reader, writer := io.Pipe()
 	defer writer.Close() //nolint:errcheck
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
 	model := newCancellableBlockingModel()
 	t.Cleanup(model.releaseQuery)
-	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
-	driver := clnkrapp.NewDriver(agent, nil)
+	driver := clnkrapp.NewDriver(clnkr.NewAgent(model, &fakeExecutor{}, "/tmp"), nil)
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- runJSONL(ctx, reader, &out, &errOut, driver)
 	}()
 
-	if _, err := writer.Write([]byte(`{"type":"prompt","text":"wait","mode":"full_send"}` + "\n")); err != nil {
-		t.Fatalf("write prompt: %v", err)
-	}
+	writeJSONL(t, writer, `{"type":"prompt","text":"wait","mode":"full_send"}`)
 	waitForSignal(t, model.started, "model query")
-
-	if _, err := writer.Write([]byte(`{"type":"prompt","text":"second","mode":"full_send"}` + "\n")); err != nil {
-		t.Fatalf("write second prompt: %v", err)
-	}
+	writeJSONL(t, writer, `{"type":"prompt","text":"second","mode":"full_send"}`)
 	waitForSignal(t, model.cancelled, "prompt cancellation")
 
 	select {
@@ -343,6 +284,43 @@ func TestRunJSONLCommandErrorWaitsForActivePrompt(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "prompt: driver run already in progress") {
 		t.Fatalf("stderr = %q, want prompt-in-progress diagnostic", errOut.String())
+	}
+}
+
+func runMainForTest(args []string, input string) (int, string, string) {
+	var out, errOut bytes.Buffer
+	code := runMain(args, strings.NewReader(input), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
+	return code, out.String(), errOut.String()
+}
+
+func newTestDriver(t *testing.T, out *bytes.Buffer, responses []clnkr.Response, executor *fakeExecutor) *clnkrapp.Driver {
+	t.Helper()
+	if executor == nil {
+		executor = &fakeExecutor{}
+	}
+	agent := clnkr.NewAgent(&fakeModel{responses: responses}, executor, "/tmp")
+	if out != nil {
+		agent.Notify = func(event clnkr.Event) {
+			if err := clnkrapp.WriteJSONL(out, event); err != nil {
+				t.Fatalf("WriteJSONL: %v", err)
+			}
+		}
+	}
+	return clnkrapp.NewDriver(agent, nil)
+}
+
+func runJSONLAsync(r io.Reader, out io.Writer, errOut io.Writer, driver *clnkrapp.Driver) <-chan error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runJSONL(context.Background(), r, out, errOut, driver)
+	}()
+	return errCh
+}
+
+func writeJSONL(t *testing.T, w io.Writer, line string) {
+	t.Helper()
+	if _, err := w.Write([]byte(line + "\n")); err != nil {
+		t.Fatalf("write %s: %v", line, err)
 	}
 }
 

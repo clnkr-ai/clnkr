@@ -11,15 +11,9 @@ import (
 	"github.com/clnkr-ai/clnkr/internal/session"
 )
 
-type fakeCompactor struct {
-	summary string
-	err     error
-}
+type fakeCompactor struct{ summary string }
 
 func (c fakeCompactor) Summarize(_ context.Context, _ []clnkr.Message) (string, error) {
-	if c.err != nil {
-		return "", c.err
-	}
 	return c.summary, nil
 }
 
@@ -40,6 +34,29 @@ func verifiedDone(summary string) *clnkr.DoneTurn {
 		},
 		KnownRisks: []string{},
 	}
+}
+
+func doneMessage(t *testing.T, summary string) clnkr.Message {
+	t.Helper()
+
+	content, err := clnkr.CanonicalTurnJSON(verifiedDone(summary))
+	if err != nil {
+		t.Fatalf("CanonicalTurnJSON: %v", err)
+	}
+	return clnkr.Message{Role: "assistant", Content: content}
+}
+
+func saveAndLoad(t *testing.T, pwd string, messages []clnkr.Message) []clnkr.Message {
+	t.Helper()
+
+	if err := session.SaveSession(pwd, messages); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	loaded, err := session.LoadLatestSession(pwd)
+	if err != nil {
+		t.Fatalf("LoadLatestSession: %v", err)
+	}
+	return loaded
 }
 
 func compactTranscript(t *testing.T, cwd string, messages []clnkr.Message) []clnkr.Message {
@@ -68,14 +85,12 @@ func compactTranscript(t *testing.T, cwd string, messages []clnkr.Message) []cln
 	if !strings.HasPrefix(compacted[0].Content, "[compact]\n") {
 		t.Fatalf("first message is not a compact block: %q", compacted[0].Content)
 	}
-
 	return compacted
 }
 
 func TestSessionRoundTrip(t *testing.T) {
 	tmpdir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", tmpdir)
-
 	projdir := filepath.Join(tmpdir, "testproj")
 
 	sessions, err := session.ListSessions(projdir)
@@ -86,37 +101,20 @@ func TestSessionRoundTrip(t *testing.T) {
 		t.Fatalf("Expected no sessions, got %d", len(sessions))
 	}
 
-	testMsgs := []clnkr.Message{
+	want := []clnkr.Message{
 		{Role: "user", Content: "test prompt"},
 		{Role: "assistant", Content: "test response"},
 	}
-	if err := session.SaveSession(projdir, testMsgs); err != nil {
-		t.Fatalf("SaveSession: %v", err)
-	}
-
-	loaded, err := session.LoadLatestSession(projdir)
-	if err != nil {
-		t.Fatalf("LoadLatestSession: %v", err)
-	}
-	if len(loaded) != 2 {
-		t.Fatalf("Expected 2 messages, got %d", len(loaded))
-	}
-	if loaded[0].Content != "test prompt" {
-		t.Errorf("First message wrong: %q", loaded[0].Content)
-	}
-	if loaded[1].Content != "test response" {
-		t.Errorf("Second message wrong: %q", loaded[1].Content)
+	if loaded := saveAndLoad(t, projdir, want); !reflect.DeepEqual(loaded, want) {
+		t.Fatalf("loaded = %#v, want %#v", loaded, want)
 	}
 
 	sessions, err = session.ListSessions(projdir)
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
-	if len(sessions) != 1 {
-		t.Fatalf("Expected 1 session, got %d", len(sessions))
-	}
-	if sessions[0].Messages != 2 {
-		t.Errorf("Expected 2 messages in session info, got %d", sessions[0].Messages)
+	if len(sessions) != 1 || sessions[0].Messages != len(want) {
+		t.Fatalf("sessions = %#v, want one session with %d messages", sessions, len(want))
 	}
 }
 
@@ -124,36 +122,31 @@ func TestSessionIsolationBetweenProjects(t *testing.T) {
 	tmpdir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", tmpdir)
 
-	proj1 := "/tmp/project-alpha"
-	proj2 := "/tmp/project-beta"
-
-	if err := session.SaveSession(proj1, []clnkr.Message{
-		{Role: "user", Content: "alpha"},
-	}); err != nil {
-		t.Fatalf("SaveSession proj1: %v", err)
+	projects := map[string]string{
+		"/tmp/project-alpha": "alpha",
+		"/tmp/project-beta":  "beta",
 	}
-
-	if err := session.SaveSession(proj2, []clnkr.Message{
-		{Role: "user", Content: "beta"},
-	}); err != nil {
-		t.Fatalf("SaveSession proj2: %v", err)
+	for project, content := range projects {
+		if err := session.SaveSession(project, []clnkr.Message{{Role: "user", Content: content}}); err != nil {
+			t.Fatalf("SaveSession %s: %v", project, err)
+		}
 	}
+	for project, want := range projects {
+		sessions, err := session.ListSessions(project)
+		if err != nil {
+			t.Fatalf("ListSessions %s: %v", project, err)
+		}
+		if len(sessions) != 1 {
+			t.Fatalf("ListSessions %s got %d sessions, want 1", project, len(sessions))
+		}
 
-	s1, _ := session.ListSessions(proj1)
-	s2, _ := session.ListSessions(proj2)
-
-	if len(s1) != 1 || len(s2) != 1 {
-		t.Fatalf("Expected 1 session each, got proj1=%d, proj2=%d", len(s1), len(s2))
-	}
-
-	m1, _ := session.LoadLatestSession(proj1)
-	m2, _ := session.LoadLatestSession(proj2)
-
-	if m1[0].Content != "alpha" {
-		t.Errorf("proj1 loaded wrong content: %q", m1[0].Content)
-	}
-	if m2[0].Content != "beta" {
-		t.Errorf("proj2 loaded wrong content: %q", m2[0].Content)
+		loaded, err := session.LoadLatestSession(project)
+		if err != nil {
+			t.Fatalf("LoadLatestSession %s: %v", project, err)
+		}
+		if len(loaded) != 1 || loaded[0].Content != want {
+			t.Fatalf("LoadLatestSession %s = %#v, want content %q", project, loaded, want)
+		}
 	}
 }
 
@@ -161,25 +154,12 @@ func TestContinueRestoresCanonicalAssistantTurn(t *testing.T) {
 	tmpdir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", tmpdir)
 
-	projdir := filepath.Join(tmpdir, "continue-proj")
-	doneText, err := clnkr.CanonicalTurnJSON(verifiedDone("saved summary"))
-	if err != nil {
-		t.Fatalf("CanonicalTurnJSON: %v", err)
-	}
 	want := []clnkr.Message{
 		{Role: "user", Content: "first task"},
-		{Role: "assistant", Content: doneText},
+		doneMessage(t, "saved summary"),
 		{Role: "user", Content: stateMessage("clnkr", "/restored")},
 	}
-
-	if err := session.SaveSession(projdir, want); err != nil {
-		t.Fatalf("SaveSession: %v", err)
-	}
-
-	loaded, err := session.LoadLatestSession(projdir)
-	if err != nil {
-		t.Fatalf("LoadLatestSession: %v", err)
-	}
+	loaded := saveAndLoad(t, filepath.Join(tmpdir, "continue-proj"), want)
 	if !reflect.DeepEqual(loaded, want) {
 		t.Fatalf("loaded = %#v, want %#v", loaded, want)
 	}
@@ -200,11 +180,8 @@ func TestContinueRestoresCanonicalAssistantTurn(t *testing.T) {
 	if !ok {
 		t.Fatalf("assistant turn = %T, want *clnkr.DoneTurn", turn)
 	}
-	if done.Summary != "saved summary" {
-		t.Fatalf("done summary = %q, want %q", done.Summary, "saved summary")
-	}
-	if agent.Cwd() != "/restored" {
-		t.Fatalf("agent cwd = %q, want %q", agent.Cwd(), "/restored")
+	if done.Summary != "saved summary" || agent.Cwd() != "/restored" {
+		t.Fatalf("summary=%q cwd=%q, want summary %q cwd %q", done.Summary, agent.Cwd(), "saved summary", "/restored")
 	}
 }
 
@@ -212,77 +189,59 @@ func TestSessionRoundTripWithCompactionState(t *testing.T) {
 	tmpdir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", tmpdir)
 
-	t.Run("round trips compact block and restores cwd from trailing valid state", func(t *testing.T) {
-		projdir := filepath.Join(tmpdir, "testproj-valid")
-		compacted := compactTranscript(t, "/wrong", []clnkr.Message{
-			{Role: "user", Content: "first task"},
-			{Role: "assistant", Content: `{"type":"done","summary":"done first","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
-			{Role: "user", Content: stateMessage("clnkr", "/old")},
-			{Role: "user", Content: "second task"},
-			{Role: "assistant", Content: `{"type":"done","summary":"done second","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
-			{Role: "user", Content: "third task"},
-			{Role: "assistant", Content: `{"type":"done","summary":"done third","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
-			{Role: "user", Content: stateMessage("clnkr", "/restored")},
-		})
+	tests := []struct {
+		name     string
+		cwd      string
+		messages []clnkr.Message
+		wantCwd  string
+	}{
+		{
+			name: "round trips compact block and restores cwd from trailing valid state",
+			cwd:  "/wrong",
+			messages: []clnkr.Message{
+				{Role: "user", Content: "first task"},
+				doneMessage(t, "done first"),
+				{Role: "user", Content: stateMessage("clnkr", "/old")},
+				{Role: "user", Content: "second task"},
+				doneMessage(t, "done second"),
+				{Role: "user", Content: "third task"},
+				doneMessage(t, "done third"),
+				{Role: "user", Content: stateMessage("clnkr", "/restored")},
+			},
+			wantCwd: "/restored",
+		},
+		{
+			name: "foreign state messages still do not restore cwd after compaction",
+			cwd:  "/original",
+			messages: []clnkr.Message{
+				{Role: "user", Content: "first task"},
+				doneMessage(t, "done first"),
+				{Role: "user", Content: "second task"},
+				doneMessage(t, "done second"),
+				{Role: "user", Content: stateMessage("user", "/wrong")},
+				doneMessage(t, "foreign state tail"),
+				{Role: "user", Content: "third task"},
+				doneMessage(t, "done third"),
+			},
+			wantCwd: "/original",
+		},
+	}
 
-		if err := session.SaveSession(projdir, compacted); err != nil {
-			t.Fatalf("SaveSession: %v", err)
-		}
-
-		loaded, err := session.LoadLatestSession(projdir)
-		if err != nil {
-			t.Fatalf("LoadLatestSession: %v", err)
-		}
-
-		if len(loaded) != len(compacted) {
-			t.Fatalf("loaded %d messages, want %d", len(loaded), len(compacted))
-		}
-		for i := range compacted {
-			if !reflect.DeepEqual(loaded[i], compacted[i]) {
-				t.Fatalf("loaded[%d] = %#v, want %#v", i, loaded[i], compacted[i])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			compacted := compactTranscript(t, tt.cwd, tt.messages)
+			loaded := saveAndLoad(t, filepath.Join(tmpdir, strings.ReplaceAll(tt.name, " ", "-")), compacted)
+			if !reflect.DeepEqual(loaded, compacted) {
+				t.Fatalf("loaded = %#v, want %#v", loaded, compacted)
 			}
-		}
-		if loaded[0].Content != compacted[0].Content {
-			t.Fatalf("compact block changed during round-trip: got %q want %q", loaded[0].Content, compacted[0].Content)
-		}
 
-		agent := clnkr.NewAgent(nil, nil, "/wrong")
-		if err := agent.AddMessages(loaded); err != nil {
-			t.Fatalf("AddMessages: %v", err)
-		}
-		if agent.Cwd() != "/restored" {
-			t.Fatalf("agent cwd = %q, want %q", agent.Cwd(), "/restored")
-		}
-	})
-
-	t.Run("foreign state messages still do not restore cwd after compaction", func(t *testing.T) {
-		projdir := filepath.Join(tmpdir, "testproj-foreign")
-		compacted := compactTranscript(t, "/original", []clnkr.Message{
-			{Role: "user", Content: "first task"},
-			{Role: "assistant", Content: `{"type":"done","summary":"done first","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
-			{Role: "user", Content: "second task"},
-			{Role: "assistant", Content: `{"type":"done","summary":"done second","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
-			{Role: "user", Content: stateMessage("user", "/wrong")},
-			{Role: "assistant", Content: `{"type":"done","summary":"foreign state tail","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
-			{Role: "user", Content: "third task"},
-			{Role: "assistant", Content: `{"type":"done","summary":"done third","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
+			agent := clnkr.NewAgent(nil, nil, tt.cwd)
+			if err := agent.AddMessages(loaded); err != nil {
+				t.Fatalf("AddMessages: %v", err)
+			}
+			if agent.Cwd() != tt.wantCwd {
+				t.Fatalf("agent cwd = %q, want %q", agent.Cwd(), tt.wantCwd)
+			}
 		})
-
-		if err := session.SaveSession(projdir, compacted); err != nil {
-			t.Fatalf("SaveSession foreign: %v", err)
-		}
-
-		loaded, err := session.LoadLatestSession(projdir)
-		if err != nil {
-			t.Fatalf("LoadLatestSession foreign: %v", err)
-		}
-
-		foreignAgent := clnkr.NewAgent(nil, nil, "/original")
-		if err := foreignAgent.AddMessages(loaded); err != nil {
-			t.Fatalf("AddMessages foreign: %v", err)
-		}
-		if foreignAgent.Cwd() != "/original" {
-			t.Fatalf("foreign agent cwd = %q, want %q", foreignAgent.Cwd(), "/original")
-		}
-	})
+	}
 }

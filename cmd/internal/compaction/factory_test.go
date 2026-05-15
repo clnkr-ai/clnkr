@@ -16,20 +16,19 @@ type stubModel struct {
 }
 
 func (m *stubModel) QueryText(_ context.Context, messages []clnkr.Message) (string, error) {
-	cp := append([]clnkr.Message{}, messages...)
-	m.got = append(m.got, cp)
+	m.got = append(m.got, append([]clnkr.Message{}, messages...))
 	if m.err != nil {
 		return "", m.err
 	}
 	return m.summary, nil
 }
 
-func TestCompactionUsesFreeformModelInterface(t *testing.T) {
+func TestNewFactoryBuildsFreshCompactorPerInstructionSet(t *testing.T) {
 	var gotInstructions []string
-	var models []FreeformModel
+	var models []*stubModel
 	factory := NewFactory(func(instructions string) FreeformModel {
 		gotInstructions = append(gotInstructions, instructions)
-		model := &stubModel{}
+		model := &stubModel{summary: "  summary for " + instructions + "  "}
 		models = append(models, model)
 		return model
 	})
@@ -44,29 +43,38 @@ func TestCompactionUsesFreeformModelInterface(t *testing.T) {
 		t.Fatalf("instructions = %#v, want [focus tests focus files]", gotInstructions)
 	}
 
-	firstCompactor, ok := first.(modelCompactor)
-	if !ok {
-		t.Fatalf("first compactor type = %T, want modelCompactor", first)
+	firstSummary, err := first.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
+	if err != nil {
+		t.Fatalf("first Summarize: %v", err)
 	}
-	secondCompactor, ok := second.(modelCompactor)
-	if !ok {
-		t.Fatalf("second compactor type = %T, want modelCompactor", second)
+	secondSummary, err := second.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "second task"}})
+	if err != nil {
+		t.Fatalf("second Summarize: %v", err)
 	}
-	if firstCompactor.model != models[0] {
-		t.Fatal("first compactor should wrap the first model instance")
+	if firstSummary != "summary for focus tests" {
+		t.Fatalf("first summary = %q, want %q", firstSummary, "summary for focus tests")
 	}
-	if secondCompactor.model != models[1] {
-		t.Fatal("second compactor should wrap the second model instance")
+	if secondSummary != "summary for focus files" {
+		t.Fatalf("second summary = %q, want %q", secondSummary, "summary for focus files")
 	}
-	if firstCompactor.model == secondCompactor.model {
-		t.Fatal("factory should build a fresh model per instruction set")
+	if len(models[0].got) != 1 || len(models[1].got) != 1 {
+		t.Fatalf("model calls = [%d %d], want [1 1]", len(models[0].got), len(models[1].got))
+	}
+	if !strings.Contains(models[0].got[0][0].Content, "first task") {
+		t.Fatalf("first model query = %#v, want first task", models[0].got[0])
+	}
+	if !strings.Contains(models[1].got[0][0].Content, "second task") {
+		t.Fatalf("second model query = %#v, want second task", models[1].got[0])
 	}
 }
 
-func TestCompactionDoesNotRequireRuntimeTurnModel(t *testing.T) {
+func TestModelCompactorSummarizesSerializedTranscript(t *testing.T) {
 	model := &stubModel{summary: "  summarized transcript  \n"}
 	compactor := modelCompactor{model: model}
-	messages := []clnkr.Message{{Role: "user", Content: "first task"}}
+	messages := []clnkr.Message{
+		{Role: "user", Content: "first task"},
+		{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+	}
 
 	got, err := compactor.Summarize(context.Background(), messages)
 	if err != nil {
@@ -78,76 +86,41 @@ func TestCompactionDoesNotRequireRuntimeTurnModel(t *testing.T) {
 	if len(model.got) != 1 {
 		t.Fatalf("model got %d calls, want 1", len(model.got))
 	}
-	if len(model.got[0]) != 2 {
-		t.Fatalf("model got %d messages, want 2", len(model.got[0]))
-	}
-	first := model.got[0][0]
-	if first.Role != "user" {
-		t.Fatalf("first query role = %q, want user", first.Role)
-	}
-	if !strings.Contains(first.Content, "<source_text>") {
-		t.Fatalf("first query missing source_text open tag: %q", first.Content)
-	}
-	if !strings.Contains(first.Content, "</source_text>") {
-		t.Fatalf("first query missing source_text close tag: %q", first.Content)
-	}
-	if !strings.Contains(first.Content, "[user]\nfirst task") {
-		t.Fatalf("first query missing serialized transcript: %q", first.Content)
-	}
-	last := model.got[0][len(model.got[0])-1]
-	if last.Role != "user" {
-		t.Fatalf("last query role = %q, want user", last.Role)
-	}
-	if !strings.Contains(last.Content, "Goal:\nConstraints:\nKey decisions:") {
-		t.Fatalf("last query content = %q, want handoff format request", last.Content)
-	}
-}
 
-func TestNewFactoryBuildsFreshCompactorPerInstructionSet(t *testing.T) {
-	TestCompactionUsesFreeformModelInterface(t)
-}
-
-func TestModelCompactorTrimsSummaryText(t *testing.T) {
-	TestCompactionDoesNotRequireRuntimeTurnModel(t)
-}
-
-func TestModelCompactorAppendsSummarizeRequestAfterAssistantTail(t *testing.T) {
-	model := &stubModel{summary: "summary"}
-	compactor := modelCompactor{model: model}
-	messages := []clnkr.Message{
-		{Role: "user", Content: "first task"},
-		{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+	query := model.got[0]
+	if len(query) != 2 {
+		t.Fatalf("model got %d messages, want 2", len(query))
 	}
-
-	if _, err := compactor.Summarize(context.Background(), messages); err != nil {
-		t.Fatalf("Summarize: %v", err)
+	if query[0].Role != "user" {
+		t.Fatalf("first query role = %q, want user", query[0].Role)
 	}
-	if len(model.got) != 1 {
-		t.Fatalf("model got %d calls, want 1", len(model.got))
+	for _, want := range []string{
+		"<source_text>",
+		"</source_text>",
+		"[user]\nfirst task",
+		"[assistant]\n{\"type\":\"done\",\"summary\":\"done first\"}",
+	} {
+		if !strings.Contains(query[0].Content, want) {
+			t.Fatalf("first query missing %q in %q", want, query[0].Content)
+		}
 	}
-	got := model.got[0]
-	if len(got) != 2 {
-		t.Fatalf("model got %d messages, want 2", len(got))
+	if query[1].Role != "user" || query[1].Content != summarizeRequest {
+		t.Fatalf("last query = %#v, want trailing summarize request", query[1])
 	}
-	if !strings.Contains(got[0].Content, "[assistant]\n{\"type\":\"done\",\"summary\":\"done first\"}") {
-		t.Fatalf("first query content = %q, want serialized assistant turn", got[0].Content)
+	if !strings.Contains(query[1].Content, "Goal:\nConstraints:\nKey decisions:") {
+		t.Fatalf("last query content = %q, want handoff format request", query[1].Content)
 	}
-	last := got[len(got)-1]
-	if last.Role != "user" {
-		t.Fatalf("last query role = %q, want user", last.Role)
-	}
-	if !strings.Contains(last.Content, "Open questions / next steps:") {
-		t.Fatalf("last query content = %q, want handoff section list", last.Content)
+	if !strings.Contains(query[1].Content, "Open questions / next steps:") {
+		t.Fatalf("last query content = %q, want handoff section list", query[1].Content)
 	}
 }
 
 func TestModelCompactorTruncatesOversizedPrefixBeforeQuery(t *testing.T) {
 	model := &stubModel{summary: "summary"}
 	compactor := modelCompactor{model: model}
-	oversized := strings.Repeat("x", summarizeInputCharBudget+1)
 	messages := []clnkr.Message{
 		{Role: "user", Content: "small opener"},
-		{Role: "assistant", Content: oversized},
+		{Role: "assistant", Content: strings.Repeat("x", summarizeInputCharBudget+1)},
 	}
 
 	if _, err := compactor.Summarize(context.Background(), messages); err != nil {
@@ -156,24 +129,24 @@ func TestModelCompactorTruncatesOversizedPrefixBeforeQuery(t *testing.T) {
 	if len(model.got) != 1 {
 		t.Fatalf("model got %d calls, want 1", len(model.got))
 	}
-	got := model.got[0]
-	if len(got) != 2 {
-		t.Fatalf("model got %d messages, want 2", len(got))
+	query := model.got[0]
+	if len(query) != 2 {
+		t.Fatalf("model got %d messages, want 2", len(query))
 	}
-	if got[0].Role != "user" {
-		t.Fatalf("first query role = %q, want user", got[0].Role)
+	if query[0].Role != "user" {
+		t.Fatalf("first query role = %q, want user", query[0].Role)
 	}
-	if !strings.HasPrefix(got[0].Content, "<source_text>\n[compact_context_truncated]\n") {
-		t.Fatalf("first query content = %q, want fenced truncation block prefix", got[0].Content)
+	if !strings.HasPrefix(query[0].Content, "<source_text>\n[compact_context_truncated]\n") {
+		t.Fatalf("first query content = %q, want fenced truncation block prefix", query[0].Content)
 	}
-	if len(got[0].Content) > summarizeInputCharBudget {
-		t.Fatalf("truncation block length = %d, want <= %d", len(got[0].Content), summarizeInputCharBudget)
+	if len(query[0].Content) > summarizeInputCharBudget {
+		t.Fatalf("truncation block length = %d, want <= %d", len(query[0].Content), summarizeInputCharBudget)
 	}
-	if !strings.HasSuffix(got[0].Content, "\n</source_text>") {
-		t.Fatalf("first query content = %q, want source_text close tag", got[0].Content)
+	if !strings.HasSuffix(query[0].Content, "\n</source_text>") {
+		t.Fatalf("first query content = %q, want source_text close tag", query[0].Content)
 	}
-	if got[1].Role != "user" || got[1].Content != summarizeRequest {
-		t.Fatalf("last query = %#v, want trailing summarize request", got[1])
+	if query[1].Role != "user" || query[1].Content != summarizeRequest {
+		t.Fatalf("last query = %#v, want trailing summarize request", query[1])
 	}
 }
 
