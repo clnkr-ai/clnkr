@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/clnkr-ai/clnkr/internal/core/transcript"
@@ -228,81 +227,7 @@ func (a *Agent) ExecuteTurnWithSkipped(ctx context.Context, act *ActTurn, skippe
 }
 
 func (a *Agent) executeTurn(ctx context.Context, act *ActTurn, skipped []BashAction) (StepResult, error) {
-	if act == nil || len(act.Bash.Commands) == 0 {
-		return StepResult{Turn: act}, fmt.Errorf("execute act turn: %w", ErrMissingCommand)
-	}
-
-	outputs, execCount := make([]string, 0, len(act.Bash.Commands)), 0
-	var execErr error
-
-	for i, action := range act.Bash.Commands {
-		if setter, ok := a.executor.(ExecutorStateSetter); ok {
-			setter.SetEnv(a.env)
-		}
-
-		execDir := a.cwd
-		if action.Workdir != "" {
-			if filepath.IsAbs(action.Workdir) {
-				execDir = action.Workdir
-			} else {
-				execDir = filepath.Join(a.cwd, action.Workdir)
-			}
-		}
-		a.notify(EventCommandStart{Command: action.Command, Dir: execDir})
-
-		execResult, commandErr := a.executor.Execute(ctx, action.Command, execDir)
-		execCount++
-		if execResult.PostCwd != "" {
-			a.cwd = execResult.PostCwd
-		}
-		// PostEnv is a full next-turn snapshot; nil means no new snapshot captured.
-		if execResult.PostEnv != nil {
-			a.env = execResult.PostEnv
-		}
-		a.notify(EventDebug{Message: fmt.Sprintf("cwd: %s", a.cwd)})
-		payload := transcript.FormatCommandResult(transcript.CommandResult{
-			Command:  execResult.Command,
-			Stdout:   execResult.Stdout,
-			Stderr:   execResult.Stderr,
-			ExitCode: execResult.ExitCode,
-			Outcome:  execResult.Outcome,
-			Feedback: execResult.Feedback,
-		})
-		if commandErr != nil {
-			a.notify(EventDebug{Message: fmt.Sprintf("command error: %v", commandErr)})
-		}
-		a.notify(EventCommandDone{
-			Command:  action.Command,
-			Stdout:   execResult.Stdout,
-			Stderr:   execResult.Stderr,
-			ExitCode: execResult.ExitCode,
-			Feedback: execResult.Feedback,
-			Err:      commandErr,
-		})
-
-		msg := Message{Role: "user", Content: payload}
-		if action.ID != "" {
-			msg.BashToolResult = &BashToolResult{ID: action.ID, Content: payload, IsError: commandResultIsError(execResult)}
-		}
-		a.messages = append(a.messages, msg)
-		outputs = append(outputs, payload)
-		if execErr = commandErr; execErr != nil {
-			for _, notRun := range act.Bash.Commands[i+1:] {
-				if payload, ok := a.appendSkippedToolResult(notRun, "previous command failed"); ok {
-					outputs = append(outputs, payload)
-				}
-			}
-			break
-		}
-	}
-
-	for _, action := range skipped {
-		if payload, ok := a.appendSkippedToolResult(action, "max steps"); ok {
-			outputs = append(outputs, payload)
-		}
-	}
-	a.appendStateMessageIfNeeded()
-	return StepResult{Turn: act, Output: strings.Join(outputs, "\n\n"), ExecErr: execErr, ExecCount: execCount}, nil
+	return actTurnExecutor{agent: a}.Execute(ctx, act, skipped)
 }
 
 // RejectTurn records that an approval-mode act turn was not executed.

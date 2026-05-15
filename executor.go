@@ -14,16 +14,19 @@ import (
 	"github.com/clnkr-ai/clnkr/internal/core/shellstate"
 )
 
-// CommandExecutor runs bash commands, captures post-command shell state, and
+// ShellExecutor runs bash commands, captures post-command shell state, and
 // always runs commands in their own process group.
-type CommandExecutor struct {
+type ShellExecutor struct {
 	// BaseEnv, when non-nil, is the complete base environment snapshot for
 	// command execution. Direct mutation is caller-owned.
 	BaseEnv map[string]string
 }
 
+// CommandExecutor is a compatibility alias for ShellExecutor.
+type CommandExecutor = ShellExecutor
+
 // SetEnv copies a full environment snapshot for future command execution.
-func (e *CommandExecutor) SetEnv(env map[string]string) {
+func (e *ShellExecutor) SetEnv(env map[string]string) {
 	if env == nil {
 		e.BaseEnv = nil
 		return
@@ -35,7 +38,7 @@ func (e *CommandExecutor) SetEnv(env map[string]string) {
 }
 
 // Execute runs a command in dir and returns separated stdout/stderr plus exit code.
-func (e *CommandExecutor) Execute(ctx context.Context, command string, dir string) (CommandResult, error) {
+func (e *ShellExecutor) Execute(ctx context.Context, command string, dir string) (CommandResult, error) {
 	baseline := gitfeedback.Detect(dir)
 
 	wrapped, stateFile, cleanup, err := shellstate.Wrap(command)
@@ -128,7 +131,7 @@ func commandOutcomeError(err error) CommandOutcome {
 	return CommandOutcome{Type: CommandOutcomeError, Message: message}
 }
 
-func (e *CommandExecutor) applyPostState(result CommandResult, stateFile string) (CommandResult, error) {
+func (e *ShellExecutor) applyPostState(result CommandResult, stateFile string) (CommandResult, error) {
 	snapshot, err := shellstate.Load(stateFile)
 	if err != nil {
 		return result, err

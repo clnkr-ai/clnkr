@@ -36,7 +36,7 @@ func PrepareStartup(inputs StartupInputs) (Startup, error) {
 	if err != nil {
 		return Startup{}, err
 	}
-	agent := clnkr.NewAgent(newModelForConfigWithOptions(cfg, systemPrompt, modelOptions{Unattended: inputs.Unattended}), &clnkr.CommandExecutor{}, inputs.CWD)
+	agent := clnkr.NewAgent(newModelForConfigWithOptions(cfg, systemPrompt, modelOptions{Unattended: inputs.Unattended}), &clnkr.ShellExecutor{}, inputs.CWD)
 	agent.SetEnv(commandEnvFromProviderConfig(cfg, inputs.Environ))
 	agent.ActProtocol = cfg.ActProtocol
 	return Startup{SystemPrompt: systemPrompt, Metadata: newRunMetadata(inputs.Version, cfg, systemPrompt), Agent: agent, Driver: NewDriver(agent, makeCompactorFactory(cfg))}, nil

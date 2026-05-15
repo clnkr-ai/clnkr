@@ -24,14 +24,14 @@ func envListToMap(list []string) map[string]string {
 	return env
 }
 
-func TestCommandExecutor(t *testing.T) {
-	exec := &CommandExecutor{}
+func TestShellExecutor(t *testing.T) {
+	exec := &ShellExecutor{}
 	ctx := context.Background()
 
 	for _, field := range []string{"Timeout", "ProcessGroup", "ExtraEnv"} {
 		t.Run("does not expose "+field, func(t *testing.T) {
-			if _, ok := reflect.TypeOf(CommandExecutor{}).FieldByName(field); ok {
-				t.Fatalf("CommandExecutor should not expose %s", field)
+			if _, ok := reflect.TypeOf(ShellExecutor{}).FieldByName(field); ok {
+				t.Fatalf("ShellExecutor should not expose %s", field)
 			}
 		})
 	}
@@ -152,7 +152,7 @@ func TestCommandExecutor(t *testing.T) {
 
 	t.Run("base environment controls command environment", func(t *testing.T) {
 		t.Setenv("CLNKR_PARENT_ONLY", "parent")
-		envExec := &CommandExecutor{BaseEnv: map[string]string{
+		envExec := &ShellExecutor{BaseEnv: map[string]string{
 			"CLNKR_ONLY": "yes",
 			"PATH":       os.Getenv("PATH"),
 		}}
@@ -167,7 +167,7 @@ func TestCommandExecutor(t *testing.T) {
 	})
 
 	t.Run("SetEnv uses a copied environment snapshot", func(t *testing.T) {
-		envExec := &CommandExecutor{}
+		envExec := &ShellExecutor{}
 		base := envListToMap(os.Environ())
 		base["CLNKR_SETENV_COPY"] = "before"
 		envExec.SetEnv(base)
@@ -197,7 +197,7 @@ func TestCommandExecutor(t *testing.T) {
 	})
 
 	t.Run("state file does not leak into environment snapshots", func(t *testing.T) {
-		envExec := &CommandExecutor{}
+		envExec := &ShellExecutor{}
 		base := envListToMap(os.Environ())
 		base["BASE"] = "ok"
 		delete(base, "CLNKR_STATE_FILE")
@@ -216,7 +216,7 @@ func TestCommandExecutor(t *testing.T) {
 	})
 
 	t.Run("captures full env snapshots across stateful commands", func(t *testing.T) {
-		envExec := &CommandExecutor{}
+		envExec := &ShellExecutor{}
 		out1 := executeAndUseEnv(t, envExec, `export CLNKR_CHAIN_ONE=one && cd /tmp && printf done`, "/tmp")
 		if out1.PostEnv["CLNKR_CHAIN_ONE"] != "one" {
 			t.Fatalf("missing chain var in snapshot: %+v", out1.PostEnv)
@@ -332,7 +332,20 @@ func assertSamePath(t *testing.T, got, want string) {
 	}
 }
 
-func executeAndUseEnv(t *testing.T, exec *CommandExecutor, command, dir string) CommandResult {
+func TestCommandExecutorAlias(t *testing.T) {
+	exec := &CommandExecutor{}
+	exec.SetEnv(map[string]string{"PATH": os.Getenv("PATH")})
+
+	out, err := exec.Execute(context.Background(), "printf alias", "/tmp")
+	if err != nil {
+		t.Fatalf("CommandExecutor alias Execute: %v", err)
+	}
+	if out.Stdout != "alias" {
+		t.Fatalf("stdout = %q, want alias", out.Stdout)
+	}
+}
+
+func executeAndUseEnv(t *testing.T, exec *ShellExecutor, command, dir string) CommandResult {
 	t.Helper()
 
 	out, err := exec.Execute(context.Background(), command, dir)

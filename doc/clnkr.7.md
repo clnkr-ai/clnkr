@@ -147,7 +147,7 @@ model's only tool; the built-in prompt teaches the model when to launch
 **clnkrd** as another ordinary process and how to read stdout, stderr, and
 event-log artifacts. **/delegate** is ordinary user prompt text that instructs
 the model to run **clnkrd** for the bounded child task. **Driver**,
-**CommandExecutor**, provider adapters, provider request semantics, canonical
+**ShellExecutor**, provider adapters, provider request semantics, canonical
 turns, and **Agent.Step** are unchanged by child-process orchestration.
 
 # ACT PROTOCOL
