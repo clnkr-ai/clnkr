@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,10 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	clnkr "github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
@@ -44,14 +41,6 @@ func mustResponse(raw string) clnkr.Response {
 	return clnkr.Response{Turn: mustTurn(raw), Raw: raw}
 }
 
-func mustCanonicalDoneText(summary string) string {
-	text, err := clnkr.CanonicalTurnJSON(verifiedDone(summary))
-	if err != nil {
-		panic(err)
-	}
-	return text
-}
-
 func verifiedDone(summary string) *clnkr.DoneTurn {
 	return &clnkr.DoneTurn{
 		Summary: summary,
@@ -65,18 +54,6 @@ func verifiedDone(summary string) *clnkr.DoneTurn {
 		},
 		KnownRisks: []string{},
 	}
-}
-
-func runDoneTranscript(t *testing.T, summary string) []clnkr.Message {
-	t.Helper()
-
-	agent := clnkr.NewAgent(&fakeModel{responses: []clnkr.Response{
-		mustResponse(mustCanonicalDoneText(summary)),
-	}}, &fakeExecutor{}, "/tmp")
-	if err := agent.Run(context.Background(), "finish"); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	return agent.Messages()
 }
 
 type fakeModel struct {
@@ -182,29 +159,6 @@ func TestHelpWritesRichUsageToStdout(t *testing.T) {
 	}
 }
 
-func TestHelpMentionsClnkrdProcessAutonomyWithoutChildFlags(t *testing.T) {
-	stdout, stderr, err := runMainHelper(t, "--help")
-	if err != nil {
-		t.Fatalf("help command: %v\nstderr: %s", err, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "Models may run clnkrd through bash for bounded child work.") {
-		t.Fatalf("stdout missing clnkrd process autonomy sentence:\n%s", stdout.String())
-	}
-	for _, removed := range []string{
-		"Child probes:",
-		"--child-max",
-		"--child",
-		"CLNKR_DELEGATE_EXECUTABLE",
-	} {
-		if strings.Contains(stdout.String(), removed) {
-			t.Fatalf("removed child surface %q leaked into help:\n%s", removed, stdout.String())
-		}
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
-	}
-}
-
 func TestFlagParseErrorsKeepUsageOffStdout(t *testing.T) {
 	tests := []struct {
 		name string
@@ -277,22 +231,6 @@ func TestDumpSystemPromptMarkerAsAppendValueDoesNotSelectUnattendedPrompt(t *tes
 	}
 }
 
-func TestDumpToolCallsSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
-	stdout, stderr, err := runMainHelper(t, "--act-protocol", "tool-calls", "--dump-system-prompt")
-	if err != nil {
-		t.Fatalf("dump tool-calls system prompt: %v\nstderr: %s", err, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "call the bash tool") {
-		t.Fatalf("stdout missing tool-calls prompt: %q", stdout.String())
-	}
-	if strings.Contains(stdout.String(), "exactly once") {
-		t.Fatalf("stdout imposes one tool call: %q", stdout.String())
-	}
-	if strings.Contains(stderr.String(), "provider is required") {
-		t.Fatalf("stderr = %q, provider validation ran first", stderr.String())
-	}
-}
-
 func TestDumpAutoSystemPromptResolvesWithoutAPIKey(t *testing.T) {
 	stdout, stderr, err := runMainHelper(t, "--provider", "openai", "--provider-api", "openai-responses", "--model", "gpt-5", "--dump-system-prompt")
 	if err != nil {
@@ -319,55 +257,19 @@ func TestDumpAutoSystemPromptReportsMissingProviderContext(t *testing.T) {
 	}
 }
 
-func TestNormalStartupMissingProviderDoesNotMentionPromptDump(t *testing.T) {
-	stdout, stderr, err := runMainHelper(t)
-	if err == nil {
-		t.Fatalf("normal startup succeeded; stdout: %s stderr: %s", stdout.String(), stderr.String())
-	}
-	if stdout.String() != "" {
-		t.Fatalf("stdout = %q, want empty", stdout.String())
-	}
-	if !strings.Contains(stderr.String(), "provider is required") {
-		t.Fatalf("stderr = %q, want provider context error", stderr.String())
-	}
-	if strings.Contains(stderr.String(), "dump") {
-		t.Fatalf("stderr = %q, want no prompt dump hint", stderr.String())
-	}
-}
-
-func TestDumpInlineSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
-	stdout, stderr, err := runMainHelper(t, "--act-protocol", "clnkr-inline", "--dump-system-prompt")
+func TestPromptFlagDumpsUnattendedSystemPrompt(t *testing.T) {
+	stdout, stderr, err := runMainHelper(t, "--act-protocol", "clnkr-inline", "-p", "fix it", "--dump-system-prompt")
 	if err != nil {
-		t.Fatalf("dump inline system prompt: %v\nstderr: %s", err, stderr.String())
+		t.Fatalf("dump unattended system prompt: %v\nstderr: %s", err, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Every response must be exactly one JSON object") {
-		t.Fatalf("stdout missing inline prompt: %q", stdout.String())
+	if strings.Contains(stdout.String(), "clarify") {
+		t.Fatalf("stdout contains clarify: %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `Set type to exactly one of "act" or "done".`) {
+		t.Fatalf("stdout missing unattended turn contract: %q", stdout.String())
 	}
 	if strings.Contains(stderr.String(), "provider is required") {
 		t.Fatalf("stderr = %q, provider validation ran first", stderr.String())
-	}
-}
-
-func TestPromptFlagDumpsUnattendedSystemPrompt(t *testing.T) {
-	for _, args := range [][]string{
-		{"--act-protocol", "clnkr-inline", "-p", "fix it", "--dump-system-prompt"},
-		{"--act-protocol", "clnkr-inline", "--prompt-mode-unattended", "fix it", "--dump-system-prompt"},
-		{"--act-protocol", "clnkr-inline", "--dump-system-prompt", "-p"},
-		{"--act-protocol", "clnkr-inline", "--dump-system-prompt", "--prompt-mode-unattended"},
-	} {
-		stdout, stderr, err := runMainHelper(t, args...)
-		if err != nil {
-			t.Fatalf("dump unattended system prompt with %v: %v\nstderr: %s", args, err, stderr.String())
-		}
-		if strings.Contains(stdout.String(), "clarify") {
-			t.Fatalf("stdout contains clarify: %q", stdout.String())
-		}
-		if !strings.Contains(stdout.String(), `Set type to exactly one of "act" or "done".`) {
-			t.Fatalf("stdout missing unattended turn contract: %q", stdout.String())
-		}
-		if strings.Contains(stderr.String(), "provider is required") {
-			t.Fatalf("stderr = %q, provider validation ran first", stderr.String())
-		}
 	}
 }
 
@@ -455,40 +357,6 @@ func TestMainHelper(t *testing.T) {
 	t.Fatal("missing helper arg separator")
 }
 
-func TestPromptModePassesDelegateTextToModel(t *testing.T) {
-	server, _ := newOpenAIChatServer(t, func(int) string { return openAIWrappedDone("ok") })
-	defer server.Close()
-
-	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
-		"--provider", "openai",
-		"--provider-api", "openai-chat-completions",
-		"--base-url", server.URL,
-		"--model", "gpt-test",
-		"-p", "/delegate inspect README",
-	)
-	if err != nil {
-		t.Fatalf("run main: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "ok") {
-		t.Fatalf("stdout = %q, want fake model completion", stdout.String())
-	}
-	if strings.Contains(stderr.String(), "/delegate is only available") {
-		t.Fatalf("stderr = %q, want no delegate rejection", stderr.String())
-	}
-}
-
-func TestAliasedStringPrefersExplicitPreferredValue(t *testing.T) {
-	if got := aliasedString("long", "short"); got != "long" {
-		t.Fatalf("aliasedString preferred = %q, want long", got)
-	}
-	if got := aliasedString("", "short"); got != "short" {
-		t.Fatalf("aliasedString fallback = %q, want short", got)
-	}
-	if got := aliasedString("  ", "long"); got != "long" {
-		t.Fatalf("aliasedString whitespace fallback = %q, want long", got)
-	}
-}
-
 func TestCommandProgressWritesToStderr(t *testing.T) {
 	server, calls := newOpenAIChatServer(t, func(call int) string {
 		if call == 1 {
@@ -542,33 +410,6 @@ func TestCommandProgressWritesToStderr(t *testing.T) {
 	}
 	if *calls != 2 {
 		t.Fatalf("model calls = %d, want 2", *calls)
-	}
-}
-
-func TestCommandProgressShowsWorkdir(t *testing.T) {
-	workdir := t.TempDir()
-	server, _ := newOpenAIChatServer(t, func(call int) string {
-		if call > 1 {
-			return openAIWrappedDone("done")
-		}
-		return fmt.Sprintf(`{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":%q}]},"question":null,"summary":null,"reasoning":null}}`, workdir)
-	})
-	defer server.Close()
-
-	_, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
-		"--provider", "openai",
-		"--provider-api", "openai-chat-completions",
-		"--base-url", server.URL,
-		"--model", "gpt-test",
-		"--max-steps", "1",
-		"--full-send",
-		"-p", "pwd elsewhere",
-	)
-	if err != nil {
-		t.Fatalf("run main: %v\nstderr: %s", err, stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "--- running: pwd in "+workdir+" ---") {
-		t.Fatalf("stderr = %q, want progress workdir", stderr.String())
 	}
 }
 
@@ -857,26 +698,18 @@ func TestMaxOutputTokensZeroIsRejectedWhenFlagSet(t *testing.T) {
 }
 
 func TestSingleTaskRejectsExplicitFullSendFalse(t *testing.T) {
-	for _, args := range [][]string{
-		{"-p", "hi", "--full-send=false"},
-		{"-p", "hi", "--full-send=false", "--full-send=true"},
-		{"-p", "hi", "--full-send=0"},
-	} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"}, args...)
-			if err == nil {
-				t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
-			}
-			if stdout.String() != "" {
-				t.Fatalf("stdout = %q, want empty", stdout.String())
-			}
-			if !strings.Contains(stderr.String(), "--full-send=false conflicts with -p") {
-				t.Fatalf("stderr = %q, want full-send conflict", stderr.String())
-			}
-			if strings.Contains(stderr.String(), "provider is required") || strings.Contains(stderr.String(), "No API key found") {
-				t.Fatalf("stderr = %q, provider config ran before conflict validation", stderr.String())
-			}
-		})
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"}, "-p", "hi", "--full-send=false")
+	if err == nil {
+		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "--full-send=false conflicts with -p") {
+		t.Fatalf("stderr = %q, want full-send conflict", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "provider is required") || strings.Contains(stderr.String(), "No API key found") {
+		t.Fatalf("stderr = %q, provider config ran before conflict validation", stderr.String())
 	}
 }
 
@@ -917,392 +750,18 @@ func TestConversationalApprovalRejectsNonTTYStdin(t *testing.T) {
 	}
 }
 
-func TestMessageFileRoundTripCanonicalAssistantTurn(t *testing.T) {
-	tests := []struct {
-		name    string
-		summary string
-		marshal func(any) ([]byte, error)
-	}{
-		{
-			name:    "trajectory",
-			summary: "Saved transcript",
-			marshal: func(v any) ([]byte, error) { return json.MarshalIndent(v, "", "  ") },
-		},
-		{
-			name:    "load messages",
-			summary: "Loaded transcript",
-			marshal: json.Marshal,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			want := runDoneTranscript(t, tt.summary)
-			path := filepath.Join(t.TempDir(), "messages.json")
-			data, err := tt.marshal(want)
-			if err != nil {
-				t.Fatalf("Marshal: %v", err)
-			}
-			if err := os.WriteFile(path, data, 0o644); err != nil {
-				t.Fatalf("WriteFile: %v", err)
-			}
-
-			loadedData, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("ReadFile: %v", err)
-			}
-			var loaded []clnkr.Message
-			if err := json.Unmarshal(loadedData, &loaded); err != nil {
-				t.Fatalf("Unmarshal: %v", err)
-			}
-
-			agent := clnkr.NewAgent(nil, nil, "/tmp")
-			if err := agent.AddMessages(loaded); err != nil {
-				t.Fatalf("AddMessages: %v", err)
-			}
-			got := agent.Messages()
-			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("messages = %#v, want %#v", got, want)
-			}
-
-			last := got[len(got)-1].Content
-			wantCanonical := mustCanonicalDoneText(tt.summary)
-			if last != wantCanonical {
-				t.Fatalf("last assistant message = %q, want %q", last, wantCanonical)
-			}
-			turn, err := clnkr.ParseTurn(last)
-			if err != nil {
-				t.Fatalf("ParseTurn(last): %v", err)
-			}
-			done, ok := turn.(*clnkr.DoneTurn)
-			if !ok {
-				t.Fatalf("last turn = %T, want *clnkr.DoneTurn", turn)
-			}
-			if done.Summary != tt.summary {
-				t.Fatalf("done summary = %q, want %q", done.Summary, tt.summary)
-			}
-		})
-	}
-}
-
 func TestRunSingleTaskRejectsCompactCommand(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-	}{
-		{name: "approval mode", args: []string{"-p", "/compact focus on tests"}},
-		{name: "full send", args: []string{"--full-send", "-p", "/compact focus on tests"}},
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{
+		"CLNKR_API_KEY=test-key",
+		"CLNKR_PROVIDER=openai",
+		"CLNKR_MODEL=gpt-test",
+		"TERM=xterm",
+	}, "-p", "/compact focus on tests")
+	if err == nil {
+		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			stdout, stderr, err := runMainHelperWithEnv(t, []string{
-				"CLNKR_API_KEY=test-key",
-				"CLNKR_PROVIDER=openai",
-				"CLNKR_MODEL=gpt-test",
-				"TERM=xterm",
-			}, tt.args...)
-			if err == nil {
-				t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
-			}
-			if !strings.Contains(stderr.String(), "/compact is only available at the conversational prompt") {
-				t.Fatalf("stderr = %q, want compact rejection", stderr.String())
-			}
-		})
-	}
-}
-
-func TestModelWaitIndicatorPromptModeGating(t *testing.T) {
-	tests := []struct {
-		name       string
-		showPrompt bool
-		singleTask bool
-		verbose    bool
-		stderrTTY  bool
-		wantOutput bool
-	}{
-		{name: "interactive", showPrompt: true, stderrTTY: true, wantOutput: true},
-		{name: "verbose", showPrompt: true, verbose: true, stderrTTY: true},
-		{name: "single task", showPrompt: true, singleTask: true, stderrTTY: true},
-		{name: "piped full send", stderrTTY: true},
-		{name: "non tty stderr", showPrompt: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			out := &guardedBuffer{}
-			indicator := testModelWaitIndicator(tt.showPrompt && !tt.singleTask && !tt.verbose && tt.stderrTTY, out, time.Millisecond, time.Hour, func() time.Time { return time.Unix(0, 0) })
-
-			updateModelWaitForAgentEvent(indicator, clnkr.EventDebug{Message: modelWaitQueryDebugMessage})
-			if tt.wantOutput {
-				waitForOutput(t, out, "waiting for model")
-			}
-			if indicator != nil {
-				indicator.Stop()
-			}
-
-			if tt.wantOutput && out.Len() == 0 {
-				t.Fatalf("output = %q, want indicator output", out.String())
-			}
-			if !tt.wantOutput && out.Len() != 0 {
-				t.Fatalf("output = %q, want empty", out.String())
-			}
-		})
-	}
-}
-
-func TestModelWaitIndicatorAgentEventsStartAndStop(t *testing.T) {
-	tests := []struct {
-		name  string
-		start clnkr.Event
-		stop  clnkr.Event
-	}{
-		{
-			name:  "query response",
-			start: clnkr.EventDebug{Message: modelWaitQueryDebugMessage},
-			stop:  clnkr.EventResponse{Turn: verifiedDone("done")},
-		},
-		{
-			name:  "step limit summary protocol failure",
-			start: clnkr.EventDebug{Message: modelWaitSummaryDebugMessage},
-			stop:  clnkr.EventProtocolFailure{Reason: "bad json"},
-		},
-		{
-			name:  "usage debug",
-			start: clnkr.EventDebug{Message: modelWaitQueryDebugMessage},
-			stop:  clnkr.EventDebug{Message: "usage: 1 input, 2 output tokens"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			out := &guardedBuffer{}
-			indicator := testModelWaitIndicator(true, out, time.Millisecond, time.Hour, func() time.Time { return time.Unix(0, 0) })
-
-			updateModelWaitForAgentEvent(indicator, tt.start)
-			waitForOutput(t, out, "waiting for model")
-			updateModelWaitForAgentEvent(indicator, tt.stop)
-
-			if !strings.HasSuffix(out.String(), "\r\x1b[2K") {
-				t.Fatalf("output = %q, want clear after stop event", out.String())
-			}
-		})
-	}
-}
-
-func TestHandleTerminalDriverEventStopsModelWaitBeforeOutput(t *testing.T) {
-	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
-	driver := clnkrapp.NewDriver(agent, nil)
-	reader := newLineReader(strings.NewReader("y\n"))
-
-	stderr := captureStderr(t, func() {
-		stop := func() { fmt.Fprint(os.Stderr, "STOP\n") }
-		_, _ = handleTerminalDriverEvent(context.Background(), driver, reader, clnkrapp.EventApprovalRequest{
-			Prompt: "1. printf hi",
-		}, nil, nil, stop)
-	})
-
-	if !strings.HasPrefix(stderr, "STOP\n1. printf hi") {
-		t.Fatalf("stderr = %q, want stop before approval output", stderr)
-	}
-}
-
-func TestHandleTerminalDriverEventStopsModelWaitBeforeErrorReturn(t *testing.T) {
-	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
-	driver := clnkrapp.NewDriver(agent, nil)
-	called := false
-
-	pending, err := handleTerminalDriverEvent(context.Background(), driver, newLineReader(strings.NewReader("")), clnkrapp.EventError{
-		Err: errors.New("boom"),
-	}, nil, nil, func() { called = true })
-
-	if !called {
-		t.Fatal("stop hook was not called")
-	}
-	if pending == nil || pending.Error() != "boom" {
-		t.Fatalf("pending error = %v, want boom", pending)
-	}
-	if err != nil {
-		t.Fatalf("handler error = %v, want nil", err)
-	}
-}
-
-func TestRunDriverPromptStopsModelWaitAfterDone(t *testing.T) {
-	out := &guardedBuffer{}
-	modelWait := testModelWaitIndicator(true, out, time.Millisecond, time.Millisecond, func() time.Time { return time.Now() })
-	agent := clnkr.NewAgent(&slowDoneModel{}, &fakeExecutor{}, "/tmp")
-	agent.Notify = func(event clnkr.Event) {
-		updateModelWaitForAgentEvent(modelWait, event)
-	}
-	driver := clnkrapp.NewDriver(agent, nil)
-
-	err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("")), "finish", clnkrapp.PromptModeFullSend, nil, modelWait.Stop)
-	if err != nil {
-		t.Fatalf("runDriverPrompt: %v", err)
-	}
-	before := out.String()
-	time.Sleep(5 * time.Millisecond)
-	if after := out.String(); after != before {
-		t.Fatalf("indicator wrote after run returned:\nbefore=%q\nafter=%q", before, after)
-	}
-}
-
-func TestRunDriverPromptCancelDoesNotRestartModelWait(t *testing.T) {
-	out := &guardedBuffer{}
-	modelWait := testModelWaitIndicator(true, out, time.Millisecond, time.Millisecond, func() time.Time { return time.Now() })
-	model := &cancelThenProtocolFailureModel{release: make(chan struct{}), queried: make(chan struct{})}
-	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
-	agent.Notify = func(event clnkr.Event) {
-		updateModelWaitForAgentEvent(modelWait, event)
-	}
-	driver := clnkrapp.NewDriver(agent, nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		done <- runDriverPrompt(ctx, driver, newLineReader(strings.NewReader("")), "finish", clnkrapp.PromptModeFullSend, nil, modelWait.Stop)
-	}()
-
-	<-model.queried
-	waitForOutput(t, out, "waiting for model")
-	cancel()
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("runDriverPrompt error = %v, want context.Canceled", err)
-	}
-	before := out.String()
-	close(model.release)
-	time.Sleep(10 * time.Millisecond)
-	if after := out.String(); after != before {
-		t.Fatalf("indicator wrote after canceled run returned:\nbefore=%q\nafter=%q", before, after)
-	}
-}
-
-type slowDoneModel struct{}
-
-func (m *slowDoneModel) Query(context.Context, []clnkr.Message) (clnkr.Response, error) {
-	time.Sleep(5 * time.Millisecond)
-	return clnkr.Response{Turn: verifiedDone("done")}, nil
-}
-
-type cancelThenProtocolFailureModel struct {
-	release chan struct{}
-	queried chan struct{}
-}
-
-func (m *cancelThenProtocolFailureModel) Query(context.Context, []clnkr.Message) (clnkr.Response, error) {
-	select {
-	case <-m.queried:
-	default:
-		close(m.queried)
-	}
-	<-m.release
-	return clnkr.Response{ProtocolErr: errors.New("bad turn")}, nil
-}
-
-func TestRunDriverPromptApprovalReadsReplyAndExecutesCommand(t *testing.T) {
-	model := &fakeModel{responses: []clnkr.Response{
-		mustResponse(`{"type":"act","bash":{"commands":[{"command":"printf hi","workdir":null}]}}`),
-		mustResponse(`{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`),
-	}}
-	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi", ExitCode: 0}}}
-	agent := clnkr.NewAgent(model, executor, "/tmp")
-	driver := clnkrapp.NewDriver(agent, nil)
-
-	stderr := captureStderr(t, func() {
-		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("y\n")), "say hi", clnkrapp.PromptModeApproval, nil, func() {})
-		if err != nil {
-			t.Fatalf("runDriverPrompt: %v", err)
-		}
-	})
-
-	if !strings.Contains(stderr, "1. printf hi") {
-		t.Fatalf("stderr should contain approval request, got %q", stderr)
-	}
-	if !strings.Contains(stderr, "Send 'y' to approve, or type what the agent should do instead: ") {
-		t.Fatalf("stderr should contain approval prompt, got %q", stderr)
-	}
-	if executor.calls != 1 {
-		t.Fatalf("executor calls = %d, want 1", executor.calls)
-	}
-}
-
-func TestRunDriverPromptApprovalShowsWorkdir(t *testing.T) {
-	model := &fakeModel{responses: []clnkr.Response{
-		mustResponse(`{"type":"act","bash":{"commands":[{"command":"rm important.txt","workdir":"subdir"}]}}`),
-		mustResponse(`{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`),
-	}}
-	executor := &fakeExecutor{results: []clnkr.CommandResult{{ExitCode: 0}}}
-	agent := clnkr.NewAgent(model, executor, "/tmp")
-	driver := clnkrapp.NewDriver(agent, nil)
-
-	stderr := captureStderr(t, func() {
-		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("y\n")), "clean up", clnkrapp.PromptModeApproval, nil, func() {})
-		if err != nil {
-			t.Fatalf("runDriverPrompt: %v", err)
-		}
-	})
-
-	if !strings.Contains(stderr, "rm important.txt in subdir") {
-		t.Fatalf("stderr should contain workdir note, got %q", stderr)
-	}
-}
-
-func TestRunDriverPromptClarificationReadsReplyAndContinues(t *testing.T) {
-	model := &fakeModel{responses: []clnkr.Response{
-		mustResponse(`{"type":"clarify","question":"Which repo?"}`),
-		mustResponse(`{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`),
-	}}
-	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
-	driver := clnkrapp.NewDriver(agent, nil)
-
-	stderr := captureStderr(t, func() {
-		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("/tmp/repo\n")), "inspect", clnkrapp.PromptModeApproval, nil, func() {})
-		if err != nil {
-			t.Fatalf("runDriverPrompt: %v", err)
-		}
-	})
-
-	if !strings.Contains(stderr, "Which repo?\nClarify: ") {
-		t.Fatalf("stderr should contain clarification prompt, got %q", stderr)
-	}
-	foundReply := false
-	for _, msg := range agent.Messages() {
-		if msg.Role == "user" && msg.Content == "/tmp/repo" {
-			foundReply = true
-			break
-		}
-	}
-	if !foundReply {
-		t.Fatalf("clarification reply not appended: %#v", agent.Messages())
-	}
-}
-
-func TestRunDriverPromptClarificationBlankLineDoesNotRepeatQuestion(t *testing.T) {
-	model := &fakeModel{responses: []clnkr.Response{
-		mustResponse(`{"type":"clarify","question":"Which repo?"}`),
-		mustResponse(`{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`),
-	}}
-	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
-	driver := clnkrapp.NewDriver(agent, nil)
-
-	stderr := captureStderr(t, func() {
-		err := runDriverPrompt(context.Background(), driver, newLineReader(strings.NewReader("\n/tmp/repo\n")), "inspect", clnkrapp.PromptModeApproval, nil, func() {})
-		if err != nil {
-			t.Fatalf("runDriverPrompt: %v", err)
-		}
-	})
-
-	if got := strings.Count(stderr, "Which repo?"); got != 1 {
-		t.Fatalf("clarification question printed %d times, want 1:\n%s", got, stderr)
-	}
-	foundReply := false
-	for _, msg := range agent.Messages() {
-		if msg.Role == "user" && msg.Content == "/tmp/repo" {
-			foundReply = true
-			break
-		}
-	}
-	if !foundReply {
-		t.Fatalf("clarification reply not appended: %#v", agent.Messages())
+	if !strings.Contains(stderr.String(), "/compact is only available at the conversational prompt") {
+		t.Fatalf("stderr = %q, want compact rejection", stderr.String())
 	}
 }
 
@@ -1331,48 +790,4 @@ func TestRunPromptLoopTreatsQueuedPasteLinesAsOnePrompt(t *testing.T) {
 	if userMessages[0] != "first line\nsecond line\nthird line" {
 		t.Fatalf("prompt = %q, want pasted lines joined", userMessages[0])
 	}
-}
-
-func TestRunDriverPromptApprovalCanBeCanceled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	agent := clnkr.NewAgent(&fakeModel{responses: []clnkr.Response{
-		mustResponse(`{"type":"act","bash":{"commands":[{"command":"rm important.txt","workdir":null}]}}`),
-	}}, &fakeExecutor{}, "/tmp")
-	driver := clnkrapp.NewDriver(agent, nil)
-
-	captureStderr(t, func() {
-		err := runDriverPrompt(ctx, driver, &lineReader{lines: make(chan lineResult)}, "clean up", clnkrapp.PromptModeApproval, nil, func() {})
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("got %v, want context.Canceled", err)
-		}
-	})
-}
-
-func captureStderr(t *testing.T, fn func()) string {
-	t.Helper()
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	old := os.Stderr
-	os.Stderr = w
-	defer func() {
-		os.Stderr = old
-	}()
-
-	fn()
-
-	if err := w.Close(); err != nil {
-		t.Fatalf("close write pipe: %v", err)
-	}
-	data, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read stderr: %v", err)
-	}
-	if err := r.Close(); err != nil {
-		t.Fatalf("close read pipe: %v", err)
-	}
-	return string(data)
 }

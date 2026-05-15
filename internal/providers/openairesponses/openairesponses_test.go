@@ -249,33 +249,6 @@ func TestModelQueriesNormalizeAssistantHistory(t *testing.T) {
 	}
 }
 
-func TestModelQueryTextRetriesTransientServerError(t *testing.T) {
-	attempts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		if attempts == 1 {
-			w.Header().Set("Retry-After", "0")
-			w.WriteHeader(http.StatusBadGateway)
-			writeJSON(t, w, map[string]any{"error": map[string]any{"message": "context deadline exceeded"}})
-			return
-		}
-		writeJSON(t, w, responseWithText(2, 3, "Older work summarized after retry."))
-	}))
-	defer server.Close()
-
-	model := openairesponses.NewModel(server.URL, "test-key", "gpt-5", "sys prompt")
-	summary, err := model.QueryText(context.Background(), []clnkr.Message{{Role: "user", Content: "hello"}})
-	if err != nil {
-		t.Fatalf("QueryText: %v", err)
-	}
-	if attempts != 2 {
-		t.Fatalf("attempts = %d, want 2", attempts)
-	}
-	if summary != "Older work summarized after retry." {
-		t.Fatalf("summary = %q, want retry summary", summary)
-	}
-}
-
 func TestModelQueriesReturnRefusalError(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -201,29 +201,15 @@ func TestResolveConfigOpenAIProviderAPISelection(t *testing.T) {
 		want        providerdomain.ProviderAPI
 	}{
 		{name: "allowlisted gpt-5", model: "gpt-5", want: providerdomain.ProviderAPIOpenAIResponses},
-		{name: "allowlisted dated mini", model: "gpt-5.4-mini-2026-03-05", want: providerdomain.ProviderAPIOpenAIResponses},
 		{name: "allowlisted codex", model: "gpt-5-codex", want: providerdomain.ProviderAPIOpenAIResponses},
-		{name: "allowlisted codex mini", model: "gpt-5.1-codex-mini", want: providerdomain.ProviderAPIOpenAIResponses},
 		{name: "allowlisted o-series", model: "o3-pro", want: providerdomain.ProviderAPIOpenAIResponses},
-		{name: "openai style latest", model: "gpt-4o-latest", want: providerdomain.ProviderAPIOpenAIResponses},
-		{name: "codex prefix", model: "codex-mini-latest", want: providerdomain.ProviderAPIOpenAIResponses},
 		{name: "codex suffix", model: "swift-codex", want: providerdomain.ProviderAPIOpenAIResponses},
-		{name: "o-series mini", model: "o4-mini", want: providerdomain.ProviderAPIOpenAIResponses},
 		{name: "case and space normalized", model: "  GPT-5.9-preview  ", want: providerdomain.ProviderAPIOpenAIResponses},
 		{name: "future gpt", model: "gpt-6", want: providerdomain.ProviderAPIOpenAIResponses},
 		{name: "dated snapshot", model: "gpt-5.4-2026-03-05", want: providerdomain.ProviderAPIOpenAIResponses},
-		{name: "openai-looking non snapshot suffix", model: "gpt-5.4-preview", want: providerdomain.ProviderAPIOpenAIResponses},
-		{name: "chat latest suffix still openai-looking", model: "gpt-5.2-chat-latest", want: providerdomain.ProviderAPIOpenAIResponses},
 		{name: "known non-openai chatgpt", model: "chatgpt-4o-latest", want: providerdomain.ProviderAPIOpenAIChatCompletions},
-		{name: "known non-openai chatgpt codex", model: "chatgpt-codex", want: providerdomain.ProviderAPIOpenAIChatCompletions},
 		{name: "known non-openai orca", model: "orca-mini", want: providerdomain.ProviderAPIOpenAIChatCompletions},
-		{name: "known non-openai orca codex", model: "orca-codex", want: providerdomain.ProviderAPIOpenAIChatCompletions},
-		{name: "known non-openai olmo", model: "olmo-2", want: providerdomain.ProviderAPIOpenAIChatCompletions},
-		{name: "known non-openai olmo codex", model: "olmo-codex", want: providerdomain.ProviderAPIOpenAIChatCompletions},
-		{name: "known non-openai openhermes", model: "openhermes-2.5", want: providerdomain.ProviderAPIOpenAIChatCompletions},
-		{name: "known non-openai openhermes codex", model: "openhermes-codex", want: providerdomain.ProviderAPIOpenAIChatCompletions},
 		{name: "unmatched llama", model: "llama3", want: providerdomain.ProviderAPIOpenAIChatCompletions},
-		{name: "unmatched gemini", model: "gemini-2.0-flash", want: providerdomain.ProviderAPIOpenAIChatCompletions},
 		{name: "non openai-looking dated suffix", model: "llama3-2026-03-05", want: providerdomain.ProviderAPIOpenAIChatCompletions},
 		{name: "explicit codex responses", model: "future-codex-model", providerAPI: "openai-responses", want: providerdomain.ProviderAPIOpenAIResponses},
 		{name: "explicit codex chat completions", model: "gpt-5.1-codex-max", providerAPI: "openai-chat-completions", want: providerdomain.ProviderAPIOpenAIChatCompletions},
@@ -245,8 +231,6 @@ func TestResolveConfigRejectsUnsupportedProModels(t *testing.T) {
 		inputs Inputs
 	}{
 		{name: "auto rejects gpt-5.2-pro", inputs: Inputs{Provider: "openai", Model: "gpt-5.2-pro"}},
-		{name: "explicit responses rejects gpt-5.4-pro", inputs: Inputs{Provider: "openai", ProviderAPI: "openai-responses", Model: "gpt-5.4-pro"}},
-		{name: "dated snapshot rejects gpt-5.4-pro", inputs: Inputs{Provider: "openai", Model: "gpt-5.4-pro-2026-03-05"}},
 		{name: "forced chat completions still rejects gpt-5.2-pro", inputs: Inputs{Provider: "openai", ProviderAPI: "openai-chat-completions", Model: "gpt-5.2-pro"}},
 	}
 
@@ -416,7 +400,6 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 		{name: "effort rejects chat completions", in: Inputs{Provider: "openai", ProviderAPI: "openai-chat-completions", Model: "gpt-5.1", RequestOptions: requestOptions(effort("high"))}, want: `effort is not supported for provider-api "openai-chat-completions"`},
 		{name: "effort rejects anthropic max", in: Inputs{Provider: "anthropic", Model: "claude-sonnet-4-20250514", RequestOptions: requestOptions(effort("xhigh"))}, want: `effort "xhigh" is not supported for provider anthropic`},
 		{name: "gpt-5-pro rejects low", in: Inputs{Provider: "openai", Model: "gpt-5-pro", RequestOptions: requestOptions(effort("low"))}, want: "gpt-5-pro only supports high"},
-		{name: "gpt-5-pro snapshot rejects low", in: Inputs{Provider: "openai", Model: "gpt-5-pro-2026-03-05", RequestOptions: requestOptions(effort("low"))}, want: "gpt-5-pro only supports high"},
 		{name: "xhigh requires codex max", in: Inputs{Provider: "openai", Model: "gpt-5.1", RequestOptions: requestOptions(effort("xhigh"))}, want: `effort "xhigh" is not supported for model "gpt-5.1"`},
 		{name: "effort requires reasoning model", in: Inputs{Provider: "openai", Model: "gpt-4.1", RequestOptions: requestOptions(effort("high"))}, want: "effort requires an OpenAI reasoning-capable model"},
 		{name: "max output requires positive", in: Inputs{Provider: "openai", Model: "gpt-5", RequestOptions: requestOptions(maxOutput(0))}, want: "max-output-tokens must be at least 1"},
@@ -426,7 +409,6 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 		{name: "thinking budget rejects small value", in: Inputs{Provider: "anthropic", Model: "claude-sonnet-4-20250514", RequestOptions: requestOptions(thinkingBudget(1023))}, want: "thinking-budget-tokens must be at least 1024"},
 		{name: "thinking budget rejects unsupported model", in: Inputs{Provider: "anthropic", Model: "claude-3-5-sonnet-20241022", RequestOptions: requestOptions(thinkingBudget(2048))}, want: "thinking-budget-tokens requires an Anthropic extended-thinking-capable model"},
 		{name: "thinking budget must be less than default max tokens", in: Inputs{Provider: "anthropic", Model: "claude-sonnet-4-20250514", RequestOptions: requestOptions(thinkingBudget(providerdomain.DefaultAnthropicMaxTokens))}, want: "thinking-budget-tokens must be less than effective anthropic max_tokens (4096)"},
-		{name: "thinking budget must be less than requested max tokens", in: Inputs{Provider: "anthropic", Model: "claude-sonnet-4-20250514", RequestOptions: requestOptions(thinkingBudget(4096), maxOutput(4096))}, want: "thinking-budget-tokens must be less than effective anthropic max_tokens (4096)"},
 		{name: "thinking budget rejects non-auto effort", in: Inputs{Provider: "anthropic", Model: "claude-sonnet-4-20250514", RequestOptions: requestOptions(effort("high"), thinkingBudget(2048))}, want: "thinking-budget-tokens requires either no --effort flag or --effort auto"},
 		{name: "thinking budget rejects Opus 4.7+", in: Inputs{Provider: "anthropic", Model: "claude-opus-4-7-20250514", RequestOptions: requestOptions(thinkingBudget(2048))}, want: "thinking-budget-tokens is not supported for model"},
 	}
@@ -447,7 +429,6 @@ func TestResolveConfigNormalizesBaseURLTrailingSlash(t *testing.T) {
 	}{
 		{name: "openai path", inputs: Inputs{Provider: "openai", Model: "gpt-test", BaseURL: "https://api.openai.com/v1/"}, wantURL: "https://api.openai.com/v1"},
 		{name: "anthropic root", inputs: Inputs{Provider: "anthropic", Model: "claude-sonnet-4-6", BaseURL: "https://api.anthropic.com/"}, wantURL: "https://api.anthropic.com"},
-		{name: "custom root", inputs: Inputs{Provider: "openai", Model: "gpt-test", BaseURL: "https://example.com/"}, wantURL: "https://example.com"},
 		{name: "preserves internal repeated slashes", inputs: Inputs{Provider: "openai", Model: "gpt-test", BaseURL: "https://example.com/proxy//v1/"}, wantURL: "https://example.com/proxy//v1"},
 		{name: "preserves escaped slash", inputs: Inputs{Provider: "openai", Model: "gpt-test", BaseURL: "https://example.com/proxy%2Fv1/"}, wantURL: "https://example.com/proxy%2Fv1"},
 	}

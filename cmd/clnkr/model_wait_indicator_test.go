@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/clnkr-ai/clnkr"
 )
 
 func TestModelWaitIndicatorDisabledWritesNothing(t *testing.T) {
@@ -128,6 +130,19 @@ func TestModelWaitIndicatorStartDuringStopDoesNotCreateSecondRenderer(t *testing
 	time.Sleep(5 * time.Millisecond)
 	if after := out.String(); after != before {
 		t.Fatalf("output changed after Stop returned:\nbefore=%q\nafter=%q", before, after)
+	}
+}
+
+func TestUpdateModelWaitForAgentEventStartsAndStops(t *testing.T) {
+	out := &guardedBuffer{}
+	indicator := testModelWaitIndicator(true, out, time.Millisecond, time.Hour, func() time.Time { return time.Unix(0, 0) })
+
+	updateModelWaitForAgentEvent(indicator, clnkr.EventDebug{Message: modelWaitQueryDebugMessage})
+	waitForOutput(t, out, "waiting for model")
+	updateModelWaitForAgentEvent(indicator, clnkr.EventResponse{Turn: &clnkr.DoneTurn{}})
+
+	if !strings.HasSuffix(out.String(), "\r\x1b[2K") {
+		t.Fatalf("output = %q, want clear after response event", out.String())
 	}
 }
 

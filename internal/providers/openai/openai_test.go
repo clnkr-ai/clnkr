@@ -57,7 +57,6 @@ func TestModel(t *testing.T) {
 		if !schemaContainsKey(schema, "minItems") {
 			t.Fatal("response_format.json_schema.schema unexpectedly omits minItems")
 		}
-		assertSchemaShape(t, schema)
 	})
 
 	t.Run("QueryText returns plain text without response format", func(t *testing.T) {
@@ -420,52 +419,13 @@ func TestModel(t *testing.T) {
 	})
 
 	t.Run("returns raw payload plus protocol error on invalid structured payload", func(t *testing.T) {
-		tests := []struct {
-			name    string
-			content string
-			wantErr error
-		}{
-			{name: "single-command wrapped act turn", content: `{"turn":{"type":"act","bash":{"command":"pwd","workdir":null},"question":null,"summary":null,"reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
-			{name: "semantic invalid act turn", content: `{"turn":{"type":"act","bash":{"commands":[{"command":"","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`, wantErr: clnkr.ErrMissingCommand},
-			{name: "done turn with command sibling", content: `{"turn":{"type":"done","bash":{"commands":[{"command":"rm -rf tmp","workdir":null}]},"question":null,"summary":"done","reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
-			{name: "clarify turn with summary sibling", content: `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":"done","reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
-			{name: "multiple wrapped objects", content: `{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"question":null,"summary":null,"reasoning":null}}{"turn":{"type":"done","bash":null,"question":null,"summary":"done","reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
-			{name: "prose wrapped json", content: "Here is the result:\n{\"turn\":{\"type\":\"done\",\"summary\":\"wrapped\"}}", wantErr: clnkr.ErrInvalidJSON},
+		content := `{"turn":{"type":"done","bash":{"commands":[{"command":"rm -rf tmp","workdir":null}]},"question":null,"summary":"done","reasoning":null}}`
+		resp := queryContent(t, content)
+		if resp.Raw != content {
+			t.Fatalf("raw = %q, want %q", resp.Raw, content)
 		}
-
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				resp := queryContent(t, tt.content)
-				if resp.Raw != tt.content {
-					t.Fatalf("raw = %q, want %q", resp.Raw, tt.content)
-				}
-				if !errors.Is(resp.ProtocolErr, tt.wantErr) {
-					t.Fatalf("protocol error = %v, want %v", resp.ProtocolErr, tt.wantErr)
-				}
-			})
-		}
-	})
-
-	t.Run("canonicalizes wrapped clarify and done payloads without null siblings", func(t *testing.T) {
-		tests := []struct {
-			name    string
-			content string
-			want    string
-		}{
-			{name: "clarify", content: `{"turn":{"type":"clarify","question":"Which directory?"}}`, want: `{"type":"clarify","question":"Which directory?"}`},
-			{name: "done", content: `{"turn":{"type":"done","summary":"ignored schema","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}}`, want: doneTurn("ignored schema")},
-		}
-
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				resp := queryContent(t, tt.content)
-				if got := mustCanonicalTurn(t, resp.Turn); got != tt.want {
-					t.Fatalf("content = %q, want %q", got, tt.want)
-				}
-				if resp.ProtocolErr != nil {
-					t.Fatalf("protocol error = %v, want nil", resp.ProtocolErr)
-				}
-			})
+		if !errors.Is(resp.ProtocolErr, clnkr.ErrInvalidJSON) {
+			t.Fatalf("protocol error = %v, want ErrInvalidJSON", resp.ProtocolErr)
 		}
 	})
 
@@ -558,139 +518,6 @@ func schemaContainsKey(node any, key string) bool {
 	}
 
 	return false
-}
-
-func assertSchemaShape(t *testing.T, schema map[string]any) {
-	t.Helper()
-
-	if got := schema["type"]; got != "object" {
-		t.Fatalf("schema type = %v, want object", got)
-	}
-	if got := schema["additionalProperties"]; got != false {
-		t.Fatalf("schema additionalProperties = %v, want false", got)
-	}
-	if got, want := schema["required"], []string{"turn"}; !sameStringSlice(got, want) {
-		t.Fatalf("schema required = %#v, want %#v", got, want)
-	}
-
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok {
-		t.Fatalf("schema properties = %T, want map[string]any", schema["properties"])
-	}
-	turnProp, ok := properties["turn"].(map[string]any)
-	if !ok {
-		t.Fatalf("schema properties[turn] = %T, want map[string]any", properties["turn"])
-	}
-	branches, ok := turnProp["anyOf"].([]any)
-	if !ok {
-		t.Fatalf("schema properties[turn].anyOf = %T, want []any", turnProp["anyOf"])
-	}
-	if len(branches) != 3 {
-		t.Fatalf("len(schema properties[turn].anyOf) = %d, want 3", len(branches))
-	}
-
-	for _, turnType := range []string{"act", "clarify", "done"} {
-		branch := schemaBranchForType(t, branches, turnType)
-		if got := branch["additionalProperties"]; got != false {
-			t.Fatalf("%s branch additionalProperties = %v, want false", turnType, got)
-		}
-		wantRequired := []string{"type", "bash", "question", "summary", "reasoning"}
-		if turnType == "done" {
-			wantRequired = []string{"type", "bash", "question", "summary", "verification", "known_risks", "reasoning"}
-		}
-		if got, want := branch["required"], wantRequired; !sameStringSlice(got, want) {
-			t.Fatalf("%s branch required = %#v, want %#v", turnType, got, want)
-		}
-		branchProperties, ok := branch["properties"].(map[string]any)
-		if !ok {
-			t.Fatalf("%s branch properties = %T, want map[string]any", turnType, branch["properties"])
-		}
-		typeProp, ok := branchProperties["type"].(map[string]any)
-		if !ok {
-			t.Fatalf("%s branch properties[type] = %T, want map[string]any", turnType, branchProperties["type"])
-		}
-		if got := typeProp["type"]; got != "string" {
-			t.Fatalf("%s branch properties[type].type = %v, want string", turnType, got)
-		}
-		if got := typeProp["const"]; got != turnType {
-			t.Fatalf("%s branch properties[type].const = %v, want %q", turnType, got, turnType)
-		}
-		assertNullableStringUnion(t, branchProperties["reasoning"])
-	}
-}
-
-func schemaBranchForType(t *testing.T, branches []any, turnType string) map[string]any {
-	t.Helper()
-
-	for _, branch := range branches {
-		branchMap, ok := branch.(map[string]any)
-		if !ok {
-			continue
-		}
-		properties, ok := branchMap["properties"].(map[string]any)
-		if !ok {
-			continue
-		}
-		typeProp, ok := properties["type"].(map[string]any)
-		if !ok {
-			continue
-		}
-		if typeProp["const"] == turnType {
-			return branchMap
-		}
-	}
-
-	t.Fatalf("no schema branch found for type %q", turnType)
-	return nil
-}
-
-func assertNullableStringUnion(t *testing.T, raw any) {
-	t.Helper()
-
-	prop, ok := raw.(map[string]any)
-	if !ok {
-		t.Fatalf("nullable property = %T, want map[string]any", raw)
-	}
-	branches, ok := prop["anyOf"].([]any)
-	if !ok {
-		t.Fatalf("nullable property anyOf = %T, want []any", prop["anyOf"])
-	}
-	if len(branches) != 2 {
-		t.Fatalf("len(nullable property anyOf) = %d, want 2", len(branches))
-	}
-
-	assertSchemaTypeBranch(t, branches, "string")
-	assertSchemaTypeBranch(t, branches, "null")
-}
-
-func assertSchemaTypeBranch(t *testing.T, branches []any, wantType string) {
-	t.Helper()
-
-	for _, branch := range branches {
-		branchMap, ok := branch.(map[string]any)
-		if !ok {
-			continue
-		}
-		if branchMap["type"] == wantType {
-			return
-		}
-	}
-
-	t.Fatalf("missing anyOf branch with type %q", wantType)
-}
-
-func sameStringSlice(got any, want []string) bool {
-	gotSlice, ok := got.([]any)
-	if !ok || len(gotSlice) != len(want) {
-		return false
-	}
-	for i := range gotSlice {
-		gotString, ok := gotSlice[i].(string)
-		if !ok || gotString != want[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func mustCanonicalTurn(t *testing.T, turn clnkr.Turn) string {

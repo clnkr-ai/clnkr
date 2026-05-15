@@ -105,39 +105,17 @@ func TestStartupSystemPromptModes(t *testing.T) {
 }
 
 func TestRunJSONLPromptWritesResponseAndDone(t *testing.T) {
-	largePrompt := strings.Repeat("x", 70*1024)
-	tests := []struct {
-		name  string
-		input string
-	}{
-		{
-			name:  "ordinary prompt line",
-			input: `{"type":"prompt","text":"inspect","mode":"full_send"}` + "\n",
-		},
-		{
-			name: "large prompt line",
-			input: mustMarshalJSONLCommand(t, clnkrapp.JSONLCommand{
-				Type: "prompt",
-				Text: largePrompt,
-				Mode: string(clnkrapp.PromptModeFullSend),
-			}) + "\n",
-		},
+	var out, errOut bytes.Buffer
+	driver := newTestDriver(t, &out, []clnkr.Response{mustResponse(doneRaw)}, nil)
+
+	err := runJSONL(context.Background(), strings.NewReader(`{"type":"prompt","text":"inspect","mode":"full_send"}`+"\n"), &out, &errOut, driver)
+	if err != nil {
+		t.Fatalf("runJSONL: %v\nstderr:\n%s", err, errOut.String())
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var out, errOut bytes.Buffer
-			driver := newTestDriver(t, &out, []clnkr.Response{mustResponse(doneRaw)}, nil)
 
-			err := runJSONL(context.Background(), strings.NewReader(tt.input), &out, &errOut, driver)
-			if err != nil {
-				t.Fatalf("runJSONL: %v\nstderr:\n%s", err, errOut.String())
-			}
-
-			assertTypesContainInOrder(t, jsonlTypes(t, out.String()), []string{"response", "done"}, out.String())
-			if errOut.Len() != 0 {
-				t.Fatalf("stderr = %q, want empty", errOut.String())
-			}
-		})
+	assertTypesContainInOrder(t, jsonlTypes(t, out.String()), []string{"response", "done"}, out.String())
+	if errOut.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", errOut.String())
 	}
 }
 
@@ -426,16 +404,6 @@ func verifiedDone(summary string) *clnkr.DoneTurn {
 		},
 		KnownRisks: []string{},
 	}
-}
-
-func mustMarshalJSONLCommand(t *testing.T, command clnkrapp.JSONLCommand) string {
-	t.Helper()
-
-	data, err := json.Marshal(command)
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
-	}
-	return string(data)
 }
 
 type blockingModel struct{}

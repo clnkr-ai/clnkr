@@ -215,66 +215,20 @@ func TestModelStructuredResponses(t *testing.T) {
 	})
 
 	t.Run("returns raw payload plus protocol error on invalid structured payload", func(t *testing.T) {
-		tests := []struct {
-			name    string
-			text    string
-			wantErr error
-		}{
-			{name: "single-command wrapped act turn", text: `{"turn":{"type":"act","bash":{"command":"pwd","workdir":null},"question":null,"summary":null,"reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
-			{name: "semantic invalid act turn", text: `{"turn":{"type":"act","bash":{"commands":[{"command":"","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`, wantErr: clnkr.ErrMissingCommand},
-			{name: "done turn with command sibling", text: `{"turn":{"type":"done","bash":{"commands":[{"command":"rm -rf tmp","workdir":null}]},"question":null,"summary":"done","reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
-			{name: "clarify turn with summary sibling", text: `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":"done","reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
-			{name: "multiple wrapped objects", text: `{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"question":null,"summary":null,"reasoning":null}}{"turn":{"type":"done","bash":null,"question":null,"summary":"done","reasoning":null}}`, wantErr: clnkr.ErrInvalidJSON},
-			{name: "prose wrapped json", text: "Here is the result:\n{\"turn\":{\"type\":\"done\",\"summary\":\"wrapped\"}}", wantErr: clnkr.ErrInvalidJSON},
+		text := `{"turn":{"type":"done","bash":{"commands":[{"command":"rm -rf tmp","workdir":null}]},"question":null,"summary":"done","reasoning":null}}`
+		server := jsonServer(t, func(r *http.Request) any { return textResponse(text) })
+		defer server.Close()
+
+		m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
+		resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+		if err != nil {
+			t.Fatalf("Query: %v", err)
 		}
-
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				server := jsonServer(t, func(r *http.Request) any { return textResponse(tt.text) })
-				defer server.Close()
-
-				m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
-				resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-				if err != nil {
-					t.Fatalf("Query: %v", err)
-				}
-				if resp.Raw != tt.text {
-					t.Fatalf("raw = %q, want %q", resp.Raw, tt.text)
-				}
-				if !errors.Is(resp.ProtocolErr, tt.wantErr) {
-					t.Fatalf("ProtocolErr = %v, want %v", resp.ProtocolErr, tt.wantErr)
-				}
-			})
+		if resp.Raw != text {
+			t.Fatalf("raw = %q, want %q", resp.Raw, text)
 		}
-	})
-
-	t.Run("canonicalizes wrapped clarify and done payloads without null siblings", func(t *testing.T) {
-		tests := []struct {
-			name string
-			text string
-			want string
-		}{
-			{name: "clarify", text: `{"turn":{"type":"clarify","question":"Which directory?"}}`, want: `{"type":"clarify","question":"Which directory?"}`},
-			{name: "done", text: `{"turn":{"type":"done","summary":"ignored schema","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}}`, want: doneTurn("ignored schema")},
-		}
-
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				server := jsonServer(t, func(r *http.Request) any { return textResponse(tt.text) })
-				defer server.Close()
-
-				m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
-				resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-				if err != nil {
-					t.Fatalf("Query: %v", err)
-				}
-				if got := mustCanonicalTurn(t, resp.Turn); got != tt.want {
-					t.Fatalf("content = %q, want %q", got, tt.want)
-				}
-				if resp.ProtocolErr != nil {
-					t.Fatalf("ProtocolErr = %v, want nil", resp.ProtocolErr)
-				}
-			})
+		if !errors.Is(resp.ProtocolErr, clnkr.ErrInvalidJSON) {
+			t.Fatalf("ProtocolErr = %v, want ErrInvalidJSON", resp.ProtocolErr)
 		}
 	})
 

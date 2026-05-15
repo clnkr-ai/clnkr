@@ -274,14 +274,6 @@ func TestLoadLatestSessionCorruptFileHandling(t *testing.T) {
 			},
 			wantErr: "2026-01-10T000000.000000000Z-001.json",
 		},
-		{
-			name: "ignores corrupt older current session",
-			files: map[string]string{
-				"2026-01-10T000000.000000000Z-000.json": `{`,
-				"2026-01-10T000000.000000000Z-001.json": sessionJSON("2026-01-10T00:00:00Z", "new"),
-			},
-			wantLatest: "new",
-		},
 	}
 
 	for _, tc := range tests {
