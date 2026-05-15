@@ -2,23 +2,26 @@
 
 # NAME
 
-clnkr - architecture and agent design notes
+clnkr - coding agent architecture
 
 # DESCRIPTION
 
-**clnkr** is a terminal coding agent with a small loop: send the transcript to
-a model, parse one structured turn, run host commands when the turn asks for
-them, append the result, and repeat.
+**clnkr** is a terminal coding agent with a model-command policy loop: send the
+transcript to a model, parse one structured turn, execute approved bash
+commands from accepted **act** turns, append command-result messages, and
+repeat until **done**, clarification, step limit, cancellation, or policy
+error.
 
-The user-facing command is documented in **clnkr**(1). This page documents
+The interactive CLI is documented in **clnkr**(1). This page documents
 clnkr's act protocol, transcript structure, provider boundary, command
 execution model, run metadata, and domain vocabulary.
 
 # ARCHITECTURE
 
 **Agent**
-: The owner of the transcript, current working directory, model, executor, and
-loop policy for one run.
+: The runtime object for one run. It owns the transcript, current working
+directory, model, executor, environment snapshot, event sink, step limit, and
+act protocol.
 
 **Model**
 : The provider connection used to send transcript messages to an LLM provider
@@ -32,7 +35,7 @@ between a provider API and clnkr's canonical protocol.
 : The provider-facing schema for APIs that require different JSON wrappers,
 tool-call records, or null-field shapes. Provider adapters project those
 provider-specific responses into clnkr's canonical **act**, **clarify**, or
-**done** turn. The schema includes verified-completion fields for **done**
+**done** turn. The schema includes completion verification fields for **done**
 turns.
 
 **CLI config resolver**
@@ -84,7 +87,7 @@ exit status.
 agent and driver, reads JSONL commands from stdin, writes JSONL events to
 stdout, and writes diagnostics to stderr.
 
-At the highest level, the object interactions look like this:
+Object interactions:
 
 ```text
                     +------------------+
@@ -115,12 +118,13 @@ At the highest level, the object interactions look like this:
                     +------------------+
 ```
 
-The main boundary is **Step** versus **RunWithPolicy**. **Step** performs one
-model query and protocol parse. **RunWithPolicy** owns the control loop:
-appending resource-state messages before queries, retrying after protocol
-failures, dispatching turn policy hooks, executing approved act turns, stopping
-on done, asking for a final summary at the step limit, and enforcing step
-limits. In full-send runs, **RunWithPolicy** also applies an automated
+The main boundary is **Step** versus **RunWithPolicy**. **Step** prepares the
+transcript for one model query, queries the model, records the response or
+protocol failure, and returns the parsed turn. **RunWithPolicy** owns the
+control loop: appending resource-state messages before queries, retrying after
+protocol failures, dispatching turn policy hooks, executing approved act turns,
+stopping on done, asking for a final summary at the step limit, and enforcing
+step limits. In full-send runs, **RunWithPolicy** also applies an automated
 completion gate before accepting **done** turns: it emits a completion-gate
 event, appends guidance after rejected or challenged completions, and exits
 after repeated invalid completions. **Run** is the full-send entry point; it
@@ -137,13 +141,13 @@ command adapters use **cmd/internal/clnkrapp** for session persistence;
 
 The configuration ownership boundary is **CLI config resolver** versus
 **Provider request semantics**. The CLI resolver owns app inputs and user-facing
-errors. Provider request semantics own the provider vocabulary and reject
-unsupported provider/model/request combinations before adapters serialize a
-request. Provider structured-output schemas and adapters own provider-specific
-response shapes and projection into canonical turns.
+errors. Provider request semantics define provider/API names and validate
+model/request-option combinations before adapters serialize requests. Provider
+structured-output schemas and adapters own provider-specific response shapes
+and projection into canonical turns.
 
-Child-agent orchestration is deliberately outside host policy. Bash is the
-model's only tool; the built-in prompt teaches the model when to launch
+Child-agent orchestration is outside host policy. Bash is the model's only
+tool; the built-in prompt teaches the model when to launch
 **clnkrd** as another ordinary process and how to read stdout, stderr, and
 event-log artifacts. **/delegate** is ordinary user prompt text that instructs
 the model to run **clnkrd** for the bounded child task. **Driver**,
@@ -152,7 +156,7 @@ turns, and **Agent.Step** are unchanged by child-process orchestration.
 
 # ACT PROTOCOL
 
-Every accepted model instruction is a **turn**. There are three turn types:
+Every accepted model response is a **turn**. There are three turn types:
 
 **act**
 : Ask the host to run one or more bash actions.
@@ -166,26 +170,28 @@ append the reply and continue the run; policies that cannot answer stop.
 successfully.
 
 An **act** turn contains a **bash batch**. Each **bash action** contains a shell
-command and an optional working directory. **Max steps** is the execution cap;
-if a batch exceeds the remaining command budget, clnkr runs only the commands
-that fit and then asks for a final summary.
+command and a nullable working directory in canonical JSON. **Max steps** is
+the execution cap; if a batch exceeds the remaining command budget, clnkr runs
+only the commands that fit and then asks for a final summary.
 
 A **canonical turn** is the internal JSON shape clnkr writes to the transcript
 after a provider adapter projects provider output into clnkr's turn space:
 **act**, **clarify**, or **done**. A **provider turn** is the provider-specific
 structured-output shape before that projection.
 
-The default act protocol is **auto**. The CLI resolves **auto** after provider
-API selection. Anthropic Messages and OpenAI Responses resolve to
-**tool-calls** because they support provider-native **bash** tool calls. OpenAI
-Chat Completions and OpenAI-compatible fallback endpoints resolve to
-**clnkr-inline**. The resolved runtime protocol is always concrete:
-**clnkr-inline** or **tool-calls**.
+The CLI **--act-protocol** setting defaults to **auto**. The CLI resolves
+**auto** after provider API selection. Anthropic Messages and OpenAI Responses
+resolve to **tool-calls** because they support provider-native tool calls using
+clnkr's **bash** tool schema. OpenAI Chat Completions and OpenAI-compatible
+fallback endpoints resolve to **clnkr-inline**. The resolved runtime protocol
+is always concrete: **clnkr-inline** or **tool-calls**.
 
 **clnkr-inline** accepts provider-portable clnkr act JSON in assistant text.
-**tool-calls** uses provider-native **bash** tool calls for **act** turns, while
-**clarify** and **done** remain text JSON.
-Single-task unattended runs use a schema that omits **clarify**.
+**tool-calls** uses provider-native tool calls with clnkr's **bash** tool
+schema for **act** turns, while **clarify** and **done** remain
+schema-constrained JSON text. In unattended mode, inline structured output
+omits **clarify**; tool-call mode uses tools for actions and a done-only text
+schema.
 
 Provider request options such as effort and output-token limits change provider
 wire fields. They do not add turn types or change the canonical turn shape.
@@ -197,13 +203,14 @@ least one concrete check with command, outcome, and evidence.
 **partially_verified** completions list remaining risks. This makes completion a
 claim backed by transcript evidence instead of a summary-only stop signal.
 
-All run policies require parser/schema validation before a **done** turn can be
-accepted. In full-send unattended runs, **RunWithPolicy** also applies an
-automated completion-quality gate before accepting structurally valid
-**done** turns. The gate rejects or challenges weak completions, challenges thin
-verification once, appends guidance as a normal user message, and emits a
-machine-readable completion-gate event. Approval and interactive policies leave
-completion quality to the frontend or user after parser/schema validation.
+Parser/schema validation happens before any run policy can accept a **done**
+turn. In full-send unattended runs, **RunWithPolicy** also applies an automated
+completion-quality gate before accepting structurally valid **done** turns. The
+gate rejects or challenges incomplete or under-evidenced completions,
+challenges one-check or claim/check mismatches once, appends guidance as a
+normal user message, and emits a machine-readable completion-gate event.
+Approval and interactive policies leave completion quality to the frontend or
+user after parser/schema validation.
 
 A **protocol failure** is a model response that cannot be accepted as exactly
 one valid turn. When that happens, clnkr appends a **protocol correction** to
@@ -231,14 +238,16 @@ protocol correction.
 : A clnkr-authored transcript message.
 
 **Command result block**
-: A host block containing a JSON object with optional **command**, **stdout**,
-**stderr**, **outcome**, and optional **feedback**. Exit outcomes include
-**exit_code**. Other outcomes include **timeout**, **cancelled**, **denied**,
-**skipped**, and **error**. Large command observations are compressed before
-they enter the model transcript. The executor and command-done events keep raw
-stdout/stderr, while the transcript receives bounded **stdout** and **stderr**
-strings with deterministic markers and optional **observation** metadata that
-records original, shown, and omitted byte counts.
+: A host block containing a JSON object with **stdout**, **stderr**,
+**outcome**, and optional **command**, **feedback**, and **observation**. Exit
+outcomes include **exit_code**. Other outcomes include **timeout**,
+**cancelled**, **denied**, **skipped**, and **error**. Large command output
+streams are compressed before they enter the model transcript. The executor and
+command-done events keep raw stdout/stderr, while the transcript receives
+bounded **stdout** and **stderr** strings with deterministic markers and
+optional **observation** metadata. That metadata is emitted only for compressed
+streams and records source, version, compression mode, and original, shown, and
+omitted byte counts.
 
 **Bash tool metadata**
 : Optional transcript metadata beside message content. It records provider tool
@@ -250,35 +259,39 @@ tool-call history without duplicating it as plain text.
 : A host message containing strict JSON current working directory state, for
 example **{"type":"state","source":"clnkr","cwd":"/repo"}**.
 
-**Resource-state message**
-: A host message containing strict JSON command and model-turn budget state. It
-records **commands_used** and **model_turns_used**. When a command budget is
-configured, it also records **commands_remaining** and **max_commands**.
+**Resource state message**
+: A host message with **"type":"resource_state"** containing JSON command and
+model-turn budget state. It records **commands_used** and
+**model_turns_used**. When a command budget is configured, it also records
+**commands_remaining** and **max_commands**.
 
 **Compact block**
 : A host block containing a summary of older transcript history.
 
-During compaction, clnkr replaces an older transcript prefix with one compact
-block. It keeps a recent tail of user-authored turns and any host state the
-next model call still needs.
+During compaction, clnkr replaces an older transcript prefix with one
+**[compact]** tagged JSON block containing **source**, **kind**, **summary**,
+and optional **instructions**. It keeps the recent tail starting at the selected
+user-authored message and preserves the latest clnkr cwd state if that state
+would otherwise be lost.
 
 Run metadata is not a transcript message. It is emitted as a debug event and
-persisted alongside session files so a run can be inspected without adding
-configuration values to the model transcript.
+persisted in saved-session envelopes outside the transcript messages so a run
+can be inspected without adding configuration values to the model transcript.
 
 # COMMAND EXECUTION
 
-The executor runs bash through the host shell. It captures stdout, stderr, exit
-code, the post-command working directory, the post-command environment, and
-optional command feedback.
+The executor runs commands with **bash -c**. It captures stdout, stderr, exit
+code, and, when the shell state trap runs, the post-command working directory
+and environment. It can also attach command feedback.
 
 Provider request options affect model calls only. Once a model emits an
 accepted **act** turn, command execution sees the same bash batch shape.
 
 The executor always starts each command in its own process group so cancellation
 can kill the shell and its children. A **base environment snapshot**, when set,
-is the complete environment used for the next command; it is not an additive
-overlay on top of the parent process environment.
+replaces the parent process environment as the base for the next command. The
+executor still adds host control variables such as pager settings and the state
+file path.
 
 **Command result**
 : The structured outcome of one bash action.
@@ -292,20 +305,22 @@ denied, skipped, or error.
 command runs.
 
 **Base environment snapshot**
-: The complete environment snapshot used as the base for command execution.
+: The environment snapshot used instead of the parent process environment as
+the base for command execution.
 
 **Command feedback**
 : Git-backed host feedback attached to a command result.
 
 **Git baseline**
-: The clean-worktree snapshot taken before a command runs.
+: The clean-worktree check recorded before a command runs.
 
 Command feedback is emitted only when the command started from a clean git
 baseline. The feedback contains changed file paths relative to the final
-working directory and a combined unstaged plus staged diff.
+working directory and, for tracked changes, a combined unstaged plus staged
+diff.
 
 On cancellation, clnkr kills the command process group. Child processes should
-not survive the shell command that started them.
+not survive cancellation while they remain in that process group.
 
 # PROVIDER BOUNDARY
 
@@ -313,17 +328,17 @@ clnkr treats provider APIs as adapters around one internal protocol.
 
 Provider resolution is split. **cmd/internal/providerconfig** owns CLI
 inputs: flag/env precedence, **CLNKR_** names, API key lookup, base URL parsing,
-provider inference from an explicit base URL, and user-facing configuration
-errors. **internal/providers/providerconfig** owns provider-domain semantics:
-provider/API constants, provider request options, model capability predicates,
-and request-option validation.
+provider inference from an explicit base URL when provider is unset, and
+user-facing configuration errors. **internal/providers/providerconfig** owns
+provider-domain semantics: provider/API constants, provider request options,
+model capability predicates, and request-option validation.
 
 For OpenAI, clnkr can use the Responses API or an OpenAI-compatible Chat
 Completions API. **provider-api=auto** selects Responses for known supported
 OpenAI model names and model names matching OpenAI model-name patterns, and
-keeps known non-OpenAI compatible names on Chat Completions. OpenAI-compatible
-endpoints, including vLLM's compatible server, must support structured model
-outputs.
+keeps known non-OpenAI model-name patterns on Chat Completions.
+OpenAI-compatible Chat Completions endpoints, including vLLM's compatible
+server, must support structured model outputs.
 
 For Anthropic, clnkr uses the Messages API and asks for structured JSON output
 through the provider adapter.
@@ -341,11 +356,14 @@ direct adapter construction and CLI config resolution follow the same request
 path rules.
 
 **Response**
-: One provider reply plus usage and any protocol failure.
+: One provider reply plus usage, optional protocol failure, native bash tool
+calls, and provider replay data.
 
 **Raw response**
-: Provider output preserved for debugging when protocol parsing fails. Depending
-on the provider path, this may be assistant text or a raw provider payload.
+: Provider output retained with the response, especially for protocol failures
+and tool-call replay debugging. Depending on the provider path, this may be
+assistant text or a raw provider payload, and may be present on successful
+tool-call responses.
 
 **Usage**
 : Token accounting for one model call.
@@ -354,28 +372,31 @@ on the provider path, this may be assistant text or a raw provider payload.
 : A provider-declared refusal instead of usable model text.
 
 **Structured output**
-: Provider-enforced JSON output intended to contain exactly one provider turn.
+: Provider-enforced JSON output for text turns, intended to contain exactly one
+provider turn. In tool-call mode, bash acts use native provider tool calls.
 
 # RUN METADATA
 
-**Run metadata** records run and provider request configuration. It is emitted
-once as an **EventDebug** payload and persisted with saved sessions.
+**Run metadata** records the clnkr version, provider selection, model, system
+prompt hash, act protocol, and provider request options. It is emitted once as
+an **EventDebug** message containing JSON metadata and persisted with saved
+sessions.
 
-**Requested request metadata**
-: The provider request options as the user requested them, including explicit
-**--effort auto**.
+**Requested metadata**
+: The provider request options after parsing, preserving whether the user
+explicitly requested **--effort auto**.
 
-**Effective request metadata**
+**Effective metadata**
 : The provider request options clnkr will put on provider calls after
 validation and defaults.
 
 Run metadata includes the selected **act_protocol**. Requested and effective
-request metadata use the same JSON fields: **effort**, **output**, and
-**anthropic_manual**. For effort, omitted and
-explicit **auto** are distinct in requested metadata. Effective metadata omits
-**auto** because clnkr sends no provider effort field for it. For Anthropic,
-effective metadata also records the Anthropic thinking mode and effective
-**max_tokens** when known.
+metadata use the same top-level JSON fields: **effort**, **output**, and
+**anthropic_manual**. For effort, omitted and explicit **auto** are distinct in
+requested metadata. Effective metadata omits the effort level for **auto**
+because clnkr sends no provider effort field for it. For Anthropic, effective
+metadata also records the Anthropic thinking mode and effective
+**anthropic_max_tokens**.
 
 # GLOSSARY
 
@@ -386,17 +407,18 @@ effective metadata also records the Anthropic thinking mode and effective
 : A turn that asks the host to run one or more bash actions.
 
 **Approval mode**
-: A **RunWithPolicy** policy that asks before executing accepted act turns.
+: A **RunWithPolicy** policy that asks before executing parsed act turns.
 
 **Bash action**
-: One shell command plus an optional working directory.
+: One shell command plus a working directory, represented as nullable
+**workdir** in canonical JSON and omitted when empty in Go.
 
 **Bash batch**
 : The ordered list of bash actions in a single act turn.
 
 **Bash tool call**
-: A provider-native request to run the bash tool, projected into one bash
-action.
+: A provider-native tool call using clnkr's **bash** tool schema, projected
+into one bash action.
 
 **Bash tool call ID**
 : The opaque provider ID attached to a bash tool call and its matching
@@ -407,7 +429,8 @@ tool result.
 denial, or skipping.
 
 **Base environment snapshot**
-: The complete environment map used as the base for command execution.
+: The environment snapshot used instead of the parent process environment as
+the base for command execution.
 
 **Canonical turn**
 : The internal JSON shape used by core code and persisted assistant transcript
@@ -418,8 +441,8 @@ messages.
 variables into a **Resolved provider config**.
 
 **Command outcome**
-: The normalized completion state of a command result: exit, timeout,
-cancelled, denied, skipped, or error.
+: The normalized command result outcome type: exit, timeout, cancelled, denied,
+skipped, or error.
 
 **Completion gate**
 : The full-send policy check that rejects or challenges structurally valid
@@ -436,12 +459,22 @@ continue, or stop when no answer is available.
 : The frontend coordinator that turns policy hooks and top-level frontend
 requests into terminal or JSONL interaction.
 
+**Executor**
+: The interface for running one shell command and returning a structured
+command result.
+
+**ShellExecutor**
+: The built-in Unix bash executor.
+
+**CommandExecutor**
+: Compatibility alias for **ShellExecutor**.
+
 **Child process**
 : A **clnkrd** process launched by bash for bounded child work. Its stdout,
 stderr, and event logs are ordinary process artifacts that the model must read
 and synthesize.
 
-**Effective request metadata**
+**Effective metadata**
 : The provider request state after validation, defaults, and provider-specific
 mapping.
 
@@ -493,19 +526,20 @@ history, such as an OpenAI Responses reasoning item.
 
 **Resolved provider config**
 : The app-facing result of config resolution: provider, provider API, model,
-base URL, API key, and validated provider request options.
+base URL, API key, act protocol, and validated provider request options.
 
-**Requested request metadata**
-: The provider request state exactly as requested by CLI inputs after
-normalization.
+**Requested metadata**
+: The normalized provider request state derived from CLI inputs before provider
+defaults and mapping.
 
-**Resource-state message**
-: A host-authored transcript message containing strict JSON command and
-model-turn budget state.
+**Resource state message**
+: A host-authored transcript message with **"type":"resource_state"**
+containing **commands_used**, **model_turns_used**, and optional command budget
+fields.
 
 **Run metadata**
-: The version, provider selection, prompt hash, requested and effective request
-metadata for one run.
+: The version, provider selection, act protocol, system prompt hash, and
+requested and effective request metadata for one run.
 
 **RunWithPolicy**
 : The run loop with policy hooks for approval and clarification interaction.
@@ -521,8 +555,8 @@ final summary.
 : The number of commands left before the step limit is reached.
 
 **Turn**
-: One structured model instruction in the agent protocol.
+: One structured model response in the agent protocol.
 
 # SEE ALSO
 
-**clnkr**(1), **clnkr**(3)
+**clnkr**(1), **clnkrd**(1), **clnkr**(3)
