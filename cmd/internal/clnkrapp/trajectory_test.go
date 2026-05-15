@@ -39,7 +39,7 @@ func TestWriteTrajectoryWritesIndentedMessages(t *testing.T) {
 }
 
 func TestRunMetadataDebugEventFormatsJSON(t *testing.T) {
-	meta := NewRunMetadata("test-version", providerconfig.ResolvedProviderConfig{
+	meta := newRunMetadata("test-version", providerconfig.ResolvedProviderConfig{
 		Provider:    providerdomain.ProviderOpenAI,
 		ProviderAPI: providerdomain.ProviderAPIOpenAIResponses,
 		Model:       "gpt-5.1",
@@ -68,7 +68,7 @@ func TestRunMetadataDebugEventFormatsJSON(t *testing.T) {
 }
 
 func TestRunMetadataMirrorsProviderRequestShape(t *testing.T) {
-	meta := NewRunMetadata("test-version", providerconfig.ResolvedProviderConfig{
+	meta := newRunMetadata("test-version", providerconfig.ResolvedProviderConfig{
 		Provider:    providerdomain.ProviderOpenAI,
 		ProviderAPI: providerdomain.ProviderAPIOpenAIResponses,
 		Model:       "gpt-5.1",

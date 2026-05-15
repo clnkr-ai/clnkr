@@ -15,7 +15,6 @@ import (
 
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
-	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
 )
 
 // version is set at build time via -ldflags.
@@ -287,43 +286,26 @@ func main() {
 		fatalf("--trajectory requires -p (single-task mode)")
 	}
 
-	actProtocolSetting, err := providerconfig.ParseActProtocolSetting(providerconfig.ActProtocolFlagValue(opts.actProtocol, opts.actProtocolSet, os.Getenv))
-	if err != nil {
-		fatalf("%v", err)
-	}
-	actProtocol := clnkr.ActProtocolClnkrInline
-	if !opts.noSystemPrompt {
-		actProtocol, err = providerconfig.ResolvePromptActProtocol(providerconfig.Inputs{
-			Provider: opts.provider, ProviderAPI: opts.providerAPI, Model: opts.model, BaseURL: opts.baseURL,
-			ActProtocol: actProtocolSetting,
-		}, os.Getenv, opts.dumpSystemPrompt)
+	startupInputs := clnkrapp.StartupInputs{CWD: cwd, Version: version, Env: os.Getenv, Environ: os.Environ(), Provider: opts.provider, ProviderAPI: opts.providerAPI, Model: opts.model, BaseURL: opts.baseURL, ActProtocol: opts.actProtocol, ActProtocolSet: opts.actProtocolSet, Effort: opts.effort, MaxOutputTokens: opts.maxOutputTokens, MaxOutputTokensSet: opts.maxOutputTokensSet, ThinkingBudgetTokens: opts.thinkingBudgetTokens, ThinkingBudgetTokensSet: opts.thinkingBudgetSet, OmitSystemPrompt: opts.noSystemPrompt, SystemPromptAppend: opts.systemPromptAppend, DumpSystemPrompt: opts.dumpSystemPrompt, Unattended: opts.singleTask}
+	if opts.dumpSystemPrompt {
+		systemPrompt, err := clnkrapp.LoadStartupPrompt(startupInputs)
 		if err != nil {
 			fatalf("%v", err)
 		}
-	}
-
-	systemPrompt := clnkr.LoadPromptWithOptions(cwd, clnkr.PromptOptions{
-		OmitSystemPrompt: opts.noSystemPrompt, SystemPromptAppend: opts.systemPromptAppend,
-		ActProtocol: actProtocol, Unattended: opts.singleTask,
-	})
-	if opts.dumpSystemPrompt {
 		_, _ = fmt.Fprint(os.Stdout, systemPrompt)
 		os.Exit(0)
 	}
 
-	cfg, err := providerconfig.ResolveConfig(providerconfig.Inputs{
-		Provider: opts.provider, ProviderAPI: opts.providerAPI,
-		Model: opts.model, BaseURL: opts.baseURL, ActProtocol: actProtocolSetting,
-		RequestOptions: clnkrapp.RequestOptions(opts.effort, opts.maxOutputTokens, opts.maxOutputTokensSet, opts.thinkingBudgetTokens, opts.thinkingBudgetSet),
-	}, os.Getenv)
+	startup, err := clnkrapp.PrepareStartup(startupInputs)
 	if err != nil {
-		if strings.Contains(err.Error(), "api key is required") {
+		if clnkrapp.IsMissingAPIKey(err) {
 			_, _ = fmt.Fprintln(os.Stderr, "Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key")
 			os.Exit(1)
 		}
 		fatalf("%v", err)
 	}
-	runMetadata := clnkrapp.NewRunMetadata(version, cfg, systemPrompt)
+	runMetadata := startup.Metadata
+	agent := startup.Agent
 
 	var eventLogFile *os.File
 	if opts.eventLog != "" {
@@ -334,9 +316,6 @@ func main() {
 		defer eventLogFile.Close() //nolint:errcheck
 	}
 
-	agent := clnkr.NewAgent(clnkrapp.NewModelForConfigWithOptions(cfg, systemPrompt, clnkrapp.ModelOptions{Unattended: opts.singleTask}), &clnkr.CommandExecutor{}, cwd)
-	agent.SetEnv(clnkrapp.CommandEnvFromProviderConfig(cfg, os.Environ()))
-	agent.ActProtocol = cfg.ActProtocol
 	var modelWait *modelWaitIndicator
 	installAgentNotify(agent, &modelWait, notifyOptions{
 		cwd:        cwd,
@@ -369,7 +348,7 @@ func main() {
 		_, _ = fmt.Fprintf(os.Stderr, "[Resumed session with %d messages]\n", count)
 	}
 
-	driver := clnkrapp.NewDriver(agent, clnkrapp.MakeCompactorFactory(cfg))
+	driver := startup.Driver
 	singleTaskOpts := singleTaskRunOptions{taskPrompt: opts.taskPrompt, trajectory: opts.trajectory}
 	replOpts := replRunOptions{fullSend: opts.fullSend, verbose: opts.verbose}
 

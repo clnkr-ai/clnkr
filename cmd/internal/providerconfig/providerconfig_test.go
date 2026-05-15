@@ -14,6 +14,9 @@ func TestResolveConfigRequiresProviderModelAndAPIKey(t *testing.T) {
 		if err == nil || err.Error() != "provider is required; set --provider or CLNKR_PROVIDER" {
 			t.Fatalf("ResolveConfig() err = %v, want provider required error", err)
 		}
+		if IsMissingAPIKey(err) {
+			t.Fatalf("IsMissingAPIKey(%v) = true, want false", err)
+		}
 	})
 
 	t.Run("model required", func(t *testing.T) {
@@ -32,6 +35,9 @@ func TestResolveConfigRequiresProviderModelAndAPIKey(t *testing.T) {
 		}, func(string) string { return "" })
 		if err == nil || err.Error() != "api key is required; set CLNKR_API_KEY" {
 			t.Fatalf("ResolveConfig() err = %v, want api key required error", err)
+		}
+		if !IsMissingAPIKey(err) {
+			t.Fatalf("IsMissingAPIKey(%v) = false, want true", err)
 		}
 	})
 

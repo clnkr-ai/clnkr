@@ -21,17 +21,15 @@ type model interface {
 	compaction.FreeformModel
 }
 
-// ModelOptions configures frontend-owned model construction behavior.
-type ModelOptions struct {
+type modelOptions struct {
 	Unattended bool
 }
 
-func NewModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt string) model {
-	return NewModelForConfigWithOptions(cfg, systemPrompt, ModelOptions{})
+func newModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt string) model {
+	return newModelForConfigWithOptions(cfg, systemPrompt, modelOptions{})
 }
 
-// NewModelForConfigWithOptions creates the provider model for a resolved config.
-func NewModelForConfigWithOptions(cfg providerconfig.ResolvedProviderConfig, systemPrompt string, modelOpts ModelOptions) model {
+func newModelForConfigWithOptions(cfg providerconfig.ResolvedProviderConfig, systemPrompt string, modelOpts modelOptions) model {
 	return providerfactory.NewModelWithOptions(providerFactoryConfig(cfg), systemPrompt, providerfactory.Options{Unattended: modelOpts.Unattended})
 }
 
@@ -47,13 +45,13 @@ func providerFactoryConfig(cfg providerconfig.ResolvedProviderConfig) providerfa
 	}
 }
 
-func MakeCompactorFactory(cfg providerconfig.ResolvedProviderConfig) compaction.Factory {
+func makeCompactorFactory(cfg providerconfig.ResolvedProviderConfig) compaction.Factory {
 	return compaction.NewFactory(func(instructions string) compaction.FreeformModel {
-		return NewModelForConfig(cfg, compaction.LoadCompactionPrompt(instructions))
+		return newModelForConfig(cfg, compaction.LoadCompactionPrompt(instructions))
 	})
 }
 
-func RequestOptions(effort string, maxOutputTokens int, maxOutputTokensSet bool, thinkingBudgetTokens int, thinkingBudgetTokensSet bool) providerdomain.ProviderRequestOptions {
+func requestOptions(effort string, maxOutputTokens int, maxOutputTokensSet bool, thinkingBudgetTokens int, thinkingBudgetTokensSet bool) providerdomain.ProviderRequestOptions {
 	return providerdomain.ProviderRequestOptions{
 		Effort: providerdomain.ProviderEffortOptions{
 			Level: effort,
@@ -147,7 +145,7 @@ type AnthropicManualMetadata struct {
 	ThinkingBudgetTokens        *int `json:"thinking_budget_tokens,omitempty"`
 }
 
-func NewRunMetadata(version string, cfg providerconfig.ResolvedProviderConfig, systemPrompt string) RunMetadata {
+func newRunMetadata(version string, cfg providerconfig.ResolvedProviderConfig, systemPrompt string) RunMetadata {
 	opts := cfg.RequestOptions
 
 	meta := RunMetadata{
