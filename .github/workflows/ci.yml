@@ -67,6 +67,7 @@ jobs:
 
       - name: Run guardrail reports
         run: |
+          make thoth-critical-check
           make architecture-shape-report
           make semantic-cohesion-report
           make test-fidelity-report
