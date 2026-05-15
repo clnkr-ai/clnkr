@@ -61,6 +61,9 @@ func TestSharedHelpFragments(t *testing.T) {
 					t.Fatalf("help missing %q", want)
 				}
 			}
+			if strings.Contains(fragment.text, "infers"+" provider") {
+				t.Fatalf("help contains stale inferred-provider text: %q", fragment.text)
+			}
 		})
 	}
 }

@@ -46,9 +46,6 @@ directory and returns a **CommandResult**.
 **ShellExecutor**
 : Built-in Unix bash executor.
 
-**CommandExecutor**
-: Compatibility alias for **ShellExecutor**.
-
 **Agent.Run**
 : Runs the full-send policy loop until **done**, clarification, error, or step
 limit. A **clarify** turn returns **ErrClarificationNeeded**.
@@ -147,8 +144,7 @@ The root package is the public library surface. Packages below **internal/**
 are not importable by external callers.
 
 The built-in **ShellExecutor** assumes Unix process semantics and bash.
-**CommandExecutor** remains available as a compatibility alias. Windows is
-unsupported.
+Windows is unsupported.
 
 # COPYRIGHT
 

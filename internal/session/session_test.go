@@ -1,7 +1,6 @@
 package session_test
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -26,9 +25,6 @@ func TestNormalizeProjectPath(t *testing.T) {
 	}
 	if got != again || got != "ldz77nnq4ybk5nbc" || len(got) != 16 {
 		t.Fatalf("NormalizeProjectPath = %q then %q, want stable 16-char key ldz77nnq4ybk5nbc", got, again)
-	}
-	if got == regressionHexProjectKey("/home/user/projects/myapp") {
-		t.Fatalf("NormalizeProjectPath returned regression-window hex key %q", got)
 	}
 	different, err := session.NormalizeProjectPath("/tmp/foo")
 	if err != nil {
@@ -153,35 +149,15 @@ func TestLoadLatestSessionOrdersBySessionFilename(t *testing.T) {
 		wantCreatedZero bool
 	}{
 		{
-			name: "legacy equal created names use highest sequence",
+			name: "current names use filename time",
 			files: map[string]string{
-				"9-2026-01-10T000000.000000Z.json":  sessionJSON("2026-01-10T00:00:00Z", "old"),
-				"10-2026-01-10T000000.000000Z.json": sessionJSON("2026-01-10T00:00:00Z", "new"),
-			},
-			wantLatest: "new",
-			wantOrder:  []string{"10-2026-01-10T000000.000000Z.json", "9-2026-01-10T000000.000000Z.json"},
-		},
-		{
-			name: "legacy filename sequence beats conflicting created metadata",
-			files: map[string]string{
-				"9-2026-01-10T000000.000000Z.json":  sessionJSON("2026-01-11T00:00:00Z", "old"),
-				"10-2026-01-10T000000.000000Z.json": sessionJSON("2026-01-10T00:00:00Z", "new"),
-			},
-			wantLatest: "new",
-			wantOrder:  []string{"10-2026-01-10T000000.000000Z.json", "9-2026-01-10T000000.000000Z.json"},
-		},
-		{
-			name: "mixed current and legacy names use filename time",
-			files: map[string]string{
-				"10-2026-01-01T000000.000000Z.json":     sessionJSON("2026-01-01T00:00:00Z", "legacy-high"),
-				"9-2026-01-03T000000.000000Z.json":      sessionJSON("2026-01-03T00:00:00Z", "legacy-low"),
+				"2026-01-03T000000.000000000Z-000.json": sessionJSON("2026-01-03T00:00:00Z", "new"),
 				"2026-01-02T000000.000000000Z-000.json": sessionJSON("2026-01-02T00:00:00Z", "current"),
 			},
-			wantLatest: "legacy-low",
+			wantLatest: "new",
 			wantOrder: []string{
-				"9-2026-01-03T000000.000000Z.json",
+				"2026-01-03T000000.000000000Z-000.json",
 				"2026-01-02T000000.000000000Z-000.json",
-				"10-2026-01-01T000000.000000Z.json",
 			},
 		},
 		{
@@ -223,19 +199,7 @@ func TestLoadLatestSessionOrdersBySessionFilename(t *testing.T) {
 	}
 }
 
-func TestLoadLatestSessionReadsRegressionHexSessionDir(t *testing.T) {
-	tmpdir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", tmpdir)
-
-	projectDir := "/tmp/test-project-regression-hex"
-	dir := filepath.Join(tmpdir, "clnkr", "projects", regressionHexProjectKey(projectDir))
-	writeFile(t, dir, "2026-01-10T000000.000000000Z-000.json", sessionJSON("2026-01-10T00:00:00Z", "hex"))
-
-	assertLatestContent(t, projectDir, "hex")
-	assertListOrder(t, projectDir, []string{"2026-01-10T000000.000000000Z-000.json"})
-}
-
-func TestSaveSessionWritesCanonicalDirWhileReadingRegressionHexDir(t *testing.T) {
+func TestSaveSessionWritesCanonicalDir(t *testing.T) {
 	tmpdir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", tmpdir)
 
@@ -244,11 +208,6 @@ func TestSaveSessionWritesCanonicalDirWhileReadingRegressionHexDir(t *testing.T)
 		t.Fatalf("SaveSession: %v", err)
 	}
 	assertSessionFileCount(t, projectDir, 1)
-
-	hexFiles, err := filepath.Glob(filepath.Join(tmpdir, "clnkr", "projects", regressionHexProjectKey(projectDir), "*.json"))
-	if err != nil || len(hexFiles) != 0 {
-		t.Fatalf("regression hex files = %d, err = %v; want 0", len(hexFiles), err)
-	}
 }
 
 func TestLoadLatestSessionCorruptFileHandling(t *testing.T) {
@@ -259,9 +218,9 @@ func TestLoadLatestSessionCorruptFileHandling(t *testing.T) {
 		wantErr    string
 	}{
 		{
-			name: "ignores corrupt older legacy when current is newest",
+			name: "ignores corrupt older current file when current is newest",
 			files: map[string]string{
-				"9-2026-01-10T000000.000000Z.json":      `{`,
+				"2026-01-10T000000.000000000Z-000.json": `{`,
 				"2026-01-11T000000.000000000Z-000.json": sessionJSON("2026-01-11T00:00:00Z", "new"),
 			},
 			wantLatest: "new",
@@ -399,9 +358,4 @@ func assertListOrder(t *testing.T, projectDir string, want []string) {
 
 func sessionJSON(created, content string) string {
 	return fmt.Sprintf(`{"created":%q,"messages":[{"role":"user","content":%q}]}`, created, content)
-}
-
-func regressionHexProjectKey(path string) string {
-	hash := sha256.Sum256([]byte(path))
-	return fmt.Sprintf("%x", hash[:8])
 }

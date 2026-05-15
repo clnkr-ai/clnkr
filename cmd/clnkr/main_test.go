@@ -305,7 +305,7 @@ func newOpenAIChatServer(t *testing.T, content func(call int) string) (*httptest
 	return server, &calls
 }
 
-func TestPromptModeUnattendedRunsSingleTask(t *testing.T) {
+func TestPromptRunsSingleTask(t *testing.T) {
 	server, _ := newOpenAIChatServer(t, func(int) string { return openAIWrappedDone("ok") })
 	defer server.Close()
 
@@ -314,7 +314,7 @@ func TestPromptModeUnattendedRunsSingleTask(t *testing.T) {
 		"--provider-api", "openai-chat-completions",
 		"--base-url", server.URL,
 		"--model", "gpt-test",
-		"--prompt-mode-unattended", "hi",
+		"--prompt", "hi",
 	)
 	if err != nil {
 		t.Fatalf("run main: %v\nstderr: %s", err, stderr.String())

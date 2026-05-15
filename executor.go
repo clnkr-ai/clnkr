@@ -22,9 +22,6 @@ type ShellExecutor struct {
 	BaseEnv map[string]string
 }
 
-// CommandExecutor is a compatibility alias for ShellExecutor.
-type CommandExecutor = ShellExecutor
-
 // SetEnv copies a full environment snapshot for future command execution.
 func (e *ShellExecutor) SetEnv(env map[string]string) {
 	if env == nil {

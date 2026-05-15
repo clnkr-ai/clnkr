@@ -332,19 +332,6 @@ func assertSamePath(t *testing.T, got, want string) {
 	}
 }
 
-func TestCommandExecutorAlias(t *testing.T) {
-	exec := &CommandExecutor{}
-	exec.SetEnv(map[string]string{"PATH": os.Getenv("PATH")})
-
-	out, err := exec.Execute(context.Background(), "printf alias", "/tmp")
-	if err != nil {
-		t.Fatalf("CommandExecutor alias Execute: %v", err)
-	}
-	if out.Stdout != "alias" {
-		t.Fatalf("stdout = %q, want alias", out.Stdout)
-	}
-}
-
 func executeAndUseEnv(t *testing.T, exec *ShellExecutor, command, dir string) CommandResult {
 	t.Helper()
 

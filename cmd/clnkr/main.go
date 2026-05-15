@@ -37,8 +37,6 @@ Usage:
 
 Options:
   -p, --prompt string       Task to run unattended and exit
-      --prompt-mode-unattended string
-                            Long alias for -p/--prompt
       --max-steps int       Limit executed commands
                             before summary (default: 100)
       --full-send           Execute every act batch without approval
@@ -55,7 +53,7 @@ Debugging:
       --trajectory string      Save single-task history as JSON on exit
 
 Short aliases:
-  -m, -u, -S                Aliases for --model, --base-url, --no-system-prompt
+  -m, -S                   Aliases for --model, --no-system-prompt
   -V, --version             Print version and exit
 
 ` + clnkrapp.ProviderOptionsUsage + `

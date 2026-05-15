@@ -328,8 +328,7 @@ clnkr treats provider APIs as adapters around one internal protocol.
 
 Provider resolution is split. **cmd/internal/providerconfig** owns CLI
 inputs: flag/env precedence, **CLNKR_** names, API key lookup, base URL parsing,
-provider inference from an explicit base URL when provider is unset, and
-user-facing configuration errors. **internal/providers/providerconfig** owns
+and user-facing configuration errors. **internal/providers/providerconfig** owns
 provider-domain semantics: provider/API constants, provider request options,
 model capability predicates, and request-option validation.
 

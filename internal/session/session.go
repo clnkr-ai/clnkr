@@ -39,9 +39,8 @@ type sessionFileRef struct {
 }
 
 type filenameOrder struct {
-	at     time.Time
-	seq    int
-	legacy bool
+	at  time.Time
+	seq int
 }
 
 // NormalizeProjectPath converts an absolute working directory to a stable,
@@ -183,23 +182,16 @@ func sessionFileRefs(pwd string) ([]sessionFileRef, error) {
 	if err != nil {
 		return nil, err
 	}
-	hash := sha256.Sum256([]byte(pwd))
-	dirs := []string{canonical, filepath.Join(filepath.Dir(canonical), fmt.Sprintf("%x", hash[:8]))}
 	var refs []sessionFileRef
-	for i, dir := range dirs {
-		if i > 0 && dir == canonical {
-			continue
+	files, err := sessionFiles(canonical)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return refs, nil
 		}
-		files, err := sessionFiles(dir)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, fmt.Errorf("readdir: %w", err)
-		}
-		for _, f := range files {
-			refs = append(refs, sessionFileRef{dir: dir, name: f.Name()})
-		}
+		return nil, fmt.Errorf("readdir: %w", err)
+	}
+	for _, f := range files {
+		refs = append(refs, sessionFileRef{dir: canonical, name: f.Name()})
 	}
 	return refs, nil
 }
@@ -245,9 +237,6 @@ func newerParsedFilename(a, b string) (bool, bool) {
 		if !aInfo.at.Equal(bInfo.at) {
 			return aInfo.at.After(bInfo.at), true
 		}
-		if aInfo.legacy != bInfo.legacy {
-			return !aInfo.legacy, true
-		}
 		if aInfo.seq != bInfo.seq {
 			return aInfo.seq > bInfo.seq, true
 		}
@@ -260,14 +249,6 @@ func parseSessionFilename(name string) (filenameOrder, bool) {
 	base, ok := strings.CutSuffix(name, ".json")
 	if !ok {
 		return filenameOrder{}, false
-	}
-	prefix, rest, ok := strings.Cut(base, "-")
-	if ok {
-		if seq, err := strconv.Atoi(prefix); err == nil {
-			if at, ok := parseSessionFilenameTime(rest, "2006-01-02T150405.000000Z"); ok {
-				return filenameOrder{at: at, seq: seq, legacy: true}, true
-			}
-		}
 	}
 	idx := strings.LastIndexByte(base, '-')
 	if idx <= 0 {

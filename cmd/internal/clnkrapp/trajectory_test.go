@@ -103,9 +103,8 @@ func TestLoadMessages(t *testing.T) {
 		input   string
 		wantErr string
 	}{
-		{name: "legacy array", input: `[{"role":"user","content":"hello"}]`},
-		{name: "envelope", input: `{"metadata":{"version":"dev"},"messages":[{"role":"user","content":"hello"}]}`},
-		{name: "envelope without messages", input: `{"metadata":{"version":"dev"}}`, wantErr: "parse messages: missing messages"},
+		{name: "message array", input: `[{"role":"user","content":"hello"}]`},
+		{name: "rejects envelope", input: `{"metadata":{"version":"dev"},"messages":[{"role":"user","content":"hello"}]}`, wantErr: "parse messages: json: cannot unmarshal object into Go value of type []transcript.Message"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := LoadMessages([]byte(tc.input))

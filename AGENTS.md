@@ -22,7 +22,7 @@ Run `make _fmt` then `make check` before committing. Do not commit if either fai
 - Root `clnkr` is the only public import surface. `internal/` is allowed when it clarifies ownership.
 - Output goes through typed events. Do not add `io.Writer` parameters.
 - Policy logic in `Run()`, shared logic in `Step()`. No policy in `Step()`.
-- CLI config resolution stays in `cmd/internal/providerconfig`: env/flag precedence, `CLNKR_*`, API keys, base URL parsing, provider detection, and user-facing config errors.
+- CLI config resolution stays in `cmd/internal/providerconfig`: env/flag precedence, `CLNKR_*`, API keys, base URL parsing, provider parsing, and user-facing config errors.
 - Provider request semantics stay in `internal/providers/providerconfig`: provider/API constants, request options, model capability checks, and provider-specific validation.
 - Provider adapters serialize validated options; they do not resolve CLI config.
 - Child-agent orchestration is prompt-guided Unix process composition. Bash may launch `clnkrd`; the host does not special-case child agents, `/delegate`, child counters, or child lifecycle events.
@@ -55,7 +55,7 @@ clnkr/                  # core: types, Agent, events (stdlib only)
 
 **Command results (host→model):** JSON with `stdout`, `stderr`, `outcome`, and optional `feedback`. Exit outcomes include `exit_code`; non-exit outcomes include timeout, cancelled, denied, skipped, and error.
 
-**Child process boundary:** `clnkrd` is the composable process surface. The prompt teaches models when to launch `clnkrd` through bash for bounded child work and how to read stdout/stderr or event logs. `Driver`, provider adapters, `CommandExecutor`, and `Agent.Step()` do not participate in child-agent policy.
+**Child process boundary:** `clnkrd` is the composable process surface. The prompt teaches models when to launch `clnkrd` through bash for bounded child work and how to read stdout/stderr or event logs. `Driver`, provider adapters, `ShellExecutor`, and `Agent.Step()` do not participate in child-agent policy.
 
 ## Release
 Tag-driven. Push feature to `main`, wait for CI/evals/site to go green, then push the plain semantic version tag. Release workflow triggers from semver tags, updates `debian/main`, and generates Debian changelog. Remote `main` may move. Fetch and rebase before follow-up pushes.

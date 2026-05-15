@@ -223,19 +223,10 @@ func WriteTrajectory(path string, messages []clnkr.Message) error {
 
 func LoadMessages(data []byte) ([]clnkr.Message, error) {
 	var messages []clnkr.Message
-	if err := json.Unmarshal(data, &messages); err == nil {
-		return messages, nil
-	}
-	var envelope struct {
-		Messages []clnkr.Message `json:"messages"`
-	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
+	if err := json.Unmarshal(data, &messages); err != nil {
 		return nil, fmt.Errorf("parse messages: %w", err)
 	}
-	if envelope.Messages == nil {
-		return nil, fmt.Errorf("parse messages: missing messages")
-	}
-	return envelope.Messages, nil
+	return messages, nil
 }
 
 func AddMessagesFile(agent *clnkr.Agent, path string) error {

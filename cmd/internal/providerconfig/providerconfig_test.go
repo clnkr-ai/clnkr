@@ -21,6 +21,17 @@ func TestResolveConfigRequiresProviderModelAndAPIKey(t *testing.T) {
 			want: "provider is required; set --provider or CLNKR_PROVIDER",
 		},
 		{
+			name:   "base url does not replace provider",
+			inputs: Inputs{BaseURL: "https://mock-provider.example/v1", Model: "test-model"},
+			want:   "provider is required; set --provider or CLNKR_PROVIDER",
+		},
+		{
+			name:   "env base url does not replace provider",
+			inputs: Inputs{Model: "test-model"},
+			env:    map[string]string{"CLNKR_BASE_URL": "https://mock-provider.example/v1"},
+			want:   "provider is required; set --provider or CLNKR_PROVIDER",
+		},
+		{
 			name:   "model required",
 			inputs: Inputs{Provider: "anthropic"},
 			want:   "model is required; set --model or CLNKR_MODEL",
@@ -162,15 +173,15 @@ func TestResolveConfigProviderAndBaseURLSelection(t *testing.T) {
 			wantBaseURL:     DefaultOpenAIBaseURL,
 		},
 		{
-			name:            "custom base url infers openai",
-			inputs:          Inputs{Model: "test-model", BaseURL: "https://mock-provider.example/v1"},
+			name:            "custom openai base url",
+			inputs:          Inputs{Provider: "openai", Model: "test-model", BaseURL: "https://mock-provider.example/v1"},
 			wantProvider:    providerdomain.ProviderOpenAI,
 			wantProviderAPI: providerdomain.ProviderAPIOpenAIChatCompletions,
 			wantBaseURL:     "https://mock-provider.example/v1",
 		},
 		{
-			name:            "anthropic base url infers anthropic",
-			inputs:          Inputs{Model: "claude-sonnet-4-6", BaseURL: "https://api.anthropic.com"},
+			name:            "custom anthropic base url",
+			inputs:          Inputs{Provider: "anthropic", Model: "claude-sonnet-4-6", BaseURL: "https://api.anthropic.com"},
 			wantProvider:    providerdomain.ProviderAnthropic,
 			wantProviderAPI: providerdomain.ProviderAPIAuto,
 			wantBaseURL:     "https://api.anthropic.com",

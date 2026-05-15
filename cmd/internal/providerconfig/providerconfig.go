@@ -116,19 +116,12 @@ func resolveContext(inputs Inputs, env func(string) string) (providerdomain.Prov
 	var provider providerdomain.Provider
 	var parsedBaseURL *url.URL
 	var err error
-	if providerSet {
-		provider, err = providerdomain.ParseProvider(providerRaw)
-		if err != nil {
-			return "", "", "", "", err
-		}
-	} else if baseURLSet {
-		parsedBaseURL, err = parseBaseURL(baseURL, baseURLSource)
-		if err != nil {
-			return "", "", "", "", err
-		}
-		provider = inferProviderFromBaseURL(parsedBaseURL)
-	} else {
+	if !providerSet {
 		return "", "", "", "", fmt.Errorf("provider is required; set --provider or CLNKR_PROVIDER")
+	}
+	provider, err = providerdomain.ParseProvider(providerRaw)
+	if err != nil {
+		return "", "", "", "", err
 	}
 
 	model, _, ok := chooseValue(inputs.Model, env("CLNKR_MODEL"), "--model", "CLNKR_MODEL")
@@ -174,13 +167,6 @@ func chooseValue(flagValue, envValue, flagSource, envSource string) (string, str
 		return envValue, envSource, true
 	}
 	return "", "", false
-}
-
-func inferProviderFromBaseURL(baseURL *url.URL) providerdomain.Provider {
-	if host := strings.ToLower(baseURL.Hostname()); host == "anthropic.com" || strings.HasSuffix(host, ".anthropic.com") {
-		return providerdomain.ProviderAnthropic
-	}
-	return providerdomain.ProviderOpenAI
 }
 
 func parseBaseURL(baseURL, source string) (*url.URL, error) {
