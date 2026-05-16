@@ -355,50 +355,65 @@ func TestResolvePromptActProtocol(t *testing.T) {
 }
 
 func TestResolveConfigAcceptsRequestOptions(t *testing.T) {
-	t.Run("openai responses effort and max output", func(t *testing.T) {
-		cfg := mustResolveConfig(t, Inputs{
-			Provider:    "openai",
-			ProviderAPI: "openai-responses",
-			Model:       "gpt-5.1-codex-max",
-			RequestOptions: providerdomain.ProviderRequestOptions{
+	tests := []struct {
+		name string
+		in   Inputs
+		want providerdomain.ProviderRequestOptions
+	}{
+		{
+			name: "openai responses effort and max output",
+			in: Inputs{
+				Provider:    "openai",
+				ProviderAPI: "openai-responses",
+				Model:       "gpt-5.1-codex-max",
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					Effort: providerdomain.ProviderEffortOptions{Level: "high", Set: true},
+					Output: providerdomain.ProviderOutputOptions{MaxOutputTokens: providerdomain.OptionalInt{Value: 8000, Set: true}},
+				},
+			},
+			want: providerdomain.ProviderRequestOptions{
 				Effort: providerdomain.ProviderEffortOptions{Level: "high", Set: true},
 				Output: providerdomain.ProviderOutputOptions{MaxOutputTokens: providerdomain.OptionalInt{Value: 8000, Set: true}},
 			},
-		}, keyedEnvMap())
-		if !cfg.RequestOptions.Effort.Set || cfg.RequestOptions.Effort.Level != "high" {
-			t.Fatalf("Effort = %#v, want high", cfg.RequestOptions.Effort)
-		}
-		if cfg.RequestOptions.Output.MaxOutputTokens != (providerdomain.OptionalInt{Value: 8000, Set: true}) {
-			t.Fatalf("Output.MaxOutputTokens = %#v, want set 8000", cfg.RequestOptions.Output.MaxOutputTokens)
-		}
-	})
-
-	t.Run("anthropic thinking and max output", func(t *testing.T) {
-		cfg := mustResolveConfig(t, Inputs{
-			Provider: "anthropic",
-			Model:    "claude-sonnet-4-20250514",
-			RequestOptions: providerdomain.ProviderRequestOptions{
+		},
+		{
+			name: "anthropic thinking and max output",
+			in: Inputs{
+				Provider: "anthropic",
+				Model:    "claude-sonnet-4-20250514",
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true}},
+					Output:          providerdomain.ProviderOutputOptions{MaxOutputTokens: providerdomain.OptionalInt{Value: 4096, Set: true}},
+				},
+			},
+			want: providerdomain.ProviderRequestOptions{
 				AnthropicManual: providerdomain.AnthropicManualThinkingOptions{ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true}},
 				Output:          providerdomain.ProviderOutputOptions{MaxOutputTokens: providerdomain.OptionalInt{Value: 4096, Set: true}},
 			},
-		}, keyedEnvMap())
-		if cfg.RequestOptions.AnthropicManual.ThinkingBudgetTokens != (providerdomain.OptionalInt{Value: 2048, Set: true}) {
-			t.Fatalf("ThinkingBudgetTokens = %#v, want set 2048", cfg.RequestOptions.AnthropicManual.ThinkingBudgetTokens)
-		}
-		if cfg.RequestOptions.Output.MaxOutputTokens != (providerdomain.OptionalInt{Value: 4096, Set: true}) {
-			t.Fatalf("Output.MaxOutputTokens = %#v, want set 4096", cfg.RequestOptions.Output.MaxOutputTokens)
-		}
-	})
-
-	t.Run("anthropic opus 4 date snapshot manual thinking", func(t *testing.T) {
-		mustResolveConfig(t, Inputs{
-			Provider: "anthropic",
-			Model:    "claude-opus-4-20250514",
-			RequestOptions: providerdomain.ProviderRequestOptions{
+		},
+		{
+			name: "anthropic opus 4 date snapshot manual thinking",
+			in: Inputs{
+				Provider: "anthropic",
+				Model:    "claude-opus-4-20250514",
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true}},
+				},
+			},
+			want: providerdomain.ProviderRequestOptions{
 				AnthropicManual: providerdomain.AnthropicManualThinkingOptions{ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true}},
 			},
-		}, keyedEnvMap())
-	})
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := mustResolveConfig(t, tt.in, keyedEnvMap())
+			if cfg.RequestOptions != tt.want {
+				t.Fatalf("RequestOptions = %#v, want %#v", cfg.RequestOptions, tt.want)
+			}
+		})
+	}
 }
 
 func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {

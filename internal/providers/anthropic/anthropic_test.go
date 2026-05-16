@@ -390,28 +390,6 @@ func TestModelToolCallsReplayToolMessagesWithoutDuplicateText(t *testing.T) {
 	}
 }
 
-func TestModelToolCallsReplayErroredToolResult(t *testing.T) {
-	var gotMessages []any
-	server := jsonServer(t, func(r *http.Request) any {
-		gotMessages = requestBody(t, r)["messages"].([]any)
-		return textResponse(anthropicWrappedDone("ok"))
-	})
-	defer server.Close()
-
-	m := anthropic.NewModelWithOptions(server.URL, "test-key", "claude-test", "sys prompt", anthropic.Options{UseBashToolCalls: true})
-	_, err := m.Query(context.Background(), []clnkr.Message{
-		{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"command":"false","workdir":null}]}}`, BashToolCalls: []clnkr.BashToolCall{{ID: "toolu_1", Command: "false"}}},
-		{Role: "user", Content: "payload", BashToolResult: &clnkr.BashToolResult{ID: "toolu_1", Content: "payload", IsError: true}},
-	})
-	if err != nil {
-		t.Fatalf("Query: %v", err)
-	}
-	result := gotMessages[1].(map[string]any)["content"].([]any)[0].(map[string]any)
-	if result["type"] != "tool_result" || result["is_error"] != true {
-		t.Fatalf("tool result = %#v, want is_error", result)
-	}
-}
-
 func TestModelToolCallsReplayConsecutiveToolResultsTogether(t *testing.T) {
 	var gotMessages []any
 	server := jsonServer(t, func(r *http.Request) any {

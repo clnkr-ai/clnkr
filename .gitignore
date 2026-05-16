@@ -41,5 +41,8 @@ eval/artifacts*
 # Local worktrees
 /.worktrees/
 
+# Local analysis scratch
+/tmp/
+
 # Local agent skills
 /.agents/

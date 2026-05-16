@@ -5,42 +5,6 @@ import (
 	"testing"
 )
 
-func TestLoadStartupPromptDumpAutoDoesNotRequireAPIKey(t *testing.T) {
-	isolatePromptEnv(t)
-
-	prompt, err := LoadStartupPrompt(StartupInputs{
-		CWD:              t.TempDir(),
-		Provider:         "openai",
-		ProviderAPI:      "openai-responses",
-		Model:            "gpt-5",
-		DumpSystemPrompt: true,
-		Env:              func(string) string { return "" },
-	})
-	if err != nil {
-		t.Fatalf("LoadStartupPrompt: %v", err)
-	}
-	if !strings.Contains(prompt, "call the bash tool") {
-		t.Fatalf("prompt missing tool-calls instructions: %q", prompt)
-	}
-}
-
-func TestLoadStartupPromptConcreteInlineNeedsNoProviderContext(t *testing.T) {
-	isolatePromptEnv(t)
-
-	prompt, err := LoadStartupPrompt(StartupInputs{
-		CWD:              t.TempDir(),
-		ActProtocol:      "clnkr-inline",
-		DumpSystemPrompt: true,
-		Env:              func(string) string { return "" },
-	})
-	if err != nil {
-		t.Fatalf("LoadStartupPrompt: %v", err)
-	}
-	if !strings.Contains(prompt, "Every response must be exactly one JSON object") {
-		t.Fatalf("prompt missing inline instructions: %q", prompt)
-	}
-}
-
 func TestPrepareStartupMissingAPIKeyIsClassified(t *testing.T) {
 	_, err := PrepareStartup(StartupInputs{
 		CWD:      t.TempDir(),

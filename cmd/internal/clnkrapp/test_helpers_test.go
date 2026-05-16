@@ -46,21 +46,6 @@ func verifiedDone(summary string) *clnkr.DoneTurn {
 	}
 }
 
-func mustCanonicalTurn(t testingT, turn clnkr.Turn) string {
-	t.Helper()
-
-	text, err := clnkr.CanonicalTurnJSON(turn)
-	if err != nil {
-		t.Fatalf("CanonicalTurnJSON: %v", err)
-	}
-	return text
-}
-
-type testingT interface {
-	Helper()
-	Fatalf(string, ...any)
-}
-
 type fakeModel struct {
 	responses []clnkr.Response
 	calls     int
