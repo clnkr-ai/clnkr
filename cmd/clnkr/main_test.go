@@ -206,137 +206,140 @@ func TestFlagParseErrorsKeepUsageOffStdout(t *testing.T) {
 	}
 }
 
-func TestDumpSystemPromptModes(t *testing.T) {
-	tests := []struct {
-		name                 string
-		args                 []string
-		wantErr              bool
-		wantStdout           string
-		wantStdoutContains   []string
-		wantStdoutSuffix     string
-		rejectStdoutContains []string
-		wantStderrContains   []string
-		rejectStderrContains []string
-	}{
-		{
-			name: "custom prompt does not require provider config",
-			args: []string{
-				"--no-system-prompt",
-				"--system-prompt-append",
-				"custom prompt",
-				"--dump-system-prompt",
-			},
-			wantStdout: "custom prompt",
+type dumpSystemPromptWant struct {
+	err                  bool
+	stdout               string
+	stdoutContains       []string
+	stdoutSuffix         string
+	rejectStdoutContains []string
+	stderrContains       []string
+	rejectStderrContains []string
+}
+
+func assertDumpSystemPrompt(t *testing.T, args []string, want dumpSystemPromptWant) {
+	t.Helper()
+
+	stdout, stderr, err := runMainHelper(t, args...)
+	if want.err && err == nil {
+		t.Fatalf("run main succeeded; stdout: %s stderr: %s", stdout.String(), stderr.String())
+	}
+	if !want.err && err != nil {
+		t.Fatalf("dump system prompt: %v\nstderr: %s", err, stderr.String())
+	}
+	if want.stdout != "" || want.err {
+		if stdout.String() != want.stdout {
+			t.Fatalf("stdout = %q, want %q", stdout.String(), want.stdout)
+		}
+	}
+	if want.stdoutSuffix != "" && !strings.HasSuffix(stdout.String(), want.stdoutSuffix) {
+		t.Fatalf("stdout suffix = %q, want suffix %q", stdout.String(), want.stdoutSuffix)
+	}
+	for _, text := range want.stdoutContains {
+		if !strings.Contains(stdout.String(), text) {
+			t.Fatalf("stdout missing %q: %q", text, stdout.String())
+		}
+	}
+	for _, text := range want.rejectStdoutContains {
+		if strings.Contains(stdout.String(), text) {
+			t.Fatalf("stdout contains %q: %q", text, stdout.String())
+		}
+	}
+	for _, text := range want.stderrContains {
+		if !strings.Contains(stderr.String(), text) {
+			t.Fatalf("stderr = %q, want %q", stderr.String(), text)
+		}
+	}
+	for _, text := range want.rejectStderrContains {
+		if strings.Contains(stderr.String(), text) {
+			t.Fatalf("stderr contains %q: %q", text, stderr.String())
+		}
+	}
+	if len(want.stderrContains) == 0 && len(want.rejectStderrContains) == 0 && stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestDumpCustomSystemPromptDoesNotRequireProviderConfig(t *testing.T) {
+	assertDumpSystemPrompt(
+		t,
+		[]string{
+			"--no-system-prompt",
+			"--system-prompt-append",
+			"custom prompt",
+			"--dump-system-prompt",
 		},
-		{
-			name: "append value may be prompt flag text",
-			args: []string{
-				"--act-protocol",
-				"clnkr-inline",
-				"--system-prompt-append",
-				"-p",
-				"--dump-system-prompt",
-			},
-			wantStdoutSuffix: "\n\n-p",
+		dumpSystemPromptWant{stdout: "custom prompt"},
+	)
+}
+
+func TestDumpSystemPromptAllowsPromptFlagTextInAppend(t *testing.T) {
+	assertDumpSystemPrompt(
+		t,
+		[]string{
+			"--act-protocol",
+			"clnkr-inline",
+			"--system-prompt-append",
+			"-p",
+			"--dump-system-prompt",
 		},
-		{
-			name:               "append marker value does not select unattended prompt",
-			args:               []string{"--system-prompt-append", "--dump-system-prompt", "-p"},
-			wantErr:            true,
-			wantStdout:         "",
-			wantStderrContains: []string{"flag needs an argument: -p"},
+		dumpSystemPromptWant{stdoutSuffix: "\n\n-p"},
+	)
+}
+
+func TestDumpSystemPromptAppendMarkerDoesNotSelectUnattendedPrompt(t *testing.T) {
+	assertDumpSystemPrompt(t,
+		[]string{"--system-prompt-append", "--dump-system-prompt", "-p"},
+		dumpSystemPromptWant{
+			err:            true,
+			stderrContains: []string{"flag needs an argument: -p"},
 		},
-		{
-			name: "auto resolves without api key",
-			args: []string{
-				"--provider",
-				"openai",
-				"--provider-api",
-				"openai-responses",
-				"--model",
-				"gpt-5",
-				"--dump-system-prompt",
-			},
-			wantStdoutContains:   []string{"call the bash tool"},
+	)
+}
+
+func TestDumpAutoSystemPromptResolvesWithoutAPIKey(t *testing.T) {
+	assertDumpSystemPrompt(t,
+		[]string{
+			"--provider", "openai",
+			"--provider-api", "openai-responses",
+			"--model", "gpt-5",
+			"--dump-system-prompt",
+		},
+		dumpSystemPromptWant{
+			stdoutContains:       []string{"call the bash tool"},
 			rejectStderrContains: []string{"No API key found", "api key is required"},
 		},
-		{
-			name:               "auto reports missing provider context",
-			args:               []string{"--dump-system-prompt"},
-			wantErr:            true,
-			wantStdout:         "",
-			wantStderrContains: []string{"--act-protocol clnkr-inline"},
+	)
+}
+
+func TestDumpAutoSystemPromptReportsMissingProviderContext(t *testing.T) {
+	assertDumpSystemPrompt(t,
+		[]string{"--dump-system-prompt"},
+		dumpSystemPromptWant{
+			err:            true,
+			stderrContains: []string{"--act-protocol clnkr-inline"},
 		},
-		{
-			name: "prompt flag dumps unattended prompt",
-			args: []string{
-				"--act-protocol",
-				"clnkr-inline",
-				"-p",
-				"fix it",
-				"--dump-system-prompt",
-			},
-			wantStdoutContains:   []string{`Set type to exactly one of "act" or "done".`},
+	)
+}
+
+func TestPromptFlagDumpsUnattendedSystemPrompt(t *testing.T) {
+	assertDumpSystemPrompt(t,
+		[]string{"--act-protocol", "clnkr-inline", "-p", "fix it", "--dump-system-prompt"},
+		dumpSystemPromptWant{
+			stdoutContains:       []string{`Set type to exactly one of "act" or "done".`},
 			rejectStdoutContains: []string{"clarify"},
 			rejectStderrContains: []string{"provider is required"},
 		},
-		{
-			name:               "prompt flag before dump errors",
-			args:               []string{"-p", "--dump-system-prompt"},
-			wantErr:            true,
-			wantStdout:         "",
-			wantStderrContains: []string{"-p requires a task", "clnkr --dump-system-prompt -p"},
-		},
-	}
+	)
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			stdout, stderr, err := runMainHelper(t, tt.args...)
-			if tt.wantErr && err == nil {
-				t.Fatalf(
-					"run main succeeded; stdout: %s stderr: %s",
-					stdout.String(),
-					stderr.String(),
-				)
-			}
-			if !tt.wantErr && err != nil {
-				t.Fatalf("dump system prompt: %v\nstderr: %s", err, stderr.String())
-			}
-			if tt.wantStdout != "" || tt.wantErr {
-				if stdout.String() != tt.wantStdout {
-					t.Fatalf("stdout = %q, want %q", stdout.String(), tt.wantStdout)
-				}
-			}
-			if tt.wantStdoutSuffix != "" &&
-				!strings.HasSuffix(stdout.String(), tt.wantStdoutSuffix) {
-				t.Fatalf("stdout suffix = %q, want suffix %q", stdout.String(), tt.wantStdoutSuffix)
-			}
-			for _, want := range tt.wantStdoutContains {
-				if !strings.Contains(stdout.String(), want) {
-					t.Fatalf("stdout missing %q: %q", want, stdout.String())
-				}
-			}
-			for _, reject := range tt.rejectStdoutContains {
-				if strings.Contains(stdout.String(), reject) {
-					t.Fatalf("stdout contains %q: %q", reject, stdout.String())
-				}
-			}
-			for _, want := range tt.wantStderrContains {
-				if !strings.Contains(stderr.String(), want) {
-					t.Fatalf("stderr = %q, want %q", stderr.String(), want)
-				}
-			}
-			for _, reject := range tt.rejectStderrContains {
-				if strings.Contains(stderr.String(), reject) {
-					t.Fatalf("stderr contains %q: %q", reject, stderr.String())
-				}
-			}
-			if len(tt.wantStderrContains) == 0 && len(tt.rejectStderrContains) == 0 &&
-				stderr.Len() != 0 {
-				t.Fatalf("stderr = %q, want empty", stderr.String())
-			}
-		})
-	}
+func TestPromptFlagBeforeDumpSystemPromptErrors(t *testing.T) {
+	assertDumpSystemPrompt(t,
+		[]string{"-p", "--dump-system-prompt"},
+		dumpSystemPromptWant{
+			err:            true,
+			stderrContains: []string{"-p requires a task", "clnkr --dump-system-prompt -p"},
+		},
+	)
 }
 
 func newOpenAIChatServer(t *testing.T, content func(call int) string) (*httptest.Server, *int) {

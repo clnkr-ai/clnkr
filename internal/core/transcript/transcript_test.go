@@ -406,149 +406,113 @@ func TestFormatCommandResultUsesStructuredShellPayload(t *testing.T) {
 	}
 }
 
-func TestFormatCommandResultCompressionAndSalience(t *testing.T) {
-	exitFailure := 1
-	compressedStdout := "stdout-head\n" + strings.Repeat(
-		"progress line\n",
-		80*1024/len("progress line\n"),
-	) + "build completed\nstdout-tail\n"
-	successWithNoisyErrors := "stdout-head\n" + strings.Repeat(
-		"error: noisy success log\n",
-		80*1024/len("error: noisy success log\n"),
-	) + "stdout-tail\n"
-	failureStdout := "stdout-head\n" +
+func requireStdoutCompressed(t *testing.T, payload commandPayload, original string) {
+	t.Helper()
+
+	if payload.Observation.Source != "clnkr" || payload.Observation.Version != 1 {
+		t.Fatalf("observation identity = %#v", payload.Observation)
+	}
+	if payload.Observation.Stdout == nil || payload.Observation.Stdout.Mode != "compressed" {
+		t.Fatalf("stdout observation = %#v, want compressed", payload.Observation.Stdout)
+	}
+	if payload.Observation.Stdout.OriginalBytes != len(original) {
+		t.Fatalf(
+			"original bytes = %d, want %d",
+			payload.Observation.Stdout.OriginalBytes,
+			len(original),
+		)
+	}
+	if payload.Observation.Stdout.ShownBytes != len(payload.Stdout) {
+		t.Fatalf(
+			"shown bytes = %d, want %d",
+			payload.Observation.Stdout.ShownBytes,
+			len(payload.Stdout),
+		)
+	}
+}
+
+func TestFormatCommandResultCompressedStdoutRecordsMetadata(t *testing.T) {
+	stdout := "stdout-head\n" +
+		strings.Repeat("progress line\n", 80*1024/len("progress line\n")) +
+		"build completed\nstdout-tail\n"
+	payload := decodeCommandPayload(
+		t,
+		FormatCommandResult(CommandResult{Stdout: stdout, ExitCode: 0}),
+	)
+
+	for _, want := range []string{"[clnkr: stdout compressed; original ", "[head]", "[tail]", "stdout-head", "stdout-tail"} {
+		if !strings.Contains(payload.Stdout, want) {
+			t.Fatalf("stdout missing %q: %q", want, payload.Stdout)
+		}
+	}
+	if strings.Contains(payload.Stdout, "omitted about ") {
+		t.Fatalf("stdout contains omitted estimate: %q", payload.Stdout)
+	}
+	requireStdoutCompressed(t, payload, stdout)
+	if payload.Observation.Stdout.OmittedBytes != len(stdout)-compressedRawKept(payload.Stdout) {
+		t.Fatalf(
+			"omitted bytes = %d, want %d",
+			payload.Observation.Stdout.OmittedBytes,
+			len(stdout)-compressedRawKept(payload.Stdout),
+		)
+	}
+}
+
+func TestFormatCommandResultLeavesShortStreamsUnchangedWithoutObservation(t *testing.T) {
+	raw := FormatCommandResult(CommandResult{
+		Command:  "printf hi",
+		ExitCode: 0,
+		Stdout:   "hello\n",
+		Stderr:   "warn\n",
+	})
+	payload := decodeCommandPayload(t, raw)
+
+	if payload.Stdout != "hello\n" || payload.Stderr != "warn\n" {
+		t.Fatalf("payload streams = %#v", payload)
+	}
+	if _, ok := decodeCommandFields(t, raw)["observation"]; ok {
+		t.Fatalf("result should not emit observation metadata: %s", raw)
+	}
+}
+
+func TestFormatCommandResultDoesNotExtractSalientLinesForSuccess(t *testing.T) {
+	stdout := "stdout-head\n" +
+		strings.Repeat("error: noisy success log\n", 80*1024/len("error: noisy success log\n")) +
+		"stdout-tail\n"
+	payload := decodeCommandPayload(
+		t,
+		FormatCommandResult(CommandResult{Stdout: stdout, ExitCode: 0}),
+	)
+
+	if strings.Contains(payload.Stdout, "[salient]") {
+		t.Fatalf("successful stdout contains salient section: %q", payload.Stdout)
+	}
+	requireStdoutCompressed(t, payload, stdout)
+}
+
+func TestFormatCommandResultUsesStdoutSalienceWhenFailureStderrEmpty(t *testing.T) {
+	code := 1
+	stdout := "stdout-head\n" +
 		strings.Repeat("progress line\n", 40*1024/len("progress line\n")) +
 		"Traceback (most recent call last):\n" +
 		`  File "app.py", line 12, in <module>` + "\n" +
 		"AssertionError: expected 3 got 4\n" +
 		strings.Repeat("cleanup line\n", 50*1024/len("cleanup line\n")) +
 		"stdout-tail\n"
+	payload := decodeCommandPayload(t, FormatCommandResult(CommandResult{
+		Stdout:  stdout,
+		Outcome: CommandOutcome{Type: CommandOutcomeExit, ExitCode: &code},
+	}))
 
-	tests := []struct {
-		name                 string
-		result               CommandResult
-		wantStdout           string
-		wantStderr           string
-		wantStdoutContains   []string
-		rejectStdoutContains []string
-		wantStdoutCompressed bool
-		wantOmittedBytes     bool
-		wantNoObservation    bool
-	}{
-		{
-			name:   "compressed stdout records metadata",
-			result: CommandResult{Stdout: compressedStdout, ExitCode: 0},
-			wantStdoutContains: []string{
-				"[clnkr: stdout compressed; original ",
-				"[head]",
-				"[tail]",
-				"stdout-head",
-				"stdout-tail",
-			},
-			rejectStdoutContains: []string{"omitted about "},
-			wantStdoutCompressed: true,
-			wantOmittedBytes:     true,
-		},
-		{
-			name: "short streams stay unchanged without observation",
-			result: CommandResult{
-				Command:  "printf hi",
-				ExitCode: 0,
-				Stdout:   "hello\n",
-				Stderr:   "warn\n",
-			},
-			wantStdout:        "hello\n",
-			wantStderr:        "warn\n",
-			wantNoObservation: true,
-		},
-		{
-			name:                 "successful output does not extract salient lines",
-			result:               CommandResult{Stdout: successWithNoisyErrors, ExitCode: 0},
-			rejectStdoutContains: []string{"[salient]"},
-			wantStdoutCompressed: true,
-		},
-		{
-			name: "failed stdout uses salience when stderr empty",
-			result: CommandResult{
-				Stdout:  failureStdout,
-				Outcome: CommandOutcome{Type: CommandOutcomeExit, ExitCode: &exitFailure},
-			},
-			wantStderr: "",
-			wantStdoutContains: []string{
-				"[salient]",
-				"Traceback (most recent call last):",
-				"AssertionError: expected 3 got 4",
-			},
-			wantStdoutCompressed: true,
-		},
+	if payload.Stderr != "" {
+		t.Fatalf("stderr = %q, want empty", payload.Stderr)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			raw := FormatCommandResult(tt.result)
-			payload := decodeCommandPayload(t, raw)
-			if tt.wantStdout != "" && payload.Stdout != tt.wantStdout {
-				t.Fatalf("stdout = %q, want %q", payload.Stdout, tt.wantStdout)
-			}
-			if payload.Stderr != tt.wantStderr {
-				t.Fatalf("stderr = %q, want %q", payload.Stderr, tt.wantStderr)
-			}
-			for _, want := range tt.wantStdoutContains {
-				if !strings.Contains(payload.Stdout, want) {
-					t.Fatalf("stdout missing %q: %q", want, payload.Stdout)
-				}
-			}
-			for _, reject := range tt.rejectStdoutContains {
-				if strings.Contains(payload.Stdout, reject) {
-					t.Fatalf("stdout contains %q: %q", reject, payload.Stdout)
-				}
-			}
-			if tt.wantNoObservation {
-				if _, ok := decodeCommandFields(t, raw)["observation"]; ok {
-					t.Fatalf("result should not emit observation metadata: %s", raw)
-				}
-				return
-			}
-			if payload.Observation.Source != "clnkr" || payload.Observation.Version != 1 {
-				t.Fatalf("observation identity = %#v", payload.Observation)
-			}
-			if tt.wantStdoutCompressed {
-				if payload.Observation.Stdout == nil ||
-					payload.Observation.Stdout.Mode != "compressed" {
-					t.Fatalf(
-						"stdout observation = %#v, want compressed",
-						payload.Observation.Stdout,
-					)
-				}
-				if payload.Observation.Stdout.OriginalBytes != len(tt.result.Stdout) {
-					t.Fatalf(
-						"original bytes = %d, want %d",
-						payload.Observation.Stdout.OriginalBytes,
-						len(tt.result.Stdout),
-					)
-				}
-				if payload.Observation.Stdout.ShownBytes != len(payload.Stdout) {
-					t.Fatalf(
-						"shown bytes = %d, want %d",
-						payload.Observation.Stdout.ShownBytes,
-						len(payload.Stdout),
-					)
-				}
-				if tt.wantOmittedBytes &&
-					payload.Observation.Stdout.OmittedBytes != len(
-						tt.result.Stdout,
-					)-compressedRawKept(
-						payload.Stdout,
-					) {
-					t.Fatalf(
-						"omitted bytes = %d, want %d",
-						payload.Observation.Stdout.OmittedBytes,
-						len(tt.result.Stdout)-compressedRawKept(payload.Stdout),
-					)
-				}
-			}
-		})
+	for _, want := range []string{"[salient]", "Traceback (most recent call last):", "AssertionError: expected 3 got 4"} {
+		if !strings.Contains(payload.Stdout, want) {
+			t.Fatalf("stdout missing %q: %q", want, payload.Stdout)
+		}
 	}
+	requireStdoutCompressed(t, payload, stdout)
 }
 
 func TestFormatCommandResultCompressesFailureStderrWithSalientLines(t *testing.T) {

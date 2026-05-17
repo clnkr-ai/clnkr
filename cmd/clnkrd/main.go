@@ -141,10 +141,10 @@ func runMain(
 	startup, err := clnkrapp.PrepareStartup(startupInputs)
 	if err != nil {
 		if clnkrapp.IsMissingAPIKey(err) {
-			fmt.Fprintln(
+			fmt.Fprintln( //nolint:errcheck
 				errOut,
 				"Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key",
-			) //nolint:errcheck
+			)
 			return 1
 		}
 		return fail("%v", err)
