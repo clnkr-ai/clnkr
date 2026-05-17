@@ -141,8 +141,13 @@ func TestPromptExamplesParseSuccessfully(t *testing.T) {
 	if got != canonicalPromptActExample {
 		t.Fatalf("canonical prompt example drifted: got %q want %q", got, canonicalPromptActExample)
 	}
-	if strings.Contains(prompt, `{"turn":{"type":"act","bash":{"command":"grep 'A\\\\|B' file.txt","workdir":null}`) {
-		t.Error("prompt should teach shell escaping with a JSON string example, not a wrapped turn object")
+	if strings.Contains(
+		prompt,
+		`{"turn":{"type":"act","bash":{"command":"grep 'A\\\\|B' file.txt","workdir":null}`,
+	) {
+		t.Error(
+			"prompt should teach shell escaping with a JSON string example, not a wrapped turn object",
+		)
 	}
 }
 
@@ -157,15 +162,18 @@ func TestLoadPromptWithOptions_Options(t *testing.T) {
 		}
 	})
 
-	t.Run("OmitSystemPrompt with SystemPromptAppend returns only the appended text", func(t *testing.T) {
-		prompt := LoadPromptWithOptions(t.TempDir(), PromptOptions{
-			OmitSystemPrompt:   true,
-			SystemPromptAppend: "custom prompt only",
-		})
-		if prompt != "custom prompt only" {
-			t.Errorf("expected only appended text, got %q", prompt)
-		}
-	})
+	t.Run(
+		"OmitSystemPrompt with SystemPromptAppend returns only the appended text",
+		func(t *testing.T) {
+			prompt := LoadPromptWithOptions(t.TempDir(), PromptOptions{
+				OmitSystemPrompt:   true,
+				SystemPromptAppend: "custom prompt only",
+			})
+			if prompt != "custom prompt only" {
+				t.Errorf("expected only appended text, got %q", prompt)
+			}
+		},
+	)
 
 	t.Run("SystemPromptAppend appends after AGENTS.md layers", func(t *testing.T) {
 		home := t.TempDir()
@@ -242,7 +250,10 @@ func TestLoadPromptWithOptions_LayeredAgentsMD(t *testing.T) {
 		if !strings.Contains(prompt, "<user-instructions>") {
 			t.Error("prompt should keep the HOME layer when project dir matches HOME")
 		}
-		if strings.Contains(prompt, "<project-instructions>\n"+content+"\n</project-instructions>") {
+		if strings.Contains(
+			prompt,
+			"<project-instructions>\n"+content+"\n</project-instructions>",
+		) {
 			t.Error("prompt should not duplicate HOME AGENTS.md as project instructions")
 		}
 	})
@@ -257,7 +268,9 @@ func TestLoadPromptWithOptions_LayeredAgentsMD(t *testing.T) {
 
 		prompt := LoadPromptWithOptions(t.TempDir(), PromptOptions{})
 		if !strings.Contains(prompt, content) {
-			t.Error("prompt should load from $HOME/.config/clnkr/AGENTS.md when XDG_CONFIG_HOME is unset")
+			t.Error(
+				"prompt should load from $HOME/.config/clnkr/AGENTS.md when XDG_CONFIG_HOME is unset",
+			)
 		}
 	})
 

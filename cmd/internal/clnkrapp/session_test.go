@@ -39,6 +39,9 @@ func TestSaveSessionReturnsDirectoryAndListSessions(t *testing.T) {
 		t.Fatalf("sessions = %#v, want one session", sessions)
 	}
 	if sessions[0].Filename == "" || sessions[0].Messages != 1 || sessions[0].Created.IsZero() {
-		t.Fatalf("session info = %#v, want filename, one message, and created timestamp", sessions[0])
+		t.Fatalf(
+			"session info = %#v, want filename, one message, and created timestamp",
+			sessions[0],
+		)
 	}
 }

@@ -46,7 +46,11 @@ func TestPrepareStartupBuildsAgentDriverAndMetadata(t *testing.T) {
 		t.Fatalf("ClnkrVersion = %q, want test-version", startup.Metadata.ClnkrVersion)
 	}
 	if startup.Agent.ActProtocol != startup.Metadata.ActProtocol {
-		t.Fatalf("agent ActProtocol = %q, want %q", startup.Agent.ActProtocol, startup.Metadata.ActProtocol)
+		t.Fatalf(
+			"agent ActProtocol = %q, want %q",
+			startup.Agent.ActProtocol,
+			startup.Metadata.ActProtocol,
+		)
 	}
 }
 

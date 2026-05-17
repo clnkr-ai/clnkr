@@ -9,13 +9,20 @@ import (
 
 const commandStreamBudget = 64 * 1024
 
-var salientPattern = regexp.MustCompile(`(?i)(error|failed|failure|panic|exception|traceback|fatal|undefined|cannot|no such file|permission denied|denied|timeout|killed|segmentation fault|failures|expected|actual|assertion|FAIL|FAILED|--- FAIL|:[0-9]+:)`)
+var salientPattern = regexp.MustCompile(
+	`(?i)(error|failed|failure|panic|exception|traceback|fatal|undefined|cannot|no such file|permission denied|denied|timeout|killed|segmentation fault|failures|expected|actual|assertion|FAIL|FAILED|--- FAIL|:[0-9]+:)`,
+)
 
 // FormatCommandResult renders a command result as structured shell output.
 func FormatCommandResult(result CommandResult) string {
 	outcome := normalizedOutcome(result.Outcome, result.ExitCode)
-	diagnostic := outcome.Type != CommandOutcomeExit || outcome.ExitCode != nil && *outcome.ExitCode != 0
-	stdout, stdoutMeta := compressCommandStream("stdout", result.Stdout, diagnostic && result.Stderr == "")
+	diagnostic := outcome.Type != CommandOutcomeExit ||
+		outcome.ExitCode != nil && *outcome.ExitCode != 0
+	stdout, stdoutMeta := compressCommandStream(
+		"stdout",
+		result.Stdout,
+		diagnostic && result.Stderr == "",
+	)
 	stderr, stderrMeta := compressCommandStream("stderr", result.Stderr, diagnostic)
 	payload := map[string]any{"stdout": stdout, "stderr": stderr, "outcome": outcome}
 	if result.Command != "" {
@@ -25,7 +32,12 @@ func FormatCommandResult(result CommandResult) string {
 		payload["feedback"] = result.Feedback
 	}
 	if stdoutMeta != nil || stderrMeta != nil {
-		payload["observation"] = map[string]any{"source": "clnkr", "version": 1, "stdout": stdoutMeta, "stderr": stderrMeta}
+		payload["observation"] = map[string]any{
+			"source":  "clnkr",
+			"version": 1,
+			"stdout":  stdoutMeta,
+			"stderr":  stderrMeta,
+		}
 	}
 	body, _ := json.Marshal(payload)
 	return string(body)
@@ -35,7 +47,9 @@ func compressCommandStream(name, stream string, salient bool) (string, map[strin
 	if len(stream) <= commandStreamBudget {
 		return stream, nil
 	}
-	marker := "[clnkr: " + name + " compressed; original " + strconv.Itoa(len(stream)) + " bytes, omitted bytes recorded in observation metadata]\n"
+	marker := "[clnkr: " + name + " compressed; original " + strconv.Itoa(
+		len(stream),
+	) + " bytes, omitted bytes recorded in observation metadata]\n"
 	keep := max(0, commandStreamBudget-len(marker)-len("\n[head]\n\n[tail]\n\n[salient]\n"))
 	head, tail := keep/3, keep/3
 	middle := salientLines(stream[head:len(stream)-tail], keep-head-tail, salient)
@@ -45,7 +59,12 @@ func compressCommandStream(name, stream string, salient bool) (string, map[strin
 	}
 	shown += "\n[tail]\n" + stream[len(stream)-tail:]
 	shown = strings.ToValidUTF8(shown, "")
-	return shown, map[string]any{"original_bytes": len(stream), "shown_bytes": len(shown), "omitted_bytes": len(stream) - head - tail - len(middle), "mode": "compressed"}
+	return shown, map[string]any{
+		"original_bytes": len(stream),
+		"shown_bytes":    len(shown),
+		"omitted_bytes":  len(stream) - head - tail - len(middle),
+		"mode":           "compressed",
+	}
 }
 
 func salientLines(stream string, budget int, ok bool) string {
@@ -64,19 +83,44 @@ func FormatDeniedCommandResult(reply string) string {
 	if trimmed := strings.TrimSpace(reply); trimmed != "" {
 		stderr += "\nUser guidance: " + trimmed
 	}
-	return FormatCommandResult(CommandResult{Stderr: stderr, Outcome: CommandOutcome{Type: CommandOutcomeDenied}})
+	return FormatCommandResult(
+		CommandResult{Stderr: stderr, Outcome: CommandOutcome{Type: CommandOutcomeDenied}},
+	)
 }
 
 func FormatSkippedCommandResult(reason string) string {
 	switch reason = strings.TrimSpace(reason); reason {
 	case "max steps":
-		return FormatCommandResult(CommandResult{Stderr: "Command was not run because the step limit was reached.", Outcome: CommandOutcome{Type: CommandOutcomeSkipped, Reason: "max_steps"}})
+		return FormatCommandResult(
+			CommandResult{
+				Stderr:  "Command was not run because the step limit was reached.",
+				Outcome: CommandOutcome{Type: CommandOutcomeSkipped, Reason: "max_steps"},
+			},
+		)
 	case "previous command failed":
-		return FormatCommandResult(CommandResult{Stderr: "Command was not run because a previous command failed.", Outcome: CommandOutcome{Type: CommandOutcomeSkipped, Reason: "previous_command_failed"}})
+		return FormatCommandResult(
+			CommandResult{
+				Stderr: "Command was not run because a previous command failed.",
+				Outcome: CommandOutcome{
+					Type:   CommandOutcomeSkipped,
+					Reason: "previous_command_failed",
+				},
+			},
+		)
 	case "":
-		return FormatCommandResult(CommandResult{Stderr: "Command was not run.", Outcome: CommandOutcome{Type: CommandOutcomeSkipped, Reason: "skipped"}})
+		return FormatCommandResult(
+			CommandResult{
+				Stderr:  "Command was not run.",
+				Outcome: CommandOutcome{Type: CommandOutcomeSkipped, Reason: "skipped"},
+			},
+		)
 	default:
-		return FormatCommandResult(CommandResult{Stderr: "Command was not run.\nReason: " + reason, Outcome: CommandOutcome{Type: CommandOutcomeSkipped, Reason: "skipped"}})
+		return FormatCommandResult(
+			CommandResult{
+				Stderr:  "Command was not run.\nReason: " + reason,
+				Outcome: CommandOutcome{Type: CommandOutcomeSkipped, Reason: "skipped"},
+			},
+		)
 	}
 }
 

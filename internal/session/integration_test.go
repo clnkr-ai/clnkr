@@ -67,10 +67,14 @@ func compactTranscript(t *testing.T, cwd string, messages []clnkr.Message) []cln
 		t.Fatalf("AddMessages before compact: %v", err)
 	}
 
-	_, err := agent.Compact(context.Background(), fakeCompactor{summary: "Older work summarized."}, clnkr.CompactOptions{
-		Instructions:    "focus on failing tests",
-		KeepRecentTurns: 2,
-	})
+	_, err := agent.Compact(
+		context.Background(),
+		fakeCompactor{summary: "Older work summarized."},
+		clnkr.CompactOptions{
+			Instructions:    "focus on failing tests",
+			KeepRecentTurns: 2,
+		},
+	)
 	if err != nil {
 		t.Fatalf("Compact: %v", err)
 	}
@@ -127,7 +131,10 @@ func TestSessionIsolationBetweenProjects(t *testing.T) {
 		"/tmp/project-beta":  "beta",
 	}
 	for project, content := range projects {
-		if err := session.SaveSession(project, []clnkr.Message{{Role: "user", Content: content}}); err != nil {
+		if err := session.SaveSession(
+			project,
+			[]clnkr.Message{{Role: "user", Content: content}},
+		); err != nil {
 			t.Fatalf("SaveSession %s: %v", project, err)
 		}
 	}
@@ -181,7 +188,13 @@ func TestContinueRestoresCanonicalAssistantTurn(t *testing.T) {
 		t.Fatalf("assistant turn = %T, want *clnkr.DoneTurn", turn)
 	}
 	if done.Summary != "saved summary" || agent.Cwd() != "/restored" {
-		t.Fatalf("summary=%q cwd=%q, want summary %q cwd %q", done.Summary, agent.Cwd(), "saved summary", "/restored")
+		t.Fatalf(
+			"summary=%q cwd=%q, want summary %q cwd %q",
+			done.Summary,
+			agent.Cwd(),
+			"saved summary",
+			"/restored",
+		)
 	}
 }
 
@@ -230,7 +243,11 @@ func TestSessionRoundTripWithCompactionState(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			compacted := compactTranscript(t, tt.cwd, tt.messages)
-			loaded := saveAndLoad(t, filepath.Join(tmpdir, strings.ReplaceAll(tt.name, " ", "-")), compacted)
+			loaded := saveAndLoad(
+				t,
+				filepath.Join(tmpdir, strings.ReplaceAll(tt.name, " ", "-")),
+				compacted,
+			)
 			if !reflect.DeepEqual(loaded, compacted) {
 				t.Fatalf("loaded = %#v, want %#v", loaded, compacted)
 			}

@@ -78,7 +78,12 @@ func TestFindCompactBoundaryIgnoresHostBlocks(t *testing.T) {
 			messages: []Message{
 				{Role: "user", Content: "first task"},
 				{Role: "assistant", Content: `{"type":"done","summary":"done"}`},
-				{Role: "user", Content: FormatCommandResult(CommandResult{Command: "ls", ExitCode: 0, Stdout: ".\n"})},
+				{
+					Role: "user",
+					Content: FormatCommandResult(
+						CommandResult{Command: "ls", ExitCode: 0, Stdout: ".\n"},
+					),
+				},
 				{Role: "user", Content: FormatStateMessage("/tmp/old")},
 				{Role: "user", Content: FormatCompactMessage("older summary", "")},
 				{Role: "user", Content: "[protocol_error]\nmissing command\n[/protocol_error]"},
@@ -146,7 +151,13 @@ func TestFindCompactBoundaryIgnoresHostBlocks(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			gotBoundary, gotOK := FindCompactBoundary(tt.messages, tt.keepRecentTurns)
 			if gotBoundary != tt.wantBoundary || gotOK != tt.wantOK {
-				t.Fatalf("FindCompactBoundary() = (%d, %v), want (%d, %v)", gotBoundary, gotOK, tt.wantBoundary, tt.wantOK)
+				t.Fatalf(
+					"FindCompactBoundary() = (%d, %v), want (%d, %v)",
+					gotBoundary,
+					gotOK,
+					tt.wantBoundary,
+					tt.wantOK,
+				)
 			}
 		})
 	}
@@ -160,7 +171,12 @@ func TestRewriteForCompaction(t *testing.T) {
 		messages := []Message{
 			{Role: "user", Content: "first task"},
 			{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
-			{Role: "user", Content: FormatCommandResult(CommandResult{Command: "ls", ExitCode: 0, Stdout: ".\n"})},
+			{
+				Role: "user",
+				Content: FormatCommandResult(
+					CommandResult{Command: "ls", ExitCode: 0, Stdout: ".\n"},
+				),
+			},
 			{Role: "user", Content: "second task"},
 			{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
 			{Role: "user", Content: "third task"},
@@ -179,7 +195,11 @@ func TestRewriteForCompaction(t *testing.T) {
 			{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
 		})
 		if stats != (CompactStats{CompactedMessages: 3, KeptMessages: 4}) {
-			t.Fatalf("stats = %#v, want %#v", stats, CompactStats{CompactedMessages: 3, KeptMessages: 4})
+			t.Fatalf(
+				"stats = %#v, want %#v",
+				stats,
+				CompactStats{CompactedMessages: 3, KeptMessages: 4},
+			)
 		}
 	})
 
@@ -206,7 +226,11 @@ func TestRewriteForCompaction(t *testing.T) {
 			{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
 		})
 		if stats != (CompactStats{CompactedMessages: 6, KeptMessages: 3}) {
-			t.Fatalf("stats = %#v, want %#v", stats, CompactStats{CompactedMessages: 6, KeptMessages: 3})
+			t.Fatalf(
+				"stats = %#v, want %#v",
+				stats,
+				CompactStats{CompactedMessages: 6, KeptMessages: 3},
+			)
 		}
 	})
 
@@ -271,7 +295,13 @@ func TestRewriteForCompaction(t *testing.T) {
 		if len(got) == 0 {
 			t.Fatal("expected rewritten transcript")
 		}
-		if !reflect.DeepEqual(got[0], Message{Role: "user", Content: FormatCompactMessage("fresh summary", "new instructions")}) {
+		if !reflect.DeepEqual(
+			got[0],
+			Message{
+				Role:    "user",
+				Content: FormatCompactMessage("fresh summary", "new instructions"),
+			},
+		) {
 			t.Fatalf("first message = %#v, want new compact block", got[0])
 		}
 
@@ -296,7 +326,9 @@ func TestFormatCompactMessageRoundTripsAsTaggedJSON(t *testing.T) {
 		t.Fatal("formatted compact message should be recognized")
 	}
 
-	body := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(msg.Content, "[compact]"), "[/compact]"))
+	body := strings.TrimSpace(
+		strings.TrimSuffix(strings.TrimPrefix(msg.Content, "[compact]"), "[/compact]"),
+	)
 	var got compactState
 	if err := json.Unmarshal([]byte(body), &got); err != nil {
 		t.Fatalf("unmarshal compact body: %v", err)
@@ -359,11 +391,16 @@ func TestFormatCommandResultUsesStructuredShellPayload(t *testing.T) {
 			if payload.Stdout != tt.stdout || payload.Stderr != tt.stderr {
 				t.Fatalf("payload streams = %#v", payload)
 			}
-			if payload.Outcome.Type != CommandOutcomeExit || payload.Outcome.ExitCode == nil || *payload.Outcome.ExitCode != tt.exitCode {
+			if payload.Outcome.Type != CommandOutcomeExit || payload.Outcome.ExitCode == nil ||
+				*payload.Outcome.ExitCode != tt.exitCode {
 				t.Fatalf("payload outcome = %#v", payload.Outcome)
 			}
-			if tt.noLegacyMarkers && (strings.Contains(raw, "[stdout]") || strings.Contains(raw, "[command]")) {
-				t.Fatalf("FormatCommandResult() still contains bracketed transcript markers: %q", raw)
+			if tt.noLegacyMarkers &&
+				(strings.Contains(raw, "[stdout]") || strings.Contains(raw, "[command]")) {
+				t.Fatalf(
+					"FormatCommandResult() still contains bracketed transcript markers: %q",
+					raw,
+				)
 			}
 		})
 	}
@@ -371,8 +408,14 @@ func TestFormatCommandResultUsesStructuredShellPayload(t *testing.T) {
 
 func TestFormatCommandResultCompressionAndSalience(t *testing.T) {
 	exitFailure := 1
-	compressedStdout := "stdout-head\n" + strings.Repeat("progress line\n", 80*1024/len("progress line\n")) + "build completed\nstdout-tail\n"
-	successWithNoisyErrors := "stdout-head\n" + strings.Repeat("error: noisy success log\n", 80*1024/len("error: noisy success log\n")) + "stdout-tail\n"
+	compressedStdout := "stdout-head\n" + strings.Repeat(
+		"progress line\n",
+		80*1024/len("progress line\n"),
+	) + "build completed\nstdout-tail\n"
+	successWithNoisyErrors := "stdout-head\n" + strings.Repeat(
+		"error: noisy success log\n",
+		80*1024/len("error: noisy success log\n"),
+	) + "stdout-tail\n"
 	failureStdout := "stdout-head\n" +
 		strings.Repeat("progress line\n", 40*1024/len("progress line\n")) +
 		"Traceback (most recent call last):\n" +
@@ -425,10 +468,17 @@ func TestFormatCommandResultCompressionAndSalience(t *testing.T) {
 			wantStdoutCompressed: true,
 		},
 		{
-			name:                 "failed stdout uses salience when stderr empty",
-			result:               CommandResult{Stdout: failureStdout, Outcome: CommandOutcome{Type: CommandOutcomeExit, ExitCode: &exitFailure}},
-			wantStderr:           "",
-			wantStdoutContains:   []string{"[salient]", "Traceback (most recent call last):", "AssertionError: expected 3 got 4"},
+			name: "failed stdout uses salience when stderr empty",
+			result: CommandResult{
+				Stdout:  failureStdout,
+				Outcome: CommandOutcome{Type: CommandOutcomeExit, ExitCode: &exitFailure},
+			},
+			wantStderr: "",
+			wantStdoutContains: []string{
+				"[salient]",
+				"Traceback (most recent call last):",
+				"AssertionError: expected 3 got 4",
+			},
 			wantStdoutCompressed: true,
 		},
 	}
@@ -463,17 +513,38 @@ func TestFormatCommandResultCompressionAndSalience(t *testing.T) {
 				t.Fatalf("observation identity = %#v", payload.Observation)
 			}
 			if tt.wantStdoutCompressed {
-				if payload.Observation.Stdout == nil || payload.Observation.Stdout.Mode != "compressed" {
-					t.Fatalf("stdout observation = %#v, want compressed", payload.Observation.Stdout)
+				if payload.Observation.Stdout == nil ||
+					payload.Observation.Stdout.Mode != "compressed" {
+					t.Fatalf(
+						"stdout observation = %#v, want compressed",
+						payload.Observation.Stdout,
+					)
 				}
 				if payload.Observation.Stdout.OriginalBytes != len(tt.result.Stdout) {
-					t.Fatalf("original bytes = %d, want %d", payload.Observation.Stdout.OriginalBytes, len(tt.result.Stdout))
+					t.Fatalf(
+						"original bytes = %d, want %d",
+						payload.Observation.Stdout.OriginalBytes,
+						len(tt.result.Stdout),
+					)
 				}
 				if payload.Observation.Stdout.ShownBytes != len(payload.Stdout) {
-					t.Fatalf("shown bytes = %d, want %d", payload.Observation.Stdout.ShownBytes, len(payload.Stdout))
+					t.Fatalf(
+						"shown bytes = %d, want %d",
+						payload.Observation.Stdout.ShownBytes,
+						len(payload.Stdout),
+					)
 				}
-				if tt.wantOmittedBytes && payload.Observation.Stdout.OmittedBytes != len(tt.result.Stdout)-compressedRawKept(payload.Stdout) {
-					t.Fatalf("omitted bytes = %d, want %d", payload.Observation.Stdout.OmittedBytes, len(tt.result.Stdout)-compressedRawKept(payload.Stdout))
+				if tt.wantOmittedBytes &&
+					payload.Observation.Stdout.OmittedBytes != len(
+						tt.result.Stdout,
+					)-compressedRawKept(
+						payload.Stdout,
+					) {
+					t.Fatalf(
+						"omitted bytes = %d, want %d",
+						payload.Observation.Stdout.OmittedBytes,
+						len(tt.result.Stdout)-compressedRawKept(payload.Stdout),
+					)
 				}
 			}
 		})
@@ -512,12 +583,16 @@ func TestFormatCommandResultCompressesFailureStderrWithSalientLines(t *testing.T
 		t.Fatalf("stderr should deduplicate exact salient lines: %q", salient)
 	}
 	if strings.Count(salient, "expected actual\n") != 2 {
-		t.Fatalf("stderr should preserve distinct salient lines that contain each other: %q", salient)
+		t.Fatalf(
+			"stderr should preserve distinct salient lines that contain each other: %q",
+			salient,
+		)
 	}
 	if strings.Contains(salient, "error: head diagnostic") {
 		t.Fatalf("stderr should not duplicate salient lines already kept in the head: %q", salient)
 	}
-	if !strings.Contains(payload.Stderr, "stderr-head") || !strings.Contains(payload.Stderr, "stderr-tail") {
+	if !strings.Contains(payload.Stderr, "stderr-head") ||
+		!strings.Contains(payload.Stderr, "stderr-tail") {
 		t.Fatalf("stderr should preserve head and tail: %q", payload.Stderr)
 	}
 	if payload.Observation.Stderr == nil || payload.Observation.Stderr.Mode != "compressed" {
@@ -548,9 +623,15 @@ func TestFormatDeniedAndSkippedResultsDoNotEmitObservationMetadata(t *testing.T)
 
 func TestFormatCommandResultDoesNotSplitUTF8AtCompressionBoundary(t *testing.T) {
 	stream := strings.Repeat("å", 40*1024) + "tail"
-	payload := decodeCommandPayload(t, FormatCommandResult(CommandResult{Stdout: stream, ExitCode: 0}))
+	payload := decodeCommandPayload(
+		t,
+		FormatCommandResult(CommandResult{Stdout: stream, ExitCode: 0}),
+	)
 	if strings.ContainsRune(payload.Stdout, '\uFFFD') {
-		t.Fatalf("compressed stdout contains replacement rune: %q", payload.Stdout[len(payload.Stdout)-128:])
+		t.Fatalf(
+			"compressed stdout contains replacement rune: %q",
+			payload.Stdout[len(payload.Stdout)-128:],
+		)
 	}
 	if !strings.Contains(payload.Stdout, "tail") {
 		t.Fatalf("compressed stdout omitted tail: %q", payload.Stdout[len(payload.Stdout)-128:])

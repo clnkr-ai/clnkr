@@ -34,14 +34,20 @@ func TestExtractStateCwdRejectsInvalidStateMessages(t *testing.T) {
 		{name: "missing type", content: `{"source":"clnkr","cwd":"/repo"}`},
 		{name: "empty cwd", content: `{"type":"state","source":"clnkr","cwd":""}`},
 		{name: "missing cwd", content: `{"type":"state","source":"clnkr"}`},
-		{name: "unknown field", content: `{"type":"state","source":"clnkr","cwd":"/repo","env":{}}`},
+		{
+			name:    "unknown field",
+			content: `{"type":"state","source":"clnkr","cwd":"/repo","env":{}}`,
+		},
 		{name: "empty string", content: ""},
 		{name: "whitespace", content: "   "},
 		{name: "null", content: "null"},
 		{name: "array", content: "[]"},
 		{name: "number", content: "42"},
 		{name: "string", content: `"state"`},
-		{name: "multiple objects", content: `{"type":"state","source":"clnkr","cwd":"/a"}{"type":"state","source":"clnkr","cwd":"/b"}`},
+		{
+			name:    "multiple objects",
+			content: `{"type":"state","source":"clnkr","cwd":"/a"}{"type":"state","source":"clnkr","cwd":"/b"}`,
+		},
 	}
 
 	for _, tt := range tests {

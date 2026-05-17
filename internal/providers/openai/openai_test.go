@@ -41,14 +41,20 @@ func TestModelUsesStructuredOutputRequestBody(t *testing.T) {
 	}
 	jsonSchema, ok := responseFormat["json_schema"].(map[string]any)
 	if !ok {
-		t.Fatalf("response_format.json_schema = %T, want map[string]any", responseFormat["json_schema"])
+		t.Fatalf(
+			"response_format.json_schema = %T, want map[string]any",
+			responseFormat["json_schema"],
+		)
 	}
 	if jsonSchema["strict"] != true {
 		t.Fatalf("response_format.json_schema.strict = %v, want true", jsonSchema["strict"])
 	}
 	schema, ok := jsonSchema["schema"].(map[string]any)
 	if !ok {
-		t.Fatalf("response_format.json_schema.schema = %T, want map[string]any", jsonSchema["schema"])
+		t.Fatalf(
+			"response_format.json_schema.schema = %T, want map[string]any",
+			jsonSchema["schema"],
+		)
 	}
 	if schemaContainsKey(schema, "maxItems") {
 		t.Fatal("response_format.json_schema.schema unexpectedly includes maxItems")
@@ -79,11 +85,18 @@ func TestModelQueryTextReturnsPlainTextWithoutResponseFormat(t *testing.T) {
 		t.Fatalf("summary = %q, want %q", summary, "Older work summarized.")
 	}
 	if _, ok := gotBody["response_format"]; ok {
-		t.Fatalf("response_format should be omitted for QueryText, got %#v", gotBody["response_format"])
+		t.Fatalf(
+			"response_format should be omitted for QueryText, got %#v",
+			gotBody["response_format"],
+		)
 	}
 	msgs, ok := gotBody["messages"].([]any)
 	if !ok || len(msgs) != len(history)+1 {
-		t.Fatalf("messages = %#v, want system plus %d transcript messages", gotBody["messages"], len(history))
+		t.Fatalf(
+			"messages = %#v, want system plus %d transcript messages",
+			gotBody["messages"],
+			len(history),
+		)
 	}
 	last, ok := msgs[len(msgs)-1].(map[string]any)
 	if !ok {
@@ -107,7 +120,10 @@ func TestModelQueryTextRetriesTransientServerError(t *testing.T) {
 	defer server.Close()
 
 	m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-	summary, err := m.QueryText(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+	summary, err := m.QueryText(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "hi"}},
+	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -171,17 +187,23 @@ func TestModelPostsToJoinedChatCompletionsEndpoint(t *testing.T) {
 		base     string
 		wantPath string
 	}{
-		{name: "nested base URL", base: "/v1beta/openai", wantPath: "/v1beta/openai/chat/completions"},
+		{
+			name:     "nested base URL",
+			base:     "/v1beta/openai",
+			wantPath: "/v1beta/openai/chat/completions",
+		},
 		{name: "trailing slash base URL", base: "/v1/", wantPath: "/v1/chat/completions"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var gotPath string
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotPath = r.URL.Path
-				writeChatResponse(t, w, openAIWrappedDone("ok"), 1, 1)
-			}))
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					gotPath = r.URL.Path
+					writeChatResponse(t, w, openAIWrappedDone("ok"), 1, 1)
+				}),
+			)
 			defer server.Close()
 
 			m := openai.NewModel(server.URL+tt.base, "test-key", "gpt-test", "sys")
@@ -202,17 +224,27 @@ func TestModelExtractsAPIErrorMessages(t *testing.T) {
 		body string
 		want string
 	}{
-		{name: "JSON error response", body: `{"error":{"code":429,"message":"Rate limit exceeded"}}`, want: "api error (status 429): Rate limit exceeded"},
-		{name: "array-wrapped response", body: `[{"error":{"code":429,"message":"Quota exceeded"}}]`, want: "api error (status 429): Quota exceeded"},
+		{
+			name: "JSON error response",
+			body: `{"error":{"code":429,"message":"Rate limit exceeded"}}`,
+			want: "api error (status 429): Rate limit exceeded",
+		},
+		{
+			name: "array-wrapped response",
+			body: `[{"error":{"code":429,"message":"Quota exceeded"}}]`,
+			want: "api error (status 429): Quota exceeded",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Retry-After", "0")
-				w.WriteHeader(http.StatusTooManyRequests)
-				_, _ = w.Write([]byte(tt.body))
-			}))
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Retry-After", "0")
+					w.WriteHeader(http.StatusTooManyRequests)
+					_, _ = w.Write([]byte(tt.body))
+				}),
+			)
 			defer server.Close()
 
 			m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
@@ -233,32 +265,50 @@ func TestModelRetriesQueryErrorsAndSucceeds(t *testing.T) {
 		status  int
 		message string
 	}{
-		{name: "rate limit response", status: http.StatusTooManyRequests, message: "Rate limit exceeded"},
-		{name: "transient server error", status: http.StatusBadGateway, message: "context deadline exceeded"},
+		{
+			name:    "rate limit response",
+			status:  http.StatusTooManyRequests,
+			message: "Rate limit exceeded",
+		},
+		{
+			name:    "transient server error",
+			status:  http.StatusBadGateway,
+			message: "context deadline exceeded",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			attempts := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				attempts++
-				if attempts == 1 {
-					writeAPIError(t, w, tt.status, tt.message)
-					return
-				}
-				writeChatResponse(t, w, openAIWrappedDone("ok after retry"), 2, 3)
-			}))
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					attempts++
+					if attempts == 1 {
+						writeAPIError(t, w, tt.status, tt.message)
+						return
+					}
+					writeChatResponse(t, w, openAIWrappedDone("ok after retry"), 2, 3)
+				}),
+			)
 			defer server.Close()
 
 			m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
-			resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+			resp, err := m.Query(
+				context.Background(),
+				[]clnkr.Message{{Role: "user", Content: "hi"}},
+			)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if attempts != 2 {
 				t.Fatalf("attempt count = %d, want 2", attempts)
 			}
-			if got, want := mustCanonicalTurn(t, resp.Turn), doneTurn("ok after retry"); got != want {
+			if got, want := mustCanonicalTurn(
+				t,
+				resp.Turn,
+			), doneTurn(
+				"ok after retry",
+			); got != want {
 				t.Fatalf("content = %q, want %q", got, want)
 			}
 		})
@@ -290,19 +340,31 @@ func TestModelStopsAfterMaxAttemptsOnRepeatedRetryableErrors(t *testing.T) {
 		body   string
 		want   string
 	}{
-		{name: "rate limits", status: http.StatusTooManyRequests, body: `{"error":{"code":429,"message":"Rate limit exceeded"}}`, want: "api error (status 429): Rate limit exceeded"},
-		{name: "non-JSON server errors", status: http.StatusBadGateway, body: "Bad Gateway", want: "api error (status 502): Bad Gateway"},
+		{
+			name:   "rate limits",
+			status: http.StatusTooManyRequests,
+			body:   `{"error":{"code":429,"message":"Rate limit exceeded"}}`,
+			want:   "api error (status 429): Rate limit exceeded",
+		},
+		{
+			name:   "non-JSON server errors",
+			status: http.StatusBadGateway,
+			body:   "Bad Gateway",
+			want:   "api error (status 502): Bad Gateway",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			attempts := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				attempts++
-				w.Header().Set("Retry-After", "0")
-				w.WriteHeader(tt.status)
-				_, _ = w.Write([]byte(tt.body))
-			}))
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					attempts++
+					w.Header().Set("Retry-After", "0")
+					w.WriteHeader(tt.status)
+					_, _ = w.Write([]byte(tt.body))
+				}),
+			)
 			defer server.Close()
 
 			m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
@@ -364,8 +426,11 @@ func TestModelFailsOnUnusableSuccessfulResponses(t *testing.T) {
 		assertErr func(*testing.T, error)
 	}{
 		{
-			name:     "empty choices",
-			response: map[string]any{"choices": []any{}, "usage": map[string]int{"prompt_tokens": 0, "completion_tokens": 0}},
+			name: "empty choices",
+			response: map[string]any{
+				"choices": []any{},
+				"usage":   map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
+			},
 			assertErr: func(t *testing.T, err error) {
 				if err == nil {
 					t.Error("expected error on empty choices")
@@ -375,8 +440,10 @@ func TestModelFailsOnUnusableSuccessfulResponses(t *testing.T) {
 		{
 			name: "empty choice content",
 			response: map[string]any{
-				"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": ""}}},
-				"usage":   map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
+				"choices": []map[string]any{
+					{"message": map[string]string{"role": "assistant", "content": ""}},
+				},
+				"usage": map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
 			},
 			assertErr: func(t *testing.T, err error) {
 				if err == nil {
@@ -387,8 +454,10 @@ func TestModelFailsOnUnusableSuccessfulResponses(t *testing.T) {
 		{
 			name: "refusal",
 			response: map[string]any{
-				"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "refusal": "refused"}}},
-				"usage":   map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
+				"choices": []map[string]any{
+					{"message": map[string]string{"role": "assistant", "refusal": "refused"}},
+				},
+				"usage": map[string]int{"prompt_tokens": 0, "completion_tokens": 0},
 			},
 			assertErr: func(t *testing.T, err error) {
 				if err == nil {
@@ -403,11 +472,13 @@ func TestModelFailsOnUnusableSuccessfulResponses(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if err := json.NewEncoder(w).Encode(tt.response); err != nil {
-					t.Fatalf("encode response: %v", err)
-				}
-			}))
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if err := json.NewEncoder(w).Encode(tt.response); err != nil {
+						t.Fatalf("encode response: %v", err)
+					}
+				}),
+			)
 			defer server.Close()
 
 			m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
@@ -452,11 +523,18 @@ func readRequestBody(t *testing.T, r *http.Request) map[string]any {
 	return got
 }
 
-func writeChatResponse(t *testing.T, w http.ResponseWriter, content string, inputTokens, outputTokens int) {
+func writeChatResponse(
+	t *testing.T,
+	w http.ResponseWriter,
+	content string,
+	inputTokens, outputTokens int,
+) {
 	t.Helper()
 	if err := json.NewEncoder(w).Encode(map[string]any{
-		"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": content}}},
-		"usage":   map[string]int{"prompt_tokens": inputTokens, "completion_tokens": outputTokens},
+		"choices": []map[string]any{
+			{"message": map[string]string{"role": "assistant", "content": content}},
+		},
+		"usage": map[string]int{"prompt_tokens": inputTokens, "completion_tokens": outputTokens},
 	}); err != nil {
 		t.Fatalf("encode response: %v", err)
 	}

@@ -13,7 +13,11 @@ type actTurnExecutor struct {
 	agent *Agent
 }
 
-func (e actTurnExecutor) Execute(ctx context.Context, act *ActTurn, skipped []BashAction) (StepResult, error) {
+func (e actTurnExecutor) Execute(
+	ctx context.Context,
+	act *ActTurn,
+	skipped []BashAction,
+) (StepResult, error) {
 	a := e.agent
 	if act == nil || len(act.Bash.Commands) == 0 {
 		return StepResult{Turn: act}, fmt.Errorf("execute act turn: %w", ErrMissingCommand)
@@ -29,7 +33,10 @@ func (e actTurnExecutor) Execute(ctx context.Context, act *ActTurn, skipped []Ba
 		outputs = append(outputs, payload)
 		if execErr = commandErr; execErr != nil {
 			for _, notRun := range act.Bash.Commands[i+1:] {
-				if payload, ok := e.agent.appendSkippedToolResult(notRun, "previous command failed"); ok {
+				if payload, ok := e.agent.appendSkippedToolResult(
+					notRun,
+					"previous command failed",
+				); ok {
 					outputs = append(outputs, payload)
 				}
 			}
@@ -43,7 +50,12 @@ func (e actTurnExecutor) Execute(ctx context.Context, act *ActTurn, skipped []Ba
 		}
 	}
 	a.appendStateMessageIfNeeded()
-	return StepResult{Turn: act, Output: strings.Join(outputs, "\n\n"), ExecErr: execErr, ExecCount: execCount}, nil
+	return StepResult{
+		Turn:      act,
+		Output:    strings.Join(outputs, "\n\n"),
+		ExecErr:   execErr,
+		ExecCount: execCount,
+	}, nil
 }
 
 func (e actTurnExecutor) executeCommand(ctx context.Context, action BashAction) (string, error) {
@@ -106,10 +118,18 @@ func (e actTurnExecutor) formatCommandResult(result CommandResult) string {
 	})
 }
 
-func (e actTurnExecutor) appendCommandMessage(action BashAction, result CommandResult, payload string) {
+func (e actTurnExecutor) appendCommandMessage(
+	action BashAction,
+	result CommandResult,
+	payload string,
+) {
 	msg := Message{Role: "user", Content: payload}
 	if action.ID != "" {
-		msg.BashToolResult = &BashToolResult{ID: action.ID, Content: payload, IsError: commandResultIsError(result)}
+		msg.BashToolResult = &BashToolResult{
+			ID:      action.ID,
+			Content: payload,
+			IsError: commandResultIsError(result),
+		}
 	}
 	e.agent.messages = append(e.agent.messages, msg)
 }

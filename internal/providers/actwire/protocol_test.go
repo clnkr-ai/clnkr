@@ -17,9 +17,13 @@ func TestSchemasExposeAllowedTurnShapes(t *testing.T) {
 		asserts []schemaAssert
 	}{
 		{
-			name:    "request",
-			schema:  RequestSchema(),
-			asserts: []schemaAssert{assertActTurnSchema, assertClarifyTurnSchema, assertDoneTurnSchema},
+			name:   "request",
+			schema: RequestSchema(),
+			asserts: []schemaAssert{
+				assertActTurnSchema,
+				assertClarifyTurnSchema,
+				assertDoneTurnSchema,
+			},
 		},
 		{
 			name:    "unattended request",
@@ -62,7 +66,9 @@ func TestParseProviderTurn(t *testing.T) {
 			name: "act",
 			raw:  `{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":"/tmp"}]},"question":null,"summary":null,"reasoning":"inspect"}}`,
 			want: &clnkr.ActTurn{
-				Bash:      clnkr.BashBatch{Commands: []clnkr.BashAction{{Command: "pwd", Workdir: "/tmp"}}},
+				Bash: clnkr.BashBatch{
+					Commands: []clnkr.BashAction{{Command: "pwd", Workdir: "/tmp"}},
+				},
 				Reasoning: "inspect",
 			},
 		},
@@ -150,15 +156,24 @@ func TestParseProviderTurn(t *testing.T) {
 func TestNormalizeMessagesForProvider(t *testing.T) {
 	messages := []clnkr.Message{
 		{Role: "user", Content: `{"type":"done","summary":"leave users alone"}`},
-		{Role: "assistant", Content: `{"type":"done","summary":"canonical","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":"ok"}`},
-		{Role: "assistant", Content: `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":null,"reasoning":null}}`},
+		{
+			Role:    "assistant",
+			Content: `{"type":"done","summary":"canonical","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":"ok"}`,
+		},
+		{
+			Role:    "assistant",
+			Content: `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":null,"reasoning":null}}`,
+		},
 		{Role: "assistant", Content: "plain text"},
 	}
 
 	got := NormalizeMessagesForProvider(messages)
 	want := []clnkr.Message{
 		messages[0],
-		{Role: "assistant", Content: `{"turn":{"type":"done","bash":null,"question":null,"summary":"canonical","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":"ok"}}`},
+		{
+			Role:    "assistant",
+			Content: `{"turn":{"type":"done","bash":null,"question":null,"summary":"canonical","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":"ok"}}`,
+		},
 		messages[2],
 		messages[3],
 	}
@@ -168,19 +183,25 @@ func TestNormalizeMessagesForProvider(t *testing.T) {
 }
 
 func TestParseProviderTurnNormalizesEscapedHumanText(t *testing.T) {
-	clarify, err := ParseProviderTurn(`{"turn":{"type":"clarify","bash":null,"question":"First\\n\\\\- escaped","summary":null,"reasoning":"Because\\n\\\\* escaped"}}`)
+	clarify, err := ParseProviderTurn(
+		`{"turn":{"type":"clarify","bash":null,"question":"First\\n\\\\- escaped","summary":null,"reasoning":"Because\\n\\\\* escaped"}}`,
+	)
 	if err != nil {
 		t.Fatalf("parse clarify: %v", err)
 	}
-	if got := clarify.(*clnkr.ClarifyTurn); got.Question != "First\n- escaped" || got.Reasoning != "Because\n* escaped" {
+	if got := clarify.(*clnkr.ClarifyTurn); got.Question != "First\n- escaped" ||
+		got.Reasoning != "Because\n* escaped" {
 		t.Fatalf("clarify = %#v", got)
 	}
 
-	done, err := ParseProviderTurn(`{"turn":{"type":"done","bash":null,"question":null,"summary":"Fixed\\n\\\\- item","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":"Reason\\n\\\\* item"}}`)
+	done, err := ParseProviderTurn(
+		`{"turn":{"type":"done","bash":null,"question":null,"summary":"Fixed\\n\\\\- item","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":"Reason\\n\\\\* item"}}`,
+	)
 	if err != nil {
 		t.Fatalf("parse done: %v", err)
 	}
-	if got := done.(*clnkr.DoneTurn); got.Summary != "Fixed\n- item" || got.Reasoning != "Reason\n* item" {
+	if got := done.(*clnkr.DoneTurn); got.Summary != "Fixed\n- item" ||
+		got.Reasoning != "Reason\n* item" {
 		t.Fatalf("done = %#v", got)
 	}
 }
@@ -206,7 +227,12 @@ func turnChoices(t *testing.T, schema map[string]any) []map[string]any {
 func assertActTurnSchema(t *testing.T, schema map[string]any) {
 	t.Helper()
 
-	properties := assertTurnSchema(t, schema, "act", []string{"type", "bash", "question", "summary", "reasoning"})
+	properties := assertTurnSchema(
+		t,
+		schema,
+		"act",
+		[]string{"type", "bash", "question", "summary", "reasoning"},
+	)
 	assertNullSchema(t, properties, "question")
 	assertNullSchema(t, properties, "summary")
 	assertNullableStringSchema(t, properties["reasoning"])
@@ -231,7 +257,10 @@ func assertActTurnSchema(t *testing.T, schema map[string]any) {
 		t.Fatalf("act command required = %#v, want command and workdir", got)
 	}
 	commandProperties := command["properties"].(map[string]any)
-	if got := commandProperties["command"]; !reflect.DeepEqual(got, map[string]any{"type": "string"}) {
+	if got := commandProperties["command"]; !reflect.DeepEqual(
+		got,
+		map[string]any{"type": "string"},
+	) {
 		t.Fatalf("act command property = %#v", got)
 	}
 	assertNullableStringSchema(t, commandProperties["workdir"])
@@ -240,7 +269,12 @@ func assertActTurnSchema(t *testing.T, schema map[string]any) {
 func assertClarifyTurnSchema(t *testing.T, schema map[string]any) {
 	t.Helper()
 
-	properties := assertTurnSchema(t, schema, "clarify", []string{"type", "bash", "question", "summary", "reasoning"})
+	properties := assertTurnSchema(
+		t,
+		schema,
+		"clarify",
+		[]string{"type", "bash", "question", "summary", "reasoning"},
+	)
 	assertNullSchema(t, properties, "bash")
 	if got := properties["question"]; !reflect.DeepEqual(got, map[string]any{"type": "string"}) {
 		t.Fatalf("clarify question schema = %#v", got)
@@ -252,7 +286,12 @@ func assertClarifyTurnSchema(t *testing.T, schema map[string]any) {
 func assertDoneTurnSchema(t *testing.T, schema map[string]any) {
 	t.Helper()
 
-	properties := assertTurnSchema(t, schema, "done", []string{"type", "bash", "question", "summary", "verification", "known_risks", "reasoning"})
+	properties := assertTurnSchema(
+		t,
+		schema,
+		"done",
+		[]string{"type", "bash", "question", "summary", "verification", "known_risks", "reasoning"},
+	)
 	assertNullSchema(t, properties, "bash")
 	assertNullSchema(t, properties, "question")
 	if got := properties["summary"]; !reflect.DeepEqual(got, map[string]any{"type": "string"}) {
@@ -268,7 +307,13 @@ func assertDoneTurnSchema(t *testing.T, schema map[string]any) {
 		t.Fatalf("verification required = %#v, want status and checks", got)
 	}
 	verificationProperties := verification["properties"].(map[string]any)
-	if got := verificationProperties["status"]; !reflect.DeepEqual(got, map[string]any{"type": "string", "enum": []string{"verified", "partially_verified", "not_verified"}}) {
+	if got := verificationProperties["status"]; !reflect.DeepEqual(
+		got,
+		map[string]any{
+			"type": "string",
+			"enum": []string{"verified", "partially_verified", "not_verified"},
+		},
+	) {
 		t.Fatalf("verification status schema = %#v", got)
 	}
 	checks := verificationProperties["checks"].(map[string]any)
@@ -279,7 +324,10 @@ func assertDoneTurnSchema(t *testing.T, schema map[string]any) {
 	if check["type"] != "object" || check["additionalProperties"] != false {
 		t.Fatalf("verification check schema = %#v", check)
 	}
-	if got := check["required"]; !reflect.DeepEqual(got, []string{"command", "outcome", "evidence"}) {
+	if got := check["required"]; !reflect.DeepEqual(
+		got,
+		[]string{"command", "outcome", "evidence"},
+	) {
 		t.Fatalf("verification check required = %#v, want command, outcome, evidence", got)
 	}
 	checkProperties := check["properties"].(map[string]any)
@@ -290,12 +338,20 @@ func assertDoneTurnSchema(t *testing.T, schema map[string]any) {
 	}
 
 	risks := properties["known_risks"].(map[string]any)
-	if got := risks; !reflect.DeepEqual(got, map[string]any{"type": "array", "items": map[string]any{"type": "string"}}) {
+	if got := risks; !reflect.DeepEqual(
+		got,
+		map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+	) {
 		t.Fatalf("known risks schema = %#v", got)
 	}
 }
 
-func assertTurnSchema(t *testing.T, schema map[string]any, typ string, required []string) map[string]any {
+func assertTurnSchema(
+	t *testing.T,
+	schema map[string]any,
+	typ string,
+	required []string,
+) map[string]any {
 	t.Helper()
 
 	if schema["type"] != "object" || schema["additionalProperties"] != false {
@@ -305,7 +361,10 @@ func assertTurnSchema(t *testing.T, schema map[string]any, typ string, required 
 		t.Fatalf("%s required = %#v, want %#v", typ, got, required)
 	}
 	properties := schema["properties"].(map[string]any)
-	if got := properties["type"]; !reflect.DeepEqual(got, map[string]any{"type": "string", "const": typ}) {
+	if got := properties["type"]; !reflect.DeepEqual(
+		got,
+		map[string]any{"type": "string", "const": typ},
+	) {
 		t.Fatalf("%s type schema = %#v", typ, got)
 	}
 	return properties
@@ -322,7 +381,9 @@ func assertNullSchema(t *testing.T, properties map[string]any, name string) {
 func assertNullableStringSchema(t *testing.T, got any) {
 	t.Helper()
 
-	want := map[string]any{"anyOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "null"}}}
+	want := map[string]any{
+		"anyOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "null"}},
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("nullable string schema = %#v, want %#v", got, want)
 	}

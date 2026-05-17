@@ -58,8 +58,16 @@ func TestStartupSystemPromptModes(t *testing.T) {
 		forbiddenError string
 	}{
 		{
-			name:           "auto prompt dump resolves without API key",
-			args:           []string{"--provider", "openai", "--provider-api", "openai-responses", "--model", "gpt-5", "--dump-system-prompt"},
+			name: "auto prompt dump resolves without API key",
+			args: []string{
+				"--provider",
+				"openai",
+				"--provider-api",
+				"openai-responses",
+				"--model",
+				"gpt-5",
+				"--dump-system-prompt",
+			},
 			wantOut:        "call the bash tool",
 			forbiddenError: "api key is required",
 		},
@@ -86,7 +94,13 @@ func TestStartupSystemPromptModes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			code, out, errOut := runMainForTest(tt.args, "")
 			if code != tt.wantCode {
-				t.Fatalf("exit code = %d, want %d\nstdout: %s\nstderr: %s", code, tt.wantCode, out, errOut)
+				t.Fatalf(
+					"exit code = %d, want %d\nstdout: %s\nstderr: %s",
+					code,
+					tt.wantCode,
+					out,
+					errOut,
+				)
 			}
 			if tt.wantCode != 0 && out != "" {
 				t.Fatalf("stdout = %q, want empty", out)
@@ -108,12 +122,23 @@ func TestRunJSONLPromptWritesResponseAndDone(t *testing.T) {
 	var out, errOut bytes.Buffer
 	driver := newTestDriver(t, &out, []clnkr.Response{mustResponse(doneRaw)}, nil)
 
-	err := runJSONL(context.Background(), strings.NewReader(`{"type":"prompt","text":"inspect","mode":"full_send"}`+"\n"), &out, &errOut, driver)
+	err := runJSONL(
+		context.Background(),
+		strings.NewReader(`{"type":"prompt","text":"inspect","mode":"full_send"}`+"\n"),
+		&out,
+		&errOut,
+		driver,
+	)
 	if err != nil {
 		t.Fatalf("runJSONL: %v\nstderr:\n%s", err, errOut.String())
 	}
 
-	assertTypesContainInOrder(t, jsonlTypes(t, out.String()), []string{"response", "done"}, out.String())
+	assertTypesContainInOrder(
+		t,
+		jsonlTypes(t, out.String()),
+		[]string{"response", "done"},
+		out.String(),
+	)
 	if errOut.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", errOut.String())
 	}
@@ -140,7 +165,19 @@ func TestRunJSONLReplyApprovesPendingCommand(t *testing.T) {
 		t.Fatalf("runJSONL: %v", err)
 	}
 
-	assertTypesContainInOrder(t, jsonlTypes(t, out.String()), []string{"response", "approval_request", "command_start", "command_done", "response", "done"}, out.String())
+	assertTypesContainInOrder(
+		t,
+		jsonlTypes(t, out.String()),
+		[]string{
+			"response",
+			"approval_request",
+			"command_start",
+			"command_done",
+			"response",
+			"done",
+		},
+		out.String(),
+	)
 	if fmt.Sprint(executor.gotCmds) != "[echo hi]" {
 		t.Fatalf("commands = %v, want [echo hi]", executor.gotCmds)
 	}
@@ -198,7 +235,13 @@ func TestRunJSONLCompactRoutesInstructionsThroughDriver(t *testing.T) {
 		return compactor
 	})
 
-	err := runJSONL(context.Background(), strings.NewReader(`{"type":"compact","instructions":"focus tests"}`+"\n"), &out, &errOut, driver)
+	err := runJSONL(
+		context.Background(),
+		strings.NewReader(`{"type":"compact","instructions":"focus tests"}`+"\n"),
+		&out,
+		&errOut,
+		driver,
+	)
 	if err != nil {
 		t.Fatalf("runJSONL: %v", err)
 	}
@@ -213,7 +256,13 @@ func TestRunJSONLInvalidCommandWritesDiagnostic(t *testing.T) {
 	var out, errOut bytes.Buffer
 	driver := clnkrapp.NewDriver(clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp"), nil)
 
-	err := runJSONL(context.Background(), strings.NewReader(`{"type":"bogus"}`+"\n"), &out, &errOut, driver)
+	err := runJSONL(
+		context.Background(),
+		strings.NewReader(`{"type":"bogus"}`+"\n"),
+		&out,
+		&errOut,
+		driver,
+	)
 	if err == nil {
 		t.Fatal("runJSONL returned nil, want error")
 	}
@@ -267,11 +316,23 @@ func TestRunJSONLCommandErrorWaitsForActivePrompt(t *testing.T) {
 
 func runMainForTest(args []string, input string) (int, string, string) {
 	var out, errOut bytes.Buffer
-	code := runMain(args, strings.NewReader(input), &out, &errOut, func(string) string { return "" }, func() []string { return nil })
+	code := runMain(
+		args,
+		strings.NewReader(input),
+		&out,
+		&errOut,
+		func(string) string { return "" },
+		func() []string { return nil },
+	)
 	return code, out.String(), errOut.String()
 }
 
-func newTestDriver(t *testing.T, out *bytes.Buffer, responses []clnkr.Response, executor *fakeExecutor) *clnkrapp.Driver {
+func newTestDriver(
+	t *testing.T,
+	out *bytes.Buffer,
+	responses []clnkr.Response,
+	executor *fakeExecutor,
+) *clnkrapp.Driver {
 	t.Helper()
 	if executor == nil {
 		executor = &fakeExecutor{}
@@ -287,7 +348,12 @@ func newTestDriver(t *testing.T, out *bytes.Buffer, responses []clnkr.Response, 
 	return clnkrapp.NewDriver(agent, nil)
 }
 
-func runJSONLAsync(r io.Reader, out io.Writer, errOut io.Writer, driver *clnkrapp.Driver) <-chan error {
+func runJSONLAsync(
+	r io.Reader,
+	out io.Writer,
+	errOut io.Writer,
+	driver *clnkrapp.Driver,
+) <-chan error {
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- runJSONL(context.Background(), r, out, errOut, driver)
@@ -430,7 +496,10 @@ func newCancellableBlockingModel() *cancellableBlockingModel {
 	}
 }
 
-func (m *cancellableBlockingModel) Query(ctx context.Context, _ []clnkr.Message) (clnkr.Response, error) {
+func (m *cancellableBlockingModel) Query(
+	ctx context.Context,
+	_ []clnkr.Message,
+) (clnkr.Response, error) {
 	defer close(m.exited)
 	close(m.started)
 	<-ctx.Done()
@@ -502,10 +571,19 @@ func (c *fakeCompactor) Summarize(_ context.Context, messages []clnkr.Message) (
 func compactableMessages() []clnkr.Message {
 	return []clnkr.Message{
 		{Role: "user", Content: "first task"},
-		{Role: "assistant", Content: `{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
+		{
+			Role:    "assistant",
+			Content: `{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`,
+		},
 		{Role: "user", Content: "second task"},
-		{Role: "assistant", Content: `{"type":"done","summary":"done again","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
+		{
+			Role:    "assistant",
+			Content: `{"type":"done","summary":"done again","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`,
+		},
 		{Role: "user", Content: "third task"},
-		{Role: "assistant", Content: `{"type":"done","summary":"done third","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`},
+		{
+			Role:    "assistant",
+			Content: `{"type":"done","summary":"done third","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`,
+		},
 	}
 }

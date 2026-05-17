@@ -113,7 +113,8 @@ func parseStatusChangedFiles(status []byte, repoRoot, finalCwd string) []string 
 
 		code := string(entry[:2])
 		paths := []string{string(entry[3:])}
-		if (strings.Contains(code, "R") || strings.Contains(code, "C")) && i+1 < len(entries) && len(entries[i+1]) > 0 {
+		if (strings.Contains(code, "R") || strings.Contains(code, "C")) && i+1 < len(entries) &&
+			len(entries[i+1]) > 0 {
 			paths = append(paths, string(entries[i+1]))
 			i++
 		}

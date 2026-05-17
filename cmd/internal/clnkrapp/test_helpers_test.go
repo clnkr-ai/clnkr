@@ -9,7 +9,10 @@ import (
 )
 
 func actJSON(command string) string {
-	return fmt.Sprintf(`{"type":"act","bash":{"commands":[{"command":%q,"workdir":null}]}}`, command)
+	return fmt.Sprintf(
+		`{"type":"act","bash":{"commands":[{"command":%q,"workdir":null}]}}`,
+		command,
+	)
 }
 
 func mustTurn(raw string) clnkr.Turn {
@@ -36,11 +39,13 @@ func verifiedDone(summary string) *clnkr.DoneTurn {
 		Summary: summary,
 		Verification: clnkr.CompletionVerification{
 			Status: clnkr.VerificationVerified,
-			Checks: []clnkr.VerificationCheck{{
-				Command:  "go test ./...",
-				Outcome:  "passed",
-				Evidence: "go test ./... passed and ls output showed current directory entries for completion",
-			}},
+			Checks: []clnkr.VerificationCheck{
+				{
+					Command:  "go test ./...",
+					Outcome:  "passed",
+					Evidence: "go test ./... passed and ls output showed current directory entries for completion",
+				},
+			},
 		},
 		KnownRisks: []string{},
 	}

@@ -162,9 +162,15 @@ func loadSessions(pwd string, failNewest bool) ([]loadedSession, error) {
 			}
 			continue
 		}
-		sessions = append(sessions, loadedSession{SessionInfo: sessionInfo(e.name, sf), messages: sf.Messages})
+		sessions = append(
+			sessions,
+			loadedSession{SessionInfo: sessionInfo(e.name, sf), messages: sf.Messages},
+		)
 	}
-	sort.Slice(sessions, func(i, j int) bool { return newerSession(sessions[i].SessionInfo, sessions[j].SessionInfo) })
+	sort.Slice(
+		sessions,
+		func(i, j int) bool { return newerSession(sessions[i].SessionInfo, sessions[j].SessionInfo) },
+	)
 	return sessions, nil
 }
 

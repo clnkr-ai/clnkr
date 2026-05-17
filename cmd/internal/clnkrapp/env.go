@@ -7,7 +7,10 @@ import (
 	providerdomain "github.com/clnkr-ai/clnkr/internal/providers/providerconfig"
 )
 
-func commandEnvFromProviderConfig(cfg providerconfig.ResolvedProviderConfig, env []string) map[string]string {
+func commandEnvFromProviderConfig(
+	cfg providerconfig.ResolvedProviderConfig,
+	env []string,
+) map[string]string {
 	base := envMapFromList(env)
 	base["CLNKR_PROVIDER"] = string(cfg.Provider)
 	if cfg.Provider == providerdomain.ProviderOpenAI {

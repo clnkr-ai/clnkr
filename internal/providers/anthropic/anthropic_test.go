@@ -25,7 +25,10 @@ func TestModelRequestSerialization(t *testing.T) {
 		defer server.Close()
 
 		m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys prompt")
-		if _, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hello"}}); err != nil {
+		if _, err := m.Query(
+			context.Background(),
+			[]clnkr.Message{{Role: "user", Content: "hello"}},
+		); err != nil {
 			t.Fatalf("Query: %v", err)
 		}
 
@@ -105,11 +108,20 @@ func TestModelRequestSerialization(t *testing.T) {
 		})
 		defer server.Close()
 
-		m := anthropic.NewModelWithOptions(server.URL, "test-key", "claude-sonnet-4-20250514", "sys", anthropic.Options{
-			MaxTokens:            8000,
-			ThinkingBudgetTokens: 2048,
-		})
-		if _, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hello"}}); err != nil {
+		m := anthropic.NewModelWithOptions(
+			server.URL,
+			"test-key",
+			"claude-sonnet-4-20250514",
+			"sys",
+			anthropic.Options{
+				MaxTokens:            8000,
+				ThinkingBudgetTokens: 2048,
+			},
+		)
+		if _, err := m.Query(
+			context.Background(),
+			[]clnkr.Message{{Role: "user", Content: "hello"}},
+		); err != nil {
 			t.Fatalf("Query: %v", err)
 		}
 		if gotBody["max_tokens"] != float64(8000) {
@@ -133,7 +145,10 @@ func TestModelRequestSerialization(t *testing.T) {
 		defer server.Close()
 
 		m := anthropic.NewModel(server.URL+"/", "test-key", "claude-test", "sys")
-		if _, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}}); err != nil {
+		if _, err := m.Query(
+			context.Background(),
+			[]clnkr.Message{{Role: "user", Content: "hi"}},
+		); err != nil {
 			t.Fatalf("Query: %v", err)
 		}
 		if gotPath != "/v1/messages" {
@@ -145,7 +160,11 @@ func TestModelRequestSerialization(t *testing.T) {
 func TestModelStructuredResponses(t *testing.T) {
 	t.Run("returns canonical json text", func(t *testing.T) {
 		server := jsonServer(t, func(r *http.Request) any {
-			return response(50, 30, map[string]any{"type": "text", "text": anthropicWrappedDone("hello back")})
+			return response(
+				50,
+				30,
+				map[string]any{"type": "text", "text": anthropicWrappedDone("hello back")},
+			)
 		})
 		defer server.Close()
 
@@ -196,59 +215,83 @@ func TestModelStructuredResponses(t *testing.T) {
 		}{
 			{name: "no text block", content: []map[string]string{{"type": "tool_use"}}},
 			{name: "empty text block", content: []map[string]string{{"type": "text", "text": ""}}},
-			{name: "multiple text blocks", content: []map[string]string{{"type": "text", "text": doneTurn("one")}, {"type": "text", "text": doneTurn("two")}}},
+			{
+				name: "multiple text blocks",
+				content: []map[string]string{
+					{"type": "text", "text": doneTurn("one")},
+					{"type": "text", "text": doneTurn("two")},
+				},
+			},
 		}
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				server := jsonServer(t, func(r *http.Request) any {
-					return map[string]any{"content": tt.content, "usage": map[string]int{"input_tokens": 1, "output_tokens": 1}}
+					return map[string]any{
+						"content": tt.content,
+						"usage":   map[string]int{"input_tokens": 1, "output_tokens": 1},
+					}
 				})
 				defer server.Close()
 
 				m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
-				if _, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}}); err == nil {
+				if _, err := m.Query(
+					context.Background(),
+					[]clnkr.Message{{Role: "user", Content: "hi"}},
+				); err == nil {
 					t.Fatal("expected fail-closed error")
 				}
 			})
 		}
 	})
 
-	t.Run("returns raw payload plus protocol error on invalid structured payload", func(t *testing.T) {
-		text := `{"turn":{"type":"done","bash":{"commands":[{"command":"rm -rf tmp","workdir":null}]},"question":null,"summary":"done","reasoning":null}}`
-		server := jsonServer(t, func(r *http.Request) any { return textResponse(text) })
-		defer server.Close()
+	t.Run(
+		"returns raw payload plus protocol error on invalid structured payload",
+		func(t *testing.T) {
+			text := `{"turn":{"type":"done","bash":{"commands":[{"command":"rm -rf tmp","workdir":null}]},"question":null,"summary":"done","reasoning":null}}`
+			server := jsonServer(t, func(r *http.Request) any { return textResponse(text) })
+			defer server.Close()
 
-		m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
-		resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-		if err != nil {
-			t.Fatalf("Query: %v", err)
-		}
-		if resp.Raw != text {
-			t.Fatalf("raw = %q, want %q", resp.Raw, text)
-		}
-		if !errors.Is(resp.ProtocolErr, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ProtocolErr = %v, want ErrInvalidJSON", resp.ProtocolErr)
-		}
-	})
+			m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
+			resp, err := m.Query(
+				context.Background(),
+				[]clnkr.Message{{Role: "user", Content: "hi"}},
+			)
+			if err != nil {
+				t.Fatalf("Query: %v", err)
+			}
+			if resp.Raw != text {
+				t.Fatalf("raw = %q, want %q", resp.Raw, text)
+			}
+			if !errors.Is(resp.ProtocolErr, clnkr.ErrInvalidJSON) {
+				t.Fatalf("ProtocolErr = %v, want ErrInvalidJSON", resp.ProtocolErr)
+			}
+		},
+	)
 
-	t.Run("returns raw payload plus protocol error when output config is ignored", func(t *testing.T) {
-		raw := doneTurn("ignored schema")
-		server := jsonServer(t, func(r *http.Request) any { return textResponse(raw) })
-		defer server.Close()
+	t.Run(
+		"returns raw payload plus protocol error when output config is ignored",
+		func(t *testing.T) {
+			raw := doneTurn("ignored schema")
+			server := jsonServer(t, func(r *http.Request) any { return textResponse(raw) })
+			defer server.Close()
 
-		m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
-		resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-		if err != nil {
-			t.Fatalf("Query: %v", err)
-		}
-		if resp.Raw != raw {
-			t.Fatalf("raw = %q, want %q", resp.Raw, raw)
-		}
-		if !errors.Is(resp.ProtocolErr, clnkr.ErrInvalidJSON) {
-			t.Fatalf("ProtocolErr = %v, want ErrInvalidJSON", resp.ProtocolErr)
-		}
-	})
+			m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
+			resp, err := m.Query(
+				context.Background(),
+				[]clnkr.Message{{Role: "user", Content: "hi"}},
+			)
+			if err != nil {
+				t.Fatalf("Query: %v", err)
+			}
+			if resp.Raw != raw {
+				t.Fatalf("raw = %q, want %q", resp.Raw, raw)
+			}
+			if !errors.Is(resp.ProtocolErr, clnkr.ErrInvalidJSON) {
+				t.Fatalf("ProtocolErr = %v, want ErrInvalidJSON", resp.ProtocolErr)
+			}
+		},
+	)
 }
 
 func TestModelErrors(t *testing.T) {
@@ -261,23 +304,36 @@ func TestModelErrors(t *testing.T) {
 		{
 			name:   "extracts error message from JSON error response",
 			status: http.StatusTooManyRequests,
-			body:   map[string]any{"type": "error", "error": map[string]any{"type": "rate_limit_error", "message": "Rate limit exceeded"}},
-			want:   "api error (status 429): Rate limit exceeded",
+			body: map[string]any{
+				"type": "error",
+				"error": map[string]any{
+					"type":    "rate_limit_error",
+					"message": "Rate limit exceeded",
+				},
+			},
+			want: "api error (status 429): Rate limit exceeded",
 		},
-		{name: "falls back to raw body for non-JSON errors", status: http.StatusBadGateway, body: "Bad Gateway", want: "api error (status 502): Bad Gateway"},
+		{
+			name:   "falls back to raw body for non-JSON errors",
+			status: http.StatusBadGateway,
+			body:   "Bad Gateway",
+			want:   "api error (status 502): Bad Gateway",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(tt.status)
-				switch body := tt.body.(type) {
-				case string:
-					_, _ = w.Write([]byte(body))
-				default:
-					_ = json.NewEncoder(w).Encode(body)
-				}
-			}))
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(tt.status)
+					switch body := tt.body.(type) {
+					case string:
+						_, _ = w.Write([]byte(body))
+					default:
+						_ = json.NewEncoder(w).Encode(body)
+					}
+				}),
+			)
 			defer server.Close()
 
 			m := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
@@ -303,7 +359,13 @@ func TestModelToolCalls(t *testing.T) {
 	})
 	defer server.Close()
 
-	m := anthropic.NewModelWithOptions(server.URL, "test-key", "claude-test", "sys prompt", anthropic.Options{UseBashToolCalls: true})
+	m := anthropic.NewModelWithOptions(
+		server.URL,
+		"test-key",
+		"claude-test",
+		"sys prompt",
+		anthropic.Options{UseBashToolCalls: true},
+	)
 	resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "where"}})
 	if err != nil {
 		t.Fatalf("Query: %v", err)
@@ -330,7 +392,8 @@ func TestModelToolCalls(t *testing.T) {
 	if got := turn.Bash.Commands[1]; got.ID != "toolu_2" || got.Command != "git status" {
 		t.Fatalf("second command = %#v, want provider ID and command", got)
 	}
-	if len(resp.BashToolCalls) != 2 || resp.BashToolCalls[0].ID != "toolu_1" || resp.BashToolCalls[1].ID != "toolu_2" {
+	if len(resp.BashToolCalls) != 2 || resp.BashToolCalls[0].ID != "toolu_1" ||
+		resp.BashToolCalls[1].ID != "toolu_2" {
 		t.Fatalf("BashToolCalls = %#v", resp.BashToolCalls)
 	}
 }
@@ -344,7 +407,13 @@ func TestModelToolCallsAllowsTextAlongsideToolUse(t *testing.T) {
 	})
 	defer server.Close()
 
-	m := anthropic.NewModelWithOptions(server.URL, "test-key", "claude-test", "sys prompt", anthropic.Options{UseBashToolCalls: true})
+	m := anthropic.NewModelWithOptions(
+		server.URL,
+		"test-key",
+		"claude-test",
+		"sys prompt",
+		anthropic.Options{UseBashToolCalls: true},
+	)
 	resp, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "where"}})
 	if err != nil {
 		t.Fatalf("Query: %v", err)
@@ -369,10 +438,24 @@ func TestModelToolCallsReplayToolMessagesWithoutDuplicateText(t *testing.T) {
 	})
 	defer server.Close()
 
-	m := anthropic.NewModelWithOptions(server.URL, "test-key", "claude-test", "sys prompt", anthropic.Options{UseBashToolCalls: true})
+	m := anthropic.NewModelWithOptions(
+		server.URL,
+		"test-key",
+		"claude-test",
+		"sys prompt",
+		anthropic.Options{UseBashToolCalls: true},
+	)
 	_, err := m.Query(context.Background(), []clnkr.Message{
-		{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]}}`, BashToolCalls: []clnkr.BashToolCall{{ID: "toolu_1", Command: "pwd"}}},
-		{Role: "user", Content: "payload", BashToolResult: &clnkr.BashToolResult{ID: "toolu_1", Content: "payload"}},
+		{
+			Role:          "assistant",
+			Content:       `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]}}`,
+			BashToolCalls: []clnkr.BashToolCall{{ID: "toolu_1", Command: "pwd"}},
+		},
+		{
+			Role:           "user",
+			Content:        "payload",
+			BashToolResult: &clnkr.BashToolResult{ID: "toolu_1", Content: "payload"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("Query: %v", err)
@@ -385,7 +468,8 @@ func TestModelToolCallsReplayToolMessagesWithoutDuplicateText(t *testing.T) {
 	if firstContent[0].(map[string]any)["type"] != "tool_use" {
 		t.Fatalf("first content = %#v, want tool_use", firstContent)
 	}
-	if secondContent[0].(map[string]any)["type"] != "tool_result" || secondContent[0].(map[string]any)["content"] != "payload" {
+	if secondContent[0].(map[string]any)["type"] != "tool_result" ||
+		secondContent[0].(map[string]any)["content"] != "payload" {
 		t.Fatalf("second content = %#v, want tool_result payload", secondContent)
 	}
 }
@@ -398,7 +482,13 @@ func TestModelToolCallsReplayConsecutiveToolResultsTogether(t *testing.T) {
 	})
 	defer server.Close()
 
-	m := anthropic.NewModelWithOptions(server.URL, "test-key", "claude-test", "sys prompt", anthropic.Options{UseBashToolCalls: true})
+	m := anthropic.NewModelWithOptions(
+		server.URL,
+		"test-key",
+		"claude-test",
+		"sys prompt",
+		anthropic.Options{UseBashToolCalls: true},
+	)
 	_, err := m.Query(context.Background(), []clnkr.Message{
 		{
 			Role:    "assistant",
@@ -408,14 +498,29 @@ func TestModelToolCallsReplayConsecutiveToolResultsTogether(t *testing.T) {
 				{ID: "toolu_2", Command: "false"},
 			},
 		},
-		{Role: "user", Content: "payload 1", BashToolResult: &clnkr.BashToolResult{ID: "toolu_1", Content: "payload 1"}},
-		{Role: "user", Content: "payload 2", BashToolResult: &clnkr.BashToolResult{ID: "toolu_2", Content: "payload 2", IsError: true}},
+		{
+			Role:           "user",
+			Content:        "payload 1",
+			BashToolResult: &clnkr.BashToolResult{ID: "toolu_1", Content: "payload 1"},
+		},
+		{
+			Role:    "user",
+			Content: "payload 2",
+			BashToolResult: &clnkr.BashToolResult{
+				ID:      "toolu_2",
+				Content: "payload 2",
+				IsError: true,
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
 	if len(gotMessages) != 2 {
-		t.Fatalf("messages = %#v, want assistant tool_use and one user tool_result message", gotMessages)
+		t.Fatalf(
+			"messages = %#v, want assistant tool_use and one user tool_result message",
+			gotMessages,
+		)
 	}
 	results := gotMessages[1].(map[string]any)["content"].([]any)
 	if len(results) != 2 {
@@ -426,7 +531,8 @@ func TestModelToolCallsReplayConsecutiveToolResultsTogether(t *testing.T) {
 	if first["tool_use_id"] != "toolu_1" || first["content"] != "payload 1" {
 		t.Fatalf("first tool result = %#v", first)
 	}
-	if second["tool_use_id"] != "toolu_2" || second["content"] != "payload 2" || second["is_error"] != true {
+	if second["tool_use_id"] != "toolu_2" || second["content"] != "payload 2" ||
+		second["is_error"] != true {
 		t.Fatalf("second tool result = %#v", second)
 	}
 }
@@ -439,8 +545,17 @@ func TestModelQueryFinalOmitsBashTool(t *testing.T) {
 	})
 	defer server.Close()
 
-	m := anthropic.NewModelWithOptions(server.URL, "test-key", "claude-test", "sys prompt", anthropic.Options{UseBashToolCalls: true})
-	if _, err := m.QueryFinal(context.Background(), []clnkr.Message{{Role: "user", Content: "summarize"}}); err != nil {
+	m := anthropic.NewModelWithOptions(
+		server.URL,
+		"test-key",
+		"claude-test",
+		"sys prompt",
+		anthropic.Options{UseBashToolCalls: true},
+	)
+	if _, err := m.QueryFinal(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "summarize"}},
+	); err != nil {
 		t.Fatalf("QueryFinal: %v", err)
 	}
 	if _, ok := gotBody["tools"]; ok {

@@ -91,8 +91,12 @@ func TestWriteEventLogSnakeCasePayloads(t *testing.T) {
 			},
 		},
 		{
-			name:      "completion gate",
-			event:     clnkr.EventCompletionGate{Decision: clnkr.CompletionChallenge, Reasons: []string{"artifact_claim_without_check"}, Summary: "created result.txt"},
+			name: "completion gate",
+			event: clnkr.EventCompletionGate{
+				Decision: clnkr.CompletionChallenge,
+				Reasons:  []string{"artifact_claim_without_check"},
+				Summary:  "created result.txt",
+			},
 			wantType:  "completion_gate",
 			wantKey:   "decision",
 			rejectKey: "Decision",
@@ -135,13 +139,21 @@ func TestWriteEventLogCommandDonePayload(t *testing.T) {
 		wantErrKey bool
 	}{
 		{
-			name:    "feedback included and nil err omitted",
-			event:   clnkr.EventCommandDone{Command: "touch note.txt", ExitCode: 0, Feedback: clnkr.CommandFeedback{ChangedFiles: []string{"note.txt"}}},
+			name: "feedback included and nil err omitted",
+			event: clnkr.EventCommandDone{
+				Command:  "touch note.txt",
+				ExitCode: 0,
+				Feedback: clnkr.CommandFeedback{ChangedFiles: []string{"note.txt"}},
+			},
 			wantErr: nil,
 		},
 		{
-			name:       "err included when present",
-			event:      clnkr.EventCommandDone{Command: "false", ExitCode: 1, Err: errors.New("boom")},
+			name: "err included when present",
+			event: clnkr.EventCommandDone{
+				Command:  "false",
+				ExitCode: 1,
+				Err:      errors.New("boom"),
+			},
 			wantErr:    "boom",
 			wantErrKey: true,
 		},
@@ -158,8 +170,15 @@ func TestWriteEventLogCommandDonePayload(t *testing.T) {
 			if payload["Command"] != nil || payload["ExitCode"] != nil {
 				t.Fatalf("payload has Go field names: %#v", payload)
 			}
-			if got, ok := payload["err"]; ok != tt.wantErrKey || !reflect.DeepEqual(got, tt.wantErr) {
-				t.Fatalf("err = %#v, present = %v; want %#v, present = %v", got, ok, tt.wantErr, tt.wantErrKey)
+			if got, ok := payload["err"]; ok != tt.wantErrKey ||
+				!reflect.DeepEqual(got, tt.wantErr) {
+				t.Fatalf(
+					"err = %#v, present = %v; want %#v, present = %v",
+					got,
+					ok,
+					tt.wantErr,
+					tt.wantErrKey,
+				)
 			}
 			if len(tt.event.Feedback.ChangedFiles) > 0 {
 				feedback := payload["feedback"].(map[string]any)
@@ -172,8 +191,14 @@ func TestWriteEventLogCommandDonePayload(t *testing.T) {
 }
 
 func TestWriteEventLogPreservesRawCommandOutput(t *testing.T) {
-	stdout := "stdout-head\n" + strings.Repeat("raw stdout\n", 80*1024/len("raw stdout\n")) + "stdout-tail\n"
-	stderr := "stderr-head\n" + strings.Repeat("raw stderr\n", 80*1024/len("raw stderr\n")) + "stderr-tail\n"
+	stdout := "stdout-head\n" + strings.Repeat(
+		"raw stdout\n",
+		80*1024/len("raw stdout\n"),
+	) + "stdout-tail\n"
+	stderr := "stderr-head\n" + strings.Repeat(
+		"raw stderr\n",
+		80*1024/len("raw stderr\n"),
+	) + "stderr-tail\n"
 
 	entry := writeEventLogEntry(t, clnkr.EventCommandDone{
 		Command:  "make test",
@@ -196,7 +221,8 @@ func TestWriteEventLogPreservesRawCommandOutput(t *testing.T) {
 	if payload.Stderr != stderr {
 		t.Fatalf("stderr length = %d, want raw %d", len(payload.Stderr), len(stderr))
 	}
-	if strings.Contains(payload.Stdout, "compressed") || strings.Contains(payload.Stderr, "compressed") {
+	if strings.Contains(payload.Stdout, "compressed") ||
+		strings.Contains(payload.Stderr, "compressed") {
 		t.Fatalf("event log should not contain model-facing compression markers")
 	}
 }

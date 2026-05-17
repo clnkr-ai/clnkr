@@ -19,7 +19,10 @@ import (
 )
 
 func openAIWrappedDone(summary string) string {
-	return fmt.Sprintf(`{"turn":{"type":"done","bash":null,"question":null,"summary":%q,"verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`, summary)
+	return fmt.Sprintf(
+		`{"turn":{"type":"done","bash":null,"question":null,"summary":%q,"verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`,
+		summary,
+	)
 }
 
 func mustTurn(raw string) clnkr.Turn {
@@ -46,11 +49,13 @@ func verifiedDone(summary string) *clnkr.DoneTurn {
 		Summary: summary,
 		Verification: clnkr.CompletionVerification{
 			Status: clnkr.VerificationVerified,
-			Checks: []clnkr.VerificationCheck{{
-				Command:  "go test ./...",
-				Outcome:  "passed",
-				Evidence: "go test ./... passed and ls output showed current directory entries for completion",
-			}},
+			Checks: []clnkr.VerificationCheck{
+				{
+					Command:  "go test ./...",
+					Outcome:  "passed",
+					Evidence: "go test ./... passed and ls output showed current directory entries for completion",
+				},
+			},
 		},
 		KnownRisks: []string{},
 	}
@@ -99,13 +104,22 @@ func runMainHelper(t *testing.T, args ...string) (bytes.Buffer, bytes.Buffer, er
 	return runMainHelperWithEnv(t, nil, args...)
 }
 
-func runMainHelperWithEnv(t *testing.T, env []string, args ...string) (bytes.Buffer, bytes.Buffer, error) {
+func runMainHelperWithEnv(
+	t *testing.T,
+	env []string,
+	args ...string,
+) (bytes.Buffer, bytes.Buffer, error) {
 	t.Helper()
 
 	return runMainHelperWithEnvAndInput(t, env, nil, args...)
 }
 
-func runMainHelperWithEnvAndInput(t *testing.T, env []string, stdin io.Reader, args ...string) (bytes.Buffer, bytes.Buffer, error) {
+func runMainHelperWithEnvAndInput(
+	t *testing.T,
+	env []string,
+	stdin io.Reader,
+	args ...string,
+) (bytes.Buffer, bytes.Buffer, error) {
 	t.Helper()
 
 	cmdArgs := append([]string{"-test.run=TestMainHelper", "--"}, args...)
@@ -166,7 +180,11 @@ func TestFlagParseErrorsKeepUsageOffStdout(t *testing.T) {
 		want string
 	}{
 		{name: "unknown flag", args: []string{"--bogus"}, want: "flag provided but not defined"},
-		{name: "removed turn protocol flag", args: []string{"--turn-protocol", "structured-json"}, want: "flag provided but not defined: -turn-protocol"},
+		{
+			name: "removed turn protocol flag",
+			args: []string{"--turn-protocol", "structured-json"},
+			want: "flag provided but not defined: -turn-protocol",
+		},
 	}
 
 	for _, tt := range tests {
@@ -201,13 +219,24 @@ func TestDumpSystemPromptModes(t *testing.T) {
 		rejectStderrContains []string
 	}{
 		{
-			name:       "custom prompt does not require provider config",
-			args:       []string{"--no-system-prompt", "--system-prompt-append", "custom prompt", "--dump-system-prompt"},
+			name: "custom prompt does not require provider config",
+			args: []string{
+				"--no-system-prompt",
+				"--system-prompt-append",
+				"custom prompt",
+				"--dump-system-prompt",
+			},
 			wantStdout: "custom prompt",
 		},
 		{
-			name:             "append value may be prompt flag text",
-			args:             []string{"--act-protocol", "clnkr-inline", "--system-prompt-append", "-p", "--dump-system-prompt"},
+			name: "append value may be prompt flag text",
+			args: []string{
+				"--act-protocol",
+				"clnkr-inline",
+				"--system-prompt-append",
+				"-p",
+				"--dump-system-prompt",
+			},
 			wantStdoutSuffix: "\n\n-p",
 		},
 		{
@@ -218,8 +247,16 @@ func TestDumpSystemPromptModes(t *testing.T) {
 			wantStderrContains: []string{"flag needs an argument: -p"},
 		},
 		{
-			name:                 "auto resolves without api key",
-			args:                 []string{"--provider", "openai", "--provider-api", "openai-responses", "--model", "gpt-5", "--dump-system-prompt"},
+			name: "auto resolves without api key",
+			args: []string{
+				"--provider",
+				"openai",
+				"--provider-api",
+				"openai-responses",
+				"--model",
+				"gpt-5",
+				"--dump-system-prompt",
+			},
 			wantStdoutContains:   []string{"call the bash tool"},
 			rejectStderrContains: []string{"No API key found", "api key is required"},
 		},
@@ -231,8 +268,14 @@ func TestDumpSystemPromptModes(t *testing.T) {
 			wantStderrContains: []string{"--act-protocol clnkr-inline"},
 		},
 		{
-			name:                 "prompt flag dumps unattended prompt",
-			args:                 []string{"--act-protocol", "clnkr-inline", "-p", "fix it", "--dump-system-prompt"},
+			name: "prompt flag dumps unattended prompt",
+			args: []string{
+				"--act-protocol",
+				"clnkr-inline",
+				"-p",
+				"fix it",
+				"--dump-system-prompt",
+			},
 			wantStdoutContains:   []string{`Set type to exactly one of "act" or "done".`},
 			rejectStdoutContains: []string{"clarify"},
 			rejectStderrContains: []string{"provider is required"},
@@ -250,7 +293,11 @@ func TestDumpSystemPromptModes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			stdout, stderr, err := runMainHelper(t, tt.args...)
 			if tt.wantErr && err == nil {
-				t.Fatalf("run main succeeded; stdout: %s stderr: %s", stdout.String(), stderr.String())
+				t.Fatalf(
+					"run main succeeded; stdout: %s stderr: %s",
+					stdout.String(),
+					stderr.String(),
+				)
 			}
 			if !tt.wantErr && err != nil {
 				t.Fatalf("dump system prompt: %v\nstderr: %s", err, stderr.String())
@@ -260,7 +307,8 @@ func TestDumpSystemPromptModes(t *testing.T) {
 					t.Fatalf("stdout = %q, want %q", stdout.String(), tt.wantStdout)
 				}
 			}
-			if tt.wantStdoutSuffix != "" && !strings.HasSuffix(stdout.String(), tt.wantStdoutSuffix) {
+			if tt.wantStdoutSuffix != "" &&
+				!strings.HasSuffix(stdout.String(), tt.wantStdoutSuffix) {
 				t.Fatalf("stdout suffix = %q, want suffix %q", stdout.String(), tt.wantStdoutSuffix)
 			}
 			for _, want := range tt.wantStdoutContains {
@@ -283,7 +331,8 @@ func TestDumpSystemPromptModes(t *testing.T) {
 					t.Fatalf("stderr contains %q: %q", reject, stderr.String())
 				}
 			}
-			if len(tt.wantStderrContains) == 0 && len(tt.rejectStderrContains) == 0 && stderr.Len() != 0 {
+			if len(tt.wantStderrContains) == 0 && len(tt.rejectStderrContains) == 0 &&
+				stderr.Len() != 0 {
 				t.Fatalf("stderr = %q, want empty", stderr.String())
 			}
 		})
@@ -329,9 +378,17 @@ func TestPromptRunsSingleTask(t *testing.T) {
 }
 
 func TestTrajectoryRequiresPromptBeforeProviderConfig(t *testing.T) {
-	stdout, stderr, err := runMainHelper(t, "--trajectory", filepath.Join(t.TempDir(), "trajectory.json"))
+	stdout, stderr, err := runMainHelper(
+		t,
+		"--trajectory",
+		filepath.Join(t.TempDir(), "trajectory.json"),
+	)
 	if err == nil {
-		t.Fatalf("trajectory without prompt succeeded; stdout: %s stderr: %s", stdout.String(), stderr.String())
+		t.Fatalf(
+			"trajectory without prompt succeeded; stdout: %s stderr: %s",
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
@@ -384,7 +441,11 @@ func TestCommandProgressWritesToStderr(t *testing.T) {
 	}
 	wantStdout := sentinel + "\ndone\n"
 	if stdout.String() != wantStdout {
-		t.Fatalf("stdout = %q, want command output and final summary %q", stdout.String(), wantStdout)
+		t.Fatalf(
+			"stdout = %q, want command output and final summary %q",
+			stdout.String(),
+			wantStdout,
+		)
 	}
 	if strings.Contains(stderr.String(), sentinel) {
 		t.Fatalf("stderr contains command output: %q", stderr.String())
@@ -392,7 +453,10 @@ func TestCommandProgressWritesToStderr(t *testing.T) {
 	if strings.Contains(stderr.String(), `{"type":"act"`) {
 		t.Fatalf("stderr contains non-verbose model response: %q", stderr.String())
 	}
-	if strings.Contains(stderr.String(), `{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`) {
+	if strings.Contains(
+		stderr.String(),
+		`{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`,
+	) {
 		t.Fatalf("stderr contains final summary response: %q", stderr.String())
 	}
 	if strings.Contains(stderr.String(), "err-no-newline--- done ---") {
@@ -477,11 +541,18 @@ func TestFullSendPipeClarificationExitsNonzeroWithoutStdout(t *testing.T) {
 	})
 	defer server.Close()
 
-	stdout, stderr, err := runMainHelperWithEnvAndInput(t, []string{"CLNKR_API_KEY=test-key"}, strings.NewReader("inspect\n"),
-		"--provider", "openai",
-		"--provider-api", "openai-chat-completions",
-		"--base-url", server.URL,
-		"--model", "gpt-test",
+	stdout, stderr, err := runMainHelperWithEnvAndInput(
+		t,
+		[]string{"CLNKR_API_KEY=test-key"},
+		strings.NewReader("inspect\n"),
+		"--provider",
+		"openai",
+		"--provider-api",
+		"openai-chat-completions",
+		"--base-url",
+		server.URL,
+		"--model",
+		"gpt-test",
 		"--full-send",
 	)
 	exitErr, ok := err.(*exec.ExitError)
@@ -492,8 +563,12 @@ func TestFullSendPipeClarificationExitsNonzeroWithoutStdout(t *testing.T) {
 	if stdout.String() != "" {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
-	if !strings.HasPrefix(stderr.String(), "Which repo?\n[Session saved to ") || !strings.HasSuffix(stderr.String(), "]\nClarification needed.\n") {
-		t.Fatalf("stderr = %q, want question, session save, and clarification status", stderr.String())
+	if !strings.HasPrefix(stderr.String(), "Which repo?\n[Session saved to ") ||
+		!strings.HasSuffix(stderr.String(), "]\nClarification needed.\n") {
+		t.Fatalf(
+			"stderr = %q, want question, session save, and clarification status",
+			stderr.String(),
+		)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -518,12 +593,20 @@ func TestFullSendPipeRunErrorExitsNonzero(t *testing.T) {
 	})
 	defer server.Close()
 
-	stdout, stderr, err := runMainHelperWithEnvAndInput(t, []string{"CLNKR_API_KEY=test-key"}, strings.NewReader("hit the limit\n"),
-		"--provider", "openai",
-		"--provider-api", "openai-chat-completions",
-		"--base-url", server.URL,
-		"--model", "gpt-test",
-		"--max-steps", "1",
+	stdout, stderr, err := runMainHelperWithEnvAndInput(
+		t,
+		[]string{"CLNKR_API_KEY=test-key"},
+		strings.NewReader("hit the limit\n"),
+		"--provider",
+		"openai",
+		"--provider-api",
+		"openai-chat-completions",
+		"--base-url",
+		server.URL,
+		"--model",
+		"gpt-test",
+		"--max-steps",
+		"1",
 		"--full-send",
 	)
 	exitErr, ok := err.(*exec.ExitError)
@@ -533,7 +616,8 @@ func TestFullSendPipeRunErrorExitsNonzero(t *testing.T) {
 	if stdout.String() != "reached-limit\n" {
 		t.Fatalf("stdout = %q, want command output", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "[Session saved to ") || !strings.Contains(stderr.String(), "Error: query model (final):") {
+	if !strings.Contains(stderr.String(), "[Session saved to ") ||
+		!strings.Contains(stderr.String(), "Error: query model (final):") {
 		t.Fatalf("stderr = %q, want session save and final query error", stderr.String())
 	}
 }
@@ -617,7 +701,10 @@ func TestOpenAIResponsesHarnessFlagsReachRequestAndMetadata(t *testing.T) {
 					"type": "message",
 					"role": "assistant",
 					"content": []map[string]any{
-						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`},
+						{
+							"type": "output_text",
+							"text": `{"turn":{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`,
+						},
 					},
 				},
 			},
@@ -675,7 +762,8 @@ func TestOpenAIResponsesHarnessFlagsReachRequestAndMetadata(t *testing.T) {
 	if metadata.Effective.Effort.Level == nil || *metadata.Effective.Effort.Level != "high" {
 		t.Fatalf("metadata effort = %#v, want high", metadata.Effective.Effort.Level)
 	}
-	if metadata.Effective.Output.MaxOutputTokens == nil || *metadata.Effective.Output.MaxOutputTokens != 8000 {
+	if metadata.Effective.Output.MaxOutputTokens == nil ||
+		*metadata.Effective.Output.MaxOutputTokens != 8000 {
 		t.Fatalf("metadata max output = %#v, want 8000", metadata.Effective.Output.MaxOutputTokens)
 	}
 }
@@ -699,7 +787,13 @@ func TestMaxOutputTokensZeroIsRejectedWhenFlagSet(t *testing.T) {
 }
 
 func TestSingleTaskRejectsExplicitFullSendFalse(t *testing.T) {
-	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"}, "-p", "hi", "--full-send=false")
+	stdout, stderr, err := runMainHelperWithEnv(
+		t,
+		[]string{"CLNKR_API_KEY=test-key"},
+		"-p",
+		"hi",
+		"--full-send=false",
+	)
 	if err == nil {
 		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
 	}
@@ -709,7 +803,8 @@ func TestSingleTaskRejectsExplicitFullSendFalse(t *testing.T) {
 	if !strings.Contains(stderr.String(), "--full-send=false conflicts with -p") {
 		t.Fatalf("stderr = %q, want full-send conflict", stderr.String())
 	}
-	if strings.Contains(stderr.String(), "provider is required") || strings.Contains(stderr.String(), "No API key found") {
+	if strings.Contains(stderr.String(), "provider is required") ||
+		strings.Contains(stderr.String(), "No API key found") {
 		t.Fatalf("stderr = %q, provider config ran before conflict validation", stderr.String())
 	}
 }
@@ -728,7 +823,10 @@ func TestToolCallsActProtocolDoesNotRequireFullSendBeforeProviderConfig(t *testi
 		t.Fatalf("stderr = %q, tool-calls mode should not require full-send", stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "provider") {
-		t.Fatalf("stderr = %q, want provider config error after act protocol parse", stderr.String())
+		t.Fatalf(
+			"stderr = %q, want provider config error after act protocol parse",
+			stderr.String(),
+		)
 	}
 }
 
@@ -761,14 +859,19 @@ func TestRunSingleTaskRejectsCompactCommand(t *testing.T) {
 	if err == nil {
 		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "/compact is only available at the conversational prompt") {
+	if !strings.Contains(
+		stderr.String(),
+		"/compact is only available at the conversational prompt",
+	) {
 		t.Fatalf("stderr = %q, want compact rejection", stderr.String())
 	}
 }
 
 func TestRunPromptLoopTreatsQueuedPasteLinesAsOnePrompt(t *testing.T) {
 	model := &fakeModel{responses: []clnkr.Response{
-		mustResponse(`{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`),
+		mustResponse(
+			`{"type":"done","summary":"done","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`,
+		),
 	}}
 	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
 	driver := clnkrapp.NewDriver(agent, nil)

@@ -31,7 +31,10 @@ func TestLoadCompactionPromptAddsTrimmedInstructions(t *testing.T) {
 	if count := strings.Count(got, "focus on failing tests and edited files"); count != 1 {
 		t.Fatalf("instruction count = %d, want 1 in prompt %q", count, got)
 	}
-	if !strings.Contains(got, "\nAdditional compact instructions:\nfocus on failing tests and edited files\n") {
+	if !strings.Contains(
+		got,
+		"\nAdditional compact instructions:\nfocus on failing tests and edited files\n",
+	) {
 		t.Fatalf("prompt missing trimmed instructions block: %q", got)
 	}
 }

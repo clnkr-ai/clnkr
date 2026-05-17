@@ -21,14 +21,18 @@ func (values *generationFlags) apply(opts *cliOptions, flags *flag.FlagSet) {
 	opts.effort = *values.effort
 	opts.thinkingBudgetTokens = *values.thinkingBudgetTokens
 	opts.maxOutputTokens = *values.maxOutputTokens
-	opts.actProtocolSet, opts.maxOutputTokensSet, opts.thinkingBudgetSet = generationFlagSetValues(flags)
+	opts.actProtocolSet, opts.maxOutputTokensSet, opts.thinkingBudgetSet = generationFlagSetValues(
+		flags,
+	)
 }
 
 func (values *generationFlags) applyTo(opts *cliOptions, flags *flag.FlagSet, _ bool) {
 	values.apply(opts, flags)
 }
 
-func generationFlagSetValues(flags *flag.FlagSet) (actProtocolSet, maxOutputTokensSet, thinkingBudgetTokensSet bool) {
+func generationFlagSetValues(
+	flags *flag.FlagSet,
+) (actProtocolSet, maxOutputTokensSet, thinkingBudgetTokensSet bool) {
 	flags.Visit(func(f *flag.Flag) {
 		switch f.Name {
 		case "act-protocol":

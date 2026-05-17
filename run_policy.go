@@ -76,7 +76,10 @@ func (s *runPolicyState) handleDone(a *Agent, turn *DoneTurn) (bool, error) {
 	if decision == CompletionReject {
 		s.completionRejects++
 		if s.completionRejects >= 3 {
-			return false, s.runError(a, fmt.Errorf("consecutive completion gate rejections, exiting"))
+			return false, s.runError(
+				a,
+				fmt.Errorf("consecutive completion gate rejections, exiting"),
+			)
 		}
 	}
 	if decision == CompletionChallenge {
@@ -100,7 +103,10 @@ func (s *runPolicyState) handleAct(ctx context.Context, a *Agent, turn *ActTurn)
 	limited, skipped := s.limitActTurn(a, turn)
 	commands := cloneBashActions(limited.Bash.Commands)
 	decision, err := s.policy.DecideAct(ctx, ActProposal{
-		Turn:     &ActTurn{Bash: BashBatch{Commands: cloneBashActions(commands)}, Reasoning: limited.Reasoning},
+		Turn: &ActTurn{
+			Bash:      BashBatch{Commands: cloneBashActions(commands)},
+			Reasoning: limited.Reasoning,
+		},
 		Skipped:  cloneBashActions(skipped),
 		Commands: commands,
 		Prompt:   formatActProposal(commands),
@@ -111,7 +117,10 @@ func (s *runPolicyState) handleAct(ctx context.Context, a *Agent, turn *ActTurn)
 	switch decision.Kind {
 	case ActDecisionReject:
 		allCommands := append(cloneBashActions(limited.Bash.Commands), skipped...)
-		a.RejectTurn(&ActTurn{Bash: BashBatch{Commands: allCommands}, Reasoning: limited.Reasoning}, decision.Guidance)
+		a.RejectTurn(
+			&ActTurn{Bash: BashBatch{Commands: allCommands}, Reasoning: limited.Reasoning},
+			decision.Guidance,
+		)
 		return false, nil
 	case ActDecisionApprove:
 	default:
@@ -132,9 +141,13 @@ func (s *runPolicyState) handleAct(ctx context.Context, a *Agent, turn *ActTurn)
 }
 
 func (s *runPolicyState) limitActTurn(a *Agent, turn *ActTurn) (*ActTurn, []BashAction) {
-	if remaining := a.MaxSteps - s.commandsUsed; a.MaxSteps > 0 && len(turn.Bash.Commands) > remaining {
+	if remaining := a.MaxSteps - s.commandsUsed; a.MaxSteps > 0 &&
+		len(turn.Bash.Commands) > remaining {
 		skipped := append([]BashAction(nil), turn.Bash.Commands[remaining:]...)
-		limited := &ActTurn{Bash: BashBatch{Commands: turn.Bash.Commands[:remaining]}, Reasoning: turn.Reasoning}
+		limited := &ActTurn{
+			Bash:      BashBatch{Commands: turn.Bash.Commands[:remaining]},
+			Reasoning: turn.Reasoning,
+		}
 		return limited, skipped
 	}
 	return turn, nil

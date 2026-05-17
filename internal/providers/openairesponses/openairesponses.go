@@ -180,7 +180,13 @@ func (m *Model) QueryFinal(ctx context.Context, messages []clnkr.Message) (clnkr
 	return m.queryStructured(ctx, mapMessages(messages), openaiwire.DoneOnlySchema(), nil, nil)
 }
 
-func (m *Model) queryStructured(ctx context.Context, input []responsesInputItem, schema map[string]any, tools []openAITool, parallelTools *bool) (clnkr.Response, error) {
+func (m *Model) queryStructured(
+	ctx context.Context,
+	input []responsesInputItem,
+	schema map[string]any,
+	tools []openAITool,
+	parallelTools *bool,
+) (clnkr.Response, error) {
 	body, err := json.Marshal(request{
 		Model:           m.model,
 		Instructions:    m.systemPrompt,
@@ -369,8 +375,12 @@ func includeOptions(tools []openAITool) []string {
 	return []string{includeReasoning}
 }
 
-func appendProviderReplayInput(input []responsesInputItem, item clnkr.ProviderReplayItem) []responsesInputItem {
-	if item.Provider != replayProvider || item.ProviderAPI != replayProviderAPI || len(item.JSON) == 0 {
+func appendProviderReplayInput(
+	input []responsesInputItem,
+	item clnkr.ProviderReplayItem,
+) []responsesInputItem {
+	if item.Provider != replayProvider || item.ProviderAPI != replayProviderAPI ||
+		len(item.JSON) == 0 {
 		return input
 	}
 	if item.Type == "reasoning" && !hasEncryptedReasoning(item.JSON) {
@@ -434,7 +444,12 @@ func bashToolSchema() openAITool {
 }
 
 func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, int, string, error) {
-	req, err := http.NewRequestWithContext(ctx, "POST", endpointURL(m.baseURL, "/responses"), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(
+		ctx,
+		"POST",
+		endpointURL(m.baseURL, "/responses"),
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("create request: %w", err)
 	}
@@ -460,7 +475,13 @@ func endpointURL(baseURL, endpoint string) string {
 		return joinURLBoundary(baseURL, endpoint)
 	}
 
-	escapedPath := strings.TrimRight(parsed.EscapedPath(), "/") + "/" + strings.TrimLeft(endpoint, "/")
+	escapedPath := strings.TrimRight(
+		parsed.EscapedPath(),
+		"/",
+	) + "/" + strings.TrimLeft(
+		endpoint,
+		"/",
+	)
 	decodedPath, err := url.PathUnescape(escapedPath)
 	if err != nil {
 		return joinURLBoundary(baseURL, endpoint)
@@ -587,7 +608,10 @@ func extractErrorMessage(body []byte) string {
 
 func retryableStatus(statusCode int) bool {
 	switch statusCode {
-	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+	case http.StatusTooManyRequests,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
 		return true
 	default:
 		return statusCode >= 500 && statusCode < 600

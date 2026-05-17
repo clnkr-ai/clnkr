@@ -66,7 +66,12 @@ Defaults:
 
 func isTerminal(fd uintptr) bool {
 	var winsize [4]uint16
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, syscall.TIOCGWINSZ, uintptr(unsafe.Pointer(&winsize)))
+	_, _, errno := syscall.Syscall(
+		syscall.SYS_IOCTL,
+		fd,
+		syscall.TIOCGWINSZ,
+		uintptr(unsafe.Pointer(&winsize)),
+	)
 	return errno == 0
 }
 
@@ -134,7 +139,15 @@ func (r *lineReader) ReadQueuedLines() ([]string, error) {
 	}
 }
 
-func runDriverPrompt(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, input string, mode string, eventLog io.Writer, stopModelWait func()) error {
+func runDriverPrompt(
+	ctx context.Context,
+	driver *clnkrapp.Driver,
+	reader *lineReader,
+	input string,
+	mode string,
+	eventLog io.Writer,
+	stopModelWait func(),
+) error {
 	defer stopModelWait()
 
 	promptCtx, cancel := context.WithCancel(ctx)
@@ -150,13 +163,29 @@ func runDriverPrompt(ctx context.Context, driver *clnkrapp.Driver, reader *lineR
 		select {
 		case event := <-driver.Events():
 			var err error
-			pendingErr, err = handleTerminalDriverEvent(promptCtx, driver, reader, event, pendingErr, eventLog, stopModelWait)
+			pendingErr, err = handleTerminalDriverEvent(
+				promptCtx,
+				driver,
+				reader,
+				event,
+				pendingErr,
+				eventLog,
+				stopModelWait,
+			)
 			if err != nil {
 				cancel()
 				return err
 			}
 		case err := <-errCh:
-			return drainDriverEvents(promptCtx, driver, reader, pendingErr, err, eventLog, stopModelWait)
+			return drainDriverEvents(
+				promptCtx,
+				driver,
+				reader,
+				pendingErr,
+				err,
+				eventLog,
+				stopModelWait,
+			)
 		case <-ctx.Done():
 			cancel()
 			return ctx.Err()
@@ -164,12 +193,28 @@ func runDriverPrompt(ctx context.Context, driver *clnkrapp.Driver, reader *lineR
 	}
 }
 
-func drainDriverEvents(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, pendingErr error, runErr error, eventLog io.Writer, stopModelWait func()) error {
+func drainDriverEvents(
+	ctx context.Context,
+	driver *clnkrapp.Driver,
+	reader *lineReader,
+	pendingErr error,
+	runErr error,
+	eventLog io.Writer,
+	stopModelWait func(),
+) error {
 	for {
 		select {
 		case event := <-driver.Events():
 			var err error
-			pendingErr, err = handleTerminalDriverEvent(ctx, driver, reader, event, pendingErr, eventLog, stopModelWait)
+			pendingErr, err = handleTerminalDriverEvent(
+				ctx,
+				driver,
+				reader,
+				event,
+				pendingErr,
+				eventLog,
+				stopModelWait,
+			)
 			if err != nil && runErr == nil {
 				runErr = err
 			}
@@ -179,7 +224,15 @@ func drainDriverEvents(ctx context.Context, driver *clnkrapp.Driver, reader *lin
 	}
 }
 
-func handleTerminalDriverEvent(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, event clnkrapp.DriverEvent, pendingErr error, eventLog io.Writer, stopModelWait func()) (error, error) {
+func handleTerminalDriverEvent(
+	ctx context.Context,
+	driver *clnkrapp.Driver,
+	reader *lineReader,
+	event clnkrapp.DriverEvent,
+	pendingErr error,
+	eventLog io.Writer,
+	stopModelWait func(),
+) (error, error) {
 	stopModelWait()
 	if eventErr, ok := event.(clnkrapp.EventError); ok {
 		return eventErr.Err, nil
@@ -193,11 +246,22 @@ func handleTerminalDriverEvent(ctx context.Context, driver *clnkrapp.Driver, rea
 
 	switch event := event.(type) {
 	case clnkrapp.EventApprovalRequest:
-		return nil, replyToTerminalRequest(ctx, driver, reader, event.Prompt, "Send 'y' to approve, or type what the agent should do instead: ")
+		return nil, replyToTerminalRequest(
+			ctx,
+			driver,
+			reader,
+			event.Prompt,
+			"Send 'y' to approve, or type what the agent should do instead: ",
+		)
 	case clnkrapp.EventClarificationRequest:
 		return nil, replyToTerminalRequest(ctx, driver, reader, event.Question, "Clarify: ")
 	case clnkrapp.EventCompacted:
-		fmt.Fprintf(os.Stderr, "[Session compacted: %d messages summarized, %d kept]\n", event.Stats.CompactedMessages, event.Stats.KeptMessages) //nolint:errcheck
+		fmt.Fprintf(
+			os.Stderr,
+			"[Session compacted: %d messages summarized, %d kept]\n",
+			event.Stats.CompactedMessages,
+			event.Stats.KeptMessages,
+		) //nolint:errcheck
 	case clnkrapp.EventDone:
 	default:
 		return nil, fmt.Errorf("unhandled driver event %T", event)
@@ -205,7 +269,12 @@ func handleTerminalDriverEvent(ctx context.Context, driver *clnkrapp.Driver, rea
 	return nil, nil
 }
 
-func replyToTerminalRequest(ctx context.Context, driver *clnkrapp.Driver, reader *lineReader, text, prompt string) error {
+func replyToTerminalRequest(
+	ctx context.Context,
+	driver *clnkrapp.Driver,
+	reader *lineReader,
+	text, prompt string,
+) error {
 	fmt.Fprintln(os.Stderr, text) //nolint:errcheck
 	for {
 		fmt.Fprint(os.Stderr, prompt) //nolint:errcheck
@@ -272,7 +341,14 @@ func main() {
 		}
 		_, _ = fmt.Fprintln(os.Stdout, "Saved sessions:")
 		for i, s := range sessions {
-			_, _ = fmt.Fprintf(os.Stdout, "  %d. %s (%d messages) - %s\n", i+1, s.Filename, s.Messages, s.Created.Format("2006-01-02 15:04:05"))
+			_, _ = fmt.Fprintf(
+				os.Stdout,
+				"  %d. %s (%d messages) - %s\n",
+				i+1,
+				s.Filename,
+				s.Messages,
+				s.Created.Format("2006-01-02 15:04:05"),
+			)
 		}
 		os.Exit(0)
 	}
@@ -284,7 +360,27 @@ func main() {
 		fatalf("--trajectory requires -p (single-task mode)")
 	}
 
-	startupInputs := clnkrapp.StartupInputs{CWD: cwd, Version: version, Env: os.Getenv, Environ: os.Environ(), Provider: opts.provider, ProviderAPI: opts.providerAPI, Model: opts.model, BaseURL: opts.baseURL, ActProtocol: opts.actProtocol, ActProtocolSet: opts.actProtocolSet, Effort: opts.effort, MaxOutputTokens: opts.maxOutputTokens, MaxOutputTokensSet: opts.maxOutputTokensSet, ThinkingBudgetTokens: opts.thinkingBudgetTokens, ThinkingBudgetTokensSet: opts.thinkingBudgetSet, OmitSystemPrompt: opts.noSystemPrompt, SystemPromptAppend: opts.systemPromptAppend, DumpSystemPrompt: opts.dumpSystemPrompt, Unattended: opts.singleTask}
+	startupInputs := clnkrapp.StartupInputs{
+		CWD:                     cwd,
+		Version:                 version,
+		Env:                     os.Getenv,
+		Environ:                 os.Environ(),
+		Provider:                opts.provider,
+		ProviderAPI:             opts.providerAPI,
+		Model:                   opts.model,
+		BaseURL:                 opts.baseURL,
+		ActProtocol:             opts.actProtocol,
+		ActProtocolSet:          opts.actProtocolSet,
+		Effort:                  opts.effort,
+		MaxOutputTokens:         opts.maxOutputTokens,
+		MaxOutputTokensSet:      opts.maxOutputTokensSet,
+		ThinkingBudgetTokens:    opts.thinkingBudgetTokens,
+		ThinkingBudgetTokensSet: opts.thinkingBudgetSet,
+		OmitSystemPrompt:        opts.noSystemPrompt,
+		SystemPromptAppend:      opts.systemPromptAppend,
+		DumpSystemPrompt:        opts.dumpSystemPrompt,
+		Unattended:              opts.singleTask,
+	}
 	if opts.dumpSystemPrompt {
 		systemPrompt, err := clnkrapp.LoadStartupPrompt(startupInputs)
 		if err != nil {
@@ -297,7 +393,10 @@ func main() {
 	startup, err := clnkrapp.PrepareStartup(startupInputs)
 	if err != nil {
 		if clnkrapp.IsMissingAPIKey(err) {
-			_, _ = fmt.Fprintln(os.Stderr, "Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key")
+			_, _ = fmt.Fprintln(
+				os.Stderr,
+				"Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key",
+			)
 			os.Exit(1)
 		}
 		fatalf("%v", err)
@@ -340,7 +439,10 @@ func main() {
 			fatalf("%v", err)
 		}
 		if !ok {
-			_, _ = fmt.Fprintf(os.Stderr, "Error: no session found for this project.\nRun 'clnkr --list-sessions' to see available sessions.\n")
+			_, _ = fmt.Fprintf(
+				os.Stderr,
+				"Error: no session found for this project.\nRun 'clnkr --list-sessions' to see available sessions.\n",
+			)
 			os.Exit(1)
 		}
 		_, _ = fmt.Fprintf(os.Stderr, "[Resumed session with %d messages]\n", count)
@@ -434,11 +536,24 @@ func writeCommandResult(e clnkr.EventCommandDone) {
 	_, _ = fmt.Fprintln(os.Stderr, "--- done ---")
 }
 
-func runSingleTask(agent *clnkr.Agent, driver *clnkrapp.Driver, opts singleTaskRunOptions, eventLog io.Writer) {
+func runSingleTask(
+	agent *clnkr.Agent,
+	driver *clnkrapp.Driver,
+	opts singleTaskRunOptions,
+	eventLog io.Writer,
+) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	fatalIfErr(clnkrapp.RejectCompactCommand(opts.taskPrompt))
-	runErr := runDriverPrompt(ctx, driver, newLineReader(strings.NewReader("")), opts.taskPrompt, clnkrapp.PromptModeFullSend, eventLog, func() {})
+	runErr := runDriverPrompt(
+		ctx,
+		driver,
+		newLineReader(strings.NewReader("")),
+		opts.taskPrompt,
+		clnkrapp.PromptModeFullSend,
+		eventLog,
+		func() {},
+	)
 	if opts.trajectory != "" {
 		if err := clnkrapp.WriteTrajectory(opts.trajectory, agent.Messages()); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -455,15 +570,31 @@ func runSingleTask(agent *clnkr.Agent, driver *clnkrapp.Driver, opts singleTaskR
 	exitRunErr(runErr)
 }
 
-func runREPL(agent *clnkr.Agent, driver *clnkrapp.Driver, modelWait **modelWaitIndicator, cwd string, runMetadata clnkrapp.RunMetadata, opts replRunOptions, eventLog io.Writer) {
+func runREPL(
+	agent *clnkr.Agent,
+	driver *clnkrapp.Driver,
+	modelWait **modelWaitIndicator,
+	cwd string,
+	runMetadata clnkrapp.RunMetadata,
+	opts replRunOptions,
+	eventLog io.Writer,
+) {
 	showPrompt := isTerminal(os.Stdin.Fd())
-	fatalWhen(!opts.fullSend && !showPrompt, "approval mode requires interactive stdin; pass --full-send=true to bypass approval")
+	fatalWhen(
+		!opts.fullSend && !showPrompt,
+		"approval mode requires interactive stdin; pass --full-send=true to bypass approval",
+	)
 	reader, mode := newLineReader(os.Stdin), clnkrapp.PromptModeApproval
 	if opts.fullSend {
 		mode = clnkrapp.PromptModeFullSend
 	}
 	if showPrompt && !opts.verbose && isTerminal(os.Stderr.Fd()) {
-		*modelWait = &modelWaitIndicator{out: os.Stderr, delay: time.Second, tick: 250 * time.Millisecond, now: time.Now}
+		*modelWait = &modelWaitIndicator{
+			out:   os.Stderr,
+			delay: time.Second,
+			tick:  250 * time.Millisecond,
+			now:   time.Now,
+		}
 	}
 	loopErr := runPromptLoop(driver, reader, *modelWait, showPrompt, mode, eventLog)
 	if msgs := agent.Messages(); len(msgs) > 0 {
@@ -476,7 +607,14 @@ func runREPL(agent *clnkr.Agent, driver *clnkrapp.Driver, modelWait **modelWaitI
 	exitRunErr(loopErr)
 }
 
-func runPromptLoop(driver *clnkrapp.Driver, reader *lineReader, modelWait *modelWaitIndicator, showPrompt bool, mode string, eventLog io.Writer) error {
+func runPromptLoop(
+	driver *clnkrapp.Driver,
+	reader *lineReader,
+	modelWait *modelWaitIndicator,
+	showPrompt bool,
+	mode string,
+	eventLog io.Writer,
+) error {
 	for {
 		if showPrompt {
 			_, _ = fmt.Fprint(os.Stderr, "clnkr> ")
@@ -498,12 +636,21 @@ func runPromptLoop(driver *clnkrapp.Driver, reader *lineReader, modelWait *model
 			continue
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-		if err := runDriverPrompt(ctx, driver, reader, input, mode, eventLog, modelWait.Stop); err != nil {
+		if err := runDriverPrompt(
+			ctx,
+			driver,
+			reader,
+			input,
+			mode,
+			eventLog,
+			modelWait.Stop,
+		); err != nil {
 			if !showPrompt {
 				stop()
 				return err
 			}
-			if errors.Is(err, clnkr.ErrClarificationNeeded) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+			if errors.Is(err, clnkr.ErrClarificationNeeded) || errors.Is(err, io.EOF) ||
+				errors.Is(err, context.Canceled) {
 				stop()
 				continue
 			}

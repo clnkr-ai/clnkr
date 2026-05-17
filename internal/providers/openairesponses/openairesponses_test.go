@@ -25,12 +25,24 @@ func TestModelQueryUsesResponsesStructuredRequest(t *testing.T) {
 	var gotPath string
 	server := captureServer(t, &gotBody, func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		writeJSON(t, w, responseWithText(11, 7, `{"turn":{"type":"done","summary":"hello`, ` back","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"`+checkEvidence+`"}]},"known_risks":[],"reasoning":null}}`))
+		writeJSON(
+			t,
+			w,
+			responseWithText(
+				11,
+				7,
+				`{"turn":{"type":"done","summary":"hello`,
+				` back","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"`+checkEvidence+`"}]},"known_risks":[],"reasoning":null}}`,
+			),
+		)
 	})
 	defer server.Close()
 
 	model := openairesponses.NewModel(server.URL+"/v1", "test-key", "gpt-5", "sys prompt")
-	resp, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hello"}})
+	resp, err := model.Query(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "hello"}},
+	)
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -44,7 +56,12 @@ func TestModelQueryUsesResponsesStructuredRequest(t *testing.T) {
 	}
 	assertUserInput(t, inputAt(t, gotBody, 0), "hello")
 	assertStructuredFormat(t, gotBody)
-	if got, want := mustCanonicalTurn(t, resp.Turn), canonicalDoneWithSummary("hello back"); got != want {
+	if got, want := mustCanonicalTurn(
+		t,
+		resp.Turn,
+	), canonicalDoneWithSummary(
+		"hello back",
+	); got != want {
 		t.Fatalf("canonical turn = %q, want %q", got, want)
 	}
 	if resp.ProtocolErr != nil {
@@ -62,7 +79,11 @@ func TestModelQueryRetriesTransientServerError(t *testing.T) {
 		if attempts == 1 {
 			w.Header().Set("Retry-After", "0")
 			w.WriteHeader(http.StatusBadGateway)
-			writeJSON(t, w, map[string]any{"error": map[string]any{"message": "context deadline exceeded"}})
+			writeJSON(
+				t,
+				w,
+				map[string]any{"error": map[string]any{"message": "context deadline exceeded"}},
+			)
 			return
 		}
 		writeJSON(t, w, responseWithText(3, 4, doneTurn("ok")))
@@ -70,7 +91,10 @@ func TestModelQueryRetriesTransientServerError(t *testing.T) {
 	defer server.Close()
 
 	model := openairesponses.NewModel(server.URL, "test-key", "gpt-test", "system")
-	resp, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "finish"}})
+	resp, err := model.Query(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "finish"}},
+	)
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -113,24 +137,48 @@ func TestModelQueryJoinsBaseURLPath(t *testing.T) {
 		wantEscapedPath string
 	}{
 		{name: "trailing slash", baseURLSuffix: "/v1/", wantPath: "/v1/responses"},
-		{name: "preserves internal repeated slashes", baseURLSuffix: "/proxy//v1/", wantPath: "/proxy//v1/responses"},
-		{name: "keeps query on base URL", baseURLSuffix: "/v1/?token=abc", wantPath: "/v1/responses", wantRawQuery: "token=abc"},
-		{name: "preserves escaped slash", baseURLSuffix: "/proxy%2Fv1/", wantPath: "/proxy/v1/responses", wantEscapedPath: "/proxy%2Fv1/responses"},
+		{
+			name:          "preserves internal repeated slashes",
+			baseURLSuffix: "/proxy//v1/",
+			wantPath:      "/proxy//v1/responses",
+		},
+		{
+			name:          "keeps query on base URL",
+			baseURLSuffix: "/v1/?token=abc",
+			wantPath:      "/v1/responses",
+			wantRawQuery:  "token=abc",
+		},
+		{
+			name:            "preserves escaped slash",
+			baseURLSuffix:   "/proxy%2Fv1/",
+			wantPath:        "/proxy/v1/responses",
+			wantEscapedPath: "/proxy%2Fv1/responses",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var gotPath, gotRawQuery, gotEscapedPath string
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotPath = r.URL.Path
-				gotRawQuery = r.URL.RawQuery
-				gotEscapedPath = r.URL.EscapedPath()
-				writeJSON(t, w, responseWithText(0, 0, doneTurn("ok")))
-			}))
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					gotPath = r.URL.Path
+					gotRawQuery = r.URL.RawQuery
+					gotEscapedPath = r.URL.EscapedPath()
+					writeJSON(t, w, responseWithText(0, 0, doneTurn("ok")))
+				}),
+			)
 			defer server.Close()
 
-			model := openairesponses.NewModel(server.URL+tt.baseURLSuffix, "test-key", "gpt-5", "sys prompt")
-			if _, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hello"}}); err != nil {
+			model := openairesponses.NewModel(
+				server.URL+tt.baseURLSuffix,
+				"test-key",
+				"gpt-5",
+				"sys prompt",
+			)
+			if _, err := model.Query(
+				context.Background(),
+				[]clnkr.Message{{Role: "user", Content: "hello"}},
+			); err != nil {
 				t.Fatalf("Query: %v", err)
 			}
 			if gotPath != tt.wantPath {
@@ -153,12 +201,21 @@ func TestModelQuerySerializesProviderRequestOptions(t *testing.T) {
 	})
 	defer server.Close()
 
-	model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5.1", "sys", openairesponses.Options{
-		ReasoningEffort:    "high",
-		MaxOutputTokens:    8000,
-		HasMaxOutputTokens: true,
-	})
-	if _, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}}); err != nil {
+	model := openairesponses.NewModelWithOptions(
+		server.URL,
+		"test-key",
+		"gpt-5.1",
+		"sys",
+		openairesponses.Options{
+			ReasoningEffort:    "high",
+			MaxOutputTokens:    8000,
+			HasMaxOutputTokens: true,
+		},
+	)
+	if _, err := model.Query(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "hi"}},
+	); err != nil {
 		t.Fatalf("Query: %v", err)
 	}
 
@@ -182,7 +239,10 @@ func TestModelQueryRejectsContradictoryStructuredTurn(t *testing.T) {
 	defer server.Close()
 
 	model := openairesponses.NewModel(server.URL, "test-key", "gpt-test", "sys")
-	resp, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hello"}})
+	resp, err := model.Query(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "hello"}},
+	)
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -258,7 +318,10 @@ func TestModelQueriesReturnRefusalError(t *testing.T) {
 		{
 			name: "structured",
 			query: func(model *openairesponses.Model) error {
-				_, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hello"}})
+				_, err := model.Query(
+					context.Background(),
+					[]clnkr.Message{{Role: "user", Content: "hello"}},
+				)
 				return err
 			},
 			wantError: "structured output refusal: refused",
@@ -266,7 +329,10 @@ func TestModelQueriesReturnRefusalError(t *testing.T) {
 		{
 			name: "text",
 			query: func(model *openairesponses.Model) error {
-				_, err := model.QueryText(context.Background(), []clnkr.Message{{Role: "user", Content: "hello"}})
+				_, err := model.QueryText(
+					context.Background(),
+					[]clnkr.Message{{Role: "user", Content: "hello"}},
+				)
 				return err
 			},
 			wantError: "free-form refusal: refused",
@@ -275,9 +341,11 @@ func TestModelQueriesReturnRefusalError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				writeJSON(t, w, responseWithRefusal("refused"))
-			}))
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					writeJSON(t, w, responseWithRefusal("refused"))
+				}),
+			)
 			defer server.Close()
 
 			model := openairesponses.NewModel(server.URL, "test-key", "gpt-5", "sys prompt")
@@ -294,7 +362,15 @@ func TestModelQueriesReturnRefusalError(t *testing.T) {
 
 func TestModelQueryErrorsOnMissingOutputText(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(t, w, map[string]any{"output": []map[string]any{{"type": "message", "role": "assistant", "content": []map[string]any{}}}})
+		writeJSON(
+			t,
+			w,
+			map[string]any{
+				"output": []map[string]any{
+					{"type": "message", "role": "assistant", "content": []map[string]any{}},
+				},
+			},
+		)
 	}))
 	defer server.Close()
 
@@ -308,7 +384,11 @@ func TestModelQueryErrorsOnMissingOutputText(t *testing.T) {
 	}
 }
 
-func captureServer(t *testing.T, gotBody *map[string]any, handler func(http.ResponseWriter, *http.Request)) *httptest.Server {
+func captureServer(
+	t *testing.T,
+	gotBody *map[string]any,
+	handler func(http.ResponseWriter, *http.Request),
+) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)

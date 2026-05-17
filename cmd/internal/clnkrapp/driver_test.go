@@ -99,7 +99,11 @@ func TestDriverTopLevelCompactDispatch(t *testing.T) {
 		return compactor
 	})
 
-	if err := driver.Prompt(context.Background(), "/compact focus on tests", PromptModeApproval); err != nil {
+	if err := driver.Prompt(
+		context.Background(),
+		"/compact focus on tests",
+		PromptModeApproval,
+	); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
 
@@ -125,7 +129,11 @@ func TestDriverDelegateTextReachesModelAsOrdinaryPrompt(t *testing.T) {
 	}}, &fakeExecutor{}, "/tmp/repo")
 	driver := NewDriver(agent, nil)
 
-	if err := driver.Prompt(context.Background(), "/delegate inspect README", PromptModeApproval); err != nil {
+	if err := driver.Prompt(
+		context.Background(),
+		"/delegate inspect README",
+		PromptModeApproval,
+	); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
 	if event := nextDriverEvent(t, driver); event != (EventDone{Summary: "done"}) {

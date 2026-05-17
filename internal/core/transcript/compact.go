@@ -43,7 +43,8 @@ func commandResultMessage(content string) bool {
 	if err := json.Unmarshal([]byte(content), &payload); err != nil {
 		return false
 	}
-	return payload.Stdout != nil && payload.Stderr != nil && payload.Outcome != nil && payload.Outcome.Type != ""
+	return payload.Stdout != nil && payload.Stderr != nil && payload.Outcome != nil &&
+		payload.Outcome.Type != ""
 }
 
 // IsCompactMessage reports whether the message is a clnkr compact block.
@@ -94,14 +95,22 @@ func FindCompactBoundary(messages []Message, keepRecentTurns int) (int, bool) {
 }
 
 // RewriteForCompaction replaces the older transcript prefix with a compact block.
-func RewriteForCompaction(messages []Message, summary, instructions string, keepRecentTurns int) ([]Message, CompactStats, error) {
+func RewriteForCompaction(
+	messages []Message,
+	summary, instructions string,
+	keepRecentTurns int,
+) ([]Message, CompactStats, error) {
 	if keepRecentTurns < 1 {
-		return nil, CompactStats{}, fmt.Errorf("rewrite for compaction: keep recent turns must be at least 1")
+		return nil, CompactStats{}, fmt.Errorf(
+			"rewrite for compaction: keep recent turns must be at least 1",
+		)
 	}
 
 	boundary, ok := FindCompactBoundary(messages, keepRecentTurns)
 	if !ok {
-		return nil, CompactStats{}, fmt.Errorf("rewrite for compaction: not enough history to compact")
+		return nil, CompactStats{}, fmt.Errorf(
+			"rewrite for compaction: not enough history to compact",
+		)
 	}
 
 	keptTail := make([]Message, 0, len(messages)-boundary)
@@ -113,7 +122,10 @@ func RewriteForCompaction(messages []Message, summary, instructions string, keep
 	}
 
 	rewritten := make([]Message, 0, len(keptTail)+2)
-	rewritten = append(rewritten, Message{Role: "user", Content: FormatCompactMessage(summary, instructions)})
+	rewritten = append(
+		rewritten,
+		Message{Role: "user", Content: FormatCompactMessage(summary, instructions)},
+	)
 
 	keptMessages := len(keptTail)
 	for i := len(messages) - 1; i >= 0; i-- {

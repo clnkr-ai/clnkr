@@ -158,19 +158,22 @@ func LoadPromptWithOptions(dir string, opts PromptOptions) string {
 
 func unattendedPrompt(prompt string, protocol ActProtocol) string {
 	if protocol == ActProtocolClnkrInline {
-		prompt = strings.Replace(prompt,
+		prompt = strings.Replace(
+			prompt,
 			`Set type to exactly one of "act", "clarify", or "done". If type is "act", bash must be an object. If type is "clarify", question must be a non-empty string. If type is "done", summary must be a non-empty string, "verification" must include status and checks, and "known_risks" must be an array.`,
 			`Set type to exactly one of "act" or "done". If type is "act", bash must be an object. If type is "done", summary must be a non-empty string, "verification" must include status and checks, and "known_risks" must be an array.`,
 			1,
 		)
 	} else {
-		prompt = strings.Replace(prompt,
+		prompt = strings.Replace(
+			prompt,
 			`For clarification or completion, respond with exactly one JSON object. Set type to exactly one of "clarify" or "done". If type is "clarify", question must be a non-empty string. If type is "done", summary must be a non-empty string, "verification" must include status and checks, and "known_risks" must be an array. Include reasoning in every response; use a string when it helps and null when you have nothing to add.`,
 			`For completion, respond with exactly one JSON object. Set type to exactly "done". If type is "done", summary must be a non-empty string, "verification" must include status and checks, and "known_risks" must be an array. Include reasoning in every response; use a string when it helps and null when you have nothing to add.`,
 			1,
 		)
 	}
-	prompt = strings.Replace(prompt,
+	prompt = strings.Replace(
+		prompt,
 		`- If the user has not given you a task, use "clarify" to ask one question. For complex tasks, describe your plan in reasoning before your first command. Stay focused on the task. Do not refactor or improve unrelated code. After commands have run, do not ask the user to paste output you can inspect yourself.`,
 		`- You are running unattended. If the task is ambiguous, inspect the environment and make reasonable assumptions. For complex tasks, describe your plan in reasoning before your first command. Stay focused on the task. Do not refactor or improve unrelated code. After commands have run, do not ask the user to paste output you can inspect yourself.`,
 		1,

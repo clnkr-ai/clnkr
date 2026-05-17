@@ -157,7 +157,11 @@ func TestShellExecutor(t *testing.T) {
 			"PATH":       os.Getenv("PATH"),
 		}}
 
-		out, err := envExec.Execute(ctx, `printf "%s,%s" "$CLNKR_ONLY" "$CLNKR_PARENT_ONLY"`, "/tmp")
+		out, err := envExec.Execute(
+			ctx,
+			`printf "%s,%s" "$CLNKR_ONLY" "$CLNKR_PARENT_ONLY"`,
+			"/tmp",
+		)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -217,17 +221,32 @@ func TestShellExecutor(t *testing.T) {
 
 	t.Run("captures full env snapshots across stateful commands", func(t *testing.T) {
 		envExec := &ShellExecutor{}
-		out1 := executeAndUseEnv(t, envExec, `export CLNKR_CHAIN_ONE=one && cd /tmp && printf done`, "/tmp")
+		out1 := executeAndUseEnv(
+			t,
+			envExec,
+			`export CLNKR_CHAIN_ONE=one && cd /tmp && printf done`,
+			"/tmp",
+		)
 		if out1.PostEnv["CLNKR_CHAIN_ONE"] != "one" {
 			t.Fatalf("missing chain var in snapshot: %+v", out1.PostEnv)
 		}
 
-		out2 := executeAndUseEnv(t, envExec, `export CLNKR_CHAIN_TWO=two && cd /tmp && printf done`, "/tmp")
+		out2 := executeAndUseEnv(
+			t,
+			envExec,
+			`export CLNKR_CHAIN_TWO=two && cd /tmp && printf done`,
+			"/tmp",
+		)
 		if out2.PostEnv["CLNKR_CHAIN_ONE"] != "one" || out2.PostEnv["CLNKR_CHAIN_TWO"] != "two" {
 			t.Fatalf("snapshot should include earlier exports: %+v", out2.PostEnv)
 		}
 
-		out3 := executeAndUseEnv(t, envExec, `unset CLNKR_CHAIN_ONE && cd /tmp && printf done`, "/tmp")
+		out3 := executeAndUseEnv(
+			t,
+			envExec,
+			`unset CLNKR_CHAIN_ONE && cd /tmp && printf done`,
+			"/tmp",
+		)
 		if _, ok := out3.PostEnv["CLNKR_CHAIN_ONE"]; ok {
 			t.Fatalf("unset variable should be removed from snapshot: %+v", out3.PostEnv)
 		}
@@ -238,7 +257,11 @@ func TestShellExecutor(t *testing.T) {
 			t.Fatalf("state file leaked into PostEnv: %+v", out3.PostEnv)
 		}
 
-		out4, err := envExec.Execute(ctx, `printf "%s,%s" "$CLNKR_CHAIN_ONE" "$CLNKR_CHAIN_TWO"`, "/tmp")
+		out4, err := envExec.Execute(
+			ctx,
+			`printf "%s,%s" "$CLNKR_CHAIN_ONE" "$CLNKR_CHAIN_TWO"`,
+			"/tmp",
+		)
 		if err != nil {
 			t.Fatalf("step 4: %v", err)
 		}
@@ -260,7 +283,8 @@ func TestShellExecutor(t *testing.T) {
 		if got := out.Feedback.ChangedFiles; !reflect.DeepEqual(got, []string{"note.txt"}) {
 			t.Fatalf("changed files = %#v, want %#v", got, []string{"note.txt"})
 		}
-		if !strings.Contains(out.Feedback.Diff, "note.txt") || !strings.Contains(out.Feedback.Diff, "+next") {
+		if !strings.Contains(out.Feedback.Diff, "note.txt") ||
+			!strings.Contains(out.Feedback.Diff, "+next") {
 			t.Fatalf("diff = %q, want note.txt and +next", out.Feedback.Diff)
 		}
 	})
@@ -288,7 +312,10 @@ func TestShellExecutor(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got := out.Feedback.ChangedFiles; !reflect.DeepEqual(got, []string{"new.txt", "old.txt"}) {
+		if got := out.Feedback.ChangedFiles; !reflect.DeepEqual(
+			got,
+			[]string{"new.txt", "old.txt"},
+		) {
 			t.Fatalf("changed files = %#v, want %#v", got, []string{"new.txt", "old.txt"})
 		}
 	})
@@ -297,7 +324,11 @@ func TestShellExecutor(t *testing.T) {
 		repo := initGitRepo(t)
 		subdir := filepath.Join(repo, "dir", "subdir")
 
-		out, err := exec.Execute(ctx, "mkdir -p dir/subdir && cd dir/subdir && printf 'nested\\n' > local.txt", repo)
+		out, err := exec.Execute(
+			ctx,
+			"mkdir -p dir/subdir && cd dir/subdir && printf 'nested\\n' > local.txt",
+			repo,
+		)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -328,7 +359,13 @@ func assertSamePath(t *testing.T, got, want string) {
 		t.Fatalf("resolve want path %q: %v", want, err)
 	}
 	if gotResolved != wantResolved {
-		t.Fatalf("path = %q (resolved %q), want %q (resolved %q)", got, gotResolved, want, wantResolved)
+		t.Fatalf(
+			"path = %q (resolved %q), want %q (resolved %q)",
+			got,
+			gotResolved,
+			want,
+			wantResolved,
+		)
 	}
 }
 

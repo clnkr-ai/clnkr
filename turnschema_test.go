@@ -48,7 +48,11 @@ func TestParseTurnAcceptsCanonicalTurns(t *testing.T) {
 					t.Fatalf("turn = %T, want *DoneTurn", turn)
 				}
 				if done.Verification.Status != clnkr.VerificationPartiallyVerified {
-					t.Fatalf("status = %q, want %q", done.Verification.Status, clnkr.VerificationPartiallyVerified)
+					t.Fatalf(
+						"status = %q, want %q",
+						done.Verification.Status,
+						clnkr.VerificationPartiallyVerified,
+					)
 				}
 				if len(done.KnownRisks) != 1 {
 					t.Fatalf("known risks = %#v, want one risk", done.KnownRisks)
@@ -64,7 +68,11 @@ func TestParseTurnAcceptsCanonicalTurns(t *testing.T) {
 					t.Fatalf("turn = %T, want *DoneTurn", turn)
 				}
 				if done.Verification.Status != clnkr.VerificationNotVerified {
-					t.Fatalf("status = %q, want %q", done.Verification.Status, clnkr.VerificationNotVerified)
+					t.Fatalf(
+						"status = %q, want %q",
+						done.Verification.Status,
+						clnkr.VerificationNotVerified,
+					)
 				}
 			},
 		},
@@ -220,7 +228,10 @@ func TestParseTurnNormalizesEscapedClarifyText(t *testing.T) {
 
 func TestCanonicalRoundTrip(t *testing.T) {
 	turns := []clnkr.Turn{
-		&clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: []clnkr.BashAction{{Command: "ls -la"}}}, Reasoning: "inspect files"},
+		&clnkr.ActTurn{
+			Bash:      clnkr.BashBatch{Commands: []clnkr.BashAction{{Command: "ls -la"}}},
+			Reasoning: "inspect files",
+		},
 		&clnkr.ClarifyTurn{Question: "Which directory?"},
 		&clnkr.DoneTurn{
 			Summary: "Finished the task.",

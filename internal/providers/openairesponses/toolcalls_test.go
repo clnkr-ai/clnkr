@@ -19,16 +19,37 @@ func TestModelQueryToolCalls(t *testing.T) {
 		writeJSON(t, w, map[string]any{
 			"output": []map[string]any{
 				{"type": "reasoning", "id": "rs_1", "summary": []any{}},
-				{"type": "function_call", "call_id": "call_1", "name": "bash", "arguments": `{"command":"pwd","workdir":null}`, "status": "completed"},
-				{"type": "function_call", "call_id": "call_2", "name": "bash", "arguments": `{"command":"git status","workdir":null}`, "status": "completed"},
+				{
+					"type":      "function_call",
+					"call_id":   "call_1",
+					"name":      "bash",
+					"arguments": `{"command":"pwd","workdir":null}`,
+					"status":    "completed",
+				},
+				{
+					"type":      "function_call",
+					"call_id":   "call_2",
+					"name":      "bash",
+					"arguments": `{"command":"git status","workdir":null}`,
+					"status":    "completed",
+				},
 			},
 			"usage": map[string]any{"input_tokens": 3, "output_tokens": 4},
 		})
 	})
 	defer server.Close()
 
-	model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{UseBashToolCalls: true})
-	resp, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "where"}})
+	model := openairesponses.NewModelWithOptions(
+		server.URL,
+		"test-key",
+		"gpt-5",
+		"sys prompt",
+		openairesponses.Options{UseBashToolCalls: true},
+	)
+	resp, err := model.Query(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "where"}},
+	)
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -59,7 +80,8 @@ func TestModelQueryToolCalls(t *testing.T) {
 	if got := act.Bash.Commands[1]; got.ID != "call_2" || got.Command != "git status" {
 		t.Fatalf("second command = %#v, want provider ID and command", got)
 	}
-	if len(resp.BashToolCalls) != 2 || resp.BashToolCalls[0].ID != "call_1" || resp.BashToolCalls[1].ID != "call_2" {
+	if len(resp.BashToolCalls) != 2 || resp.BashToolCalls[0].ID != "call_1" ||
+		resp.BashToolCalls[1].ID != "call_2" {
 		t.Fatalf("BashToolCalls = %#v", resp.BashToolCalls)
 	}
 	if len(resp.ProviderReplay) != 1 || resp.ProviderReplay[0].Type != "reasoning" {
@@ -71,15 +93,30 @@ func TestModelQueryToolCallsPreservesWorkdir(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(t, w, map[string]any{
 			"output": []map[string]any{
-				{"type": "function_call", "call_id": "call_1", "name": "bash", "arguments": `{"command":"pwd","workdir":"/tmp/project"}`, "status": "completed"},
+				{
+					"type":      "function_call",
+					"call_id":   "call_1",
+					"name":      "bash",
+					"arguments": `{"command":"pwd","workdir":"/tmp/project"}`,
+					"status":    "completed",
+				},
 			},
 			"usage": map[string]any{"input_tokens": 3, "output_tokens": 4},
 		})
 	}))
 	defer server.Close()
 
-	model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{UseBashToolCalls: true})
-	resp, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "where"}})
+	model := openairesponses.NewModelWithOptions(
+		server.URL,
+		"test-key",
+		"gpt-5",
+		"sys prompt",
+		openairesponses.Options{UseBashToolCalls: true},
+	)
+	resp, err := model.Query(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "where"}},
+	)
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -104,38 +141,73 @@ func TestModelQueryToolCallsRejectsInvalidFunctionCalls(t *testing.T) {
 		wantError string
 	}{
 		{
-			name:      "missing call id",
-			item:      map[string]any{"type": "function_call", "name": "bash", "arguments": `{"command":"pwd","workdir":null}`, "status": "completed"},
+			name: "missing call id",
+			item: map[string]any{
+				"type":      "function_call",
+				"name":      "bash",
+				"arguments": `{"command":"pwd","workdir":null}`,
+				"status":    "completed",
+			},
 			wantErr:   clnkr.ErrInvalidJSON,
 			wantError: "bash tool call missing call_id",
 		},
 		{
-			name:      "unsupported tool",
-			item:      map[string]any{"type": "function_call", "call_id": "call_1", "name": "python", "arguments": `{"command":"pwd","workdir":null}`, "status": "completed"},
+			name: "unsupported tool",
+			item: map[string]any{
+				"type":      "function_call",
+				"call_id":   "call_1",
+				"name":      "python",
+				"arguments": `{"command":"pwd","workdir":null}`,
+				"status":    "completed",
+			},
 			wantErr:   clnkr.ErrInvalidJSON,
 			wantError: `unsupported tool "python"`,
 		},
 		{
-			name:      "malformed arguments",
-			item:      map[string]any{"type": "function_call", "call_id": "call_1", "name": "bash", "arguments": `{`, "status": "completed"},
+			name: "malformed arguments",
+			item: map[string]any{
+				"type":      "function_call",
+				"call_id":   "call_1",
+				"name":      "bash",
+				"arguments": `{`,
+				"status":    "completed",
+			},
 			wantErr:   clnkr.ErrInvalidJSON,
 			wantError: "malformed bash tool arguments",
 		},
 		{
-			name:      "unknown argument field",
-			item:      map[string]any{"type": "function_call", "call_id": "call_1", "name": "bash", "arguments": `{"command":"pwd","workdir":null,"extra":true}`, "status": "completed"},
+			name: "unknown argument field",
+			item: map[string]any{
+				"type":      "function_call",
+				"call_id":   "call_1",
+				"name":      "bash",
+				"arguments": `{"command":"pwd","workdir":null,"extra":true}`,
+				"status":    "completed",
+			},
 			wantErr:   clnkr.ErrInvalidJSON,
 			wantError: "malformed bash tool arguments",
 		},
 		{
-			name:      "missing workdir",
-			item:      map[string]any{"type": "function_call", "call_id": "call_1", "name": "bash", "arguments": `{"command":"pwd"}`, "status": "completed"},
+			name: "missing workdir",
+			item: map[string]any{
+				"type":      "function_call",
+				"call_id":   "call_1",
+				"name":      "bash",
+				"arguments": `{"command":"pwd"}`,
+				"status":    "completed",
+			},
 			wantErr:   clnkr.ErrInvalidJSON,
 			wantError: "bash tool arguments missing workdir",
 		},
 		{
-			name:      "empty command",
-			item:      map[string]any{"type": "function_call", "call_id": "call_1", "name": "bash", "arguments": `{"command":"  ","workdir":null}`, "status": "completed"},
+			name: "empty command",
+			item: map[string]any{
+				"type":      "function_call",
+				"call_id":   "call_1",
+				"name":      "bash",
+				"arguments": `{"command":"  ","workdir":null}`,
+				"status":    "completed",
+			},
 			wantErr:   clnkr.ErrMissingCommand,
 			wantError: clnkr.ErrMissingCommand.Error(),
 		},
@@ -143,16 +215,27 @@ func TestModelQueryToolCallsRejectsInvalidFunctionCalls(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				writeJSON(t, w, map[string]any{
-					"output": []map[string]any{tt.item},
-					"usage":  map[string]any{"input_tokens": 3, "output_tokens": 4},
-				})
-			}))
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					writeJSON(t, w, map[string]any{
+						"output": []map[string]any{tt.item},
+						"usage":  map[string]any{"input_tokens": 3, "output_tokens": 4},
+					})
+				}),
+			)
 			defer server.Close()
 
-			model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{UseBashToolCalls: true})
-			resp, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "where"}})
+			model := openairesponses.NewModelWithOptions(
+				server.URL,
+				"test-key",
+				"gpt-5",
+				"sys prompt",
+				openairesponses.Options{UseBashToolCalls: true},
+			)
+			resp, err := model.Query(
+				context.Background(),
+				[]clnkr.Message{{Role: "user", Content: "where"}},
+			)
 			if err != nil {
 				t.Fatalf("Query: %v", err)
 			}
@@ -160,7 +243,11 @@ func TestModelQueryToolCallsRejectsInvalidFunctionCalls(t *testing.T) {
 				t.Fatalf("ProtocolErr = %v, want %v", resp.ProtocolErr, tt.wantErr)
 			}
 			if !strings.Contains(resp.ProtocolErr.Error(), tt.wantError) {
-				t.Fatalf("ProtocolErr = %q, want containing %q", resp.ProtocolErr.Error(), tt.wantError)
+				t.Fatalf(
+					"ProtocolErr = %q, want containing %q",
+					resp.ProtocolErr.Error(),
+					tt.wantError,
+				)
 			}
 			if resp.Usage.InputTokens != 3 || resp.Usage.OutputTokens != 4 {
 				t.Fatalf("usage = %+v, want 3/4", resp.Usage)
@@ -180,42 +267,82 @@ func TestModelQueryToolCallsRejectsInvalidOutputShape(t *testing.T) {
 		{
 			name: "mixed function call and text",
 			output: []map[string]any{
-				{"type": "function_call", "call_id": "call_1", "name": "bash", "arguments": `{"command":"pwd","workdir":null}`, "status": "completed"},
-				{"type": "message", "role": "assistant", "content": []map[string]any{{"type": "output_text", "text": doneTurn("done")}}},
+				{
+					"type":      "function_call",
+					"call_id":   "call_1",
+					"name":      "bash",
+					"arguments": `{"command":"pwd","workdir":null}`,
+					"status":    "completed",
+				},
+				{
+					"type":    "message",
+					"role":    "assistant",
+					"content": []map[string]any{{"type": "output_text", "text": doneTurn("done")}},
+				},
 			},
 			wantProtocolErr:  clnkr.ErrInvalidJSON,
 			wantProtocolText: "mixed bash tool call and structured text",
 		},
 		{
-			name:           "missing output text and tool call",
-			output:         []map[string]any{{"type": "message", "role": "assistant", "content": []map[string]any{}}},
+			name: "missing output text and tool call",
+			output: []map[string]any{
+				{"type": "message", "role": "assistant", "content": []map[string]any{}},
+			},
 			wantQueryError: "tool-call response: no usable output_text or bash tool call",
 		},
 		{
-			name:             "text act turn",
-			output:           []map[string]any{{"type": "message", "role": "assistant", "content": []map[string]any{{"type": "output_text", "text": `{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`}}}},
+			name: "text act turn",
+			output: []map[string]any{
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]any{
+						{
+							"type": "output_text",
+							"text": `{"turn":{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`,
+						},
+					},
+				},
+			},
 			wantProtocolErr:  clnkr.ErrInvalidJSON,
 			wantProtocolText: "tool-call mode does not accept text act turns",
 		},
 		{
-			name:           "refusal",
-			output:         []map[string]any{{"type": "message", "role": "assistant", "content": []map[string]any{{"type": "refusal", "refusal": "refused"}}}},
+			name: "refusal",
+			output: []map[string]any{
+				{
+					"type":    "message",
+					"role":    "assistant",
+					"content": []map[string]any{{"type": "refusal", "refusal": "refused"}},
+				},
+			},
 			wantQueryError: "tool-call refusal: refused",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				writeJSON(t, w, map[string]any{
-					"output": tt.output,
-					"usage":  map[string]any{"input_tokens": 3, "output_tokens": 4},
-				})
-			}))
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					writeJSON(t, w, map[string]any{
+						"output": tt.output,
+						"usage":  map[string]any{"input_tokens": 3, "output_tokens": 4},
+					})
+				}),
+			)
 			defer server.Close()
 
-			model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{UseBashToolCalls: true})
-			resp, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "where"}})
+			model := openairesponses.NewModelWithOptions(
+				server.URL,
+				"test-key",
+				"gpt-5",
+				"sys prompt",
+				openairesponses.Options{UseBashToolCalls: true},
+			)
+			resp, err := model.Query(
+				context.Background(),
+				[]clnkr.Message{{Role: "user", Content: "where"}},
+			)
 			if tt.wantQueryError != "" {
 				if err == nil || err.Error() != tt.wantQueryError {
 					t.Fatalf("Query error = %v, want %q", err, tt.wantQueryError)
@@ -229,7 +356,11 @@ func TestModelQueryToolCallsRejectsInvalidOutputShape(t *testing.T) {
 				t.Fatalf("ProtocolErr = %v, want %v", resp.ProtocolErr, tt.wantProtocolErr)
 			}
 			if !strings.Contains(resp.ProtocolErr.Error(), tt.wantProtocolText) {
-				t.Fatalf("ProtocolErr = %q, want containing %q", resp.ProtocolErr.Error(), tt.wantProtocolText)
+				t.Fatalf(
+					"ProtocolErr = %q, want containing %q",
+					resp.ProtocolErr.Error(),
+					tt.wantProtocolText,
+				)
 			}
 			if resp.Usage.InputTokens != 3 || resp.Usage.OutputTokens != 4 {
 				t.Fatalf("usage = %+v, want 3/4", resp.Usage)
@@ -246,8 +377,10 @@ func TestModelQueryToolCallsReplayToolMessagesWithoutDuplicateText(t *testing.T)
 		wantReasonID string
 	}{
 		{
-			name:         "keeps encrypted reasoning",
-			replay:       json.RawMessage(`{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"opaque"}`),
+			name: "keeps encrypted reasoning",
+			replay: json.RawMessage(
+				`{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"opaque"}`,
+			),
 			wantTypes:    []string{"reasoning", "function_call", "function_call_output"},
 			wantReasonID: "rs_1",
 		},
@@ -266,17 +399,44 @@ func TestModelQueryToolCallsReplayToolMessagesWithoutDuplicateText(t *testing.T)
 			})
 			defer server.Close()
 
-			model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{UseBashToolCalls: true})
+			model := openairesponses.NewModelWithOptions(
+				server.URL,
+				"test-key",
+				"gpt-5",
+				"sys prompt",
+				openairesponses.Options{UseBashToolCalls: true},
+			)
 			resp, err := model.Query(context.Background(), []clnkr.Message{
-				{Role: "assistant", Content: `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":"/tmp/project"}]}}`, BashToolCalls: []clnkr.BashToolCall{{ID: "call_1", Command: "pwd", Workdir: "/tmp/project"}}, ProviderReplay: []clnkr.ProviderReplayItem{{
-					Provider: "openai", ProviderAPI: "openai-responses", Type: "reasoning", JSON: tt.replay,
-				}}},
-				{Role: "user", Content: "payload", BashToolResult: &clnkr.BashToolResult{ID: "call_1", Content: "payload"}},
+				{
+					Role:    "assistant",
+					Content: `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":"/tmp/project"}]}}`,
+					BashToolCalls: []clnkr.BashToolCall{
+						{ID: "call_1", Command: "pwd", Workdir: "/tmp/project"},
+					},
+					ProviderReplay: []clnkr.ProviderReplayItem{
+						{
+							Provider:    "openai",
+							ProviderAPI: "openai-responses",
+							Type:        "reasoning",
+							JSON:        tt.replay,
+						},
+					},
+				},
+				{
+					Role:           "user",
+					Content:        "payload",
+					BashToolResult: &clnkr.BashToolResult{ID: "call_1", Content: "payload"},
+				},
 			})
 			if err != nil {
 				t.Fatalf("Query: %v", err)
 			}
-			if got, want := mustCanonicalTurn(t, resp.Turn), canonicalDoneWithSummary("ok"); got != want {
+			if got, want := mustCanonicalTurn(
+				t,
+				resp.Turn,
+			), canonicalDoneWithSummary(
+				"ok",
+			); got != want {
 				t.Fatalf("canonical turn = %q, want %q", got, want)
 			}
 			if resp.ProtocolErr != nil {
@@ -301,10 +461,14 @@ func TestModelQueryToolCallsReplayToolMessagesWithoutDuplicateText(t *testing.T)
 				Command string  `json:"command"`
 				Workdir *string `json:"workdir"`
 			}
-			if err := json.Unmarshal([]byte(functionCall["arguments"].(string)), &arguments); err != nil {
+			if err := json.Unmarshal(
+				[]byte(functionCall["arguments"].(string)),
+				&arguments,
+			); err != nil {
 				t.Fatalf("unmarshal function_call arguments: %v", err)
 			}
-			if arguments.Command != "pwd" || arguments.Workdir == nil || *arguments.Workdir != "/tmp/project" {
+			if arguments.Command != "pwd" || arguments.Workdir == nil ||
+				*arguments.Workdir != "/tmp/project" {
 				t.Fatalf("function_call arguments = %#v, want command and workdir", arguments)
 			}
 			output := lastTwo[1].(map[string]any)
@@ -313,7 +477,8 @@ func TestModelQueryToolCallsReplayToolMessagesWithoutDuplicateText(t *testing.T)
 			}
 			if tt.wantReasonID != "" {
 				reasoning := gotInput[0].(map[string]any)
-				if reasoning["id"] != tt.wantReasonID || reasoning["encrypted_content"] != "opaque" {
+				if reasoning["id"] != tt.wantReasonID ||
+					reasoning["encrypted_content"] != "opaque" {
 					t.Fatalf("reasoning = %#v, want opaque replay", reasoning)
 				}
 			}
@@ -328,8 +493,17 @@ func TestModelQueryFinalOmitsBashTool(t *testing.T) {
 	})
 	defer server.Close()
 
-	model := openairesponses.NewModelWithOptions(server.URL, "test-key", "gpt-5", "sys prompt", openairesponses.Options{UseBashToolCalls: true})
-	if _, err := model.QueryFinal(context.Background(), []clnkr.Message{{Role: "user", Content: "summarize"}}); err != nil {
+	model := openairesponses.NewModelWithOptions(
+		server.URL,
+		"test-key",
+		"gpt-5",
+		"sys prompt",
+		openairesponses.Options{UseBashToolCalls: true},
+	)
+	if _, err := model.QueryFinal(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "summarize"}},
+	); err != nil {
 		t.Fatalf("QueryFinal: %v", err)
 	}
 	if _, ok := gotBody["tools"]; ok {

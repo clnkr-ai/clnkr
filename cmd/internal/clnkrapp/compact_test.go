@@ -28,7 +28,14 @@ func TestParseCompactCommand(t *testing.T) {
 		t.Run(tt.input, func(t *testing.T) {
 			gotInstructions, gotOK := ParseCompactCommand(tt.input)
 			if gotInstructions != tt.instructions || gotOK != tt.ok {
-				t.Fatalf("ParseCompactCommand(%q) = (%q, %v), want (%q, %v)", tt.input, gotInstructions, gotOK, tt.instructions, tt.ok)
+				t.Fatalf(
+					"ParseCompactCommand(%q) = (%q, %v), want (%q, %v)",
+					tt.input,
+					gotInstructions,
+					gotOK,
+					tt.instructions,
+					tt.ok,
+				)
 			}
 		})
 	}
@@ -42,10 +49,15 @@ func TestHandleCompactCommandDoesNotAppendLiteralUserMessage(t *testing.T) {
 
 	compactor := &fakeCompactor{summary: "Older work summarized."}
 	var gotInstructions string
-	stats, ran, err := HandleCompactCommand(context.Background(), agent, "/compact focus on failing tests", func(instructions string) clnkr.Compactor {
-		gotInstructions = instructions
-		return compactor
-	})
+	stats, ran, err := HandleCompactCommand(
+		context.Background(),
+		agent,
+		"/compact focus on failing tests",
+		func(instructions string) clnkr.Compactor {
+			gotInstructions = instructions
+			return compactor
+		},
+	)
 	if err != nil {
 		t.Fatalf("HandleCompactCommand: %v", err)
 	}
@@ -59,7 +71,11 @@ func TestHandleCompactCommandDoesNotAppendLiteralUserMessage(t *testing.T) {
 		t.Fatalf("factory instructions = %q, want focus on failing tests", gotInstructions)
 	}
 	if compactor.calls != 1 || len(compactor.messages) != 2 {
-		t.Fatalf("compactor got %d calls and %d messages, want 1 call and 2 messages", compactor.calls, len(compactor.messages))
+		t.Fatalf(
+			"compactor got %d calls and %d messages, want 1 call and 2 messages",
+			compactor.calls,
+			len(compactor.messages),
+		)
 	}
 
 	msgs := agent.Messages()
@@ -78,14 +94,23 @@ func TestHandleCompactCommandFailureLeavesMessagesUnchanged(t *testing.T) {
 	}
 	before := agent.Messages()
 
-	_, _, err := HandleCompactCommand(context.Background(), agent, "/compact", func(string) clnkr.Compactor {
-		return &fakeCompactor{err: errors.New("boom")}
-	})
+	_, _, err := HandleCompactCommand(
+		context.Background(),
+		agent,
+		"/compact",
+		func(string) clnkr.Compactor {
+			return &fakeCompactor{err: errors.New("boom")}
+		},
+	)
 	if err == nil || !strings.Contains(err.Error(), "compact transcript: summarize prefix: boom") {
 		t.Fatalf("got %v, want summarize prefix error", err)
 	}
 	if !reflect.DeepEqual(agent.Messages(), before) {
-		t.Fatalf("messages changed on compaction failure: got %#v want %#v", agent.Messages(), before)
+		t.Fatalf(
+			"messages changed on compaction failure: got %#v want %#v",
+			agent.Messages(),
+			before,
+		)
 	}
 }
 
@@ -97,7 +122,11 @@ func TestHandleCompactCommandRejectsMissingCompactor(t *testing.T) {
 		want    string
 	}{
 		{name: "factory", want: "no compactor factory configured"},
-		{name: "compactor", factory: func(string) clnkr.Compactor { return nil }, want: "no compactor configured"},
+		{
+			name:    "compactor",
+			factory: func(string) clnkr.Compactor { return nil },
+			want:    "no compactor configured",
+		},
 	}
 
 	for _, tt := range tests {
@@ -112,7 +141,8 @@ func TestHandleCompactCommandRejectsMissingCompactor(t *testing.T) {
 
 func TestRejectCompactCommandOutsideConversation(t *testing.T) {
 	err := RejectCompactCommand("/compact focus on tests")
-	if err == nil || !strings.Contains(err.Error(), "/compact is only available at the conversational prompt") {
+	if err == nil ||
+		!strings.Contains(err.Error(), "/compact is only available at the conversational prompt") {
 		t.Fatalf("got %v, want compact rejection", err)
 	}
 }

@@ -106,16 +106,10 @@ evaluations-live-anthropic: ## Run the live-provider evaluation suite against An
 	$(MAKE) evaluations-live CLANKERVAL_BINARY="$(CURDIR)/scripts/eval-clnkr-anthropic"
 
 _fmt:
-	go fmt ./...
+	golangci-lint fmt ./...
 
 _fmt-check:
-	@files=$$(find . -type f -name '*.go' -not -path './.git/*'); \
-	unformatted=$$(gofmt -l $$files); \
-	if [ -n "$$unformatted" ]; then \
-		echo "gofmt: these files are not formatted:"; \
-		echo "$$unformatted"; \
-		exit 1; \
-	fi
+	golangci-lint fmt --diff ./...
 
 _vet:
 	go vet ./...

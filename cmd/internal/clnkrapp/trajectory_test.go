@@ -40,7 +40,8 @@ func TestRunMetadataDebugEventFormatsJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(event.Message), &got); err != nil {
 		t.Fatalf("debug message is not JSON metadata: %v", err)
 	}
-	if got.ClnkrVersion != "test-version" || got.Provider != providerdomain.ProviderOpenAI || got.Model != "gpt-5.1" {
+	if got.ClnkrVersion != "test-version" || got.Provider != providerdomain.ProviderOpenAI ||
+		got.Model != "gpt-5.1" {
 		t.Fatalf("metadata = %#v, want version/provider/model", got)
 	}
 	if got.PromptSHA256 != "e16202309c92180728dd7fd1c59f16004a6d5ee245538c28d2a9a22edf2dd2ab" {
@@ -86,14 +87,19 @@ func TestRunMetadataMirrorsProviderRequestShape(t *testing.T) {
 	if got.TurnProtocol != nil {
 		t.Fatalf("turn_protocol = %s, want omitted", got.TurnProtocol)
 	}
-	if got.Requested.Effort.LevelOmitted || got.Requested.Effort.Level == nil || *got.Requested.Effort.Level != "auto" {
+	if got.Requested.Effort.LevelOmitted || got.Requested.Effort.Level == nil ||
+		*got.Requested.Effort.Level != "auto" {
 		t.Fatalf("requested.effort = %#v, want explicit auto", got.Requested.Effort)
 	}
 	if !got.Effective.Effort.LevelOmitted || got.Effective.Effort.Level != nil {
 		t.Fatalf("effective.effort = %#v, want omitted level for auto", got.Effective.Effort)
 	}
-	if got.Requested.Output.MaxOutputTokens == nil || *got.Requested.Output.MaxOutputTokens != 8000 {
-		t.Fatalf("requested.output.max_output_tokens = %#v, want 8000", got.Requested.Output.MaxOutputTokens)
+	if got.Requested.Output.MaxOutputTokens == nil ||
+		*got.Requested.Output.MaxOutputTokens != 8000 {
+		t.Fatalf(
+			"requested.output.max_output_tokens = %#v, want 8000",
+			got.Requested.Output.MaxOutputTokens,
+		)
 	}
 }
 

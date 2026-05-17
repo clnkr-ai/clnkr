@@ -19,14 +19,49 @@ func TestDecodeJSONLCommand(t *testing.T) {
 		want    JSONLCommand
 		wantErr string
 	}{
-		{"prompt command", `{"type":"prompt","text":"inspect","mode":"approval"}`, JSONLCommand{Type: "prompt", Text: "inspect", Mode: "approval"}, ""},
-		{"full send prompt command", `{"type":"prompt","text":"ship it","mode":"full_send"}`, JSONLCommand{Type: "prompt", Text: "ship it", Mode: "full_send"}, ""},
-		{"reply command", `{"type":"reply","text":"y"}`, JSONLCommand{Type: "reply", Text: "y"}, ""},
-		{"compact command", `{"type":"compact","instructions":"focus on tests"}`, JSONLCommand{Type: "compact", Instructions: "focus on tests"}, ""},
+		{
+			"prompt command",
+			`{"type":"prompt","text":"inspect","mode":"approval"}`,
+			JSONLCommand{Type: "prompt", Text: "inspect", Mode: "approval"},
+			"",
+		},
+		{
+			"full send prompt command",
+			`{"type":"prompt","text":"ship it","mode":"full_send"}`,
+			JSONLCommand{Type: "prompt", Text: "ship it", Mode: "full_send"},
+			"",
+		},
+		{
+			"reply command",
+			`{"type":"reply","text":"y"}`,
+			JSONLCommand{Type: "reply", Text: "y"},
+			"",
+		},
+		{
+			"compact command",
+			`{"type":"compact","instructions":"focus on tests"}`,
+			JSONLCommand{Type: "compact", Instructions: "focus on tests"},
+			"",
+		},
 		{"shutdown command", `{"type":"shutdown"}`, JSONLCommand{Type: "shutdown"}, ""},
-		{"unknown command", `{"type":"bogus"}`, JSONLCommand{}, `unknown JSONL command type "bogus"`},
-		{"unknown prompt mode", `{"type":"prompt","text":"inspect","mode":"manual"}`, JSONLCommand{}, `unknown JSONL prompt mode "manual"`},
-		{"missing prompt mode", `{"type":"prompt","text":"inspect"}`, JSONLCommand{}, `unknown JSONL prompt mode ""`},
+		{
+			"unknown command",
+			`{"type":"bogus"}`,
+			JSONLCommand{},
+			`unknown JSONL command type "bogus"`,
+		},
+		{
+			"unknown prompt mode",
+			`{"type":"prompt","text":"inspect","mode":"manual"}`,
+			JSONLCommand{},
+			`unknown JSONL prompt mode "manual"`,
+		},
+		{
+			"missing prompt mode",
+			`{"type":"prompt","text":"inspect"}`,
+			JSONLCommand{},
+			`unknown JSONL prompt mode ""`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -62,9 +97,21 @@ func TestWriteJSONL(t *testing.T) {
 			},
 			typ: "response",
 		},
-		{name: "core command start event uses event log encoding", event: clnkr.EventCommandStart{Command: "pwd", Dir: "/tmp"}, typ: "command_start"},
-		{name: "core command done event uses event log encoding", event: clnkr.EventCommandDone{Command: "echo hi", Stdout: "hi\n", ExitCode: 0}, typ: "command_done"},
-		{name: "clarification request", event: EventClarificationRequest{Question: "Which repo?"}, typ: "clarify"},
+		{
+			name:  "core command start event uses event log encoding",
+			event: clnkr.EventCommandStart{Command: "pwd", Dir: "/tmp"},
+			typ:   "command_start",
+		},
+		{
+			name:  "core command done event uses event log encoding",
+			event: clnkr.EventCommandDone{Command: "echo hi", Stdout: "hi\n", ExitCode: 0},
+			typ:   "command_done",
+		},
+		{
+			name:  "clarification request",
+			event: EventClarificationRequest{Question: "Which repo?"},
+			typ:   "clarify",
+		},
 		{
 			name: "approval request",
 			event: EventApprovalRequest{
@@ -77,7 +124,11 @@ func TestWriteJSONL(t *testing.T) {
 			typ: "approval_request",
 		},
 		{name: "done event", event: EventDone{Summary: "done"}, typ: "done"},
-		{name: "compacted event", event: EventCompacted{Stats: clnkr.CompactStats{CompactedMessages: 4, KeptMessages: 2}}, typ: "compacted"},
+		{
+			name:  "compacted event",
+			event: EventCompacted{Stats: clnkr.CompactStats{CompactedMessages: 4, KeptMessages: 2}},
+			typ:   "compacted",
+		},
 		{name: "error event", event: EventError{Err: errors.New("boom")}, typ: "error"},
 	}
 
@@ -114,11 +165,15 @@ func TestWriteJSONL(t *testing.T) {
 			if !reflect.DeepEqual(commands[0], map[string]any{"command": "echo hi"}) {
 				t.Fatalf("first approval command = %#v, want command only", commands[0])
 			}
-			if !reflect.DeepEqual(commands[1], map[string]any{"command": "pwd", "workdir": "/tmp"}) {
+			if !reflect.DeepEqual(
+				commands[1],
+				map[string]any{"command": "pwd", "workdir": "/tmp"},
+			) {
 				t.Fatalf("second approval command = %#v, want command and workdir", commands[1])
 			}
 		case "compacted":
-			if got.Payload["compacted_messages"] != float64(4) || got.Payload["kept_messages"] != float64(2) {
+			if got.Payload["compacted_messages"] != float64(4) ||
+				got.Payload["kept_messages"] != float64(2) {
 				t.Fatalf("compacted payload = %#v, want explicit stats", got.Payload)
 			}
 		case "error":

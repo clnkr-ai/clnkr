@@ -59,7 +59,10 @@ func collectToolCallResponseParts(apiResp response, rawBody string) (toolCallRes
 					text.WriteString(content.Text)
 				case "refusal":
 					if strings.TrimSpace(content.Refusal) != "" {
-						return toolCallResponseParts{}, fmt.Errorf("tool-call refusal: %s", content.Refusal)
+						return toolCallResponseParts{}, fmt.Errorf(
+							"tool-call refusal: %s",
+							content.Refusal,
+						)
 					}
 				}
 			}
@@ -87,9 +90,12 @@ func collectToolCallResponseParts(apiResp response, rawBody string) (toolCallRes
 func responseFromFunctionCalls(parts toolCallResponseParts) clnkr.Response {
 	if !parts.protocolOK {
 		return clnkr.Response{
-			Raw:         parts.rawBody,
-			Usage:       parts.usage,
-			ProtocolErr: fmt.Errorf("%w: mixed bash tool call and structured text", clnkr.ErrInvalidJSON),
+			Raw:   parts.rawBody,
+			Usage: parts.usage,
+			ProtocolErr: fmt.Errorf(
+				"%w: mixed bash tool call and structured text",
+				clnkr.ErrInvalidJSON,
+			),
 		}
 	}
 
@@ -114,7 +120,9 @@ func responseFromFunctionCalls(parts toolCallResponseParts) clnkr.Response {
 
 func responseFromToolCallText(parts toolCallResponseParts) (clnkr.Response, error) {
 	if strings.TrimSpace(parts.text) == "" {
-		return clnkr.Response{}, fmt.Errorf("tool-call response: no usable output_text or bash tool call")
+		return clnkr.Response{}, fmt.Errorf(
+			"tool-call response: no usable output_text or bash tool call",
+		)
 	}
 	turn, err := openaiwire.ParseProviderTurn(parts.text)
 	if err != nil {
@@ -122,9 +130,12 @@ func responseFromToolCallText(parts toolCallResponseParts) (clnkr.Response, erro
 	}
 	if _, ok := turn.(*clnkr.ActTurn); ok {
 		return clnkr.Response{
-			Raw:         parts.text,
-			Usage:       parts.usage,
-			ProtocolErr: fmt.Errorf("%w: tool-call mode does not accept text act turns", clnkr.ErrInvalidJSON),
+			Raw:   parts.text,
+			Usage: parts.usage,
+			ProtocolErr: fmt.Errorf(
+				"%w: tool-call mode does not accept text act turns",
+				clnkr.ErrInvalidJSON,
+			),
 		}, nil
 	}
 	if _, err := clnkr.CanonicalTurnJSON(turn); err != nil {
@@ -135,10 +146,17 @@ func responseFromToolCallText(parts toolCallResponseParts) (clnkr.Response, erro
 
 func turnFromFunctionCall(item outputItem) (clnkr.BashAction, clnkr.BashToolCall, error) {
 	if strings.TrimSpace(item.CallID) == "" {
-		return clnkr.BashAction{}, clnkr.BashToolCall{}, fmt.Errorf("%w: bash tool call missing call_id", clnkr.ErrInvalidJSON)
+		return clnkr.BashAction{}, clnkr.BashToolCall{}, fmt.Errorf(
+			"%w: bash tool call missing call_id",
+			clnkr.ErrInvalidJSON,
+		)
 	}
 	if item.Name != "bash" {
-		return clnkr.BashAction{}, clnkr.BashToolCall{}, fmt.Errorf("%w: unsupported tool %q", clnkr.ErrInvalidJSON, item.Name)
+		return clnkr.BashAction{}, clnkr.BashToolCall{}, fmt.Errorf(
+			"%w: unsupported tool %q",
+			clnkr.ErrInvalidJSON,
+			item.Name,
+		)
 	}
 	var args struct {
 		Command string  `json:"command"`
@@ -146,15 +164,26 @@ func turnFromFunctionCall(item outputItem) (clnkr.BashAction, clnkr.BashToolCall
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(item.Arguments), &fields); err != nil {
-		return clnkr.BashAction{}, clnkr.BashToolCall{}, fmt.Errorf("%w: malformed bash tool arguments: %v", clnkr.ErrInvalidJSON, err)
+		return clnkr.BashAction{}, clnkr.BashToolCall{}, fmt.Errorf(
+			"%w: malformed bash tool arguments: %v",
+			clnkr.ErrInvalidJSON,
+			err,
+		)
 	}
 	if _, ok := fields["workdir"]; !ok {
-		return clnkr.BashAction{}, clnkr.BashToolCall{}, fmt.Errorf("%w: bash tool arguments missing workdir", clnkr.ErrInvalidJSON)
+		return clnkr.BashAction{}, clnkr.BashToolCall{}, fmt.Errorf(
+			"%w: bash tool arguments missing workdir",
+			clnkr.ErrInvalidJSON,
+		)
 	}
 	dec := json.NewDecoder(strings.NewReader(item.Arguments))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&args); err != nil {
-		return clnkr.BashAction{}, clnkr.BashToolCall{}, fmt.Errorf("%w: malformed bash tool arguments: %v", clnkr.ErrInvalidJSON, err)
+		return clnkr.BashAction{}, clnkr.BashToolCall{}, fmt.Errorf(
+			"%w: malformed bash tool arguments: %v",
+			clnkr.ErrInvalidJSON,
+			err,
+		)
 	}
 	if strings.TrimSpace(args.Command) == "" {
 		return clnkr.BashAction{}, clnkr.BashToolCall{}, clnkr.ErrMissingCommand

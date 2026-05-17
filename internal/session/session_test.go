@@ -24,7 +24,11 @@ func TestNormalizeProjectPath(t *testing.T) {
 		t.Fatalf("NormalizeProjectPath again: %v", err)
 	}
 	if got != again || got != "ldz77nnq4ybk5nbc" || len(got) != 16 {
-		t.Fatalf("NormalizeProjectPath = %q then %q, want stable 16-char key ldz77nnq4ybk5nbc", got, again)
+		t.Fatalf(
+			"NormalizeProjectPath = %q then %q, want stable 16-char key ldz77nnq4ybk5nbc",
+			got,
+			again,
+		)
 	}
 	different, err := session.NormalizeProjectPath("/tmp/foo")
 	if err != nil {
@@ -55,7 +59,11 @@ func TestSessionDir(t *testing.T) {
 		if err != nil {
 			t.Fatalf("UserHomeDir: %v", err)
 		}
-		assertSessionDirPrefix(t, "/tmp/test", filepath.Join(home, ".local", "state", "clnkr", "projects"))
+		assertSessionDirPrefix(
+			t,
+			"/tmp/test",
+			filepath.Join(home, ".local", "state", "clnkr", "projects"),
+		)
 	})
 }
 
@@ -79,7 +87,10 @@ func TestSaveLoadAndListSessions(t *testing.T) {
 		t.Fatalf("ListSessions empty = %#v, want nil", listed)
 	}
 
-	first := []clnkr.Message{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "hi there"}}
+	first := []clnkr.Message{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "hi there"},
+	}
 	if err := session.SaveSession(projectDir, first); err != nil {
 		t.Fatalf("SaveSession first: %v", err)
 	}
@@ -93,7 +104,10 @@ func TestSaveLoadAndListSessions(t *testing.T) {
 	}
 
 	for i := 1; i < 3; i++ {
-		if err := session.SaveSession(projectDir, []clnkr.Message{{Role: "user", Content: fmt.Sprintf("msg %d", i)}}); err != nil {
+		if err := session.SaveSession(
+			projectDir,
+			[]clnkr.Message{{Role: "user", Content: fmt.Sprintf("msg %d", i)}},
+		); err != nil {
 			t.Fatalf("SaveSession %d: %v", i, err)
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -118,7 +132,11 @@ func TestSaveSessionWithMetadataPreservesLoadCompatibility(t *testing.T) {
 
 	projectDir := "/tmp/test-project-save-metadata"
 	original := []clnkr.Message{{Role: "user", Content: "hello"}}
-	if err := session.SaveSessionWithMetadata(projectDir, original, map[string]any{"provider": "openai", "max_output_tokens": 8000}); err != nil {
+	if err := session.SaveSessionWithMetadata(
+		projectDir,
+		original,
+		map[string]any{"provider": "openai", "max_output_tokens": 8000},
+	); err != nil {
 		t.Fatalf("SaveSessionWithMetadata: %v", err)
 	}
 
@@ -127,7 +145,8 @@ func TestSaveSessionWithMetadataPreservesLoadCompatibility(t *testing.T) {
 		Messages []clnkr.Message `json:"messages"`
 	}
 	readOnlySessionFile(t, projectDir, &gotFile)
-	if gotFile.Metadata["provider"] != "openai" || gotFile.Metadata["max_output_tokens"] != float64(8000) {
+	if gotFile.Metadata["provider"] != "openai" ||
+		gotFile.Metadata["max_output_tokens"] != float64(8000) {
 		t.Fatalf("metadata = %#v, want provider and max_output_tokens", gotFile.Metadata)
 	}
 
@@ -152,7 +171,10 @@ func TestLoadLatestSessionOrdersBySessionFilename(t *testing.T) {
 			name: "current names use filename time",
 			files: map[string]string{
 				"2026-01-03T000000.000000000Z-000.json": sessionJSON("2026-01-03T00:00:00Z", "new"),
-				"2026-01-02T000000.000000000Z-000.json": sessionJSON("2026-01-02T00:00:00Z", "current"),
+				"2026-01-02T000000.000000000Z-000.json": sessionJSON(
+					"2026-01-02T00:00:00Z",
+					"current",
+				),
 			},
 			wantLatest: "new",
 			wantOrder: []string{
@@ -166,8 +188,11 @@ func TestLoadLatestSessionOrdersBySessionFilename(t *testing.T) {
 				"2026-01-12T000000.000000000Z-000.json": sessionJSON("not-a-time", "new"),
 				"2026-01-11T000000.000000000Z-000.json": sessionJSON("2026-01-11T00:00:00Z", "old"),
 			},
-			wantLatest:      "new",
-			wantOrder:       []string{"2026-01-12T000000.000000000Z-000.json", "2026-01-11T000000.000000000Z-000.json"},
+			wantLatest: "new",
+			wantOrder: []string{
+				"2026-01-12T000000.000000000Z-000.json",
+				"2026-01-11T000000.000000000Z-000.json",
+			},
 			wantCreatedZero: true,
 		},
 		{
@@ -177,7 +202,10 @@ func TestLoadLatestSessionOrdersBySessionFilename(t *testing.T) {
 				"2026-01-10T000000.000000000Z-001.json": sessionJSON("2026-01-10T00:00:00Z", "new"),
 			},
 			wantLatest: "new",
-			wantOrder:  []string{"2026-01-10T000000.000000000Z-001.json", "2026-01-10T000000.000000000Z-000.json"},
+			wantOrder: []string{
+				"2026-01-10T000000.000000000Z-001.json",
+				"2026-01-10T000000.000000000Z-000.json",
+			},
 		},
 	}
 
@@ -192,7 +220,10 @@ func TestLoadLatestSessionOrdersBySessionFilename(t *testing.T) {
 					t.Fatalf("ListSessions: %v", err)
 				}
 				if !sessions[0].Created.IsZero() {
-					t.Fatalf("sessions[0].Created = %v, want zero time for malformed created metadata", sessions[0].Created)
+					t.Fatalf(
+						"sessions[0].Created = %v, want zero time for malformed created metadata",
+						sessions[0].Created,
+					)
 				}
 			}
 		})
@@ -204,7 +235,10 @@ func TestSaveSessionWritesCanonicalDir(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", tmpdir)
 
 	projectDir := "/tmp/test-project-save-canonical"
-	if err := session.SaveSession(projectDir, []clnkr.Message{{Role: "user", Content: "canonical"}}); err != nil {
+	if err := session.SaveSession(
+		projectDir,
+		[]clnkr.Message{{Role: "user", Content: "canonical"}},
+	); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
 	assertSessionFileCount(t, projectDir, 1)
@@ -351,7 +385,13 @@ func assertListOrder(t *testing.T, projectDir string, want []string) {
 	}
 	for i, filename := range want {
 		if sessions[i].Filename != filename {
-			t.Fatalf("sessions[%d] = %q, want %q; sessions = %#v", i, sessions[i].Filename, filename, sessions)
+			t.Fatalf(
+				"sessions[%d] = %q, want %q; sessions = %#v",
+				i,
+				sessions[i].Filename,
+				filename,
+				sessions,
+			)
 		}
 	}
 }

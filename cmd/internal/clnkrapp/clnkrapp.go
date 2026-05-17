@@ -29,8 +29,16 @@ func newModelForConfig(cfg providerconfig.ResolvedProviderConfig, systemPrompt s
 	return newModelForConfigWithOptions(cfg, systemPrompt, modelOptions{})
 }
 
-func newModelForConfigWithOptions(cfg providerconfig.ResolvedProviderConfig, systemPrompt string, modelOpts modelOptions) model {
-	return providerfactory.NewModelWithOptions(providerFactoryConfig(cfg), systemPrompt, providerfactory.Options{Unattended: modelOpts.Unattended})
+func newModelForConfigWithOptions(
+	cfg providerconfig.ResolvedProviderConfig,
+	systemPrompt string,
+	modelOpts modelOptions,
+) model {
+	return providerfactory.NewModelWithOptions(
+		providerFactoryConfig(cfg),
+		systemPrompt,
+		providerfactory.Options{Unattended: modelOpts.Unattended},
+	)
 }
 
 func providerFactoryConfig(cfg providerconfig.ResolvedProviderConfig) providerfactory.Config {
@@ -51,7 +59,13 @@ func makeCompactorFactory(cfg providerconfig.ResolvedProviderConfig) compaction.
 	})
 }
 
-func requestOptions(effort string, maxOutputTokens int, maxOutputTokensSet bool, thinkingBudgetTokens int, thinkingBudgetTokensSet bool) providerdomain.ProviderRequestOptions {
+func requestOptions(
+	effort string,
+	maxOutputTokens int,
+	maxOutputTokensSet bool,
+	thinkingBudgetTokens int,
+	thinkingBudgetTokensSet bool,
+) providerdomain.ProviderRequestOptions {
 	return providerdomain.ProviderRequestOptions{
 		Effort: providerdomain.ProviderEffortOptions{
 			Level: effort,
@@ -77,7 +91,13 @@ func WriteEventLog(w io.Writer, e clnkr.Event) error {
 		if err != nil {
 			return nil
 		}
-		payload := map[string]any{"turn": json.RawMessage(canonical), "usage": map[string]int{"input_tokens": e.Usage.InputTokens, "output_tokens": e.Usage.OutputTokens}}
+		payload := map[string]any{
+			"turn": json.RawMessage(canonical),
+			"usage": map[string]int{
+				"input_tokens":  e.Usage.InputTokens,
+				"output_tokens": e.Usage.OutputTokens,
+			},
+		}
 		if e.Raw != "" {
 			payload["raw"] = e.Raw
 		}
@@ -85,13 +105,23 @@ func WriteEventLog(w io.Writer, e clnkr.Event) error {
 	case clnkr.EventCommandStart:
 		return writeEvent(w, "command_start", map[string]string{"command": e.Command, "dir": e.Dir})
 	case clnkr.EventCommandDone:
-		payload := map[string]any{"command": e.Command, "stdout": e.Stdout, "stderr": e.Stderr, "exit_code": e.ExitCode, "feedback": e.Feedback}
+		payload := map[string]any{
+			"command":   e.Command,
+			"stdout":    e.Stdout,
+			"stderr":    e.Stderr,
+			"exit_code": e.ExitCode,
+			"feedback":  e.Feedback,
+		}
 		if e.Err != nil {
 			payload["err"] = e.Err.Error()
 		}
 		return writeEvent(w, "command_done", payload)
 	case clnkr.EventProtocolFailure:
-		return writeEvent(w, "protocol_failure", map[string]string{"reason": e.Reason, "raw": e.Raw})
+		return writeEvent(
+			w,
+			"protocol_failure",
+			map[string]string{"reason": e.Reason, "raw": e.Raw},
+		)
 	case clnkr.EventCompletionGate:
 		return writeEvent(w, "completion_gate", map[string]any{
 			"decision": e.Decision,
@@ -145,7 +175,11 @@ type AnthropicManualMetadata struct {
 	ThinkingBudgetTokens        *int `json:"thinking_budget_tokens,omitempty"`
 }
 
-func newRunMetadata(version string, cfg providerconfig.ResolvedProviderConfig, systemPrompt string) RunMetadata {
+func newRunMetadata(
+	version string,
+	cfg providerconfig.ResolvedProviderConfig,
+	systemPrompt string,
+) RunMetadata {
 	opts := cfg.RequestOptions
 
 	meta := RunMetadata{
@@ -156,7 +190,10 @@ func newRunMetadata(version string, cfg providerconfig.ResolvedProviderConfig, s
 		PromptSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(systemPrompt))),
 		ActProtocol:  cfg.ActProtocol,
 		Requested:    providerRequestMetadata(opts, !opts.Effort.Set),
-		Effective:    providerRequestMetadata(opts, !opts.Effort.Set || opts.Effort.Level == "auto"),
+		Effective: providerRequestMetadata(
+			opts,
+			!opts.Effort.Set || opts.Effort.Level == "auto",
+		),
 	}
 
 	if cfg.Provider == providerdomain.ProviderAnthropic {
@@ -180,7 +217,10 @@ func newRunMetadata(version string, cfg providerconfig.ResolvedProviderConfig, s
 	return meta
 }
 
-func providerRequestMetadata(opts providerdomain.ProviderRequestOptions, effortOmitted bool) ProviderRequestMetadata {
+func providerRequestMetadata(
+	opts providerdomain.ProviderRequestOptions,
+	effortOmitted bool,
+) ProviderRequestMetadata {
 	meta := ProviderRequestMetadata{
 		Effort: EffortMetadata{LevelOmitted: effortOmitted},
 		Output: OutputMetadata{
@@ -252,19 +292,30 @@ func ParseCompactCommand(input string) (instructions string, ok bool) {
 	return strings.TrimSpace(strings.TrimPrefix(input, "/compact")), true
 }
 
-func HandleCompactCommand(ctx context.Context, agent *clnkr.Agent, input string, factory compaction.Factory) (clnkr.CompactStats, bool, error) {
+func HandleCompactCommand(
+	ctx context.Context,
+	agent *clnkr.Agent,
+	input string,
+	factory compaction.Factory,
+) (clnkr.CompactStats, bool, error) {
 	instructions, ok := ParseCompactCommand(input)
 	if !ok {
 		return clnkr.CompactStats{}, false, nil
 	}
 	if factory == nil {
-		return clnkr.CompactStats{}, false, fmt.Errorf("compact command: no compactor factory configured")
+		return clnkr.CompactStats{}, false, fmt.Errorf(
+			"compact command: no compactor factory configured",
+		)
 	}
 	compactor := factory(instructions)
 	if compactor == nil {
 		return clnkr.CompactStats{}, false, fmt.Errorf("compact command: no compactor configured")
 	}
-	stats, err := agent.Compact(ctx, compactor, clnkr.CompactOptions{Instructions: instructions, KeepRecentTurns: 2})
+	stats, err := agent.Compact(
+		ctx,
+		compactor,
+		clnkr.CompactOptions{Instructions: instructions, KeepRecentTurns: 2},
+	)
 	if err != nil {
 		return clnkr.CompactStats{}, false, err
 	}

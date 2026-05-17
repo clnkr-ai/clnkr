@@ -35,12 +35,22 @@ func (e *ShellExecutor) SetEnv(env map[string]string) {
 }
 
 // Execute runs a command in dir and returns separated stdout/stderr plus exit code.
-func (e *ShellExecutor) Execute(ctx context.Context, command string, dir string) (CommandResult, error) {
+func (e *ShellExecutor) Execute(
+	ctx context.Context,
+	command string,
+	dir string,
+) (CommandResult, error) {
 	baseline := gitfeedback.Detect(dir)
 
 	wrapped, stateFile, cleanup, err := shellstate.Wrap(command)
 	if err != nil {
-		return CommandResult{Command: command, Outcome: commandOutcomeError(err)}, fmt.Errorf("wrap command: %w", err)
+		return CommandResult{
+				Command: command,
+				Outcome: commandOutcomeError(err),
+			}, fmt.Errorf(
+				"wrap command: %w",
+				err,
+			)
 	}
 	defer cleanup()
 
@@ -128,7 +138,10 @@ func commandOutcomeError(err error) CommandOutcome {
 	return CommandOutcome{Type: CommandOutcomeError, Message: message}
 }
 
-func (e *ShellExecutor) applyPostState(result CommandResult, stateFile string) (CommandResult, error) {
+func (e *ShellExecutor) applyPostState(
+	result CommandResult,
+	stateFile string,
+) (CommandResult, error) {
 	snapshot, err := shellstate.Load(stateFile)
 	if err != nil {
 		return result, err
@@ -138,7 +151,11 @@ func (e *ShellExecutor) applyPostState(result CommandResult, stateFile string) (
 	return result, nil
 }
 
-func applyCommandFeedback(result CommandResult, baseline gitfeedback.Baseline, dir string) CommandResult {
+func applyCommandFeedback(
+	result CommandResult,
+	baseline gitfeedback.Baseline,
+	dir string,
+) CommandResult {
 	finalCwd := dir
 	if result.PostCwd != "" {
 		finalCwd = result.PostCwd

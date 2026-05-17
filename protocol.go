@@ -100,10 +100,24 @@ var (
 )
 
 const protocolActExample = `{"type":"act","bash":{"commands":[{"command":"...","workdir":null}]}}`
+
 const protocolDoneExample = `{"type":"done","summary":"...","verification":{"status":"verified","checks":[{"command":"...","outcome":"passed","evidence":"..."}]},"known_risks":[]}`
 
-var protocolErrorTargets = []error{ErrInvalidJSON, ErrMissingCommand, ErrEmptyClarify, ErrEmptySummary, ErrUnknownTurnType}
-var protocolErrorReasons = []string{"invalid_json", "missing_command", "empty_clarify", "empty_summary", "unknown_turn_type"}
+var protocolErrorTargets = []error{
+	ErrInvalidJSON,
+	ErrMissingCommand,
+	ErrEmptyClarify,
+	ErrEmptySummary,
+	ErrUnknownTurnType,
+}
+
+var protocolErrorReasons = []string{
+	"invalid_json",
+	"missing_command",
+	"empty_clarify",
+	"empty_summary",
+	"unknown_turn_type",
+}
 
 func errorToReason(err error) string {
 	for i, target := range protocolErrorTargets {

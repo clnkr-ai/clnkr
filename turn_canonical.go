@@ -78,20 +78,38 @@ func validateDoneVerification(verification CompletionVerification, knownRisks []
 	}
 	for i, check := range verification.Checks {
 		if strings.TrimSpace(check.Command) == "" {
-			return fmt.Errorf("%w: verification.checks[%d].command must be non-empty", ErrInvalidJSON, i)
+			return fmt.Errorf(
+				"%w: verification.checks[%d].command must be non-empty",
+				ErrInvalidJSON,
+				i,
+			)
 		}
 		if strings.TrimSpace(check.Outcome) == "" {
-			return fmt.Errorf("%w: verification.checks[%d].outcome must be non-empty", ErrInvalidJSON, i)
+			return fmt.Errorf(
+				"%w: verification.checks[%d].outcome must be non-empty",
+				ErrInvalidJSON,
+				i,
+			)
 		}
 		if strings.TrimSpace(check.Evidence) == "" {
-			return fmt.Errorf("%w: verification.checks[%d].evidence must be non-empty", ErrInvalidJSON, i)
+			return fmt.Errorf(
+				"%w: verification.checks[%d].evidence must be non-empty",
+				ErrInvalidJSON,
+				i,
+			)
 		}
 	}
 	if verification.Status == VerificationVerified && len(verification.Checks) == 0 {
-		return fmt.Errorf("%w: verified done requires at least one verification check", ErrInvalidJSON)
+		return fmt.Errorf(
+			"%w: verified done requires at least one verification check",
+			ErrInvalidJSON,
+		)
 	}
 	if verification.Status == VerificationPartiallyVerified && len(knownRisks) == 0 {
-		return fmt.Errorf("%w: partially verified done requires at least one known risk", ErrInvalidJSON)
+		return fmt.Errorf(
+			"%w: partially verified done requires at least one known risk",
+			ErrInvalidJSON,
+		)
 	}
 	return nil
 }

@@ -32,14 +32,30 @@ func PrepareStartup(inputs StartupInputs) (Startup, error) {
 	if err != nil {
 		return Startup{}, err
 	}
-	cfg, err := providerconfig.ResolveConfig(startupProviderInputs(inputs, actProtocolSetting), startupEnv(inputs.Env))
+	cfg, err := providerconfig.ResolveConfig(
+		startupProviderInputs(inputs, actProtocolSetting),
+		startupEnv(inputs.Env),
+	)
 	if err != nil {
 		return Startup{}, err
 	}
-	agent := clnkr.NewAgent(newModelForConfigWithOptions(cfg, systemPrompt, modelOptions{Unattended: inputs.Unattended}), &clnkr.ShellExecutor{}, inputs.CWD)
+	agent := clnkr.NewAgent(
+		newModelForConfigWithOptions(
+			cfg,
+			systemPrompt,
+			modelOptions{Unattended: inputs.Unattended},
+		),
+		&clnkr.ShellExecutor{},
+		inputs.CWD,
+	)
 	agent.SetEnv(commandEnvFromProviderConfig(cfg, inputs.Environ))
 	agent.ActProtocol = cfg.ActProtocol
-	return Startup{SystemPrompt: systemPrompt, Metadata: newRunMetadata(inputs.Version, cfg, systemPrompt), Agent: agent, Driver: NewDriver(agent, makeCompactorFactory(cfg))}, nil
+	return Startup{
+		SystemPrompt: systemPrompt,
+		Metadata:     newRunMetadata(inputs.Version, cfg, systemPrompt),
+		Agent:        agent,
+		Driver:       NewDriver(agent, makeCompactorFactory(cfg)),
+	}, nil
 }
 
 func IsMissingAPIKey(err error) bool { return providerconfig.IsMissingAPIKey(err) }
@@ -51,22 +67,54 @@ func startupEnv(env func(string) string) func(string) string {
 	return env
 }
 
-func startupPromptAndProtocol(inputs StartupInputs) (string, providerconfig.ActProtocolSetting, error) {
+func startupPromptAndProtocol(
+	inputs StartupInputs,
+) (string, providerconfig.ActProtocolSetting, error) {
 	env := startupEnv(inputs.Env)
-	setting, err := providerconfig.ParseActProtocolSetting(providerconfig.ActProtocolFlagValue(inputs.ActProtocol, inputs.ActProtocolSet, env))
+	setting, err := providerconfig.ParseActProtocolSetting(
+		providerconfig.ActProtocolFlagValue(inputs.ActProtocol, inputs.ActProtocolSet, env),
+	)
 	if err != nil {
 		return "", "", err
 	}
 	actProtocol := clnkr.ActProtocolClnkrInline
 	if !inputs.OmitSystemPrompt {
-		actProtocol, err = providerconfig.ResolvePromptActProtocol(startupProviderInputs(inputs, setting), env, inputs.DumpSystemPrompt)
+		actProtocol, err = providerconfig.ResolvePromptActProtocol(
+			startupProviderInputs(inputs, setting),
+			env,
+			inputs.DumpSystemPrompt,
+		)
 		if err != nil {
 			return "", "", err
 		}
 	}
-	return clnkr.LoadPromptWithOptions(inputs.CWD, clnkr.PromptOptions{OmitSystemPrompt: inputs.OmitSystemPrompt, SystemPromptAppend: inputs.SystemPromptAppend, ActProtocol: actProtocol, Unattended: inputs.Unattended}), setting, nil
+	return clnkr.LoadPromptWithOptions(
+		inputs.CWD,
+		clnkr.PromptOptions{
+			OmitSystemPrompt:   inputs.OmitSystemPrompt,
+			SystemPromptAppend: inputs.SystemPromptAppend,
+			ActProtocol:        actProtocol,
+			Unattended:         inputs.Unattended,
+		},
+	), setting, nil
 }
 
-func startupProviderInputs(inputs StartupInputs, setting providerconfig.ActProtocolSetting) providerconfig.Inputs {
-	return providerconfig.Inputs{Provider: inputs.Provider, ProviderAPI: inputs.ProviderAPI, Model: inputs.Model, BaseURL: inputs.BaseURL, ActProtocol: setting, RequestOptions: requestOptions(inputs.Effort, inputs.MaxOutputTokens, inputs.MaxOutputTokensSet, inputs.ThinkingBudgetTokens, inputs.ThinkingBudgetTokensSet)}
+func startupProviderInputs(
+	inputs StartupInputs,
+	setting providerconfig.ActProtocolSetting,
+) providerconfig.Inputs {
+	return providerconfig.Inputs{
+		Provider:    inputs.Provider,
+		ProviderAPI: inputs.ProviderAPI,
+		Model:       inputs.Model,
+		BaseURL:     inputs.BaseURL,
+		ActProtocol: setting,
+		RequestOptions: requestOptions(
+			inputs.Effort,
+			inputs.MaxOutputTokens,
+			inputs.MaxOutputTokensSet,
+			inputs.ThinkingBudgetTokens,
+			inputs.ThinkingBudgetTokensSet,
+		),
+	}
 }

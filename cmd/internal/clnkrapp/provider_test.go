@@ -15,7 +15,10 @@ import (
 )
 
 func anthropicWrappedDone(summary string) string {
-	return fmt.Sprintf(`{"turn":{"type":"done","bash":null,"question":null,"summary":%q,"verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`, summary)
+	return fmt.Sprintf(
+		`{"turn":{"type":"done","bash":null,"question":null,"summary":%q,"verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`,
+		summary,
+	)
 }
 
 func TestNewModelForConfigPassesAnthropicRequestOptions(t *testing.T) {
@@ -44,7 +47,10 @@ func TestNewModelForConfigPassesAnthropicRequestOptions(t *testing.T) {
 			},
 		},
 	}, "sys")
-	if _, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}}); err != nil {
+	if _, err := model.Query(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "hi"}},
+	); err != nil {
 		t.Fatalf("Query: %v", err)
 	}
 	if got := gotBody["max_tokens"]; got != float64(8000) {
@@ -115,7 +121,10 @@ func TestNewModelForConfigPassesAnthropicEffortWithAdaptiveThinking(t *testing.T
 			},
 		},
 	}, "sys")
-	if _, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}}); err != nil {
+	if _, err := model.Query(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "hi"}},
+	); err != nil {
 		t.Fatalf("Query: %v", err)
 	}
 
@@ -143,7 +152,12 @@ func TestMakeCompactorFactoryUsesOpenAIWhenProviderSelected(t *testing.T) {
 		_ = json.Unmarshal(body, &gotBody)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{
-				{"message": map[string]string{"role": "assistant", "content": "Older work summarized."}},
+				{
+					"message": map[string]string{
+						"role":    "assistant",
+						"content": "Older work summarized.",
+					},
+				},
 			},
 			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
 		})
@@ -157,7 +171,10 @@ func TestMakeCompactorFactoryUsesOpenAIWhenProviderSelected(t *testing.T) {
 		APIKey:      "test-key",
 		Model:       "gpt-test",
 	})("")
-	summary, err := compactor.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
+	summary, err := compactor.Summarize(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "first task"}},
+	)
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -165,7 +182,10 @@ func TestMakeCompactorFactoryUsesOpenAIWhenProviderSelected(t *testing.T) {
 		t.Fatalf("summary = %q, want %q", summary, "Older work summarized.")
 	}
 	if _, ok := gotBody["response_format"]; ok {
-		t.Fatalf("response_format should be omitted for compaction, got %#v", gotBody["response_format"])
+		t.Fatalf(
+			"response_format should be omitted for compaction, got %#v",
+			gotBody["response_format"],
+		)
 	}
 }
 
@@ -198,7 +218,10 @@ func TestMakeCompactorFactoryUsesOpenAIResponsesWhenConfigured(t *testing.T) {
 		APIKey:      "test-key",
 		Model:       "gpt-test",
 	})("")
-	summary, err := compactor.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
+	summary, err := compactor.Summarize(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "first task"}},
+	)
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -235,7 +258,10 @@ func TestMakeCompactorFactoryUsesAnthropicWhenProviderSelected(t *testing.T) {
 		APIKey:   "test-key",
 		Model:    "claude-test",
 	})("")
-	summary, err := compactor.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
+	summary, err := compactor.Summarize(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "first task"}},
+	)
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -246,7 +272,10 @@ func TestMakeCompactorFactoryUsesAnthropicWhenProviderSelected(t *testing.T) {
 		t.Fatalf("request path = %q, want %q", requestPath, "/v1/messages")
 	}
 	if _, ok := gotBody["response_format"]; ok {
-		t.Fatalf("response_format should be omitted for compaction, got %#v", gotBody["response_format"])
+		t.Fatalf(
+			"response_format should be omitted for compaction, got %#v",
+			gotBody["response_format"],
+		)
 	}
 	if _, ok := gotBody["max_tokens"]; !ok {
 		t.Fatalf("anthropic request missing max_tokens: %#v", gotBody)

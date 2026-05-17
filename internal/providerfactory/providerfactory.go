@@ -51,20 +51,38 @@ func NewModelWithOptions(config Config, systemPrompt string, modelOpts Options) 
 		}
 		anthropicOpts.UseBashToolCalls = config.ActProtocol == clnkr.ActProtocolToolCalls
 		anthropicOpts.Unattended = modelOpts.Unattended
-		return anthropic.NewModelWithOptions(config.BaseURL, config.APIKey, config.Model, systemPrompt, anthropicOpts)
+		return anthropic.NewModelWithOptions(
+			config.BaseURL,
+			config.APIKey,
+			config.Model,
+			systemPrompt,
+			anthropicOpts,
+		)
 	case config.ProviderAPI == providerdomain.ProviderAPIOpenAIResponses:
 		var effort string
 		if opts.Effort.Set && opts.Effort.Level != "auto" {
 			effort = opts.Effort.Level
 		}
-		return openairesponses.NewModelWithOptions(config.BaseURL, config.APIKey, config.Model, systemPrompt, openairesponses.Options{
-			ReasoningEffort:    effort,
-			MaxOutputTokens:    opts.Output.MaxOutputTokens.Value,
-			HasMaxOutputTokens: opts.Output.MaxOutputTokens.Set,
-			UseBashToolCalls:   config.ActProtocol == clnkr.ActProtocolToolCalls,
-			Unattended:         modelOpts.Unattended,
-		})
+		return openairesponses.NewModelWithOptions(
+			config.BaseURL,
+			config.APIKey,
+			config.Model,
+			systemPrompt,
+			openairesponses.Options{
+				ReasoningEffort:    effort,
+				MaxOutputTokens:    opts.Output.MaxOutputTokens.Value,
+				HasMaxOutputTokens: opts.Output.MaxOutputTokens.Set,
+				UseBashToolCalls:   config.ActProtocol == clnkr.ActProtocolToolCalls,
+				Unattended:         modelOpts.Unattended,
+			},
+		)
 	default:
-		return openai.NewModelWithOptions(config.BaseURL, config.APIKey, config.Model, systemPrompt, openai.Options{Unattended: modelOpts.Unattended})
+		return openai.NewModelWithOptions(
+			config.BaseURL,
+			config.APIKey,
+			config.Model,
+			systemPrompt,
+			openai.Options{Unattended: modelOpts.Unattended},
+		)
 	}
 }

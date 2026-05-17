@@ -148,7 +148,10 @@ func (d *Driver) Pending() string {
 	return d.pending.kind
 }
 
-func (d *Driver) DecideAct(ctx context.Context, proposal clnkr.ActProposal) (clnkr.ActDecision, error) {
+func (d *Driver) DecideAct(
+	ctx context.Context,
+	proposal clnkr.ActProposal,
+) (clnkr.ActDecision, error) {
 	reply, err := d.waitForReply(ctx, PendingApproval, EventApprovalRequest{
 		Commands: proposal.Commands,
 		Prompt:   proposal.Prompt,

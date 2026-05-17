@@ -43,11 +43,17 @@ func TestNewFactoryBuildsFreshCompactorPerInstructionSet(t *testing.T) {
 		t.Fatalf("instructions = %#v, want [focus tests focus files]", gotInstructions)
 	}
 
-	firstSummary, err := first.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
+	firstSummary, err := first.Summarize(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "first task"}},
+	)
 	if err != nil {
 		t.Fatalf("first Summarize: %v", err)
 	}
-	secondSummary, err := second.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "second task"}})
+	secondSummary, err := second.Summarize(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "second task"}},
+	)
 	if err != nil {
 		t.Fatalf("second Summarize: %v", err)
 	}
@@ -140,7 +146,11 @@ func TestModelCompactorTruncatesOversizedPrefixBeforeQuery(t *testing.T) {
 		t.Fatalf("first query content = %q, want fenced truncation block prefix", query[0].Content)
 	}
 	if len(query[0].Content) > summarizeInputCharBudget {
-		t.Fatalf("truncation block length = %d, want <= %d", len(query[0].Content), summarizeInputCharBudget)
+		t.Fatalf(
+			"truncation block length = %d, want <= %d",
+			len(query[0].Content),
+			summarizeInputCharBudget,
+		)
 	}
 	if !strings.HasSuffix(query[0].Content, "\n</source_text>") {
 		t.Fatalf("first query content = %q, want source_text close tag", query[0].Content)
@@ -154,7 +164,10 @@ func TestModelCompactorReturnsModelError(t *testing.T) {
 	wantErr := errors.New("query failed")
 	compactor := modelCompactor{model: &stubModel{err: wantErr}}
 
-	_, err := compactor.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
+	_, err := compactor.Summarize(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "first task"}},
+	)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
 	}
