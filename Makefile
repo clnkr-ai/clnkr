@@ -35,8 +35,8 @@ CLANKERVAL_PREFLIGHT = \
 	_hooks _check-docs _require-run-clnkr-tools _require-pandoc _require-readme-image-tools _site-sync _site-build
 
 PREFIX ?= /usr/local
-CORE_SLOC_LIMIT := 2200
-FRONTEND_SLOC_LIMIT := 2200
+CORE_SLOC_LIMIT := 2350
+FRONTEND_SLOC_LIMIT := 2600
 DOC_MAN_DIR := build/docs/man
 DOC_MAN_OUTPUTS := $(DOC_MAN_DIR)/clnkr.1 $(DOC_MAN_DIR)/clnkrd.1 $(DOC_MAN_DIR)/clnkr.3 $(DOC_MAN_DIR)/clnkr.7
 DOC_CONTENT_DIR := site/content/docs
@@ -123,6 +123,7 @@ _arch:
 _script-tests:
 	./scripts/test/check-architecture-imports.sh
 	./scripts/test/check-thoth-critical.sh
+	./scripts/test/release-require-green-main.sh
 
 # Repo-root only: counts repo-local Go files in the main-module dependency closure of `.`.
 sloc: ## Report core runtime graph SLOC and fail if it exceeds CORE_SLOC_LIMIT

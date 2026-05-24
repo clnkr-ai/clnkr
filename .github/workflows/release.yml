@@ -11,11 +11,25 @@ concurrency:
 
 permissions:
   contents: write
+  actions: read
   id-token: write
   attestations: write
 
 jobs:
+  ci-preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require latest main checks success
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/release-require-green-main.sh
+
+  live-evaluations:
+    uses: ./.github/workflows/eval-live.yml
+    secrets: inherit
+
   debian-amd64:
+    needs: [ci-preflight, live-evaluations]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -89,6 +103,7 @@ jobs:
           path: debian-changelog
 
   debian-arm64:
+    needs: [ci-preflight, live-evaluations]
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v5
@@ -154,6 +169,7 @@ jobs:
           path: clnkr_*.deb
 
   binaries:
+    needs: [ci-preflight, live-evaluations]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

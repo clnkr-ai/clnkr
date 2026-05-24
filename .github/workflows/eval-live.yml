@@ -1,9 +1,8 @@
 name: Live Evaluations
 
 on:
+  workflow_call:
   workflow_dispatch:
-  push:
-    branches: [main]
 
 jobs:
   evaluations-live-openai:

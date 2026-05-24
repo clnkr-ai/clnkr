@@ -11,6 +11,8 @@ make check       # Run the full quality suite
 make man         # Generate staged man pages from doc/*.1.md
 make docs        # Build the documentation site
 make docs-serve  # Run the documentation site locally
+allium check specs/    # Validate Allium specs
+allium analyse specs/  # Analyse spec process gaps
 make _fmt        # Format source
 make _hooks      # Configure repo-local Git hooks
 ```
@@ -56,6 +58,15 @@ clnkr/                  # core: types, Agent, events (stdlib only)
 **Command results (host→model):** JSON with `stdout`, `stderr`, `outcome`, and optional `feedback`. Exit outcomes include `exit_code`; non-exit outcomes include timeout, cancelled, denied, skipped, and error.
 
 **Child process boundary:** `clnkrd` is the composable process surface. The prompt teaches models when to launch `clnkrd` through bash for bounded child work and how to read stdout/stderr or event logs. `Driver`, provider adapters, `ShellExecutor`, and `Agent.Step()` do not participate in child-agent policy.
+
+## Allium Specs
+Allium specs live under `specs/`. They describe observable behavior, not implementation history or Go structure. Keep them current when a change alters the intended behavior of a specified area.
+
+Allium setup and CLI install instructions live in the upstream README:
+https://github.com/juxt/allium/tree/main#get-started and
+https://github.com/juxt/allium/tree/main#command-line-tooling.
+
+Run `allium check specs/` after editing specs. Run `allium analyse specs/` when rules, surfaces, or process flow change. Fix diagnostics before committing.
 
 ## Release
 Tag-driven. Push feature to `main`, wait for CI/evals/site to go green, then push the plain semantic version tag. Release workflow triggers from semver tags, updates `debian/main`, and generates Debian changelog. Remote `main` may move. Fetch and rebase before follow-up pushes.
