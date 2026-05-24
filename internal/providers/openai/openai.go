@@ -266,7 +266,7 @@ func parseResponse(respBody []byte) (clnkr.Response, error) {
 	if strings.TrimSpace(choice.Message.Content) == "" {
 		return clnkr.Response{}, fmt.Errorf("empty choice content")
 	}
-	turn, err := openaiwire.ParseProviderTurn(choice.Message.Content)
+	turn, err := openaiwire.ParseChatCompletionTurn(choice.Message.Content)
 	if err != nil {
 		return clnkr.Response{
 			Raw: choice.Message.Content,
