@@ -499,14 +499,59 @@ func TestModelReturnsRawPayloadPlusProtocolErrorOnInvalidStructuredPayload(t *te
 	}
 }
 
-func TestModelReturnsRawPayloadPlusProtocolErrorWhenResponseFormatIsIgnored(t *testing.T) {
-	raw := doneTurn("ignored")
+func TestModelAcceptsCanonicalJSONWhenResponseFormatWrapperIsIgnored(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "done",
+			raw:  doneTurn("ignored"),
+			want: doneTurn("ignored"),
+		},
+		{
+			name: "clarify",
+			raw:  `{"type":"clarify","question":"Which repo?"}`,
+			want: `{"type":"clarify","question":"Which repo?"}`,
+		},
+		{
+			name: "act",
+			raw:  `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"reasoning":"inspect cwd"}`,
+			want: `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"reasoning":"inspect cwd"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := queryContent(t, tt.raw)
+			if resp.Raw != tt.raw {
+				t.Fatalf("raw = %q, want %q", resp.Raw, tt.raw)
+			}
+			if resp.ProtocolErr != nil {
+				t.Fatalf("protocol error = %v, want nil", resp.ProtocolErr)
+			}
+			if resp.Turn == nil {
+				t.Fatal("turn = nil, want parsed turn")
+			}
+			if got := mustCanonicalTurn(t, resp.Turn); got != tt.want {
+				t.Fatalf("turn = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestModelRejectsNonTurnJSONWhenResponseFormatWrapperIsIgnored(t *testing.T) {
+	raw := `[{"command":"pwd","workdir":null}]`
 	resp := queryContent(t, raw)
 	if resp.Raw != raw {
 		t.Fatalf("raw = %q, want %q", resp.Raw, raw)
 	}
 	if !errors.Is(resp.ProtocolErr, clnkr.ErrInvalidJSON) {
 		t.Fatalf("protocol error = %v, want ErrInvalidJSON", resp.ProtocolErr)
+	}
+	if resp.Turn != nil {
+		t.Fatalf("turn = %T, want nil", resp.Turn)
 	}
 }
 

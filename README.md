@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/clnkr-ai/clnkr/actions/workflows/ci.yml/badge.svg)](https://github.com/clnkr-ai/clnkr/actions/workflows/ci.yml)
 
-A minimal coding agent CLI.
+A coding agent CLI that gives the model bash and little else.
 
 <img width="1388" height="826" alt="alacritty-2026-05-09-220219" src="https://github.com/user-attachments/assets/74370dc6-d954-4697-8080-fec8f49a9acd" />
 
@@ -23,7 +23,7 @@ curl -fsSLO https://github.com/clnkr-ai/clnkr/releases/download/v<VERSION>/clnkr
 sudo dpkg -i ./clnkr_<VERSION>-1_<ARCH>.deb
 ```
 
-`go install` works too:
+Install from source with Go:
 
 ```bash
 go install github.com/clnkr-ai/clnkr/cmd/clnkr@latest
@@ -40,7 +40,7 @@ export CLNKR_MODEL=claude-sonnet-4-6
 clnkr
 ```
 
-At the prompt, ask for a task. `clnkr` proposes bash commands and asks before running each batch.
+At the prompt, ask for a task. `clnkr` proposes bash commands and asks before it runs each batch.
 
 Run unattended:
 
@@ -56,9 +56,9 @@ clnkr --full-send
 
 ## Usage
 
-clnkr can:
+Common workflows:
 
-- Run interactively, with approval before each command batch
+- Run interactively with approval before each command batch
 - Run unattended with `-p`
 - Resume project sessions with `--continue`
 - Stream JSONL event logs with `--event-log`
@@ -82,15 +82,16 @@ Compact older transcript history:
 /compact focus on failing tests and edited files
 ```
 
-Ask the model to launch a bounded child process through bash:
+Ask the model to launch a bounded child process:
 
 ```text
 /delegate inspect cmd/clnkrd and summarize the JSONL contract
 ```
 
-The host treats `/delegate` as ordinary prompt text. The built-in prompt teaches
-the model to run `clnkrd` as a normal process, keep child artifacts under `/tmp`,
-read stdout/stderr or event logs, and verify important child claims locally.
+`clnkr` treats `/delegate` as prompt text. The built-in prompt tells the model
+to run `clnkrd` as a normal process, keep child artifacts under `/tmp`, read
+stdout/stderr or event logs, and verify important child claims in the parent
+session.
 
 Emit events or reuse transcripts:
 
@@ -117,7 +118,7 @@ clnkr --provider openai --base-url http://localhost:11434/v1 --model llama3
 clnkr --provider openai --base-url http://proxy:4000/v1 --model gpt-4o
 ```
 
-clnkr requires structured outputs.
+The endpoint must support structured outputs.
 
 Full CLI reference: [`doc/clnkr.1.md`](doc/clnkr.1.md).
 
@@ -132,7 +133,7 @@ Set `CLNKR_API_KEY`. Everything else can come from flags or environment variable
 | `CLNKR_MODEL` | Model name (overridden by `--model`) |
 | `CLNKR_BASE_URL` | LLM endpoint (overridden by `--base-url`) |
 
-clnkr builds its system prompt from the built-in prompt plus `AGENTS.md` files found in the user home directory, the XDG config directory, and the current working directory.
+clnkr builds its system prompt from the built-in prompt plus `AGENTS.md` files in the user home directory, the XDG config directory, and the current working directory.
 
 Prompt controls:
 
@@ -145,7 +146,7 @@ clnkr --no-system-prompt
 
 ## How it works
 
-clnkr is a scaffold that loops:
+At each step, clnkr:
 
 1. Send the conversation to the LLM.
 2. Get back a question, command batch, or final answer.

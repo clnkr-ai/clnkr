@@ -29,3 +29,14 @@ func NormalizeMessagesForProvider(messages []clnkr.Message) []clnkr.Message {
 func ParseProviderTurn(raw string) (clnkr.Turn, error) {
 	return actwire.ParseProviderTurn(raw)
 }
+
+func ParseChatCompletionTurn(raw string) (clnkr.Turn, error) {
+	turn, err := actwire.ParseProviderTurn(raw)
+	if err == nil {
+		return turn, nil
+	}
+	if canonical, canonicalErr := clnkr.ParseTurn(raw); canonicalErr == nil {
+		return canonical, nil
+	}
+	return nil, err
+}

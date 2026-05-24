@@ -175,9 +175,11 @@ the execution cap; if a batch exceeds the remaining command budget, clnkr runs
 only the commands that fit and then asks for a final summary.
 
 A **canonical turn** is the internal JSON shape clnkr writes to the transcript
-after a provider adapter projects provider output into clnkr's turn space:
+after a provider adapter validates model output into clnkr's turn space:
 **act**, **clarify**, or **done**. A **provider turn** is the provider-specific
-structured-output shape before that projection.
+structured-output shape before that validation. When a compatibility adapter
+accepts canonical response text directly, validation still produces the same
+canonical turn stored in the transcript.
 
 The CLI **--act-protocol** setting defaults to **auto**. The CLI resolves
 **auto** after provider API selection. Anthropic Messages and OpenAI Responses
@@ -336,8 +338,11 @@ For OpenAI, clnkr can use the Responses API or an OpenAI-compatible Chat
 Completions API. **provider-api=auto** selects Responses for known supported
 OpenAI model names and model names matching OpenAI model-name patterns, and
 keeps known non-OpenAI model-name patterns on Chat Completions.
-OpenAI-compatible Chat Completions endpoints, including vLLM's compatible
-server, must support structured model outputs.
+OpenAI-compatible Chat Completions endpoints are requested with JSON-schema
+structured output. For compatibility with servers that accept the schema
+request but do not enforce clnkr's provider wrapper, the Chat Completions
+adapter also accepts response text that is exactly one canonical
+**clnkr-inline** turn.
 
 For Anthropic, clnkr uses the Messages API and asks for structured JSON output
 through the provider adapter.
@@ -371,8 +376,10 @@ tool-call responses.
 : A provider-declared refusal instead of usable model text.
 
 **Structured output**
-: Provider-enforced JSON output for text turns, intended to contain exactly one
-provider turn. In tool-call mode, bash acts use native provider tool calls.
+: JSON text requested through provider structured-output support. It normally
+contains exactly one provider turn. The OpenAI-compatible Chat Completions
+adapter may also accept exactly one canonical **clnkr-inline** turn as response
+text. In tool-call mode, bash acts use native provider tool calls.
 
 # RUN METADATA
 
