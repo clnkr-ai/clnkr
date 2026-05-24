@@ -1,6 +1,7 @@
 package providerconfig
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -27,6 +28,12 @@ type ResolvedProviderConfig struct {
 	ActProtocol            clnkr.ActProtocol
 	RequestOptions         providerdomain.ProviderRequestOptions
 }
+
+type missingAPIKeyError struct{}
+
+func (missingAPIKeyError) Error() string { return "api key is required; set CLNKR_API_KEY" }
+
+func IsMissingAPIKey(err error) bool { return errors.As(err, new(missingAPIKeyError)) }
 
 type ActProtocolSetting string
 
@@ -57,7 +64,11 @@ func ActProtocolFlagValue(flagValue string, flagSet bool, env func(string) strin
 	return flagValue
 }
 
-func resolveActProtocol(setting ActProtocolSetting, provider providerdomain.Provider, providerAPI providerdomain.ProviderAPI) clnkr.ActProtocol {
+func resolveActProtocol(
+	setting ActProtocolSetting,
+	provider providerdomain.Provider,
+	providerAPI providerdomain.ProviderAPI,
+) clnkr.ActProtocol {
 	if setting == ActProtocolSettingAuto {
 		if providerdomain.SupportsBashToolCalls(provider, providerAPI) {
 			return clnkr.ActProtocolToolCalls
@@ -79,49 +90,77 @@ func ResolveConfig(inputs Inputs, env func(string) string) (ResolvedProviderConf
 	actProtocol := resolveActProtocol(actProtocolSetting, provider, providerAPI)
 	apiKey := strings.TrimSpace(env("CLNKR_API_KEY"))
 	if apiKey == "" {
-		return ResolvedProviderConfig{}, fmt.Errorf("api key is required; set CLNKR_API_KEY")
+		return ResolvedProviderConfig{}, missingAPIKeyError{}
 	}
-	requestOptions, err := providerdomain.ValidateRequestOptions(provider, providerAPI, model, actProtocol == clnkr.ActProtocolToolCalls, inputs.RequestOptions)
+	requestOptions, err := providerdomain.ValidateRequestOptions(
+		provider,
+		providerAPI,
+		model,
+		actProtocol == clnkr.ActProtocolToolCalls,
+		inputs.RequestOptions,
+	)
 	if err != nil {
 		return ResolvedProviderConfig{}, err
 	}
-	return ResolvedProviderConfig{Provider: provider, ProviderAPI: providerAPI, Model: model, BaseURL: baseURL, APIKey: apiKey, ActProtocol: actProtocol, RequestOptions: requestOptions}, nil
+	return ResolvedProviderConfig{
+		Provider:       provider,
+		ProviderAPI:    providerAPI,
+		Model:          model,
+		BaseURL:        baseURL,
+		APIKey:         apiKey,
+		ActProtocol:    actProtocol,
+		RequestOptions: requestOptions,
+	}, nil
 }
 
-func ResolvePromptActProtocol(inputs Inputs, env func(string) string, dumpSystemPrompt bool) (clnkr.ActProtocol, error) {
+func ResolvePromptActProtocol(
+	inputs Inputs,
+	env func(string) string,
+	dumpSystemPrompt bool,
+) (clnkr.ActProtocol, error) {
 	actProtocolSetting, err := ParseActProtocolSetting(string(inputs.ActProtocol))
 	if err != nil {
 		return "", err
 	}
-	if actProtocolSetting == ActProtocolSettingClnkrInline || actProtocolSetting == ActProtocolSettingToolCalls {
+	if actProtocolSetting == ActProtocolSettingClnkrInline ||
+		actProtocolSetting == ActProtocolSettingToolCalls {
 		return resolveActProtocol(actProtocolSetting, "", ""), nil
 	}
 	provider, providerAPI, _, _, err := resolveContext(inputs, env)
 	if err != nil && dumpSystemPrompt {
-		return "", fmt.Errorf("%w; pass --act-protocol clnkr-inline or --act-protocol tool-calls to dump a concrete prompt without provider/model context", err)
+		return "", fmt.Errorf(
+			"%w; pass --act-protocol clnkr-inline or --act-protocol tool-calls to dump a concrete prompt without provider/model context",
+			err,
+		)
 	}
 	return resolveActProtocol(actProtocolSetting, provider, providerAPI), err
 }
 
-func resolveContext(inputs Inputs, env func(string) string) (providerdomain.Provider, providerdomain.ProviderAPI, string, string, error) {
-	baseURL, baseURLSource, baseURLSet := chooseValue(inputs.BaseURL, env("CLNKR_BASE_URL"), "--base-url", "CLNKR_BASE_URL")
-	providerRaw, _, providerSet := chooseValue(inputs.Provider, env("CLNKR_PROVIDER"), "--provider", "CLNKR_PROVIDER")
+func resolveContext(
+	inputs Inputs,
+	env func(string) string,
+) (providerdomain.Provider, providerdomain.ProviderAPI, string, string, error) {
+	baseURL, baseURLSource, baseURLSet := chooseValue(
+		inputs.BaseURL,
+		env("CLNKR_BASE_URL"),
+		"--base-url",
+		"CLNKR_BASE_URL",
+	)
+	providerRaw, _, providerSet := chooseValue(
+		inputs.Provider,
+		env("CLNKR_PROVIDER"),
+		"--provider",
+		"CLNKR_PROVIDER",
+	)
 	var provider providerdomain.Provider
 	var parsedBaseURL *url.URL
 	var err error
-	if providerSet {
-		provider, err = providerdomain.ParseProvider(providerRaw)
-		if err != nil {
-			return "", "", "", "", err
-		}
-	} else if baseURLSet {
-		parsedBaseURL, err = parseBaseURL(baseURL, baseURLSource)
-		if err != nil {
-			return "", "", "", "", err
-		}
-		provider = inferProviderFromBaseURL(parsedBaseURL)
-	} else {
+	if !providerSet {
 		return "", "", "", "", fmt.Errorf("provider is required; set --provider or CLNKR_PROVIDER")
+	}
+	provider, err = providerdomain.ParseProvider(providerRaw)
+	if err != nil {
+		return "", "", "", "", err
 	}
 
 	model, _, ok := chooseValue(inputs.Model, env("CLNKR_MODEL"), "--model", "CLNKR_MODEL")
@@ -129,7 +168,12 @@ func resolveContext(inputs Inputs, env func(string) string) (providerdomain.Prov
 		return "", "", "", "", fmt.Errorf("model is required; set --model or CLNKR_MODEL")
 	}
 
-	providerAPIRaw, _, providerAPISet := chooseValue(inputs.ProviderAPI, env("CLNKR_PROVIDER_API"), "--provider-api", "CLNKR_PROVIDER_API")
+	providerAPIRaw, _, providerAPISet := chooseValue(
+		inputs.ProviderAPI,
+		env("CLNKR_PROVIDER_API"),
+		"--provider-api",
+		"CLNKR_PROVIDER_API",
+	)
 	if provider == providerdomain.ProviderAnthropic && providerAPISet {
 		return "", "", "", "", fmt.Errorf(`provider-api is only valid for provider "openai"`)
 	}
@@ -169,20 +213,17 @@ func chooseValue(flagValue, envValue, flagSource, envSource string) (string, str
 	return "", "", false
 }
 
-func inferProviderFromBaseURL(baseURL *url.URL) providerdomain.Provider {
-	if host := strings.ToLower(baseURL.Hostname()); host == "anthropic.com" || strings.HasSuffix(host, ".anthropic.com") {
-		return providerdomain.ProviderAnthropic
-	}
-	return providerdomain.ProviderOpenAI
-}
-
 func parseBaseURL(baseURL, source string) (*url.URL, error) {
 	parsed, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid base URL %q (from %s): %w", baseURL, source, err)
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil, fmt.Errorf("invalid base URL %q (from %s): must start with http:// or https://", baseURL, source)
+		return nil, fmt.Errorf(
+			"invalid base URL %q (from %s): must start with http:// or https://",
+			baseURL,
+			source,
+		)
 	}
 	if parsed.Hostname() == "" {
 		return nil, fmt.Errorf("invalid base URL %q (from %s): missing host", baseURL, source)
@@ -190,7 +231,12 @@ func parseBaseURL(baseURL, source string) (*url.URL, error) {
 	escapedPath := strings.TrimRight(parsed.EscapedPath(), "/")
 	path, err := url.PathUnescape(escapedPath)
 	if err != nil {
-		return nil, fmt.Errorf("invalid base URL %q (from %s): invalid path escape: %w", baseURL, source, err)
+		return nil, fmt.Errorf(
+			"invalid base URL %q (from %s): invalid path escape: %w",
+			baseURL,
+			source,
+			err,
+		)
 	}
 	parsed.Path = path
 	parsed.RawPath = ""

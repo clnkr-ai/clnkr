@@ -212,7 +212,10 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 
 	text, textBlocks := extractTextBlocks(apiResp.Content)
 	if textBlocks != 1 {
-		return clnkr.Response{}, fmt.Errorf("structured output response: expected exactly one text block, got %d", textBlocks)
+		return clnkr.Response{}, fmt.Errorf(
+			"structured output response: expected exactly one text block, got %d",
+			textBlocks,
+		)
 	}
 	if strings.TrimSpace(text) == "" {
 		return clnkr.Response{}, fmt.Errorf("structured output response: empty text payload")
@@ -220,18 +223,27 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 	turn, err := parseProviderTurn(text)
 	if err != nil {
 		return clnkr.Response{
-			Raw:         text,
-			Usage:       clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens},
+			Raw: text,
+			Usage: clnkr.Usage{
+				InputTokens:  apiResp.Usage.InputTokens,
+				OutputTokens: apiResp.Usage.OutputTokens,
+			},
 			ProtocolErr: err,
 		}, nil
 	}
 	if _, err := clnkr.CanonicalTurnJSON(turn); err != nil {
-		return clnkr.Response{}, fmt.Errorf("structured output response: canonicalize turn payload: %w", err)
+		return clnkr.Response{}, fmt.Errorf(
+			"structured output response: canonicalize turn payload: %w",
+			err,
+		)
 	}
 	return clnkr.Response{
-		Turn:  turn,
-		Raw:   text,
-		Usage: clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens},
+		Turn: turn,
+		Raw:  text,
+		Usage: clnkr.Usage{
+			InputTokens:  apiResp.Usage.InputTokens,
+			OutputTokens: apiResp.Usage.OutputTokens,
+		},
 	}, nil
 }
 
@@ -267,7 +279,11 @@ func (m *Model) QueryFinal(ctx context.Context, messages []clnkr.Message) (clnkr
 func parseStructuredResponse(apiResp response, context string) (clnkr.Response, error) {
 	text, textBlocks := extractTextBlocks(apiResp.Content)
 	if textBlocks != 1 {
-		return clnkr.Response{}, fmt.Errorf("%s: expected exactly one text block, got %d", context, textBlocks)
+		return clnkr.Response{}, fmt.Errorf(
+			"%s: expected exactly one text block, got %d",
+			context,
+			textBlocks,
+		)
 	}
 	if strings.TrimSpace(text) == "" {
 		return clnkr.Response{}, fmt.Errorf("%s: empty text payload", context)
@@ -275,8 +291,11 @@ func parseStructuredResponse(apiResp response, context string) (clnkr.Response, 
 	turn, err := parseProviderTurn(text)
 	if err != nil {
 		return clnkr.Response{
-			Raw:         text,
-			Usage:       clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens},
+			Raw: text,
+			Usage: clnkr.Usage{
+				InputTokens:  apiResp.Usage.InputTokens,
+				OutputTokens: apiResp.Usage.OutputTokens,
+			},
 			ProtocolErr: err,
 		}, nil
 	}
@@ -284,14 +303,20 @@ func parseStructuredResponse(apiResp response, context string) (clnkr.Response, 
 		return clnkr.Response{}, fmt.Errorf("%s: canonicalize turn payload: %w", context, err)
 	}
 	return clnkr.Response{
-		Turn:  turn,
-		Raw:   text,
-		Usage: clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens},
+		Turn: turn,
+		Raw:  text,
+		Usage: clnkr.Usage{
+			InputTokens:  apiResp.Usage.InputTokens,
+			OutputTokens: apiResp.Usage.OutputTokens,
+		},
 	}, nil
 }
 
 func parseToolCallResponse(apiResp response, raw []byte) (clnkr.Response, error) {
-	usage := clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens}
+	usage := clnkr.Usage{
+		InputTokens:  apiResp.Usage.InputTokens,
+		OutputTokens: apiResp.Usage.OutputTokens,
+	}
 	var toolUses []contentBlock
 	var text strings.Builder
 	for _, block := range apiResp.Content {
@@ -313,13 +338,18 @@ func parseToolCallResponse(apiResp response, raw []byte) (clnkr.Response, error)
 			}
 			act, ok := turn.(*clnkr.ActTurn)
 			if !ok || len(act.Bash.Commands) != 1 {
-				return clnkr.Response{}, fmt.Errorf("tool-call response: expected one command from tool use")
+				return clnkr.Response{}, fmt.Errorf(
+					"tool-call response: expected one command from tool use",
+				)
 			}
 			actions = append(actions, act.Bash.Commands[0])
 			calls = append(calls, call)
 		}
 		return clnkr.Response{
-			Turn:          &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: actions}, Reasoning: strings.TrimSpace(outputText)},
+			Turn: &clnkr.ActTurn{
+				Bash:      clnkr.BashBatch{Commands: actions},
+				Reasoning: strings.TrimSpace(outputText),
+			},
 			Raw:           string(raw),
 			Usage:         usage,
 			BashToolCalls: calls,
@@ -333,20 +363,37 @@ func parseToolCallResponse(apiResp response, raw []byte) (clnkr.Response, error)
 		return clnkr.Response{Raw: outputText, Usage: usage, ProtocolErr: err}, nil
 	}
 	if _, ok := turn.(*clnkr.ActTurn); ok {
-		return clnkr.Response{Raw: outputText, Usage: usage, ProtocolErr: fmt.Errorf("%w: tool-call mode does not accept text act turns", clnkr.ErrInvalidJSON)}, nil
+		return clnkr.Response{
+			Raw:   outputText,
+			Usage: usage,
+			ProtocolErr: fmt.Errorf(
+				"%w: tool-call mode does not accept text act turns",
+				clnkr.ErrInvalidJSON,
+			),
+		}, nil
 	}
 	if _, err := clnkr.CanonicalTurnJSON(turn); err != nil {
-		return clnkr.Response{}, fmt.Errorf("tool-call response: canonicalize turn payload: %w", err)
+		return clnkr.Response{}, fmt.Errorf(
+			"tool-call response: canonicalize turn payload: %w",
+			err,
+		)
 	}
 	return clnkr.Response{Turn: turn, Raw: outputText, Usage: usage}, nil
 }
 
 func turnFromToolUse(block contentBlock) (clnkr.Turn, clnkr.BashToolCall, error) {
 	if strings.TrimSpace(block.ID) == "" {
-		return nil, clnkr.BashToolCall{}, fmt.Errorf("%w: bash tool use missing id", clnkr.ErrInvalidJSON)
+		return nil, clnkr.BashToolCall{}, fmt.Errorf(
+			"%w: bash tool use missing id",
+			clnkr.ErrInvalidJSON,
+		)
 	}
 	if block.Name != "bash" {
-		return nil, clnkr.BashToolCall{}, fmt.Errorf("%w: unsupported tool %q", clnkr.ErrInvalidJSON, block.Name)
+		return nil, clnkr.BashToolCall{}, fmt.Errorf(
+			"%w: unsupported tool %q",
+			clnkr.ErrInvalidJSON,
+			block.Name,
+		)
 	}
 	var input struct {
 		Command string  `json:"command"`
@@ -355,7 +402,11 @@ func turnFromToolUse(block contentBlock) (clnkr.Turn, clnkr.BashToolCall, error)
 	dec := json.NewDecoder(bytes.NewReader(block.Input))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&input); err != nil {
-		return nil, clnkr.BashToolCall{}, fmt.Errorf("%w: malformed bash tool input: %v", clnkr.ErrInvalidJSON, err)
+		return nil, clnkr.BashToolCall{}, fmt.Errorf(
+			"%w: malformed bash tool input: %v",
+			clnkr.ErrInvalidJSON,
+			err,
+		)
 	}
 	if strings.TrimSpace(input.Command) == "" {
 		return nil, clnkr.BashToolCall{}, clnkr.ErrMissingCommand
@@ -525,7 +576,12 @@ func (m *Model) thinkingOptions() *thinkingOptions {
 }
 
 func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, "POST", endpointURL(m.baseURL, "/v1/messages"), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(
+		ctx,
+		"POST",
+		endpointURL(m.baseURL, "/v1/messages"),
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -544,7 +600,11 @@ func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, error) {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("api error (status %d): %s", resp.StatusCode, extractErrorMessage(respBody))
+		return nil, fmt.Errorf(
+			"api error (status %d): %s",
+			resp.StatusCode,
+			extractErrorMessage(respBody),
+		)
 	}
 	return respBody, nil
 }
@@ -555,7 +615,13 @@ func endpointURL(baseURL, endpoint string) string {
 		return joinURLBoundary(baseURL, endpoint)
 	}
 
-	escapedPath := strings.TrimRight(parsed.EscapedPath(), "/") + "/" + strings.TrimLeft(endpoint, "/")
+	escapedPath := strings.TrimRight(
+		parsed.EscapedPath(),
+		"/",
+	) + "/" + strings.TrimLeft(
+		endpoint,
+		"/",
+	)
 	decodedPath, err := url.PathUnescape(escapedPath)
 	if err != nil {
 		return joinURLBoundary(baseURL, endpoint)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/clnkr-ai/clnkr/internal/core/transcript"
@@ -95,17 +94,29 @@ func (a *Agent) appendStateMessageIfNeeded() {
 	if cwd, ok := transcript.ExtractLatestCwd(a.messages); ok && cwd == a.cwd {
 		return
 	}
-	a.messages = append(a.messages, Message{Role: "user", Content: transcript.FormatStateMessage(a.cwd)})
+	a.messages = append(
+		a.messages,
+		Message{Role: "user", Content: transcript.FormatStateMessage(a.cwd)},
+	)
 }
 
 func (a *Agent) appendResourceStateMessage(commandsUsed, modelTurnsUsed int) {
-	content := fmt.Sprintf(`{"type":"resource_state","source":"clnkr","commands_used":%d,"model_turns_used":%d}`,
-		commandsUsed, modelTurnsUsed)
+	content := fmt.Sprintf(
+		`{"type":"resource_state","source":"clnkr","commands_used":%d,"model_turns_used":%d}`,
+		commandsUsed,
+		modelTurnsUsed,
+	)
 	if a.MaxSteps > 0 {
-		content = fmt.Sprintf(`{"type":"resource_state","source":"clnkr","commands_used":%d,"commands_remaining":%d,"max_commands":%d,"model_turns_used":%d}`,
-			commandsUsed, max(a.MaxSteps-commandsUsed, 0), a.MaxSteps, modelTurnsUsed)
+		content = fmt.Sprintf(
+			`{"type":"resource_state","source":"clnkr","commands_used":%d,"commands_remaining":%d,"max_commands":%d,"model_turns_used":%d}`,
+			commandsUsed,
+			max(a.MaxSteps-commandsUsed, 0),
+			a.MaxSteps,
+			modelTurnsUsed,
+		)
 	}
-	if len(a.messages) > 0 && a.messages[len(a.messages)-1].Role == "user" && a.messages[len(a.messages)-1].Content == content {
+	if len(a.messages) > 0 && a.messages[len(a.messages)-1].Role == "user" &&
+		a.messages[len(a.messages)-1].Content == content {
 		return
 	}
 	a.messages = append(a.messages, Message{Role: "user", Content: content})
@@ -142,20 +153,33 @@ func (a *Agent) appendProtocolFailure(resp Response, appendCorrection bool) {
 	a.messages = append(a.messages, Message{Role: "assistant", Content: resp.Raw})
 	a.notify(EventProtocolFailure{Reason: errorToReason(resp.ProtocolErr), Raw: resp.Raw})
 	if appendCorrection {
-		a.messages = append(a.messages, Message{Role: "user", Content: protocolCorrectionMessageFor(resp.ProtocolErr, a.ActProtocol)})
+		a.messages = append(
+			a.messages,
+			Message{
+				Role:    "user",
+				Content: protocolCorrectionMessageFor(resp.ProtocolErr, a.ActProtocol),
+			},
+		)
 	}
 }
 
 // Compact rewrites the transcript by summarizing an older prefix and keeping a
 // recent tail of user-authored turns intact.
-func (a *Agent) Compact(ctx context.Context, compactor Compactor, opts CompactOptions) (CompactStats, error) {
+func (a *Agent) Compact(
+	ctx context.Context,
+	compactor Compactor,
+	opts CompactOptions,
+) (CompactStats, error) {
 	if compactor == nil {
 		return CompactStats{}, fmt.Errorf("compact transcript: no compactor configured")
 	}
 
 	keepRecentTurns := opts.KeepRecentTurns
 	if keepRecentTurns < 0 {
-		return CompactStats{}, fmt.Errorf("compact transcript: invalid keep recent turns: %d", keepRecentTurns)
+		return CompactStats{}, fmt.Errorf(
+			"compact transcript: invalid keep recent turns: %d",
+			keepRecentTurns,
+		)
 	}
 	if keepRecentTurns == 0 {
 		keepRecentTurns = 2
@@ -177,7 +201,12 @@ func (a *Agent) Compact(ctx context.Context, compactor Compactor, opts CompactOp
 		return CompactStats{}, fmt.Errorf("compact transcript: empty summary")
 	}
 
-	rewritten, stats, err := transcript.RewriteForCompaction(transcriptMessages, summary, opts.Instructions, keepRecentTurns)
+	rewritten, stats, err := transcript.RewriteForCompaction(
+		transcriptMessages,
+		summary,
+		opts.Instructions,
+		keepRecentTurns,
+	)
 	if err != nil {
 		return CompactStats{}, fmt.Errorf("compact transcript: %w", err)
 	}
@@ -202,7 +231,15 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 	if err != nil {
 		return StepResult{}, fmt.Errorf("query model: %w", err)
 	}
-	a.notify(EventDebug{Message: fmt.Sprintf("usage: %d input, %d output tokens", resp.Usage.InputTokens, resp.Usage.OutputTokens)})
+	a.notify(
+		EventDebug{
+			Message: fmt.Sprintf(
+				"usage: %d input, %d output tokens",
+				resp.Usage.InputTokens,
+				resp.Usage.OutputTokens,
+			),
+		},
+	)
 
 	if resp.ProtocolErr != nil {
 		a.appendProtocolFailure(resp, true)
@@ -223,86 +260,20 @@ func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, erro
 
 // ExecuteTurnWithSkipped runs an act turn and records bash tool calls that
 // were skipped before execution, for example by MaxSteps truncation.
-func (a *Agent) ExecuteTurnWithSkipped(ctx context.Context, act *ActTurn, skipped []BashAction) (StepResult, error) {
+func (a *Agent) ExecuteTurnWithSkipped(
+	ctx context.Context,
+	act *ActTurn,
+	skipped []BashAction,
+) (StepResult, error) {
 	return a.executeTurn(ctx, act, skipped)
 }
 
-func (a *Agent) executeTurn(ctx context.Context, act *ActTurn, skipped []BashAction) (StepResult, error) {
-	if act == nil || len(act.Bash.Commands) == 0 {
-		return StepResult{Turn: act}, fmt.Errorf("execute act turn: %w", ErrMissingCommand)
-	}
-
-	outputs, execCount := make([]string, 0, len(act.Bash.Commands)), 0
-	var execErr error
-
-	for i, action := range act.Bash.Commands {
-		if setter, ok := a.executor.(ExecutorStateSetter); ok {
-			setter.SetEnv(a.env)
-		}
-
-		execDir := a.cwd
-		if action.Workdir != "" {
-			if filepath.IsAbs(action.Workdir) {
-				execDir = action.Workdir
-			} else {
-				execDir = filepath.Join(a.cwd, action.Workdir)
-			}
-		}
-		a.notify(EventCommandStart{Command: action.Command, Dir: execDir})
-
-		execResult, commandErr := a.executor.Execute(ctx, action.Command, execDir)
-		execCount++
-		if execResult.PostCwd != "" {
-			a.cwd = execResult.PostCwd
-		}
-		// PostEnv is a full next-turn snapshot; nil means no new snapshot captured.
-		if execResult.PostEnv != nil {
-			a.env = execResult.PostEnv
-		}
-		a.notify(EventDebug{Message: fmt.Sprintf("cwd: %s", a.cwd)})
-		payload := transcript.FormatCommandResult(transcript.CommandResult{
-			Command:  execResult.Command,
-			Stdout:   execResult.Stdout,
-			Stderr:   execResult.Stderr,
-			ExitCode: execResult.ExitCode,
-			Outcome:  execResult.Outcome,
-			Feedback: execResult.Feedback,
-		})
-		if commandErr != nil {
-			a.notify(EventDebug{Message: fmt.Sprintf("command error: %v", commandErr)})
-		}
-		a.notify(EventCommandDone{
-			Command:  action.Command,
-			Stdout:   execResult.Stdout,
-			Stderr:   execResult.Stderr,
-			ExitCode: execResult.ExitCode,
-			Feedback: execResult.Feedback,
-			Err:      commandErr,
-		})
-
-		msg := Message{Role: "user", Content: payload}
-		if action.ID != "" {
-			msg.BashToolResult = &BashToolResult{ID: action.ID, Content: payload, IsError: commandResultIsError(execResult)}
-		}
-		a.messages = append(a.messages, msg)
-		outputs = append(outputs, payload)
-		if execErr = commandErr; execErr != nil {
-			for _, notRun := range act.Bash.Commands[i+1:] {
-				if payload, ok := a.appendSkippedToolResult(notRun, "previous command failed"); ok {
-					outputs = append(outputs, payload)
-				}
-			}
-			break
-		}
-	}
-
-	for _, action := range skipped {
-		if payload, ok := a.appendSkippedToolResult(action, "max steps"); ok {
-			outputs = append(outputs, payload)
-		}
-	}
-	a.appendStateMessageIfNeeded()
-	return StepResult{Turn: act, Output: strings.Join(outputs, "\n\n"), ExecErr: execErr, ExecCount: execCount}, nil
+func (a *Agent) executeTurn(
+	ctx context.Context,
+	act *ActTurn,
+	skipped []BashAction,
+) (StepResult, error) {
+	return actTurnExecutor{agent: a}.Execute(ctx, act, skipped)
 }
 
 // RejectTurn records that an approval-mode act turn was not executed.
@@ -343,7 +314,8 @@ func (a *Agent) appendSkippedToolResult(action BashAction, reason string) (strin
 }
 
 func commandResultIsError(result CommandResult) bool {
-	if result.Outcome.Type == "" || result.Outcome.Type == CommandOutcomeExit && result.Outcome.ExitCode == nil {
+	if result.Outcome.Type == "" ||
+		result.Outcome.Type == CommandOutcomeExit && result.Outcome.ExitCode == nil {
 		return result.ExitCode != 0
 	}
 	if result.Outcome.Type != CommandOutcomeExit {
@@ -356,7 +328,9 @@ func commandResultIsError(result CommandResult) bool {
 // caller decides the step budget is exhausted.
 func (a *Agent) RequestStepLimitSummary(ctx context.Context) error {
 	a.notify(EventDebug{Message: "step limit reached, requesting summary"})
-	a.AppendUserMessage("Step limit reached. Respond with " + protocolDoneExample + " summarizing your progress.")
+	a.AppendUserMessage(
+		"Step limit reached. Respond with " + protocolDoneExample + " summarizing your progress.",
+	)
 
 	queryMessages := transcript.CloneMessages(a.messages)
 	query := a.model.Query
@@ -369,7 +343,11 @@ func (a *Agent) RequestStepLimitSummary(ctx context.Context) error {
 	}
 	if resp.ProtocolErr != nil {
 		a.appendProtocolFailure(resp, false)
-		a.notify(EventDebug{Message: fmt.Sprintf("final response not a valid turn: %v", resp.ProtocolErr)})
+		a.notify(
+			EventDebug{
+				Message: fmt.Sprintf("final response not a valid turn: %v", resp.ProtocolErr),
+			},
+		)
 		return fmt.Errorf("query model (final): %w", resp.ProtocolErr)
 	}
 	resp.Turn = turnPointer(resp.Turn)

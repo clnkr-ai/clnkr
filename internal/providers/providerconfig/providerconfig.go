@@ -32,10 +32,14 @@ func ParseProvider(raw string) (Provider, error) {
 
 func ParseProviderAPI(raw string) (ProviderAPI, error) {
 	api := ProviderAPI(strings.ToLower(strings.TrimSpace(raw)))
-	if api == ProviderAPIAuto || api == ProviderAPIOpenAIChatCompletions || api == ProviderAPIOpenAIResponses {
+	if api == ProviderAPIAuto || api == ProviderAPIOpenAIChatCompletions ||
+		api == ProviderAPIOpenAIResponses {
 		return api, nil
 	}
-	return "", fmt.Errorf(`invalid provider-api %q (allowed: auto, openai-chat-completions, openai-responses)`, raw)
+	return "", fmt.Errorf(
+		`invalid provider-api %q (allowed: auto, openai-chat-completions, openai-responses)`,
+		raw,
+	)
 }
 
 const (
@@ -105,11 +109,18 @@ var unsupportedStructuredOpenAIModels = map[string]struct{}{
 	"gpt-5.4-pro": {},
 }
 
-func ResolveProviderAPI(provider Provider, providerAPI ProviderAPI, model string) (ProviderAPI, error) {
+func ResolveProviderAPI(
+	provider Provider,
+	providerAPI ProviderAPI,
+	model string,
+) (ProviderAPI, error) {
 	if provider == ProviderOpenAI {
 		normalizedModel := strings.ToLower(strings.TrimSpace(model))
 		if listedModel(unsupportedStructuredOpenAIModels, normalizedModel) {
-			return "", fmt.Errorf("model %q is unsupported for clnkr agent turns: structured outputs are required and this model does not support that contract", model)
+			return "", fmt.Errorf(
+				"model %q is unsupported for clnkr agent turns: structured outputs are required and this model does not support that contract",
+				model,
+			)
 		}
 
 		return resolveOpenAIProviderAPI(normalizedModel, providerAPI), nil
@@ -124,12 +135,24 @@ func SupportsBashToolCalls(provider Provider, providerAPI ProviderAPI) bool {
 	return provider == ProviderOpenAI && providerAPI == ProviderAPIOpenAIResponses
 }
 
-func ValidateRequestOptions(provider Provider, providerAPI ProviderAPI, model string, useBashToolCalls bool, opts ProviderRequestOptions) (ProviderRequestOptions, error) {
+func ValidateRequestOptions(
+	provider Provider,
+	providerAPI ProviderAPI,
+	model string,
+	useBashToolCalls bool,
+	opts ProviderRequestOptions,
+) (ProviderRequestOptions, error) {
 	if useBashToolCalls && !SupportsBashToolCalls(provider, providerAPI) {
 		if provider == ProviderOpenAI {
-			return ProviderRequestOptions{}, fmt.Errorf("bash tool calls require provider-api %q for provider openai", ProviderAPIOpenAIResponses)
+			return ProviderRequestOptions{}, fmt.Errorf(
+				"bash tool calls require provider-api %q for provider openai",
+				ProviderAPIOpenAIResponses,
+			)
 		}
-		return ProviderRequestOptions{}, fmt.Errorf("bash tool calls are not supported for provider %q", provider)
+		return ProviderRequestOptions{}, fmt.Errorf(
+			"bash tool calls are not supported for provider %q",
+			provider,
+		)
 	}
 	opts.Effort.Level = strings.ToLower(strings.TrimSpace(opts.Effort.Level))
 	if opts.Effort.Set {
@@ -142,10 +165,17 @@ func ValidateRequestOptions(provider Provider, providerAPI ProviderAPI, model st
 			return ProviderRequestOptions{}, fmt.Errorf("max-output-tokens must be at least 1")
 		}
 		if provider == ProviderOpenAI && providerAPI != ProviderAPIOpenAIResponses {
-			return ProviderRequestOptions{}, fmt.Errorf("max-output-tokens is not supported for provider-api %q", providerAPI)
+			return ProviderRequestOptions{}, fmt.Errorf(
+				"max-output-tokens is not supported for provider-api %q",
+				providerAPI,
+			)
 		}
-		if provider == ProviderAnthropic && opts.Output.MaxOutputTokens.Value > MaxAnthropicNonStreamingTokens {
-			return ProviderRequestOptions{}, fmt.Errorf("max-output-tokens for anthropic must be at most %d while streaming is unsupported", MaxAnthropicNonStreamingTokens)
+		if provider == ProviderAnthropic &&
+			opts.Output.MaxOutputTokens.Value > MaxAnthropicNonStreamingTokens {
+			return ProviderRequestOptions{}, fmt.Errorf(
+				"max-output-tokens for anthropic must be at most %d while streaming is unsupported",
+				MaxAnthropicNonStreamingTokens,
+			)
 		}
 	}
 	if opts.AnthropicManual.ThinkingBudgetTokens.Set {
@@ -158,7 +188,10 @@ func ValidateRequestOptions(provider Provider, providerAPI ProviderAPI, model st
 
 func validateEffort(provider Provider, providerAPI ProviderAPI, model, effort string) error {
 	if !allowedEffort(effort) {
-		return fmt.Errorf(`invalid effort %q (allowed: auto, low, medium, high, xhigh, max)`, effort)
+		return fmt.Errorf(
+			`invalid effort %q (allowed: auto, low, medium, high, xhigh, max)`,
+			effort,
+		)
 	}
 	if effort == "auto" {
 		return nil
@@ -169,7 +202,10 @@ func validateEffort(provider Provider, providerAPI ProviderAPI, model, effort st
 		case "low", "medium", "high":
 			return nil
 		default:
-			return fmt.Errorf(`effort %q is not supported for provider anthropic (allowed: low, medium, high)`, effort)
+			return fmt.Errorf(
+				`effort %q is not supported for provider anthropic (allowed: low, medium, high)`,
+				effort,
+			)
 		}
 	}
 	if provider == ProviderOpenAI {
@@ -183,12 +219,20 @@ func validateEffort(provider Provider, providerAPI ProviderAPI, model, effort st
 			return fmt.Errorf(`effort %q is not supported for OpenAI Responses`, effort)
 		case "xhigh":
 			if !isCodexMaxOrNewerModel(normalizedModel) {
-				return fmt.Errorf(`effort %q is not supported for model %q; xhigh requires codex-max-or-newer`, effort, model)
+				return fmt.Errorf(
+					`effort %q is not supported for model %q; xhigh requires codex-max-or-newer`,
+					effort,
+					model,
+				)
 			}
 		case "low", "medium", "high":
 			switch {
 			case baseModel == "gpt-5-pro" && effort != "high":
-				return fmt.Errorf(`effort %q is not supported for model %q; gpt-5-pro only supports high`, effort, model)
+				return fmt.Errorf(
+					`effort %q is not supported for model %q; gpt-5-pro only supports high`,
+					effort,
+					model,
+				)
 			case !isReasoningCapableOpenAIModel(normalizedModel):
 				return fmt.Errorf("effort requires an OpenAI reasoning-capable model")
 			}
@@ -206,34 +250,52 @@ func allowedEffort(effort string) bool {
 	}
 }
 
-func validateThinkingBudgetTokens(provider Provider, model string, opts ProviderRequestOptions) error {
+func validateThinkingBudgetTokens(
+	provider Provider,
+	model string,
+	opts ProviderRequestOptions,
+) error {
 	if provider != ProviderAnthropic {
 		return fmt.Errorf("thinking-budget-tokens requires provider anthropic")
 	}
 	if !isAnthropicExtendedThinkingModel(strings.ToLower(strings.TrimSpace(model))) {
-		return fmt.Errorf("thinking-budget-tokens requires an Anthropic extended-thinking-capable model")
+		return fmt.Errorf(
+			"thinking-budget-tokens requires an Anthropic extended-thinking-capable model",
+		)
 	}
 	if isAnthropicOpus47Plus(model) {
-		return fmt.Errorf("thinking-budget-tokens is not supported for model %q (Opus 4.7+ does not support manual thinking budget)", model)
+		return fmt.Errorf(
+			"thinking-budget-tokens is not supported for model %q (Opus 4.7+ does not support manual thinking budget)",
+			model,
+		)
 	}
 	if opts.Effort.Set && opts.Effort.Level != "auto" {
-		return fmt.Errorf("thinking-budget-tokens requires either no --effort flag or --effort auto; non-auto effort is incompatible with manual thinking budget")
+		return fmt.Errorf(
+			"thinking-budget-tokens requires either no --effort flag or --effort auto; non-auto effort is incompatible with manual thinking budget",
+		)
 	}
 	if opts.AnthropicManual.ThinkingBudgetTokens.Value < MinAnthropicThinkingBudgetTokens {
-		return fmt.Errorf("thinking-budget-tokens must be at least %d", MinAnthropicThinkingBudgetTokens)
+		return fmt.Errorf(
+			"thinking-budget-tokens must be at least %d",
+			MinAnthropicThinkingBudgetTokens,
+		)
 	}
 	maxTokens := DefaultAnthropicMaxTokens
 	if opts.Output.MaxOutputTokens.Set {
 		maxTokens = opts.Output.MaxOutputTokens.Value
 	}
 	if opts.AnthropicManual.ThinkingBudgetTokens.Value >= maxTokens {
-		return fmt.Errorf("thinking-budget-tokens must be less than effective anthropic max_tokens (%d)", maxTokens)
+		return fmt.Errorf(
+			"thinking-budget-tokens must be less than effective anthropic max_tokens (%d)",
+			maxTokens,
+		)
 	}
 	return nil
 }
 
 func resolveOpenAIProviderAPI(model string, providerAPI ProviderAPI) ProviderAPI {
-	if providerAPI == ProviderAPIOpenAIChatCompletions || providerAPI == ProviderAPIOpenAIResponses {
+	if providerAPI == ProviderAPIOpenAIChatCompletions ||
+		providerAPI == ProviderAPIOpenAIResponses {
 		return providerAPI
 	}
 	if isKnownNonOpenAIModel(model) {

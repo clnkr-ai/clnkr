@@ -187,6 +187,49 @@ do
   fi
 done
 
+
+rm -rf cmd/clnkr
+mkdir -p cmd/internal/providerconfig cmd/clnkr
+cat > cmd/internal/providerconfig/providerconfig.go <<'GO'
+package providerconfig
+GO
+cat > cmd/clnkr/main.go <<'GO'
+package main
+
+import _ "example.test/clnkr/cmd/internal/providerconfig"
+GO
+
+set +e
+output="$(./check-architecture-imports.sh 2>&1)"
+status=$?
+set -e
+
+if [[ $status -ne 1 ]]; then
+  echo "expected frontend providerconfig import to fail with status 1, got $status" >&2
+  echo "$output" >&2
+  exit 1
+fi
+
+for expected in \
+  "error: architecture import boundary violation" \
+  "rule: ARCH013 frontend-providerconfig-boundary" \
+  "importer: example.test/clnkr/cmd/clnkr" \
+  "target: example.test/clnkr/cmd/internal/providerconfig" \
+  "import_source: imports" \
+  "trusted_rule: frontend adapters must use cmd/internal/clnkrapp instead of importing cmd/internal/providerconfig directly." \
+  "source_fact: go list reported importer imports target." \
+  "guidance: move provider config and startup construction behind cmd/internal/clnkrapp; do not import cmd/internal/providerconfig from cmd/... outside cmd/internal/clnkrapp."
+do
+  if [[ "$output" != *"$expected"* ]]; then
+    echo "missing expected output: $expected" >&2
+    echo "$output" >&2
+    exit 1
+  fi
+done
+
+rm -rf cmd/clnkr
+mkdir -p cmd/clnkr
+
 cat > cmd/clnkr/cli_options.go <<'GO'
 package main
 

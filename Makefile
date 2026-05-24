@@ -4,7 +4,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hugo)
 PANDOC ?= pandoc
 CLANKERVAL_PINNED_VERSION := 0.4.5
-CLANKERVAL_BINARY ?= $(CURDIR)/clnkr
+CLANKERVAL_BINARY ?= $(CURDIR)/scripts/eval-clnkr-openai
 CLNKR_ARGS ?=
 CLNKR_RUN_CWD ?=
 CLANKERVAL_PREFLIGHT = \
@@ -28,7 +28,7 @@ CLANKERVAL_PREFLIGHT = \
 	build clean install run \
 	clnkr send readme-image \
 	check test evaluations evaluations-live evaluations-live-openai evaluations-live-anthropic \
-	architecture-shape-report semantic-cohesion-report test-fidelity-report \
+	thoth-critical-check architecture-shape-report semantic-cohesion-report test-fidelity-report \
 	help man docs docs-serve \
 	_build-clnkr _build-clnkrd \
 	_fmt _fmt-check _vet _lint _arch _script-tests sloc frontend-sloc _workflow-make-targets \
@@ -97,25 +97,19 @@ evaluations-live-openai: ## Run the live-provider evaluation suite against OpenA
 	@CLNKR_EVALUATION_API_KEY="$${CLNKR_EVALUATION_OPENAI_API_KEY:-$${OPENAI_API_KEY}}" \
 	CLNKR_EVALUATION_BASE_URL="$${CLNKR_EVALUATION_OPENAI_BASE_URL:-https://api.openai.com/v1}" \
 	CLNKR_EVALUATION_MODEL="$${CLNKR_EVALUATION_OPENAI_MODEL:-gpt-5.4-nano}" \
-	$(MAKE) evaluations-live
+	$(MAKE) evaluations-live CLANKERVAL_BINARY="$(CURDIR)/scripts/eval-clnkr-openai"
 
 evaluations-live-anthropic: ## Run the live-provider evaluation suite against Anthropic defaults
 	@CLNKR_EVALUATION_API_KEY="$${CLNKR_EVALUATION_ANTHROPIC_API_KEY:-$${ANTHROPIC_API_KEY}}" \
 	CLNKR_EVALUATION_BASE_URL="$${CLNKR_EVALUATION_ANTHROPIC_BASE_URL:-https://api.anthropic.com}" \
 	CLNKR_EVALUATION_MODEL="$${CLNKR_EVALUATION_ANTHROPIC_MODEL:-claude-haiku-4-5}" \
-	$(MAKE) evaluations-live
+	$(MAKE) evaluations-live CLANKERVAL_BINARY="$(CURDIR)/scripts/eval-clnkr-anthropic"
 
 _fmt:
-	go fmt ./...
+	golangci-lint fmt ./...
 
 _fmt-check:
-	@files=$$(find . -type f -name '*.go' -not -path './.git/*'); \
-	unformatted=$$(gofmt -l $$files); \
-	if [ -n "$$unformatted" ]; then \
-		echo "gofmt: these files are not formatted:"; \
-		echo "$$unformatted"; \
-		exit 1; \
-	fi
+	golangci-lint fmt --diff ./...
 
 _vet:
 	go vet ./...
@@ -128,6 +122,7 @@ _arch:
 
 _script-tests:
 	./scripts/test/check-architecture-imports.sh
+	./scripts/test/check-thoth-critical.sh
 
 # Repo-root only: counts repo-local Go files in the main-module dependency closure of `.`.
 sloc: ## Report core runtime graph SLOC and fail if it exceeds CORE_SLOC_LIMIT
@@ -142,6 +137,9 @@ frontend-sloc: ## Report non-test frontend SLOC and fail if it exceeds FRONTEND_
 
 architecture-shape-report: ## Manually report thoth architecture shape; requires thoth in PATH or THOTH_BIN
 	./scripts/architecture-shape-report.sh .
+
+thoth-critical-check: ## Fail when thoth reports any critical file risk; requires thoth in PATH or THOTH_BIN
+	./scripts/check-thoth-critical.sh .
 
 semantic-cohesion-report: ## Manually report thoth semantic cohesion; requires thoth in PATH or THOTH_BIN
 	./scripts/semantic-cohesion-report.sh .

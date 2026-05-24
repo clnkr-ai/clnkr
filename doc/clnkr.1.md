@@ -6,7 +6,7 @@ clnkr - a minimal coding agent (plain CLI)
 
 # SYNOPSIS
 
-**clnkr** [**-p**|**--prompt**|**--prompt-mode-unattended** *task*] [**-m**|**--model** *name*] [**-u**|**--base-url** *url*] [**--provider** *mode*] [**--provider-api** *surface*] [**--act-protocol** *protocol*] [**--effort** *level*] [**--thinking-budget-tokens** *n*] [**--max-output-tokens** *n*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
+**clnkr** [**-p**|**--prompt** *task*] [**-m**|**--model** *name*] [**--base-url** *url*] [**--provider** *mode*] [**--provider-api** *surface*] [**--act-protocol** *protocol*] [**--effort** *level*] [**--thinking-budget-tokens** *n*] [**--max-output-tokens** *n*] [**--max-steps** *n*] [**--full-send**] [**-c**|**--continue**] [**-l**|**--list-sessions**] [**-S**|**--no-system-prompt**] [**--system-prompt-append** *text*] [**--dump-system-prompt**] [**--load-messages** *file*] [**--event-log** *file*] [**--trajectory** *file*] [**-v**|**--verbose**] [**-V**|**--version**]
 
 # DESCRIPTION
 
@@ -42,17 +42,14 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 **-p**, **--prompt** *task*
 : Run the given task unattended and exit. Without this flag, clnkr starts in conversational REPL mode. This implies **--full-send** and removes **clarify** from the model turn contract; passing **--full-send=false** with **-p** is rejected.
 
-**--prompt-mode-unattended** *task*
-: Long alias for **-p** and **--prompt**. When preceded by **--dump-system-prompt** with no *task*, selects the unattended prompt contract and exits after printing it.
-
 **-m**, **--model** *name*
 : LLM model identifier. Required unless **CLNKR_MODEL** is set.
 
-**-u**, **--base-url** *url*
+**--base-url** *url*
 : LLM endpoint transport URL. If omitted, clnkr uses the provider default: **https://api.anthropic.com** for **anthropic** or **https://api.openai.com/v1** for **openai**. **CLNKR_BASE_URL** overrides the default when set.
 
 **--provider** *mode*
-: Provider adapter semantics: **anthropic** or **openai**. Required in normal use unless **CLNKR_PROVIDER** is set. Compatibility fallback: if provider is unset but **--base-url** or **CLNKR_BASE_URL** is explicitly set, clnkr infers the provider from that URL.
+: Provider adapter semantics: **anthropic** or **openai**. Required unless **CLNKR_PROVIDER** is set.
 
 **--provider-api** *surface*
 : OpenAI-only API surface override: **auto**, **openai-chat-completions**, or **openai-responses**. With **provider=openai**, **auto** prefers **openai-responses** for known supported names and other OpenAI-looking model names such as **gpt-***, **o** followed by a digit, **codex**, **codex-***, names ending in **-codex**, and names containing **-codex-**. Names that do not look OpenAI-ish, such as **llama3**, **gemini-2.0-flash**, **orca-***, **olmo-***, **openhermes-***, and **chatgpt-***, stay on **openai-chat-completions**. This flag is rejected for **provider=anthropic**.
@@ -88,10 +85,10 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : Append *text* to the built-in system prompt after any loaded **AGENTS.md** content.
 
 **--dump-system-prompt**
-: Print the composed system prompt and exit. By default this prints the conversational prompt. Use **--dump-system-prompt -p** or **--dump-system-prompt --prompt-mode-unattended** to print the unattended prompt.
+: Print the composed system prompt and exit. By default this prints the conversational prompt. Use **--dump-system-prompt -p** to print the unattended prompt.
 
 **--load-messages** *file*
-: Read a JSON message array, or a compatible envelope with a **messages** field, from *file* and prepend the messages to the conversation before starting. Host-generated JSON state messages in that transcript restore the current working directory.
+: Read a JSON message array from *file* and prepend the messages to the conversation before starting. Host-generated JSON state messages in that transcript restore the current working directory.
 
 **--event-log** *file*
 : Write every agent event as a JSONL line to *file*. Each line is a JSON object with "type" and "payload" fields. Uses O_APPEND for atomic writes, safe to tail from another process.

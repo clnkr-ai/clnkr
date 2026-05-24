@@ -9,7 +9,7 @@ import (
 )
 
 func TestCommandEnvFromProviderConfig(t *testing.T) {
-	got := CommandEnvFromProviderConfig(providerconfig.ResolvedProviderConfig{
+	got := commandEnvFromProviderConfig(providerconfig.ResolvedProviderConfig{
 		Provider:    providerdomain.ProviderAnthropic,
 		ProviderAPI: providerdomain.ProviderAPIAuto,
 		Model:       "claude-sonnet-4-6",
@@ -41,7 +41,7 @@ func TestCommandEnvFromProviderConfig(t *testing.T) {
 }
 
 func TestCommandEnvFromProviderConfigOpenAIProviderAPI(t *testing.T) {
-	got := CommandEnvFromProviderConfig(providerconfig.ResolvedProviderConfig{
+	got := commandEnvFromProviderConfig(providerconfig.ResolvedProviderConfig{
 		Provider:    providerdomain.ProviderOpenAI,
 		ProviderAPI: providerdomain.ProviderAPIOpenAIResponses,
 		Model:       "gpt-test",
@@ -54,7 +54,7 @@ func TestCommandEnvFromProviderConfigOpenAIProviderAPI(t *testing.T) {
 }
 
 func TestCommandEnvFromProviderConfigAnthropicResolves(t *testing.T) {
-	env := CommandEnvFromProviderConfig(providerconfig.ResolvedProviderConfig{
+	env := commandEnvFromProviderConfig(providerconfig.ResolvedProviderConfig{
 		Provider:    providerdomain.ProviderAnthropic,
 		ProviderAPI: providerdomain.ProviderAPIAuto,
 		Model:       "claude-sonnet-4-6",

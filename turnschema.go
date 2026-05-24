@@ -45,10 +45,18 @@ func strictTurnFromEnvelope(env jsonEnvelope, fields map[string]json.RawMessage)
 		if env.Bash == nil || len(env.Bash.Commands) == 0 {
 			return nil, ErrMissingCommand
 		}
-		if err := rejectPresentField(fields, "question", "act turn only allows question when it is omitted"); err != nil {
+		if err := rejectPresentField(
+			fields,
+			"question",
+			"act turn only allows question when it is omitted",
+		); err != nil {
 			return nil, err
 		}
-		if err := rejectPresentField(fields, "summary", "act turn only allows summary when it is omitted"); err != nil {
+		if err := rejectPresentField(
+			fields,
+			"summary",
+			"act turn only allows summary when it is omitted",
+		); err != nil {
 			return nil, err
 		}
 		actions := make([]BashAction, 0, len(env.Bash.Commands))
@@ -70,10 +78,18 @@ func strictTurnFromEnvelope(env jsonEnvelope, fields map[string]json.RawMessage)
 		if strings.TrimSpace(env.Question) == "" {
 			return nil, ErrEmptyClarify
 		}
-		if err := rejectPresentField(fields, "bash", "clarify turn only allows bash when it is omitted"); err != nil {
+		if err := rejectPresentField(
+			fields,
+			"bash",
+			"clarify turn only allows bash when it is omitted",
+		); err != nil {
 			return nil, err
 		}
-		if err := rejectPresentField(fields, "summary", "clarify turn only allows summary when it is omitted"); err != nil {
+		if err := rejectPresentField(
+			fields,
+			"summary",
+			"clarify turn only allows summary when it is omitted",
+		); err != nil {
 			return nil, err
 		}
 		return &ClarifyTurn{Question: env.Question, Reasoning: env.Reasoning}, nil
@@ -81,10 +97,18 @@ func strictTurnFromEnvelope(env jsonEnvelope, fields map[string]json.RawMessage)
 		if strings.TrimSpace(env.Summary) == "" {
 			return nil, ErrEmptySummary
 		}
-		if err := rejectPresentField(fields, "bash", "done turn only allows bash when it is omitted"); err != nil {
+		if err := rejectPresentField(
+			fields,
+			"bash",
+			"done turn only allows bash when it is omitted",
+		); err != nil {
 			return nil, err
 		}
-		if err := rejectPresentField(fields, "question", "done turn only allows question when it is omitted"); err != nil {
+		if err := rejectPresentField(
+			fields,
+			"question",
+			"done turn only allows question when it is omitted",
+		); err != nil {
 			return nil, err
 		}
 		knownRisks, err := requireDoneArrayFields(fields)
@@ -116,12 +140,20 @@ func requireDoneArrayFields(fields map[string]json.RawMessage) ([]string, error)
 		return nil, fmt.Errorf("%w: missing required field %q", ErrInvalidJSON, "verification")
 	}
 	var verificationFields map[string]json.RawMessage
-	if err := json.Unmarshal(rawVerification, &verificationFields); err != nil || verificationFields == nil {
+	if err := json.Unmarshal(
+		rawVerification,
+		&verificationFields,
+	); err != nil ||
+		verificationFields == nil {
 		return nil, fmt.Errorf("%w: verification must be an object", ErrInvalidJSON)
 	}
 	rawChecks, ok := verificationFields["checks"]
 	if !ok {
-		return nil, fmt.Errorf("%w: missing required field %q", ErrInvalidJSON, "verification.checks")
+		return nil, fmt.Errorf(
+			"%w: missing required field %q",
+			ErrInvalidJSON,
+			"verification.checks",
+		)
 	}
 	if string(rawChecks) == "null" {
 		return nil, fmt.Errorf("%w: verification.checks must be an array", ErrInvalidJSON)
@@ -183,7 +215,10 @@ func requireActCommandWorkdirs(fields map[string]json.RawMessage) error {
 			return fmt.Errorf("field %q must be object", fmt.Sprintf("bash.commands[%d]", i))
 		}
 		if _, ok := item["workdir"]; !ok {
-			return fmt.Errorf("missing required field %q", fmt.Sprintf("bash.commands[%d].workdir", i))
+			return fmt.Errorf(
+				"missing required field %q",
+				fmt.Sprintf("bash.commands[%d].workdir", i),
+			)
 		}
 	}
 	return nil

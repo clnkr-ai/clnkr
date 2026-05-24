@@ -47,7 +47,11 @@ func WriteJSONL(w io.Writer, event any) error {
 	case EventClarificationRequest:
 		return writeEvent(w, "clarify", map[string]string{"question": event.Question})
 	case EventApprovalRequest:
-		return writeEvent(w, "approval_request", map[string]any{"prompt": event.Prompt, "commands": event.Commands})
+		return writeEvent(
+			w,
+			"approval_request",
+			map[string]any{"prompt": event.Prompt, "commands": event.Commands},
+		)
 	case EventDone:
 		return writeEvent(w, "done", map[string]string{"summary": event.Summary})
 	case EventCompacted:

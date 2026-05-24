@@ -197,7 +197,15 @@ func doneTurnSchema() map[string]any {
 			},
 			"reasoning": nullableStringSchema(),
 		},
-		"required": []string{"type", "bash", "question", "summary", "verification", "known_risks", "reasoning"},
+		"required": []string{
+			"type",
+			"bash",
+			"question",
+			"summary",
+			"verification",
+			"known_risks",
+			"reasoning",
+		},
 	}
 }
 
@@ -283,22 +291,38 @@ func extractWrappedTurn(raw string) (string, error) {
 
 	turnRaw, ok := envFields["turn"]
 	if !ok {
-		return "", fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, "turn")
+		return "", fmt.Errorf(
+			"%w: missing required structured output field %q",
+			clnkr.ErrInvalidJSON,
+			"turn",
+		)
 	}
 	if len(envFields) != 1 {
 		for field := range envFields {
 			if field != "turn" {
-				return "", fmt.Errorf("%w: unknown structured output field %q", clnkr.ErrInvalidJSON, field)
+				return "", fmt.Errorf(
+					"%w: unknown structured output field %q",
+					clnkr.ErrInvalidJSON,
+					field,
+				)
 			}
 		}
 	}
 
 	var turnFields map[string]json.RawMessage
 	if err := json.Unmarshal(turnRaw, &turnFields); err != nil {
-		return "", fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, "turn")
+		return "", fmt.Errorf(
+			"%w: structured output field %q must be object",
+			clnkr.ErrInvalidJSON,
+			"turn",
+		)
 	}
 	if turnFields == nil {
-		return "", fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, "turn")
+		return "", fmt.Errorf(
+			"%w: structured output field %q must be object",
+			clnkr.ErrInvalidJSON,
+			"turn",
+		)
 	}
 	return string(turnRaw), nil
 }
@@ -317,10 +341,18 @@ func validateWrappedTurnShape(raw string) error {
 	case "act":
 		return validateActShape(fields)
 	case "clarify":
-		if err := rejectNonNullField(fields, "bash", "clarify turn only allows bash when it is null or omitted"); err != nil {
+		if err := rejectNonNullField(
+			fields,
+			"bash",
+			"clarify turn only allows bash when it is null or omitted",
+		); err != nil {
 			return err
 		}
-		if err := rejectNonNullField(fields, "summary", "clarify turn only allows summary when it is null or omitted"); err != nil {
+		if err := rejectNonNullField(
+			fields,
+			"summary",
+			"clarify turn only allows summary when it is null or omitted",
+		); err != nil {
 			return err
 		}
 	case "done":
@@ -339,17 +371,29 @@ func validateActShape(fields map[string]json.RawMessage) error {
 		return err
 	}
 	if len(commands) == 0 {
-		return fmt.Errorf("%w: structured output field %q must contain at least 1 item", clnkr.ErrInvalidJSON, "bash.commands")
+		return fmt.Errorf(
+			"%w: structured output field %q must contain at least 1 item",
+			clnkr.ErrInvalidJSON,
+			"bash.commands",
+		)
 	}
 	for i, rawCommand := range commands {
 		if err := validateCommandShape(rawCommand, i); err != nil {
 			return err
 		}
 	}
-	if err := rejectNonNullField(fields, "question", "act turn only allows question when it is null or omitted"); err != nil {
+	if err := rejectNonNullField(
+		fields,
+		"question",
+		"act turn only allows question when it is null or omitted",
+	); err != nil {
 		return err
 	}
-	return rejectNonNullField(fields, "summary", "act turn only allows summary when it is null or omitted")
+	return rejectNonNullField(
+		fields,
+		"summary",
+		"act turn only allows summary when it is null or omitted",
+	)
 }
 
 func validateCommandShape(raw json.RawMessage, index int) error {
@@ -359,7 +403,11 @@ func validateCommandShape(raw json.RawMessage, index int) error {
 		return err
 	}
 	for _, name := range []string{"command", "workdir"} {
-		if _, err := requiredField(commandFields, name, fmt.Sprintf("%s.%s", field, name)); err != nil {
+		if _, err := requiredField(
+			commandFields,
+			name,
+			fmt.Sprintf("%s.%s", field, name),
+		); err != nil {
 			return err
 		}
 	}
@@ -370,10 +418,18 @@ func validateCommandShape(raw json.RawMessage, index int) error {
 }
 
 func validateDoneShape(fields map[string]json.RawMessage) error {
-	if err := rejectNonNullField(fields, "bash", "done turn only allows bash when it is null or omitted"); err != nil {
+	if err := rejectNonNullField(
+		fields,
+		"bash",
+		"done turn only allows bash when it is null or omitted",
+	); err != nil {
 		return err
 	}
-	if err := rejectNonNullField(fields, "question", "done turn only allows question when it is null or omitted"); err != nil {
+	if err := rejectNonNullField(
+		fields,
+		"question",
+		"done turn only allows question when it is null or omitted",
+	); err != nil {
 		return err
 	}
 	for _, field := range []string{"summary", "verification", "known_risks"} {
@@ -393,7 +449,11 @@ func validateDoneShape(fields map[string]json.RawMessage) error {
 		return err
 	}
 	if string(rawChecks) == "null" {
-		return fmt.Errorf("%w: structured output field %q must be array", clnkr.ErrInvalidJSON, "verification.checks")
+		return fmt.Errorf(
+			"%w: structured output field %q must be array",
+			clnkr.ErrInvalidJSON,
+			"verification.checks",
+		)
 	}
 	return nil
 }
@@ -401,7 +461,11 @@ func validateDoneShape(fields map[string]json.RawMessage) error {
 func requiredField(fields map[string]json.RawMessage, key, label string) (json.RawMessage, error) {
 	raw, ok := fields[key]
 	if !ok {
-		return nil, fmt.Errorf("%w: missing required structured output field %q", clnkr.ErrInvalidJSON, label)
+		return nil, fmt.Errorf(
+			"%w: missing required structured output field %q",
+			clnkr.ErrInvalidJSON,
+			label,
+		)
 	}
 	return raw, nil
 }
@@ -413,7 +477,11 @@ func stringField(fields map[string]json.RawMessage, key, label string) (string, 
 	}
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil {
-		return "", fmt.Errorf("%w: structured output field %q must be string", clnkr.ErrInvalidJSON, label)
+		return "", fmt.Errorf(
+			"%w: structured output field %q must be string",
+			clnkr.ErrInvalidJSON,
+			label,
+		)
 	}
 	return value, nil
 }
@@ -428,12 +496,19 @@ func nullableStringField(fields map[string]json.RawMessage, key, label string) e
 	}
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil {
-		return fmt.Errorf("%w: structured output field %q must be string or null", clnkr.ErrInvalidJSON, label)
+		return fmt.Errorf(
+			"%w: structured output field %q must be string or null",
+			clnkr.ErrInvalidJSON,
+			label,
+		)
 	}
 	return nil
 }
 
-func objectField(fields map[string]json.RawMessage, key, label string) (map[string]json.RawMessage, error) {
+func objectField(
+	fields map[string]json.RawMessage,
+	key, label string,
+) (map[string]json.RawMessage, error) {
 	raw, err := requiredField(fields, key, label)
 	if err != nil {
 		return nil, err
@@ -444,22 +519,37 @@ func objectField(fields map[string]json.RawMessage, key, label string) (map[stri
 func objectValue(raw json.RawMessage, field string) (map[string]json.RawMessage, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
-		return nil, fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, field)
+		return nil, fmt.Errorf(
+			"%w: structured output field %q must be object",
+			clnkr.ErrInvalidJSON,
+			field,
+		)
 	}
 	if fields == nil {
-		return nil, fmt.Errorf("%w: structured output field %q must be object", clnkr.ErrInvalidJSON, field)
+		return nil, fmt.Errorf(
+			"%w: structured output field %q must be object",
+			clnkr.ErrInvalidJSON,
+			field,
+		)
 	}
 	return fields, nil
 }
 
-func rawArrayField(fields map[string]json.RawMessage, key, label string) ([]json.RawMessage, error) {
+func rawArrayField(
+	fields map[string]json.RawMessage,
+	key, label string,
+) ([]json.RawMessage, error) {
 	raw, err := requiredField(fields, key, label)
 	if err != nil {
 		return nil, err
 	}
 	var values []json.RawMessage
 	if err := json.Unmarshal(raw, &values); err != nil {
-		return nil, fmt.Errorf("%w: structured output field %q must be array", clnkr.ErrInvalidJSON, label)
+		return nil, fmt.Errorf(
+			"%w: structured output field %q must be array",
+			clnkr.ErrInvalidJSON,
+			label,
+		)
 	}
 	return values, nil
 }
@@ -470,11 +560,19 @@ func stringArrayField(fields map[string]json.RawMessage, key, label string) erro
 		return err
 	}
 	if string(raw) == "null" {
-		return fmt.Errorf("%w: structured output field %q must be array of strings", clnkr.ErrInvalidJSON, label)
+		return fmt.Errorf(
+			"%w: structured output field %q must be array of strings",
+			clnkr.ErrInvalidJSON,
+			label,
+		)
 	}
 	var values []string
 	if err := json.Unmarshal(raw, &values); err != nil {
-		return fmt.Errorf("%w: structured output field %q must be array of strings", clnkr.ErrInvalidJSON, label)
+		return fmt.Errorf(
+			"%w: structured output field %q must be array of strings",
+			clnkr.ErrInvalidJSON,
+			label,
+		)
 	}
 	return nil
 }
@@ -517,7 +615,10 @@ func turnFromProviderPayload(payload wireTurnPayload) (clnkr.Turn, error) {
 		if payload.Summary == "" {
 			return nil, clnkr.ErrEmptySummary
 		}
-		verification, err := providerCompletionVerification(payload.Verification, payload.KnownRisks)
+		verification, err := providerCompletionVerification(
+			payload.Verification,
+			payload.KnownRisks,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -534,26 +635,51 @@ func turnFromProviderPayload(payload wireTurnPayload) (clnkr.Turn, error) {
 	}
 }
 
-func providerCompletionVerification(raw *wireVerification, knownRisks []string) (clnkr.CompletionVerification, error) {
+func providerCompletionVerification(
+	raw *wireVerification,
+	knownRisks []string,
+) (clnkr.CompletionVerification, error) {
 	if raw == nil {
-		return clnkr.CompletionVerification{}, fmt.Errorf("%w: missing required field %q", clnkr.ErrInvalidJSON, "verification")
+		return clnkr.CompletionVerification{}, fmt.Errorf(
+			"%w: missing required field %q",
+			clnkr.ErrInvalidJSON,
+			"verification",
+		)
 	}
 	status := clnkr.VerificationStatus(strings.TrimSpace(raw.Status))
 	switch status {
-	case clnkr.VerificationVerified, clnkr.VerificationPartiallyVerified, clnkr.VerificationNotVerified:
+	case clnkr.VerificationVerified,
+		clnkr.VerificationPartiallyVerified,
+		clnkr.VerificationNotVerified:
 	default:
-		return clnkr.CompletionVerification{}, fmt.Errorf("%w: invalid verification status %q", clnkr.ErrInvalidJSON, raw.Status)
+		return clnkr.CompletionVerification{}, fmt.Errorf(
+			"%w: invalid verification status %q",
+			clnkr.ErrInvalidJSON,
+			raw.Status,
+		)
 	}
 	checks := make([]clnkr.VerificationCheck, 0, len(raw.Checks))
 	for i, check := range raw.Checks {
 		if strings.TrimSpace(check.Command) == "" {
-			return clnkr.CompletionVerification{}, fmt.Errorf("%w: verification.checks[%d].command must be non-empty", clnkr.ErrInvalidJSON, i)
+			return clnkr.CompletionVerification{}, fmt.Errorf(
+				"%w: verification.checks[%d].command must be non-empty",
+				clnkr.ErrInvalidJSON,
+				i,
+			)
 		}
 		if strings.TrimSpace(check.Outcome) == "" {
-			return clnkr.CompletionVerification{}, fmt.Errorf("%w: verification.checks[%d].outcome must be non-empty", clnkr.ErrInvalidJSON, i)
+			return clnkr.CompletionVerification{}, fmt.Errorf(
+				"%w: verification.checks[%d].outcome must be non-empty",
+				clnkr.ErrInvalidJSON,
+				i,
+			)
 		}
 		if strings.TrimSpace(check.Evidence) == "" {
-			return clnkr.CompletionVerification{}, fmt.Errorf("%w: verification.checks[%d].evidence must be non-empty", clnkr.ErrInvalidJSON, i)
+			return clnkr.CompletionVerification{}, fmt.Errorf(
+				"%w: verification.checks[%d].evidence must be non-empty",
+				clnkr.ErrInvalidJSON,
+				i,
+			)
 		}
 		checks = append(checks, clnkr.VerificationCheck{
 			Command:  check.Command,
@@ -562,10 +688,16 @@ func providerCompletionVerification(raw *wireVerification, knownRisks []string) 
 		})
 	}
 	if status == clnkr.VerificationVerified && len(checks) == 0 {
-		return clnkr.CompletionVerification{}, fmt.Errorf("%w: verified done requires at least one verification check", clnkr.ErrInvalidJSON)
+		return clnkr.CompletionVerification{}, fmt.Errorf(
+			"%w: verified done requires at least one verification check",
+			clnkr.ErrInvalidJSON,
+		)
 	}
 	if status == clnkr.VerificationPartiallyVerified && len(knownRisks) == 0 {
-		return clnkr.CompletionVerification{}, fmt.Errorf("%w: partially verified done requires at least one known risk", clnkr.ErrInvalidJSON)
+		return clnkr.CompletionVerification{}, fmt.Errorf(
+			"%w: partially verified done requires at least one known risk",
+			clnkr.ErrInvalidJSON,
+		)
 	}
 	return clnkr.CompletionVerification{Status: status, Checks: checks}, nil
 }
@@ -596,7 +728,10 @@ func wrappedEnvelope(turn clnkr.Turn) (wireEnvelope, error) {
 		}, nil
 	case *clnkr.ActTurn:
 		if v == nil {
-			return wireEnvelope{}, fmt.Errorf("provider turn json: %w: nil *ActTurn", errUnsupportedTurn)
+			return wireEnvelope{}, fmt.Errorf(
+				"provider turn json: %w: nil *ActTurn",
+				errUnsupportedTurn,
+			)
 		}
 		return wrappedEnvelope(*v)
 	case clnkr.ClarifyTurn:
@@ -611,7 +746,10 @@ func wrappedEnvelope(turn clnkr.Turn) (wireEnvelope, error) {
 		}, nil
 	case *clnkr.ClarifyTurn:
 		if v == nil {
-			return wireEnvelope{}, fmt.Errorf("provider turn json: %w: nil *ClarifyTurn", errUnsupportedTurn)
+			return wireEnvelope{}, fmt.Errorf(
+				"provider turn json: %w: nil *ClarifyTurn",
+				errUnsupportedTurn,
+			)
 		}
 		return wrappedEnvelope(*v)
 	case clnkr.DoneTurn:
@@ -628,7 +766,10 @@ func wrappedEnvelope(turn clnkr.Turn) (wireEnvelope, error) {
 		}, nil
 	case *clnkr.DoneTurn:
 		if v == nil {
-			return wireEnvelope{}, fmt.Errorf("provider turn json: %w: nil *DoneTurn", errUnsupportedTurn)
+			return wireEnvelope{}, fmt.Errorf(
+				"provider turn json: %w: nil *DoneTurn",
+				errUnsupportedTurn,
+			)
 		}
 		return wrappedEnvelope(*v)
 	case nil:

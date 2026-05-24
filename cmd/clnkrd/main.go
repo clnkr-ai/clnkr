@@ -13,7 +13,6 @@ import (
 
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
-	"github.com/clnkr-ai/clnkr/cmd/internal/providerconfig"
 )
 
 // version is set at build time via -ldflags.
@@ -57,7 +56,14 @@ func main() {
 	os.Exit(runMain(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv, os.Environ))
 }
 
-func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env func(string) string, environ func() []string) int {
+func runMain(
+	args []string,
+	in io.Reader,
+	out io.Writer,
+	errOut io.Writer,
+	env func(string) string,
+	environ func() []string,
+) int {
 	flags := flag.NewFlagSet("clnkrd", flag.ContinueOnError)
 	flags.Usage = func() {}
 	flags.SetOutput(io.Discard)
@@ -102,49 +108,50 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 		return fail("cannot get working directory: %v", err)
 	}
 
-	actProtocolSet := flagIsSet(flags, "act-protocol")
-	actProtocolSetting, err := providerconfig.ParseActProtocolSetting(providerconfig.ActProtocolFlagValue(*actProtocolFlag, actProtocolSet, env))
-	if err != nil {
-		return fail("%v", err)
+	startupInputs := clnkrapp.StartupInputs{
+		CWD:                     cwd,
+		Version:                 version,
+		Env:                     env,
+		Environ:                 environ(),
+		Provider:                *providerFlag,
+		ProviderAPI:             *providerAPIFlag,
+		Model:                   *modelFlag,
+		BaseURL:                 *baseURLFlag,
+		ActProtocol:             *actProtocolFlag,
+		ActProtocolSet:          flagIsSet(flags, "act-protocol"),
+		Effort:                  *effortFlag,
+		MaxOutputTokens:         *maxOutputTokens,
+		MaxOutputTokensSet:      maxOutputTokensSet,
+		ThinkingBudgetTokens:    *thinkingBudgetTokens,
+		ThinkingBudgetTokensSet: thinkingBudgetTokensSet,
+		OmitSystemPrompt:        *noSystemPrompt,
+		SystemPromptAppend:      *systemPromptAppend,
+		DumpSystemPrompt:        *dumpSystemPrompt,
+		Unattended:              false,
 	}
-	actProtocol := clnkr.ActProtocolClnkrInline
-	if !*noSystemPrompt {
-		actProtocol, err = providerconfig.ResolvePromptActProtocol(providerconfig.Inputs{
-			Provider:    *providerFlag,
-			ProviderAPI: *providerAPIFlag,
-			Model:       *modelFlag,
-			BaseURL:     *baseURLFlag,
-			ActProtocol: actProtocolSetting,
-		}, env, *dumpSystemPrompt)
+	if *dumpSystemPrompt {
+		systemPrompt, err := clnkrapp.LoadStartupPrompt(startupInputs)
 		if err != nil {
 			return fail("%v", err)
 		}
-	}
-	systemPrompt := clnkr.LoadPromptWithOptions(cwd, clnkr.PromptOptions{
-		OmitSystemPrompt:   *noSystemPrompt,
-		SystemPromptAppend: *systemPromptAppend,
-		ActProtocol:        actProtocol,
-	})
-	if *dumpSystemPrompt {
 		fmt.Fprint(out, systemPrompt) //nolint:errcheck
 		return 0
 	}
 
-	cfg, err := providerconfig.ResolveConfig(providerconfig.Inputs{
-		Provider: *providerFlag, ProviderAPI: *providerAPIFlag,
-		Model: *modelFlag, BaseURL: *baseURLFlag,
-		ActProtocol:    actProtocolSetting,
-		RequestOptions: clnkrapp.RequestOptions(*effortFlag, *maxOutputTokens, maxOutputTokensSet, *thinkingBudgetTokens, thinkingBudgetTokensSet),
-	}, env)
+	startup, err := clnkrapp.PrepareStartup(startupInputs)
 	if err != nil {
-		if strings.Contains(err.Error(), "api key is required") {
-			fmt.Fprintln(errOut, "Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key") //nolint:errcheck
+		if clnkrapp.IsMissingAPIKey(err) {
+			fmt.Fprintln( //nolint:errcheck
+				errOut,
+				"Error: No API key found.\nSet it with: export CLNKR_API_KEY=your-api-key",
+			)
 			return 1
 		}
 		return fail("%v", err)
 	}
+	runMetadata := startup.Metadata
+	agent := startup.Agent
 
-	runMetadata := clnkrapp.NewRunMetadata(version, cfg, systemPrompt)
 	eventOut := &lockedWriter{w: out}
 	if *eventLog != "" {
 		eventLogFile, err := os.OpenFile(*eventLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
@@ -155,9 +162,6 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 		eventOut.w = io.MultiWriter(out, eventLogFile)
 	}
 
-	agent := clnkr.NewAgent(clnkrapp.NewModelForConfig(cfg, systemPrompt), &clnkr.CommandExecutor{}, cwd)
-	agent.SetEnv(clnkrapp.CommandEnvFromProviderConfig(cfg, environ()))
-	agent.ActProtocol = cfg.ActProtocol
 	agent.Notify = func(event clnkr.Event) {
 		if err := clnkrapp.WriteJSONL(eventOut, event); err != nil {
 			fmt.Fprintf(errOut, "Error: write event: %v\n", err) //nolint:errcheck
@@ -182,7 +186,7 @@ func runMain(args []string, in io.Reader, out io.Writer, errOut io.Writer, env f
 		}
 	}
 
-	driver := clnkrapp.NewDriver(agent, clnkrapp.MakeCompactorFactory(cfg))
+	driver := startup.Driver
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	if err := runJSONL(ctx, in, eventOut, errOut, driver); err != nil {
@@ -237,7 +241,13 @@ type jsonlInput struct {
 	err     error
 }
 
-func runJSONL(ctx context.Context, r io.Reader, out io.Writer, errOut io.Writer, driver *clnkrapp.Driver) error {
+func runJSONL(
+	ctx context.Context,
+	r io.Reader,
+	out io.Writer,
+	errOut io.Writer,
+	driver *clnkrapp.Driver,
+) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -276,7 +286,13 @@ func runJSONL(ctx context.Context, r io.Reader, out io.Writer, errOut io.Writer,
 				return fail(fmt.Errorf("read JSONL: %w", input.err))
 			}
 			var err error
-			runDone, cancelRun, err = handleJSONLCommand(ctx, input.command, runDone, cancelRun, driver)
+			runDone, cancelRun, err = handleJSONLCommand(
+				ctx,
+				input.command,
+				runDone,
+				cancelRun,
+				driver,
+			)
 			if err != nil {
 				return fail(err)
 			}
@@ -320,7 +336,12 @@ func runJSONL(ctx context.Context, r io.Reader, out io.Writer, errOut io.Writer,
 	return nil
 }
 
-func harvestReadyRun(out io.Writer, driver *clnkrapp.Driver, runDone <-chan error, cancelRun context.CancelFunc) (<-chan error, context.CancelFunc, error) {
+func harvestReadyRun(
+	out io.Writer,
+	driver *clnkrapp.Driver,
+	runDone <-chan error,
+	cancelRun context.CancelFunc,
+) (<-chan error, context.CancelFunc, error) {
 	if runDone == nil {
 		return runDone, cancelRun, nil
 	}
@@ -387,7 +408,13 @@ func readJSONL(ctx context.Context, r io.Reader) (<-chan jsonlInput, <-chan stru
 	return inputs, done
 }
 
-func handleJSONLCommand(ctx context.Context, command clnkrapp.JSONLCommand, runDone <-chan error, cancelRun context.CancelFunc, driver *clnkrapp.Driver) (<-chan error, context.CancelFunc, error) {
+func handleJSONLCommand(
+	ctx context.Context,
+	command clnkrapp.JSONLCommand,
+	runDone <-chan error,
+	cancelRun context.CancelFunc,
+	driver *clnkrapp.Driver,
+) (<-chan error, context.CancelFunc, error) {
 	switch command.Type {
 	case "prompt":
 		if runDone != nil {
@@ -403,7 +430,12 @@ func handleJSONLCommand(ctx context.Context, command clnkrapp.JSONLCommand, runD
 		if runDone != nil {
 			return runDone, cancelRun, fmt.Errorf("compact: driver run already in progress")
 		}
-		runDone, cancelRun = startDriverPrompt(ctx, driver, compactPrompt(command.Instructions), clnkrapp.PromptModeApproval)
+		runDone, cancelRun = startDriverPrompt(
+			ctx,
+			driver,
+			compactPrompt(command.Instructions),
+			clnkrapp.PromptModeApproval,
+		)
 	case "shutdown":
 		if cancelRun != nil {
 			cancelRun()
@@ -414,7 +446,12 @@ func handleJSONLCommand(ctx context.Context, command clnkrapp.JSONLCommand, runD
 	return runDone, cancelRun, nil
 }
 
-func startDriverPrompt(ctx context.Context, driver *clnkrapp.Driver, text string, mode string) (<-chan error, context.CancelFunc) {
+func startDriverPrompt(
+	ctx context.Context,
+	driver *clnkrapp.Driver,
+	text string,
+	mode string,
+) (<-chan error, context.CancelFunc) {
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() {

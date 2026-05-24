@@ -6,7 +6,10 @@ const CompletionAccept, CompletionReject, CompletionChallenge = "accept", "rejec
 
 type CompletionGate struct{ challengesUsed int }
 
-func (g *CompletionGate) Decide(done *DoneTurn, commandsUsed, maxSteps int) (string, []string, string) {
+func (g *CompletionGate) Decide(
+	done *DoneTurn,
+	commandsUsed, maxSteps int,
+) (string, []string, string) {
 	if reasons := completionRejectReasons(done, commandsUsed, maxSteps); len(reasons) > 0 {
 		return CompletionReject, reasons, completionRejectGuidance(reasons[0])
 	}
@@ -26,21 +29,40 @@ func completionRejectReasons(done *DoneTurn, commandsUsed, maxSteps int) []strin
 	}
 	var reasons []string
 	reasons = appendReason(reasons, strings.TrimSpace(done.Summary) == "", "empty_summary")
-	reasons = appendReason(reasons, containsAny(strings.ToLower(done.Summary), incompleteSummaryPhrases), "incomplete_summary")
+	reasons = appendReason(
+		reasons,
+		containsAny(strings.ToLower(done.Summary), incompleteSummaryPhrases),
+		"incomplete_summary",
+	)
 	switch done.Verification.Status {
 	case VerificationVerified:
-		reasons = appendReason(reasons, len(done.Verification.Checks) == 0, "verified_without_checks")
+		reasons = appendReason(
+			reasons,
+			len(done.Verification.Checks) == 0,
+			"verified_without_checks",
+		)
 	case VerificationPartiallyVerified:
 		reasons = appendReason(reasons, len(done.KnownRisks) == 0, "partial_without_risks")
 	case VerificationNotVerified:
-		reasons = appendReason(reasons, maxSteps <= 0 || commandsUsed < maxSteps, "not_verified_with_budget_remaining")
+		reasons = appendReason(
+			reasons,
+			maxSteps <= 0 || commandsUsed < maxSteps,
+			"not_verified_with_budget_remaining",
+		)
 	default:
 		reasons = append(reasons, "invalid_verification_status")
 	}
 	return reasons
 }
 
-var incompleteSummaryPhrases = []string{"protocol correction", "cannot proceed", "need to continue", "ready to run", "no file changes have been made", "need create"}
+var incompleteSummaryPhrases = []string{
+	"protocol correction",
+	"cannot proceed",
+	"need to continue",
+	"ready to run",
+	"no file changes have been made",
+	"need create",
+}
 
 type completionChallengeRule struct {
 	claims, checks []string
@@ -48,9 +70,21 @@ type completionChallengeRule struct {
 }
 
 var completionChallengeRules = []completionChallengeRule{
-	{[]string{"created ", "wrote ", "saved ", "/", ".go", ".md", ".json", ".txt"}, []string{"test -f", "cat ", "ls ", "stat ", "grep ", "exists", "contains"}, "artifact_claim_without_check"},
-	{[]string{"server", "service", "daemon", "listening"}, []string{"curl ", "nc ", "ss ", "lsof ", "listening", "responded"}, "service_claim_without_liveness_check"},
-	{[]string{"implemented", "fixed", "updated", "changed"}, []string{"test", "go test", "pytest", "npm test", "make check", "passed"}, "implementation_claim_without_behavior_check"},
+	{
+		[]string{"created ", "wrote ", "saved ", "/", ".go", ".md", ".json", ".txt"},
+		[]string{"test -f", "cat ", "ls ", "stat ", "grep ", "exists", "contains"},
+		"artifact_claim_without_check",
+	},
+	{
+		[]string{"server", "service", "daemon", "listening"},
+		[]string{"curl ", "nc ", "ss ", "lsof ", "listening", "responded"},
+		"service_claim_without_liveness_check",
+	},
+	{
+		[]string{"implemented", "fixed", "updated", "changed"},
+		[]string{"test", "go test", "pytest", "npm test", "make check", "passed"},
+		"implementation_claim_without_behavior_check",
+	},
 }
 
 func completionChallengeReasons(done *DoneTurn, commandsUsed int) []string {

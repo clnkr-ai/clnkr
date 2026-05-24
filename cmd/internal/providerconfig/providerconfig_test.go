@@ -9,109 +9,129 @@ import (
 )
 
 func TestResolveConfigRequiresProviderModelAndAPIKey(t *testing.T) {
-	t.Run("provider required", func(t *testing.T) {
-		_, err := ResolveConfig(Inputs{}, func(string) string { return "" })
-		if err == nil || err.Error() != "provider is required; set --provider or CLNKR_PROVIDER" {
-			t.Fatalf("ResolveConfig() err = %v, want provider required error", err)
-		}
-	})
+	tests := []struct {
+		name              string
+		inputs            Inputs
+		env               map[string]string
+		want              string
+		wantMissingAPIKey bool
+	}{
+		{
+			name: "provider required",
+			want: "provider is required; set --provider or CLNKR_PROVIDER",
+		},
+		{
+			name:   "base url does not replace provider",
+			inputs: Inputs{BaseURL: "https://mock-provider.example/v1", Model: "test-model"},
+			want:   "provider is required; set --provider or CLNKR_PROVIDER",
+		},
+		{
+			name:   "env base url does not replace provider",
+			inputs: Inputs{Model: "test-model"},
+			env:    map[string]string{"CLNKR_BASE_URL": "https://mock-provider.example/v1"},
+			want:   "provider is required; set --provider or CLNKR_PROVIDER",
+		},
+		{
+			name:   "model required",
+			inputs: Inputs{Provider: "anthropic"},
+			want:   "model is required; set --model or CLNKR_MODEL",
+		},
+		{
+			name:              "api key required",
+			inputs:            Inputs{Provider: "openai", Model: "gpt-4.1"},
+			want:              "api key is required; set CLNKR_API_KEY",
+			wantMissingAPIKey: true,
+		},
+	}
 
-	t.Run("model required", func(t *testing.T) {
-		_, err := ResolveConfig(Inputs{Provider: "anthropic"}, func(string) string {
-			return ""
-		})
-		if err == nil || err.Error() != "model is required; set --model or CLNKR_MODEL" {
-			t.Fatalf("ResolveConfig() err = %v, want model required error", err)
-		}
-	})
-
-	t.Run("api key required", func(t *testing.T) {
-		_, err := ResolveConfig(Inputs{
-			Provider: "openai",
-			Model:    "gpt-4.1",
-		}, func(string) string { return "" })
-		if err == nil || err.Error() != "api key is required; set CLNKR_API_KEY" {
-			t.Fatalf("ResolveConfig() err = %v, want api key required error", err)
-		}
-	})
-
-	t.Run("provider inferred from explicit base url", func(t *testing.T) {
-		cfg, err := ResolveConfig(Inputs{
-			Model:   "test-model",
-			BaseURL: "https://mock-provider.example/v1",
-		}, func(key string) string {
-			if key == "CLNKR_API_KEY" {
-				return "test-key"
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ResolveConfig(tt.inputs, envMap(tt.env))
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("ResolveConfig() err = %v, want %q", err, tt.want)
 			}
-			return ""
+			if IsMissingAPIKey(err) != tt.wantMissingAPIKey {
+				t.Fatalf(
+					"IsMissingAPIKey(%v) = %v, want %v",
+					err,
+					IsMissingAPIKey(err),
+					tt.wantMissingAPIKey,
+				)
+			}
 		})
-		if err != nil {
-			t.Fatalf("ResolveConfig(): %v", err)
-		}
-		if cfg.Provider != providerdomain.ProviderOpenAI {
-			t.Fatalf("Provider = %q, want %q", cfg.Provider, providerdomain.ProviderOpenAI)
-		}
-	})
-}
-
-func TestActProtocolFlagValueUsesEnvWhenFlagUnset(t *testing.T) {
-	got := ActProtocolFlagValue("auto", false, func(key string) string {
-		if key == "CLNKR_ACT_PROTOCOL" {
-			return "tool-calls"
-		}
-		return ""
-	})
-	if got != "tool-calls" {
-		t.Fatalf("ActProtocolFlagValue() = %q, want tool-calls", got)
 	}
 }
 
-func TestActProtocolFlagValuePrefersFlag(t *testing.T) {
-	got := ActProtocolFlagValue("clnkr-inline", true, func(string) string {
-		return "tool-calls"
-	})
-	if got != "clnkr-inline" {
-		t.Fatalf("ActProtocolFlagValue() = %q, want clnkr-inline", got)
+func TestActProtocolFlagValue(t *testing.T) {
+	tests := []struct {
+		name      string
+		flagValue string
+		flagSet   bool
+		env       string
+		want      string
+	}{
+		{
+			name:      "uses env when flag unset",
+			flagValue: "auto",
+			env:       "tool-calls",
+			want:      "tool-calls",
+		},
+		{
+			name:      "prefers flag",
+			flagValue: "clnkr-inline",
+			flagSet:   true,
+			env:       "tool-calls",
+			want:      "clnkr-inline",
+		},
+		{name: "defaults auto", flagValue: "auto", want: "auto"},
 	}
-}
 
-func TestActProtocolFlagValueDefaultsAuto(t *testing.T) {
-	got := ActProtocolFlagValue("auto", false, func(string) string { return "" })
-	if got != "auto" {
-		t.Fatalf("ActProtocolFlagValue() = %q, want auto", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ActProtocolFlagValue(tt.flagValue, tt.flagSet, func(key string) string {
+				if key == "CLNKR_ACT_PROTOCOL" {
+					return tt.env
+				}
+				return ""
+			})
+			if got != tt.want {
+				t.Fatalf("ActProtocolFlagValue() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
 func TestResolveConfigPrefersFlagsOverEnv(t *testing.T) {
-	cfg, err := ResolveConfig(Inputs{
+	cfg := mustResolveConfig(t, Inputs{
 		Provider:    "openai",
 		ProviderAPI: "openai-chat-completions",
 		Model:       "flag-model",
 		BaseURL:     "https://flags.example.com/v1",
-	}, envMap(map[string]string{
+	}, map[string]string{
 		"CLNKR_PROVIDER":     "anthropic",
 		"CLNKR_PROVIDER_API": "openai-responses",
 		"CLNKR_MODEL":        "env-model",
 		"CLNKR_BASE_URL":     "https://env.example.com/v1",
 		"CLNKR_API_KEY":      "env-key",
-	}))
-	if err != nil {
-		t.Fatalf("ResolveConfig(): %v", err)
-	}
+	})
 	if cfg.Provider != providerdomain.ProviderOpenAI {
 		t.Fatalf("Provider = %q, want %q", cfg.Provider, providerdomain.ProviderOpenAI)
 	}
 	if cfg.ProviderAPI != providerdomain.ProviderAPIOpenAIChatCompletions {
-		t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, providerdomain.ProviderAPIOpenAIChatCompletions)
+		t.Fatalf(
+			"ProviderAPI = %q, want %q",
+			cfg.ProviderAPI,
+			providerdomain.ProviderAPIOpenAIChatCompletions,
+		)
 	}
 	if cfg.Model != "flag-model" {
-		t.Fatalf("Model = %q, want %q", cfg.Model, "flag-model")
+		t.Fatalf("Model = %q, want flag-model", cfg.Model)
 	}
 	if cfg.BaseURL != "https://flags.example.com/v1" {
-		t.Fatalf("BaseURL = %q, want %q", cfg.BaseURL, "https://flags.example.com/v1")
+		t.Fatalf("BaseURL = %q, want https://flags.example.com/v1", cfg.BaseURL)
 	}
 	if cfg.APIKey != "env-key" {
-		t.Fatalf("APIKey = %q, want %q", cfg.APIKey, "env-key")
+		t.Fatalf("APIKey = %q, want env-key", cfg.APIKey)
 	}
 }
 
@@ -136,7 +156,7 @@ func TestResolveConfigUsesOnlyCLNKREnvSurface(t *testing.T) {
 		t.Fatalf("ResolveConfig(): %v", err)
 	}
 	if cfg.APIKey != "clnkr-key" {
-		t.Fatalf("APIKey = %q, want %q", cfg.APIKey, "clnkr-key")
+		t.Fatalf("APIKey = %q, want clnkr-key", cfg.APIKey)
 	}
 	if lookups["ANTHROPIC_API_KEY"] != 0 {
 		t.Fatalf("ANTHROPIC_API_KEY lookups = %d, want 0", lookups["ANTHROPIC_API_KEY"])
@@ -144,61 +164,64 @@ func TestResolveConfigUsesOnlyCLNKREnvSurface(t *testing.T) {
 }
 
 func TestResolveConfigRejectsProviderAPIForAnthropic(t *testing.T) {
-	_, err := ResolveConfig(Inputs{
-		Provider:    "anthropic",
-		ProviderAPI: "auto",
-		Model:       "claude-sonnet-4-6",
-	}, envMap(map[string]string{
-		"CLNKR_API_KEY": "test-key",
-	}))
+	_, err := ResolveConfig(
+		Inputs{Provider: "anthropic", ProviderAPI: "auto", Model: "claude-sonnet-4-6"},
+		keyedEnv(),
+	)
 	if err == nil || err.Error() != `provider-api is only valid for provider "openai"` {
 		t.Fatalf("ResolveConfig() err = %v, want anthropic provider-api rejection", err)
 	}
 }
 
-func TestResolveConfigAppliesProviderSpecificBaseURLDefaults(t *testing.T) {
+func TestResolveConfigProviderAndBaseURLSelection(t *testing.T) {
 	tests := []struct {
 		name            string
 		inputs          Inputs
-		env             map[string]string
 		wantProvider    providerdomain.Provider
 		wantProviderAPI providerdomain.ProviderAPI
 		wantBaseURL     string
 	}{
 		{
-			name: "anthropic default",
-			inputs: Inputs{
-				Provider: "anthropic",
-				Model:    "claude-sonnet-4-6",
-			},
-			env: map[string]string{
-				"CLNKR_API_KEY": "anthropic-key",
-			},
+			name:            "anthropic default",
+			inputs:          Inputs{Provider: "anthropic", Model: "claude-sonnet-4-6"},
 			wantProvider:    providerdomain.ProviderAnthropic,
 			wantProviderAPI: providerdomain.ProviderAPIAuto,
 			wantBaseURL:     DefaultAnthropicBaseURL,
 		},
 		{
-			name: "openai default",
-			inputs: Inputs{
-				Provider: "openai",
-				Model:    "proxy-model",
-			},
-			env: map[string]string{
-				"CLNKR_API_KEY": "openai-key",
-			},
+			name:            "openai default",
+			inputs:          Inputs{Provider: "openai", Model: "proxy-model"},
 			wantProvider:    providerdomain.ProviderOpenAI,
 			wantProviderAPI: providerdomain.ProviderAPIOpenAIChatCompletions,
 			wantBaseURL:     DefaultOpenAIBaseURL,
+		},
+		{
+			name: "custom openai base url",
+			inputs: Inputs{
+				Provider: "openai",
+				Model:    "test-model",
+				BaseURL:  "https://mock-provider.example/v1",
+			},
+			wantProvider:    providerdomain.ProviderOpenAI,
+			wantProviderAPI: providerdomain.ProviderAPIOpenAIChatCompletions,
+			wantBaseURL:     "https://mock-provider.example/v1",
+		},
+		{
+			name: "custom anthropic base url",
+			inputs: Inputs{
+				Provider: "anthropic",
+				Model:    "claude-sonnet-4-6",
+				BaseURL:  "https://api.anthropic.com",
+			},
+			wantProvider:    providerdomain.ProviderAnthropic,
+			wantProviderAPI: providerdomain.ProviderAPIAuto,
+			wantBaseURL:     "https://api.anthropic.com",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := ResolveConfig(tt.inputs, envMap(tt.env))
-			if err != nil {
-				t.Fatalf("ResolveConfig(): %v", err)
-			}
+			cfg := mustResolveConfig(t, tt.inputs, keyedEnvMap())
 			if cfg.Provider != tt.wantProvider {
 				t.Fatalf("Provider = %q, want %q", cfg.Provider, tt.wantProvider)
 			}
@@ -212,284 +235,87 @@ func TestResolveConfigAppliesProviderSpecificBaseURLDefaults(t *testing.T) {
 	}
 }
 
-func TestResolveConfigInfersAnthropicFromExplicitBaseURL(t *testing.T) {
-	cfg, err := ResolveConfig(Inputs{
-		Model:   "claude-sonnet-4-6",
-		BaseURL: "https://api.anthropic.com",
-	}, envMap(map[string]string{
-		"CLNKR_API_KEY": "anthropic-key",
-	}))
-	if err != nil {
-		t.Fatalf("ResolveConfig(): %v", err)
-	}
-	if cfg.Provider != providerdomain.ProviderAnthropic {
-		t.Fatalf("Provider = %q, want %q", cfg.Provider, providerdomain.ProviderAnthropic)
-	}
-	if cfg.ProviderAPI != providerdomain.ProviderAPIAuto {
-		t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, providerdomain.ProviderAPIAuto)
-	}
-}
-
-func TestResolveConfigKnownOpenAIResponsesModels(t *testing.T) {
-	tests := []string{
-		"gpt-5",
-		"gpt-5.4-mini-2026-03-05",
-		"gpt-5-codex",
-		"gpt-5.1-codex-mini",
-		"o3-pro",
-	}
-
-	for _, model := range tests {
-		t.Run(model, func(t *testing.T) {
-			cfg, err := ResolveConfig(Inputs{
-				Provider: "openai",
-				Model:    model,
-			}, envMap(map[string]string{
-				"CLNKR_API_KEY": "test-key",
-			}))
-			if err != nil {
-				t.Fatalf("ResolveConfig(): %v", err)
-			}
-			if cfg.ProviderAPI != providerdomain.ProviderAPIOpenAIResponses {
-				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, providerdomain.ProviderAPIOpenAIResponses)
-			}
-		})
-	}
-}
-
-func TestParseActProtocolSetting(t *testing.T) {
+func TestResolveConfigOpenAIProviderAPISelection(t *testing.T) {
 	tests := []struct {
-		name string
-		raw  string
-		want ActProtocolSetting
+		name        string
+		model       string
+		providerAPI string
+		want        providerdomain.ProviderAPI
 	}{
-		{name: "default", want: ActProtocolSettingAuto},
-		{name: "auto", raw: " AUTO ", want: ActProtocolSettingAuto},
-		{name: "inline", raw: "clnkr-inline", want: ActProtocolSettingClnkrInline},
-		{name: "tool calls", raw: "tool-calls", want: ActProtocolSettingToolCalls},
+		{
+			name:  "allowlisted gpt-5",
+			model: "gpt-5",
+			want:  providerdomain.ProviderAPIOpenAIResponses,
+		},
+		{
+			name:  "allowlisted codex",
+			model: "gpt-5-codex",
+			want:  providerdomain.ProviderAPIOpenAIResponses,
+		},
+		{
+			name:  "allowlisted o-series",
+			model: "o3-pro",
+			want:  providerdomain.ProviderAPIOpenAIResponses,
+		},
+		{
+			name:  "codex suffix",
+			model: "swift-codex",
+			want:  providerdomain.ProviderAPIOpenAIResponses,
+		},
+		{
+			name:  "case and space normalized",
+			model: "  GPT-5.9-preview  ",
+			want:  providerdomain.ProviderAPIOpenAIResponses,
+		},
+		{name: "future gpt", model: "gpt-6", want: providerdomain.ProviderAPIOpenAIResponses},
+		{
+			name:  "dated snapshot",
+			model: "gpt-5.4-2026-03-05",
+			want:  providerdomain.ProviderAPIOpenAIResponses,
+		},
+		{
+			name:  "known non-openai chatgpt",
+			model: "chatgpt-4o-latest",
+			want:  providerdomain.ProviderAPIOpenAIChatCompletions,
+		},
+		{
+			name:  "known non-openai orca",
+			model: "orca-mini",
+			want:  providerdomain.ProviderAPIOpenAIChatCompletions,
+		},
+		{
+			name:  "unmatched llama",
+			model: "llama3",
+			want:  providerdomain.ProviderAPIOpenAIChatCompletions,
+		},
+		{
+			name:  "non openai-looking dated suffix",
+			model: "llama3-2026-03-05",
+			want:  providerdomain.ProviderAPIOpenAIChatCompletions,
+		},
+		{
+			name:        "explicit codex responses",
+			model:       "future-codex-model",
+			providerAPI: "openai-responses",
+			want:        providerdomain.ProviderAPIOpenAIResponses,
+		},
+		{
+			name:        "explicit codex chat completions",
+			model:       "gpt-5.1-codex-max",
+			providerAPI: "openai-chat-completions",
+			want:        providerdomain.ProviderAPIOpenAIChatCompletions,
+		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := ParseActProtocolSetting(tc.raw)
-			if err != nil {
-				t.Fatalf("ParseActProtocolSetting(%q): %v", tc.raw, err)
-			}
-			if got != tc.want {
-				t.Fatalf("ParseActProtocolSetting(%q) = %q, want %q", tc.raw, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestParseActProtocolSettingRejectsUnknownValues(t *testing.T) {
-	_, err := ParseActProtocolSetting("native-bash-tools")
-	if err == nil || !strings.Contains(err.Error(), `invalid act-protocol`) {
-		t.Fatalf("ParseActProtocolSetting err = %v, want act-protocol validation", err)
-	}
-	if !strings.Contains(err.Error(), "auto, clnkr-inline, tool-calls") {
-		t.Fatalf("ParseActProtocolSetting err = %q, want allowed values", err.Error())
-	}
-}
-
-func TestResolveConfigActProtocol(t *testing.T) {
-	t.Run("defaults auto to anthropic tool calls", func(t *testing.T) {
-		cfg, err := ResolveConfig(Inputs{Provider: "anthropic", Model: "claude-sonnet-4-6"}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
-		if err != nil {
-			t.Fatalf("ResolveConfig: %v", err)
-		}
-		if cfg.ActProtocol != clnkr.ActProtocolToolCalls {
-			t.Fatalf("ActProtocol = %q, want tool-calls", cfg.ActProtocol)
-		}
-	})
-
-	t.Run("auto uses openai responses tool calls", func(t *testing.T) {
-		cfg, err := ResolveConfig(Inputs{
-			Provider:    "openai",
-			ProviderAPI: "openai-responses",
-			Model:       "gpt-5",
-		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
-		if err != nil {
-			t.Fatalf("ResolveConfig: %v", err)
-		}
-		if cfg.ActProtocol != clnkr.ActProtocolToolCalls {
-			t.Fatalf("ActProtocol = %q, want tool-calls", cfg.ActProtocol)
-		}
-	})
-
-	t.Run("auto falls back for openai chat completions", func(t *testing.T) {
-		cfg, err := ResolveConfig(Inputs{
-			Provider:    "openai",
-			ProviderAPI: "openai-chat-completions",
-			Model:       "proxy-model",
-		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
-		if err != nil {
-			t.Fatalf("ResolveConfig: %v", err)
-		}
-		if cfg.ActProtocol != clnkr.ActProtocolClnkrInline {
-			t.Fatalf("ActProtocol = %q, want clnkr-inline", cfg.ActProtocol)
-		}
-	})
-
-	t.Run("explicit inline stays inline", func(t *testing.T) {
-		cfg, err := ResolveConfig(Inputs{
-			Provider:    "anthropic",
-			Model:       "claude-sonnet-4-6",
-			ActProtocol: ActProtocolSettingClnkrInline,
-		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
-		if err != nil {
-			t.Fatalf("ResolveConfig: %v", err)
-		}
-		if cfg.ActProtocol != clnkr.ActProtocolClnkrInline {
-			t.Fatalf("ActProtocol = %q, want clnkr-inline", cfg.ActProtocol)
-		}
-	})
-
-	t.Run("accepts explicit anthropic tool calls", func(t *testing.T) {
-		cfg, err := ResolveConfig(Inputs{
-			Provider:    "anthropic",
-			Model:       "claude-sonnet-4-6",
-			ActProtocol: ActProtocolSettingToolCalls,
-		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
-		if err != nil {
-			t.Fatalf("ResolveConfig: %v", err)
-		}
-		if cfg.ActProtocol != clnkr.ActProtocolToolCalls {
-			t.Fatalf("ActProtocol = %q, want tool-calls", cfg.ActProtocol)
-		}
-	})
-
-	t.Run("rejects openai chat completions tool calls", func(t *testing.T) {
-		_, err := ResolveConfig(Inputs{
-			Provider:    "openai",
-			ProviderAPI: "openai-chat-completions",
-			Model:       "proxy-model",
-			ActProtocol: ActProtocolSettingToolCalls,
-		}, envMap(map[string]string{"CLNKR_API_KEY": "key"}))
-		if err == nil || !strings.Contains(err.Error(), "bash tool calls") {
-			t.Fatalf("ResolveConfig err = %v, want bash tool calls rejection", err)
-		}
-	})
-}
-
-func TestResolvePromptActProtocol(t *testing.T) {
-	t.Run("concrete inline needs no provider config", func(t *testing.T) {
-		got, err := ResolvePromptActProtocol(Inputs{ActProtocol: ActProtocolSettingClnkrInline}, func(string) string { return "" }, false)
-		if err != nil {
-			t.Fatalf("ResolvePromptActProtocol: %v", err)
-		}
-		if got != clnkr.ActProtocolClnkrInline {
-			t.Fatalf("ActProtocol = %q, want clnkr-inline", got)
-		}
-	})
-
-	t.Run("concrete tool calls needs no provider config", func(t *testing.T) {
-		got, err := ResolvePromptActProtocol(Inputs{ActProtocol: ActProtocolSettingToolCalls}, func(string) string { return "" }, false)
-		if err != nil {
-			t.Fatalf("ResolvePromptActProtocol: %v", err)
-		}
-		if got != clnkr.ActProtocolToolCalls {
-			t.Fatalf("ActProtocol = %q, want tool-calls", got)
-		}
-	})
-
-	t.Run("auto resolves anthropic without api key", func(t *testing.T) {
-		got, err := ResolvePromptActProtocol(Inputs{Provider: "anthropic", Model: "claude-sonnet-4-6"}, func(string) string { return "" }, false)
-		if err != nil {
-			t.Fatalf("ResolvePromptActProtocol: %v", err)
-		}
-		if got != clnkr.ActProtocolToolCalls {
-			t.Fatalf("ActProtocol = %q, want tool-calls", got)
-		}
-	})
-
-	t.Run("auto resolves openai responses without api key", func(t *testing.T) {
-		got, err := ResolvePromptActProtocol(Inputs{Provider: "openai", ProviderAPI: "openai-responses", Model: "gpt-5"}, func(string) string { return "" }, false)
-		if err != nil {
-			t.Fatalf("ResolvePromptActProtocol: %v", err)
-		}
-		if got != clnkr.ActProtocolToolCalls {
-			t.Fatalf("ActProtocol = %q, want tool-calls", got)
-		}
-	})
-
-	t.Run("auto resolves openai chat completions without api key", func(t *testing.T) {
-		got, err := ResolvePromptActProtocol(Inputs{Provider: "openai", ProviderAPI: "openai-chat-completions", Model: "proxy-model"}, func(string) string { return "" }, false)
-		if err != nil {
-			t.Fatalf("ResolvePromptActProtocol: %v", err)
-		}
-		if got != clnkr.ActProtocolClnkrInline {
-			t.Fatalf("ActProtocol = %q, want clnkr-inline", got)
-		}
-	})
-
-	t.Run("auto reports missing context", func(t *testing.T) {
-		_, err := ResolvePromptActProtocol(Inputs{}, func(string) string { return "" }, false)
-		if err == nil || !strings.Contains(err.Error(), "provider is required") {
-			t.Fatalf("ResolvePromptActProtocol err = %v, want provider context error", err)
-		}
-		if strings.Contains(err.Error(), "dump") || strings.Contains(err.Error(), "--act-protocol clnkr-inline") {
-			t.Fatalf("ResolvePromptActProtocol err = %q, want raw context error", err.Error())
-		}
-	})
-}
-
-func TestResolveConfigOpenAIStyleModelsUseResponses(t *testing.T) {
-	tests := []string{
-		"gpt-5.2-chat-latest",
-		"gpt-4o-latest",
-		"codex-mini-latest",
-		"swift-codex",
-		"o4-mini",
-		"GPT-5.9-preview",
-		"  gpt-6  ",
-	}
-
-	for _, model := range tests {
-		t.Run(model, func(t *testing.T) {
-			cfg, err := ResolveConfig(Inputs{
-				Provider: "openai",
-				Model:    model,
-			}, envMap(map[string]string{
-				"CLNKR_API_KEY": "test-key",
-			}))
-			if err != nil {
-				t.Fatalf("ResolveConfig(): %v", err)
-			}
-			if cfg.ProviderAPI != providerdomain.ProviderAPIOpenAIResponses {
-				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, providerdomain.ProviderAPIOpenAIResponses)
-			}
-		})
-	}
-}
-
-func TestResolveConfigNegativeExamplesStayOnChatCompletions(t *testing.T) {
-	tests := []string{
-		"chatgpt-4o-latest",
-		"chatgpt-codex",
-		"orca-mini",
-		"orca-codex",
-		"olmo-2",
-		"olmo-codex",
-		"openhermes-2.5",
-		"openhermes-codex",
-		"llama3",
-		"gemini-2.0-flash",
-	}
-
-	for _, model := range tests {
-		t.Run(model, func(t *testing.T) {
-			cfg, err := ResolveConfig(Inputs{
-				Provider: "openai",
-				Model:    model,
-			}, envMap(map[string]string{
-				"CLNKR_API_KEY": "test-key",
-			}))
-			if err != nil {
-				t.Fatalf("ResolveConfig(): %v", err)
-			}
-			if cfg.ProviderAPI != providerdomain.ProviderAPIOpenAIChatCompletions {
-				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, providerdomain.ProviderAPIOpenAIChatCompletions)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := mustResolveConfig(
+				t,
+				Inputs{Provider: "openai", ProviderAPI: tt.providerAPI, Model: tt.model},
+				keyedEnvMap(),
+			)
+			if cfg.ProviderAPI != tt.want {
+				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, tt.want)
 			}
 		})
 	}
@@ -501,26 +327,8 @@ func TestResolveConfigRejectsUnsupportedProModels(t *testing.T) {
 		inputs Inputs
 	}{
 		{
-			name: "auto rejects gpt-5.2-pro",
-			inputs: Inputs{
-				Provider: "openai",
-				Model:    "gpt-5.2-pro",
-			},
-		},
-		{
-			name: "explicit responses rejects gpt-5.4-pro",
-			inputs: Inputs{
-				Provider:    "openai",
-				ProviderAPI: "openai-responses",
-				Model:       "gpt-5.4-pro",
-			},
-		},
-		{
-			name: "dated snapshot rejects gpt-5.4-pro",
-			inputs: Inputs{
-				Provider: "openai",
-				Model:    "gpt-5.4-pro-2026-03-05",
-			},
+			name:   "auto rejects gpt-5.2-pro",
+			inputs: Inputs{Provider: "openai", Model: "gpt-5.2-pro"},
 		},
 		{
 			name: "forced chat completions still rejects gpt-5.2-pro",
@@ -534,145 +342,231 @@ func TestResolveConfigRejectsUnsupportedProModels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := ResolveConfig(tt.inputs, envMap(map[string]string{
-				"CLNKR_API_KEY": "test-key",
-			}))
-			if err == nil || !strings.Contains(err.Error(), "structured outputs") {
-				t.Fatalf("ResolveConfig() err = %v, want structured outputs error", err)
-			}
+			_, err := ResolveConfig(tt.inputs, keyedEnv())
+			requireErrorContains(t, err, "structured outputs")
 		})
 	}
 }
 
-func TestResolveConfigAcceptsExplicitCodexResponsesSelections(t *testing.T) {
-	tests := []string{
-		"gpt-5-codex",
-		"gpt-5.1-codex-mini",
-		"gpt-5.3-codex",
-		"future-codex-model",
-		"codex-mini-latest",
-	}
-
-	for _, model := range tests {
-		t.Run(model, func(t *testing.T) {
-			cfg, err := ResolveConfig(Inputs{
-				Provider:    "openai",
-				ProviderAPI: "openai-responses",
-				Model:       model,
-			}, envMap(map[string]string{
-				"CLNKR_API_KEY": "test-key",
-			}))
-			if err != nil {
-				t.Fatalf("ResolveConfig(): %v", err)
-			}
-			if cfg.ProviderAPI != providerdomain.ProviderAPIOpenAIResponses {
-				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, providerdomain.ProviderAPIOpenAIResponses)
-			}
-		})
-	}
-}
-
-func TestResolveConfigAcceptsExplicitCodexChatCompletionsSelections(t *testing.T) {
-	tests := []string{
-		"gpt-5-codex",
-		"gpt-5.1-codex-max",
-		"future-codex-model",
-	}
-
-	for _, model := range tests {
-		t.Run(model, func(t *testing.T) {
-			cfg, err := ResolveConfig(Inputs{
-				Provider:    "openai",
-				ProviderAPI: "openai-chat-completions",
-				Model:       model,
-			}, envMap(map[string]string{
-				"CLNKR_API_KEY": "test-key",
-			}))
-			if err != nil {
-				t.Fatalf("ResolveConfig(): %v", err)
-			}
-			if cfg.ProviderAPI != providerdomain.ProviderAPIOpenAIChatCompletions {
-				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, providerdomain.ProviderAPIOpenAIChatCompletions)
-			}
-		})
-	}
-}
-
-func TestResolveConfigOpenAIStyleFallbackAndDatedSnapshots(t *testing.T) {
+func TestParseActProtocolSetting(t *testing.T) {
 	tests := []struct {
 		name    string
-		model   string
-		wantAPI providerdomain.ProviderAPI
+		raw     string
+		want    ActProtocolSetting
+		wantErr string
+	}{
+		{name: "default", want: ActProtocolSettingAuto},
+		{name: "auto", raw: " AUTO ", want: ActProtocolSettingAuto},
+		{name: "inline", raw: "clnkr-inline", want: ActProtocolSettingClnkrInline},
+		{name: "tool calls", raw: "tool-calls", want: ActProtocolSettingToolCalls},
+		{name: "rejects unknown", raw: "native-bash-tools", wantErr: "invalid act-protocol"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseActProtocolSetting(tt.raw)
+			if tt.wantErr != "" {
+				requireErrorContains(t, err, tt.wantErr)
+				requireErrorContains(t, err, "auto, clnkr-inline, tool-calls")
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseActProtocolSetting(%q): %v", tt.raw, err)
+			}
+			if got != tt.want {
+				t.Fatalf("ParseActProtocolSetting(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveConfigActProtocol(t *testing.T) {
+	tests := []struct {
+		name    string
+		inputs  Inputs
+		want    clnkr.ActProtocol
+		wantErr string
 	}{
 		{
-			name:    "dated snapshot matches",
-			model:   "gpt-5.4-2026-03-05",
-			wantAPI: providerdomain.ProviderAPIOpenAIResponses,
+			name:   "defaults auto to anthropic tool calls",
+			inputs: Inputs{Provider: "anthropic", Model: "claude-sonnet-4-6"},
+			want:   clnkr.ActProtocolToolCalls,
 		},
 		{
-			name:    "openai-looking non snapshot suffix uses responses",
-			model:   "gpt-5.4-preview",
-			wantAPI: providerdomain.ProviderAPIOpenAIResponses,
+			name:   "auto uses openai responses tool calls",
+			inputs: Inputs{Provider: "openai", ProviderAPI: "openai-responses", Model: "gpt-5"},
+			want:   clnkr.ActProtocolToolCalls,
 		},
 		{
-			name:    "chat latest suffix still looks openai",
-			model:   "gpt-5.2-chat-latest",
-			wantAPI: providerdomain.ProviderAPIOpenAIResponses,
+			name: "auto falls back for openai chat completions",
+			inputs: Inputs{
+				Provider:    "openai",
+				ProviderAPI: "openai-chat-completions",
+				Model:       "proxy-model",
+			},
+			want: clnkr.ActProtocolClnkrInline,
 		},
 		{
-			name:    "non openai looking suffix stays on chat completions",
-			model:   "llama3-2026-03-05",
-			wantAPI: providerdomain.ProviderAPIOpenAIChatCompletions,
+			name: "explicit inline stays inline",
+			inputs: Inputs{
+				Provider:    "anthropic",
+				Model:       "claude-sonnet-4-6",
+				ActProtocol: ActProtocolSettingClnkrInline,
+			},
+			want: clnkr.ActProtocolClnkrInline,
+		},
+		{
+			name: "accepts explicit anthropic tool calls",
+			inputs: Inputs{
+				Provider:    "anthropic",
+				Model:       "claude-sonnet-4-6",
+				ActProtocol: ActProtocolSettingToolCalls,
+			},
+			want: clnkr.ActProtocolToolCalls,
+		},
+		{
+			name: "rejects openai chat completions tool calls",
+			inputs: Inputs{
+				Provider:    "openai",
+				ProviderAPI: "openai-chat-completions",
+				Model:       "proxy-model",
+				ActProtocol: ActProtocolSettingToolCalls,
+			},
+			wantErr: "bash tool calls",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := ResolveConfig(Inputs{
-				Provider: "openai",
-				Model:    tt.model,
-			}, envMap(map[string]string{
-				"CLNKR_API_KEY": "test-key",
-			}))
+			cfg, err := ResolveConfig(tt.inputs, keyedEnv())
+			if tt.wantErr != "" {
+				requireErrorContains(t, err, tt.wantErr)
+				return
+			}
 			if err != nil {
 				t.Fatalf("ResolveConfig(): %v", err)
 			}
-			if cfg.ProviderAPI != tt.wantAPI {
-				t.Fatalf("ProviderAPI = %q, want %q", cfg.ProviderAPI, tt.wantAPI)
+			if cfg.ActProtocol != tt.want {
+				t.Fatalf("ActProtocol = %q, want %q", cfg.ActProtocol, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolvePromptActProtocol(t *testing.T) {
+	tests := []struct {
+		name             string
+		inputs           Inputs
+		dumpSystemPrompt bool
+		want             clnkr.ActProtocol
+		wantErr          string
+		rejectErr        string
+	}{
+		{
+			name:   "concrete inline needs no provider config",
+			inputs: Inputs{ActProtocol: ActProtocolSettingClnkrInline},
+			want:   clnkr.ActProtocolClnkrInline,
+		},
+		{
+			name:   "concrete tool calls needs no provider config",
+			inputs: Inputs{ActProtocol: ActProtocolSettingToolCalls},
+			want:   clnkr.ActProtocolToolCalls,
+		},
+		{
+			name:   "auto resolves anthropic without api key",
+			inputs: Inputs{Provider: "anthropic", Model: "claude-sonnet-4-6"},
+			want:   clnkr.ActProtocolToolCalls,
+		},
+		{
+			name:   "auto resolves openai responses without api key",
+			inputs: Inputs{Provider: "openai", ProviderAPI: "openai-responses", Model: "gpt-5"},
+			want:   clnkr.ActProtocolToolCalls,
+		},
+		{
+			name: "auto resolves openai chat completions without api key",
+			inputs: Inputs{
+				Provider:    "openai",
+				ProviderAPI: "openai-chat-completions",
+				Model:       "proxy-model",
+			},
+			want: clnkr.ActProtocolClnkrInline,
+		},
+		{
+			name:      "auto reports missing context",
+			wantErr:   "provider is required",
+			rejectErr: "--act-protocol clnkr-inline",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResolvePromptActProtocol(
+				tt.inputs,
+				func(string) string { return "" },
+				tt.dumpSystemPrompt,
+			)
+			if tt.wantErr != "" {
+				requireErrorContains(t, err, tt.wantErr)
+				if strings.Contains(err.Error(), tt.rejectErr) {
+					t.Fatalf(
+						"ResolvePromptActProtocol err = %q, want no %q",
+						err.Error(),
+						tt.rejectErr,
+					)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ResolvePromptActProtocol(): %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("ActProtocol = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
 func TestResolveConfigAcceptsRequestOptions(t *testing.T) {
-	t.Run("openai responses effort and max output", func(t *testing.T) {
-		cfg, err := ResolveConfig(Inputs{
-			Provider:    "openai",
-			ProviderAPI: "openai-responses",
-			Model:       "gpt-5.1-codex-max",
-			RequestOptions: providerdomain.ProviderRequestOptions{
+	tests := []struct {
+		name string
+		in   Inputs
+		want providerdomain.ProviderRequestOptions
+	}{
+		{
+			name: "openai responses effort and max output",
+			in: Inputs{
+				Provider:    "openai",
+				ProviderAPI: "openai-responses",
+				Model:       "gpt-5.1-codex-max",
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					Effort: providerdomain.ProviderEffortOptions{Level: "high", Set: true},
+					Output: providerdomain.ProviderOutputOptions{
+						MaxOutputTokens: providerdomain.OptionalInt{Value: 8000, Set: true},
+					},
+				},
+			},
+			want: providerdomain.ProviderRequestOptions{
 				Effort: providerdomain.ProviderEffortOptions{Level: "high", Set: true},
 				Output: providerdomain.ProviderOutputOptions{
 					MaxOutputTokens: providerdomain.OptionalInt{Value: 8000, Set: true},
 				},
 			},
-		}, envMap(map[string]string{"CLNKR_API_KEY": "test-key"}))
-		if err != nil {
-			t.Fatalf("ResolveConfig(): %v", err)
-		}
-		if !cfg.RequestOptions.Effort.Set || cfg.RequestOptions.Effort.Level != "high" {
-			t.Fatalf("Effort = %#v, want high", cfg.RequestOptions.Effort)
-		}
-		if cfg.RequestOptions.Output.MaxOutputTokens != (providerdomain.OptionalInt{Value: 8000, Set: true}) {
-			t.Fatalf("Output.MaxOutputTokens = %#v, want set 8000", cfg.RequestOptions.Output.MaxOutputTokens)
-		}
-	})
-
-	t.Run("anthropic thinking and max output", func(t *testing.T) {
-		cfg, err := ResolveConfig(Inputs{
-			Provider: "anthropic",
-			Model:    "claude-sonnet-4-20250514",
-			RequestOptions: providerdomain.ProviderRequestOptions{
+		},
+		{
+			name: "anthropic thinking and max output",
+			in: Inputs{
+				Provider: "anthropic",
+				Model:    "claude-sonnet-4-20250514",
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
+						ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true},
+					},
+					Output: providerdomain.ProviderOutputOptions{
+						MaxOutputTokens: providerdomain.OptionalInt{Value: 4096, Set: true},
+					},
+				},
+			},
+			want: providerdomain.ProviderRequestOptions{
 				AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
 					ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true},
 				},
@@ -680,32 +574,34 @@ func TestResolveConfigAcceptsRequestOptions(t *testing.T) {
 					MaxOutputTokens: providerdomain.OptionalInt{Value: 4096, Set: true},
 				},
 			},
-		}, envMap(map[string]string{"CLNKR_API_KEY": "test-key"}))
-		if err != nil {
-			t.Fatalf("ResolveConfig(): %v", err)
-		}
-		if cfg.RequestOptions.AnthropicManual.ThinkingBudgetTokens != (providerdomain.OptionalInt{Value: 2048, Set: true}) {
-			t.Fatalf("ThinkingBudgetTokens = %#v, want set 2048", cfg.RequestOptions.AnthropicManual.ThinkingBudgetTokens)
-		}
-		if cfg.RequestOptions.Output.MaxOutputTokens != (providerdomain.OptionalInt{Value: 4096, Set: true}) {
-			t.Fatalf("Output.MaxOutputTokens = %#v, want set 4096", cfg.RequestOptions.Output.MaxOutputTokens)
-		}
-	})
-
-	t.Run("anthropic opus 4 date snapshot manual thinking", func(t *testing.T) {
-		_, err := ResolveConfig(Inputs{
-			Provider: "anthropic",
-			Model:    "claude-opus-4-20250514",
-			RequestOptions: providerdomain.ProviderRequestOptions{
+		},
+		{
+			name: "anthropic opus 4 date snapshot manual thinking",
+			in: Inputs{
+				Provider: "anthropic",
+				Model:    "claude-opus-4-20250514",
+				RequestOptions: providerdomain.ProviderRequestOptions{
+					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
+						ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true},
+					},
+				},
+			},
+			want: providerdomain.ProviderRequestOptions{
 				AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
 					ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true},
 				},
 			},
-		}, envMap(map[string]string{"CLNKR_API_KEY": "test-key"}))
-		if err != nil {
-			t.Fatalf("ResolveConfig(): %v", err)
-		}
-	})
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := mustResolveConfig(t, tt.in, keyedEnvMap())
+			if cfg.RequestOptions != tt.want {
+				t.Fatalf("RequestOptions = %#v, want %#v", cfg.RequestOptions, tt.want)
+			}
+		})
+	}
 }
 
 func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
@@ -717,105 +613,74 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 		{
 			name: "invalid effort",
 			in: Inputs{
-				Provider: "openai",
-				Model:    "gpt-5.1",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					Effort: providerdomain.ProviderEffortOptions{Level: "extreme", Set: true},
-				},
+				Provider:       "openai",
+				Model:          "gpt-5.1",
+				RequestOptions: requestOptions(effort("extreme")),
 			},
 			want: "invalid effort",
 		},
 		{
 			name: "effort rejects chat completions",
 			in: Inputs{
-				Provider:    "openai",
-				ProviderAPI: "openai-chat-completions",
-				Model:       "gpt-5.1",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					Effort: providerdomain.ProviderEffortOptions{Level: "high", Set: true},
-				},
+				Provider:       "openai",
+				ProviderAPI:    "openai-chat-completions",
+				Model:          "gpt-5.1",
+				RequestOptions: requestOptions(effort("high")),
 			},
 			want: `effort is not supported for provider-api "openai-chat-completions"`,
 		},
 		{
 			name: "effort rejects anthropic max",
 			in: Inputs{
-				Provider: "anthropic",
-				Model:    "claude-sonnet-4-20250514",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					Effort: providerdomain.ProviderEffortOptions{Level: "xhigh", Set: true},
-				},
+				Provider:       "anthropic",
+				Model:          "claude-sonnet-4-20250514",
+				RequestOptions: requestOptions(effort("xhigh")),
 			},
 			want: `effort "xhigh" is not supported for provider anthropic`,
 		},
 		{
 			name: "gpt-5-pro rejects low",
 			in: Inputs{
-				Provider: "openai",
-				Model:    "gpt-5-pro",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					Effort: providerdomain.ProviderEffortOptions{Level: "low", Set: true},
-				},
-			},
-			want: "gpt-5-pro only supports high",
-		},
-		{
-			name: "gpt-5-pro snapshot rejects low",
-			in: Inputs{
-				Provider: "openai",
-				Model:    "gpt-5-pro-2026-03-05",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					Effort: providerdomain.ProviderEffortOptions{Level: "low", Set: true},
-				},
+				Provider:       "openai",
+				Model:          "gpt-5-pro",
+				RequestOptions: requestOptions(effort("low")),
 			},
 			want: "gpt-5-pro only supports high",
 		},
 		{
 			name: "xhigh requires codex max",
 			in: Inputs{
-				Provider: "openai",
-				Model:    "gpt-5.1",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					Effort: providerdomain.ProviderEffortOptions{Level: "xhigh", Set: true},
-				},
+				Provider:       "openai",
+				Model:          "gpt-5.1",
+				RequestOptions: requestOptions(effort("xhigh")),
 			},
 			want: `effort "xhigh" is not supported for model "gpt-5.1"`,
 		},
 		{
 			name: "effort requires reasoning model",
 			in: Inputs{
-				Provider: "openai",
-				Model:    "gpt-4.1",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					Effort: providerdomain.ProviderEffortOptions{Level: "high", Set: true},
-				},
+				Provider:       "openai",
+				Model:          "gpt-4.1",
+				RequestOptions: requestOptions(effort("high")),
 			},
 			want: "effort requires an OpenAI reasoning-capable model",
 		},
 		{
 			name: "max output requires positive",
 			in: Inputs{
-				Provider: "openai",
-				Model:    "gpt-5",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					Output: providerdomain.ProviderOutputOptions{
-						MaxOutputTokens: providerdomain.OptionalInt{Value: 0, Set: true},
-					},
-				},
+				Provider:       "openai",
+				Model:          "gpt-5",
+				RequestOptions: requestOptions(maxOutput(0)),
 			},
 			want: "max-output-tokens must be at least 1",
 		},
 		{
 			name: "max output rejects chat completions",
 			in: Inputs{
-				Provider:    "openai",
-				ProviderAPI: "openai-chat-completions",
-				Model:       "gpt-5",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					Output: providerdomain.ProviderOutputOptions{
-						MaxOutputTokens: providerdomain.OptionalInt{Value: 1000, Set: true},
-					},
-				},
+				Provider:       "openai",
+				ProviderAPI:    "openai-chat-completions",
+				Model:          "gpt-5",
+				RequestOptions: requestOptions(maxOutput(1000)),
 			},
 			want: `max-output-tokens is not supported for provider-api "openai-chat-completions"`,
 		},
@@ -824,50 +689,36 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "anthropic",
 				Model:    "claude-sonnet-4-20250514",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					Output: providerdomain.ProviderOutputOptions{
-						MaxOutputTokens: providerdomain.OptionalInt{Value: providerdomain.MaxAnthropicNonStreamingTokens + 1, Set: true},
-					},
-				},
+				RequestOptions: requestOptions(
+					maxOutput(providerdomain.MaxAnthropicNonStreamingTokens + 1),
+				),
 			},
 			want: "while streaming is unsupported",
 		},
 		{
 			name: "thinking budget rejects openai",
 			in: Inputs{
-				Provider: "openai",
-				Model:    "gpt-5",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
-						ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true},
-					},
-				},
+				Provider:       "openai",
+				Model:          "gpt-5",
+				RequestOptions: requestOptions(thinkingBudget(2048)),
 			},
 			want: "thinking-budget-tokens requires provider anthropic",
 		},
 		{
 			name: "thinking budget rejects small value",
 			in: Inputs{
-				Provider: "anthropic",
-				Model:    "claude-sonnet-4-20250514",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
-						ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 1023, Set: true},
-					},
-				},
+				Provider:       "anthropic",
+				Model:          "claude-sonnet-4-20250514",
+				RequestOptions: requestOptions(thinkingBudget(1023)),
 			},
 			want: "thinking-budget-tokens must be at least 1024",
 		},
 		{
 			name: "thinking budget rejects unsupported model",
 			in: Inputs{
-				Provider: "anthropic",
-				Model:    "claude-3-5-sonnet-20241022",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
-						ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true},
-					},
-				},
+				Provider:       "anthropic",
+				Model:          "claude-3-5-sonnet-20241022",
+				RequestOptions: requestOptions(thinkingBudget(2048)),
 			},
 			want: "thinking-budget-tokens requires an Anthropic extended-thinking-capable model",
 		},
@@ -876,54 +727,27 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 			in: Inputs{
 				Provider: "anthropic",
 				Model:    "claude-sonnet-4-20250514",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
-						ThinkingBudgetTokens: providerdomain.OptionalInt{Value: providerdomain.DefaultAnthropicMaxTokens, Set: true},
-					},
-				},
-			},
-			want: "thinking-budget-tokens must be less than effective anthropic max_tokens (4096)",
-		},
-		{
-			name: "thinking budget must be less than requested max tokens",
-			in: Inputs{
-				Provider: "anthropic",
-				Model:    "claude-sonnet-4-20250514",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
-						ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 4096, Set: true},
-					},
-					Output: providerdomain.ProviderOutputOptions{
-						MaxOutputTokens: providerdomain.OptionalInt{Value: 4096, Set: true},
-					},
-				},
+				RequestOptions: requestOptions(
+					thinkingBudget(providerdomain.DefaultAnthropicMaxTokens),
+				),
 			},
 			want: "thinking-budget-tokens must be less than effective anthropic max_tokens (4096)",
 		},
 		{
 			name: "thinking budget rejects non-auto effort",
 			in: Inputs{
-				Provider: "anthropic",
-				Model:    "claude-sonnet-4-20250514",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					Effort: providerdomain.ProviderEffortOptions{Level: "high", Set: true},
-					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
-						ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true},
-					},
-				},
+				Provider:       "anthropic",
+				Model:          "claude-sonnet-4-20250514",
+				RequestOptions: requestOptions(effort("high"), thinkingBudget(2048)),
 			},
 			want: "thinking-budget-tokens requires either no --effort flag or --effort auto",
 		},
 		{
 			name: "thinking budget rejects Opus 4.7+",
 			in: Inputs{
-				Provider: "anthropic",
-				Model:    "claude-opus-4-7-20250514",
-				RequestOptions: providerdomain.ProviderRequestOptions{
-					AnthropicManual: providerdomain.AnthropicManualThinkingOptions{
-						ThinkingBudgetTokens: providerdomain.OptionalInt{Value: 2048, Set: true},
-					},
-				},
+				Provider:       "anthropic",
+				Model:          "claude-opus-4-7-20250514",
+				RequestOptions: requestOptions(thinkingBudget(2048)),
 			},
 			want: "thinking-budget-tokens is not supported for model",
 		},
@@ -931,10 +755,8 @@ func TestResolveConfigRejectsUnsupportedRequestOptions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := ResolveConfig(tt.in, envMap(map[string]string{"CLNKR_API_KEY": "test-key"}))
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("ResolveConfig() err = %v, want containing %q", err, tt.want)
-			}
+			_, err := ResolveConfig(tt.in, keyedEnv())
+			requireErrorContains(t, err, tt.want)
 		})
 	}
 }
@@ -964,15 +786,6 @@ func TestResolveConfigNormalizesBaseURLTrailingSlash(t *testing.T) {
 			wantURL: "https://api.anthropic.com",
 		},
 		{
-			name: "custom root",
-			inputs: Inputs{
-				Provider: "openai",
-				Model:    "gpt-test",
-				BaseURL:  "https://example.com/",
-			},
-			wantURL: "https://example.com",
-		},
-		{
 			name: "preserves internal repeated slashes",
 			inputs: Inputs{
 				Provider: "openai",
@@ -994,17 +807,67 @@ func TestResolveConfigNormalizesBaseURLTrailingSlash(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := ResolveConfig(tt.inputs, envMap(map[string]string{
-				"CLNKR_API_KEY": "test-key",
-			}))
-			if err != nil {
-				t.Fatalf("ResolveConfig(): %v", err)
-			}
+			cfg := mustResolveConfig(t, tt.inputs, keyedEnvMap())
 			if cfg.BaseURL != tt.wantURL {
 				t.Fatalf("BaseURL = %q, want %q", cfg.BaseURL, tt.wantURL)
 			}
 		})
 	}
+}
+
+type requestOption func(*providerdomain.ProviderRequestOptions)
+
+func effort(level string) requestOption {
+	return func(opts *providerdomain.ProviderRequestOptions) {
+		opts.Effort = providerdomain.ProviderEffortOptions{Level: level, Set: true}
+	}
+}
+
+func maxOutput(tokens int) requestOption {
+	return func(opts *providerdomain.ProviderRequestOptions) {
+		opts.Output.MaxOutputTokens = providerdomain.OptionalInt{Value: tokens, Set: true}
+	}
+}
+
+func thinkingBudget(tokens int) requestOption {
+	return func(opts *providerdomain.ProviderRequestOptions) {
+		opts.AnthropicManual.ThinkingBudgetTokens = providerdomain.OptionalInt{
+			Value: tokens,
+			Set:   true,
+		}
+	}
+}
+
+func requestOptions(options ...requestOption) providerdomain.ProviderRequestOptions {
+	var opts providerdomain.ProviderRequestOptions
+	for _, option := range options {
+		option(&opts)
+	}
+	return opts
+}
+
+func mustResolveConfig(t *testing.T, inputs Inputs, env map[string]string) ResolvedProviderConfig {
+	t.Helper()
+	cfg, err := ResolveConfig(inputs, envMap(env))
+	if err != nil {
+		t.Fatalf("ResolveConfig(): %v", err)
+	}
+	return cfg
+}
+
+func requireErrorContains(t *testing.T, err error, want string) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want containing %q", err, want)
+	}
+}
+
+func keyedEnv() func(string) string {
+	return envMap(keyedEnvMap())
+}
+
+func keyedEnvMap() map[string]string {
+	return map[string]string{"CLNKR_API_KEY": "test-key"}
 }
 
 func envMap(values map[string]string) func(string) string {

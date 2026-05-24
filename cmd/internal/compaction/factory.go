@@ -49,7 +49,13 @@ func (m modelCompactor) Summarize(ctx context.Context, messages []clnkr.Message)
 
 func buildSummarizeMessages(messages []clnkr.Message) []clnkr.Message {
 	sourceBody := formatSourceText(messages)
-	available := summarizeInputCharBudget - len(sourceTextOpen) - len(sourceTextClose) - len(summarizeRequest)
+	available := summarizeInputCharBudget - len(
+		sourceTextOpen,
+	) - len(
+		sourceTextClose,
+	) - len(
+		summarizeRequest,
+	)
 	if len(sourceBody) > available {
 		tailBudget := available - len(truncationHeader)
 		if tailBudget < 0 {

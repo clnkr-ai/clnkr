@@ -24,6 +24,6 @@ const EnvironmentUsage = `Environment:
   CLNKR_PROVIDER     Provider adapter semantics
   CLNKR_PROVIDER_API OpenAI-only API surface override
   CLNKR_MODEL        Model identifier override
-  CLNKR_BASE_URL     Endpoint override; infers provider when provider is unset
+  CLNKR_BASE_URL     Endpoint override
   CLNKR_ACT_PROTOCOL Command proposal mode override
 `

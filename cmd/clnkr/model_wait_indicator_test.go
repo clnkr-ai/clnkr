@@ -6,11 +6,19 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/clnkr-ai/clnkr"
 )
 
 func TestModelWaitIndicatorDisabledWritesNothing(t *testing.T) {
 	var out bytes.Buffer
-	_ = testModelWaitIndicator(false, &out, time.Millisecond, time.Millisecond, func() time.Time { return time.Unix(0, 0) })
+	_ = testModelWaitIndicator(
+		false,
+		&out,
+		time.Millisecond,
+		time.Millisecond,
+		func() time.Time { return time.Unix(0, 0) },
+	)
 
 	if out.Len() != 0 {
 		t.Fatalf("output = %q, want empty", out.String())
@@ -19,7 +27,13 @@ func TestModelWaitIndicatorDisabledWritesNothing(t *testing.T) {
 
 func TestModelWaitIndicatorShortWaitBeforeDelayWritesNothing(t *testing.T) {
 	var out bytes.Buffer
-	indicator := testModelWaitIndicator(true, &out, time.Hour, time.Millisecond, func() time.Time { return time.Unix(0, 0) })
+	indicator := testModelWaitIndicator(
+		true,
+		&out,
+		time.Hour,
+		time.Millisecond,
+		func() time.Time { return time.Unix(0, 0) },
+	)
 
 	indicator.Start()
 	indicator.Stop()
@@ -32,7 +46,13 @@ func TestModelWaitIndicatorShortWaitBeforeDelayWritesNothing(t *testing.T) {
 func TestModelWaitIndicatorRendersAfterDelayAndClearsOnStop(t *testing.T) {
 	out := &guardedBuffer{}
 	now := time.Unix(10, 0)
-	indicator := testModelWaitIndicator(true, out, time.Millisecond, time.Hour, func() time.Time { return now })
+	indicator := testModelWaitIndicator(
+		true,
+		out,
+		time.Millisecond,
+		time.Hour,
+		func() time.Time { return now },
+	)
 
 	indicator.Start()
 	waitForOutput(t, out, "waiting for model")
@@ -63,14 +83,22 @@ func TestModelWaitIndicatorRendersFixedDotsAndElapsedSeconds(t *testing.T) {
 	if !strings.Contains(got, "╵[-_-]╵ waiting for model... 0s") {
 		t.Fatalf("output = %q, want first approved frame", got)
 	}
-	if !strings.Contains(got, "╶[o_o]╴ waiting for model    2s") && !strings.Contains(got, "╷[O_O]╷ waiting for model.   2s") && !strings.Contains(got, "╴[o_o]╶ waiting for model..  2s") {
+	if !strings.Contains(got, "╶[o_o]╴ waiting for model    2s") &&
+		!strings.Contains(got, "╷[O_O]╷ waiting for model.   2s") &&
+		!strings.Contains(got, "╴[o_o]╶ waiting for model..  2s") {
 		t.Fatalf("output = %q, want later approved frame with elapsed seconds", got)
 	}
 }
 
 func TestModelWaitIndicatorRepeatedStartStopIsRaceSafe(t *testing.T) {
 	var out bytes.Buffer
-	indicator := testModelWaitIndicator(true, &out, time.Millisecond, time.Millisecond, func() time.Time { return time.Now() })
+	indicator := testModelWaitIndicator(
+		true,
+		&out,
+		time.Millisecond,
+		time.Millisecond,
+		func() time.Time { return time.Now() },
+	)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
@@ -89,7 +117,13 @@ func TestModelWaitIndicatorRepeatedStartStopIsRaceSafe(t *testing.T) {
 
 func TestModelWaitIndicatorStopPreventsFutureWrites(t *testing.T) {
 	out := &guardedBuffer{}
-	indicator := testModelWaitIndicator(true, out, time.Millisecond, time.Millisecond, func() time.Time { return time.Now() })
+	indicator := testModelWaitIndicator(
+		true,
+		out,
+		time.Millisecond,
+		time.Millisecond,
+		func() time.Time { return time.Now() },
+	)
 
 	indicator.Start()
 	waitForGuardedOutput(t, out)
@@ -105,7 +139,13 @@ func TestModelWaitIndicatorStopPreventsFutureWrites(t *testing.T) {
 
 func TestModelWaitIndicatorStartDuringStopDoesNotCreateSecondRenderer(t *testing.T) {
 	out := newBlockingClearBuffer()
-	indicator := testModelWaitIndicator(true, out, time.Millisecond, time.Hour, func() time.Time { return time.Now() })
+	indicator := testModelWaitIndicator(
+		true,
+		out,
+		time.Millisecond,
+		time.Hour,
+		func() time.Time { return time.Now() },
+	)
 
 	indicator.Start()
 	waitForOutput(t, out, "waiting for model")
@@ -131,12 +171,36 @@ func TestModelWaitIndicatorStartDuringStopDoesNotCreateSecondRenderer(t *testing
 	}
 }
 
+func TestUpdateModelWaitForAgentEventStartsAndStops(t *testing.T) {
+	out := &guardedBuffer{}
+	indicator := testModelWaitIndicator(
+		true,
+		out,
+		time.Millisecond,
+		time.Hour,
+		func() time.Time { return time.Unix(0, 0) },
+	)
+
+	updateModelWaitForAgentEvent(indicator, clnkr.EventDebug{Message: modelWaitQueryDebugMessage})
+	waitForOutput(t, out, "waiting for model")
+	updateModelWaitForAgentEvent(indicator, clnkr.EventResponse{Turn: &clnkr.DoneTurn{}})
+
+	if !strings.HasSuffix(out.String(), "\r\x1b[2K") {
+		t.Fatalf("output = %q, want clear after response event", out.String())
+	}
+}
+
 type guardedBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
 }
 
-func testModelWaitIndicator(enabled bool, out interface{ Write([]byte) (int, error) }, delay, tick time.Duration, now func() time.Time) *modelWaitIndicator {
+func testModelWaitIndicator(
+	enabled bool,
+	out interface{ Write([]byte) (int, error) },
+	delay, tick time.Duration,
+	now func() time.Time,
+) *modelWaitIndicator {
 	if !enabled {
 		return nil
 	}

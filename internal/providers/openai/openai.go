@@ -196,7 +196,12 @@ func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string
 }
 
 func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, int, string, error) {
-	req, err := http.NewRequestWithContext(ctx, "POST", endpointURL(m.baseURL, "/chat/completions"), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(
+		ctx,
+		"POST",
+		endpointURL(m.baseURL, "/chat/completions"),
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("create request: %w", err)
 	}
@@ -222,7 +227,13 @@ func endpointURL(baseURL, endpoint string) string {
 		return joinURLBoundary(baseURL, endpoint)
 	}
 
-	escapedPath := strings.TrimRight(parsed.EscapedPath(), "/") + "/" + strings.TrimLeft(endpoint, "/")
+	escapedPath := strings.TrimRight(
+		parsed.EscapedPath(),
+		"/",
+	) + "/" + strings.TrimLeft(
+		endpoint,
+		"/",
+	)
 	decodedPath, err := url.PathUnescape(escapedPath)
 	if err != nil {
 		return joinURLBoundary(baseURL, endpoint)
@@ -258,8 +269,11 @@ func parseResponse(respBody []byte) (clnkr.Response, error) {
 	turn, err := openaiwire.ParseProviderTurn(choice.Message.Content)
 	if err != nil {
 		return clnkr.Response{
-			Raw:         choice.Message.Content,
-			Usage:       clnkr.Usage{InputTokens: apiResp.Usage.PromptTokens, OutputTokens: apiResp.Usage.CompletionTokens},
+			Raw: choice.Message.Content,
+			Usage: clnkr.Usage{
+				InputTokens:  apiResp.Usage.PromptTokens,
+				OutputTokens: apiResp.Usage.CompletionTokens,
+			},
 			ProtocolErr: err,
 		}, nil
 	}
@@ -267,9 +281,12 @@ func parseResponse(respBody []byte) (clnkr.Response, error) {
 		return clnkr.Response{}, fmt.Errorf("canonicalize structured output payload: %w", err)
 	}
 	return clnkr.Response{
-		Turn:  turn,
-		Raw:   choice.Message.Content,
-		Usage: clnkr.Usage{InputTokens: apiResp.Usage.PromptTokens, OutputTokens: apiResp.Usage.CompletionTokens},
+		Turn: turn,
+		Raw:  choice.Message.Content,
+		Usage: clnkr.Usage{
+			InputTokens:  apiResp.Usage.PromptTokens,
+			OutputTokens: apiResp.Usage.CompletionTokens,
+		},
 	}, nil
 }
 
@@ -294,7 +311,10 @@ func parseTextResponse(respBody []byte) (string, error) {
 
 func retryableStatus(statusCode int) bool {
 	switch statusCode {
-	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+	case http.StatusTooManyRequests,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
 		return true
 	default:
 		return statusCode >= 500 && statusCode < 600

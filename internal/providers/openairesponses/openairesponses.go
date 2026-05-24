@@ -180,7 +180,13 @@ func (m *Model) QueryFinal(ctx context.Context, messages []clnkr.Message) (clnkr
 	return m.queryStructured(ctx, mapMessages(messages), openaiwire.DoneOnlySchema(), nil, nil)
 }
 
-func (m *Model) queryStructured(ctx context.Context, input []responsesInputItem, schema map[string]any, tools []openAITool, parallelTools *bool) (clnkr.Response, error) {
+func (m *Model) queryStructured(
+	ctx context.Context,
+	input []responsesInputItem,
+	schema map[string]any,
+	tools []openAITool,
+	parallelTools *bool,
+) (clnkr.Response, error) {
 	body, err := json.Marshal(request{
 		Model:           m.model,
 		Instructions:    m.systemPrompt,
@@ -369,8 +375,12 @@ func includeOptions(tools []openAITool) []string {
 	return []string{includeReasoning}
 }
 
-func appendProviderReplayInput(input []responsesInputItem, item clnkr.ProviderReplayItem) []responsesInputItem {
-	if item.Provider != replayProvider || item.ProviderAPI != replayProviderAPI || len(item.JSON) == 0 {
+func appendProviderReplayInput(
+	input []responsesInputItem,
+	item clnkr.ProviderReplayItem,
+) []responsesInputItem {
+	if item.Provider != replayProvider || item.ProviderAPI != replayProviderAPI ||
+		len(item.JSON) == 0 {
 		return input
 	}
 	if item.Type == "reasoning" && !hasEncryptedReasoning(item.JSON) {
@@ -434,7 +444,12 @@ func bashToolSchema() openAITool {
 }
 
 func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, int, string, error) {
-	req, err := http.NewRequestWithContext(ctx, "POST", endpointURL(m.baseURL, "/responses"), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(
+		ctx,
+		"POST",
+		endpointURL(m.baseURL, "/responses"),
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("create request: %w", err)
 	}
@@ -460,7 +475,13 @@ func endpointURL(baseURL, endpoint string) string {
 		return joinURLBoundary(baseURL, endpoint)
 	}
 
-	escapedPath := strings.TrimRight(parsed.EscapedPath(), "/") + "/" + strings.TrimLeft(endpoint, "/")
+	escapedPath := strings.TrimRight(
+		parsed.EscapedPath(),
+		"/",
+	) + "/" + strings.TrimLeft(
+		endpoint,
+		"/",
+	)
 	decodedPath, err := url.PathUnescape(escapedPath)
 	if err != nil {
 		return joinURLBoundary(baseURL, endpoint)
@@ -499,117 +520,6 @@ func parseStructuredResponse(respBody []byte) (clnkr.Response, error) {
 		Raw:   text,
 		Usage: usage,
 	}, nil
-}
-
-func parseToolCallResponse(respBody []byte) (clnkr.Response, error) {
-	apiResp, err := unmarshalResponse(respBody)
-	if err != nil {
-		return clnkr.Response{}, err
-	}
-	usage := clnkr.Usage{InputTokens: apiResp.Usage.InputTokens, OutputTokens: apiResp.Usage.OutputTokens}
-
-	var calls []outputItem
-	var text strings.Builder
-	replay := make([]clnkr.ProviderReplayItem, 0)
-	for i, item := range apiResp.Output {
-		switch item.Type {
-		case "function_call":
-			calls = append(calls, item)
-		case "message":
-			if item.Role != "assistant" {
-				continue
-			}
-			for _, content := range item.Content {
-				switch content.Type {
-				case "output_text":
-					text.WriteString(content.Text)
-				case "refusal":
-					if strings.TrimSpace(content.Refusal) != "" {
-						return clnkr.Response{}, fmt.Errorf("tool-call refusal: %s", content.Refusal)
-					}
-				}
-			}
-		default:
-			if i < len(apiResp.RawOutput) {
-				replay = append(replay, clnkr.ProviderReplayItem{
-					Provider:    replayProvider,
-					ProviderAPI: replayProviderAPI,
-					Type:        item.Type,
-					JSON:        append(json.RawMessage(nil), apiResp.RawOutput[i]...),
-				})
-			}
-		}
-	}
-
-	outputText := text.String()
-	if len(calls) > 0 && strings.TrimSpace(outputText) != "" {
-		return clnkr.Response{Raw: string(respBody), Usage: usage, ProtocolErr: fmt.Errorf("%w: mixed bash tool call and structured text", clnkr.ErrInvalidJSON)}, nil
-	}
-	if len(calls) > 0 {
-		actions := make([]clnkr.BashAction, 0, len(calls))
-		toolCalls := make([]clnkr.BashToolCall, 0, len(calls))
-		for _, item := range calls {
-			turn, call, err := turnFromFunctionCall(item)
-			if err != nil {
-				return clnkr.Response{Raw: string(respBody), Usage: usage, ProtocolErr: err}, nil
-			}
-			act, ok := turn.(*clnkr.ActTurn)
-			if !ok || len(act.Bash.Commands) != 1 {
-				return clnkr.Response{}, fmt.Errorf("tool-call response: expected one command from function call")
-			}
-			actions = append(actions, act.Bash.Commands[0])
-			toolCalls = append(toolCalls, call)
-		}
-		return clnkr.Response{
-			Turn:           &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: actions}},
-			Raw:            string(respBody),
-			Usage:          usage,
-			BashToolCalls:  toolCalls,
-			ProviderReplay: replay,
-		}, nil
-	}
-	if strings.TrimSpace(outputText) == "" {
-		return clnkr.Response{}, fmt.Errorf("tool-call response: no usable output_text or bash tool call")
-	}
-	turn, err := openaiwire.ParseProviderTurn(outputText)
-	if err != nil {
-		return clnkr.Response{Raw: outputText, Usage: usage, ProtocolErr: err}, nil
-	}
-	if _, ok := turn.(*clnkr.ActTurn); ok {
-		return clnkr.Response{Raw: outputText, Usage: usage, ProtocolErr: fmt.Errorf("%w: tool-call mode does not accept text act turns", clnkr.ErrInvalidJSON)}, nil
-	}
-	if _, err := clnkr.CanonicalTurnJSON(turn); err != nil {
-		return clnkr.Response{}, fmt.Errorf("canonicalize tool-call payload: %w", err)
-	}
-	return clnkr.Response{Turn: turn, Raw: outputText, Usage: usage}, nil
-}
-
-func turnFromFunctionCall(item outputItem) (clnkr.Turn, clnkr.BashToolCall, error) {
-	if strings.TrimSpace(item.CallID) == "" {
-		return nil, clnkr.BashToolCall{}, fmt.Errorf("%w: bash tool call missing call_id", clnkr.ErrInvalidJSON)
-	}
-	if item.Name != "bash" {
-		return nil, clnkr.BashToolCall{}, fmt.Errorf("%w: unsupported tool %q", clnkr.ErrInvalidJSON, item.Name)
-	}
-	var args struct {
-		Command string  `json:"command"`
-		Workdir *string `json:"workdir"`
-	}
-	dec := json.NewDecoder(strings.NewReader(item.Arguments))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&args); err != nil {
-		return nil, clnkr.BashToolCall{}, fmt.Errorf("%w: malformed bash tool arguments: %v", clnkr.ErrInvalidJSON, err)
-	}
-	if strings.TrimSpace(args.Command) == "" {
-		return nil, clnkr.BashToolCall{}, clnkr.ErrMissingCommand
-	}
-	call := clnkr.BashToolCall{ID: item.CallID, Command: args.Command}
-	action := clnkr.BashAction{ID: item.CallID, Command: args.Command}
-	if args.Workdir != nil {
-		call.Workdir = *args.Workdir
-		action.Workdir = *args.Workdir
-	}
-	return &clnkr.ActTurn{Bash: clnkr.BashBatch{Commands: []clnkr.BashAction{action}}}, call, nil
 }
 
 func unmarshalResponse(respBody []byte) (response, error) {
@@ -698,7 +608,10 @@ func extractErrorMessage(body []byte) string {
 
 func retryableStatus(statusCode int) bool {
 	switch statusCode {
-	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+	case http.StatusTooManyRequests,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
 		return true
 	default:
 		return statusCode >= 500 && statusCode < 600

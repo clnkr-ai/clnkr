@@ -6,53 +6,64 @@ import (
 )
 
 func TestSharedHelpFragments(t *testing.T) {
-	for name, text := range map[string]string{
-		"provider":      ProviderOptionsUsage,
-		"system prompt": SystemPromptUsage,
-		"environment":   EnvironmentUsage,
+	for _, fragment := range []struct {
+		name  string
+		text  string
+		wants []string
+	}{
+		{
+			name: "provider",
+			text: ProviderOptionsUsage,
+			wants: []string{
+				"--model string",
+				"--base-url string",
+				"--provider-api string",
+				"--act-protocol string",
+				"auto|clnkr-inline|tool-calls",
+				"--effort string",
+				"--max-output-tokens int",
+				"--thinking-budget-tokens int",
+			},
+		},
+		{
+			name: "system prompt",
+			text: SystemPromptUsage,
+			wants: []string{
+				"--no-system-prompt",
+				"--system-prompt-append string",
+				"--dump-system-prompt",
+			},
+		},
+		{
+			name: "environment",
+			text: EnvironmentUsage,
+			wants: []string{
+				"CLNKR_API_KEY",
+				"CLNKR_PROVIDER",
+				"CLNKR_PROVIDER_API",
+				"CLNKR_MODEL",
+				"CLNKR_BASE_URL",
+				"CLNKR_ACT_PROTOCOL",
+			},
+		},
 	} {
-		if strings.TrimSpace(text) == "" {
-			t.Fatalf("%s help is empty", name)
-		}
-		for _, line := range strings.Split(text, "\n") {
-			if len(line) > 79 {
-				t.Fatalf("%s help line length = %d, want <= 79: %q", name, len(line), line)
+		t.Run(fragment.name, func(t *testing.T) {
+			if strings.TrimSpace(fragment.text) == "" {
+				t.Fatal("help is empty")
 			}
-		}
-	}
-	for _, want := range []string{
-		"--model string",
-		"--base-url string",
-		"--provider-api string",
-		"--act-protocol string",
-		"auto|clnkr-inline|tool-calls",
-		"--effort string",
-		"--max-output-tokens int",
-		"--thinking-budget-tokens int",
-	} {
-		if !strings.Contains(ProviderOptionsUsage, want) {
-			t.Fatalf("provider help missing %q", want)
-		}
-	}
-	for _, want := range []string{
-		"--no-system-prompt",
-		"--system-prompt-append string",
-		"--dump-system-prompt",
-	} {
-		if !strings.Contains(SystemPromptUsage, want) {
-			t.Fatalf("system prompt help missing %q", want)
-		}
-	}
-	for _, want := range []string{
-		"CLNKR_API_KEY",
-		"CLNKR_PROVIDER",
-		"CLNKR_PROVIDER_API",
-		"CLNKR_MODEL",
-		"CLNKR_BASE_URL",
-		"CLNKR_ACT_PROTOCOL",
-	} {
-		if !strings.Contains(EnvironmentUsage, want) {
-			t.Fatalf("environment help missing %q", want)
-		}
+			for _, line := range strings.Split(fragment.text, "\n") {
+				if len(line) > 79 {
+					t.Fatalf("line length = %d, want <= 79: %q", len(line), line)
+				}
+			}
+			for _, want := range fragment.wants {
+				if !strings.Contains(fragment.text, want) {
+					t.Fatalf("help missing %q", want)
+				}
+			}
+			if strings.Contains(fragment.text, "infers"+" provider") {
+				t.Fatalf("help contains stale inferred-provider text: %q", fragment.text)
+			}
+		})
 	}
 }

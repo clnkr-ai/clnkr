@@ -87,7 +87,13 @@ func (i *modelWaitIndicator) run(stop <-chan struct{}, done chan<- struct{}, sta
 
 func (i *modelWaitIndicator) render(frame int, start time.Time) {
 	elapsed := int(i.now().Sub(start).Seconds())
-	_, _ = fmt.Fprintf(i.out, "\r[clnkr] %s waiting for model%s%ds", modelWaitFrames[frame%len(modelWaitFrames)], modelWaitDots[(frame+len(modelWaitDots)-1)%len(modelWaitDots)], elapsed)
+	_, _ = fmt.Fprintf(
+		i.out,
+		"\r[clnkr] %s waiting for model%s%ds",
+		modelWaitFrames[frame%len(modelWaitFrames)],
+		modelWaitDots[(frame+len(modelWaitDots)-1)%len(modelWaitDots)],
+		elapsed,
+	)
 }
 
 func updateModelWaitForAgentEvent(indicator *modelWaitIndicator, event clnkr.Event) {
@@ -102,7 +108,10 @@ func updateModelWaitForAgentEvent(indicator *modelWaitIndicator, event clnkr.Eve
 		default:
 			indicator.Stop()
 		}
-	case clnkr.EventResponse, clnkr.EventProtocolFailure, clnkr.EventCommandStart, clnkr.EventCommandDone:
+	case clnkr.EventResponse,
+		clnkr.EventProtocolFailure,
+		clnkr.EventCommandStart,
+		clnkr.EventCommandDone:
 		indicator.Stop()
 	}
 }

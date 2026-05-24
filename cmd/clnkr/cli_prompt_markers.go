@@ -7,7 +7,11 @@ func unattendedPromptDumpArgs(args []string) ([]string, bool) {
 	}
 	for i := 0; i+1 < len(args); i++ {
 		if promptModeMarker(args, i) && args[i+1] == "--dump-system-prompt" {
-			fatalOptionf("%s requires a task. To dump the unattended prompt, use: clnkr --dump-system-prompt %s", args[i], args[i])
+			fatalOptionf(
+				"%s requires a task. To dump the unattended prompt, use: clnkr --dump-system-prompt %s",
+				args[i],
+				args[i],
+			)
 		}
 	}
 	return args, dumpUnattendedPrompt
@@ -17,7 +21,7 @@ func promptModeMarker(args []string, i int) bool {
 	if i > 0 && valueFlag(args[i-1]) {
 		return false
 	}
-	return args[i] == "-p" || args[i] == "--prompt" || args[i] == "--prompt-mode-unattended"
+	return args[i] == "-p" || args[i] == "--prompt"
 }
 
 func dumpPromptMarker(args []string, i int) bool {
@@ -29,7 +33,22 @@ func dumpPromptMarker(args []string, i int) bool {
 
 func valueFlag(arg string) bool {
 	switch arg {
-	case "-p", "--prompt", "--prompt-mode-unattended", "-m", "--model", "-u", "--base-url", "--provider", "--provider-api", "--act-protocol", "--effort", "--thinking-budget-tokens", "--max-output-tokens", "--max-steps", "--event-log", "--trajectory", "--load-messages", "--system-prompt-append":
+	case "-p",
+		"--prompt",
+		"-m",
+		"--model",
+		"--base-url",
+		"--provider",
+		"--provider-api",
+		"--act-protocol",
+		"--effort",
+		"--thinking-budget-tokens",
+		"--max-output-tokens",
+		"--max-steps",
+		"--event-log",
+		"--trajectory",
+		"--load-messages",
+		"--system-prompt-append":
 		return true
 	}
 	return false

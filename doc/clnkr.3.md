@@ -43,7 +43,7 @@ returns a **Response**.
 : Interface for command runners. **Execute** receives a command and working
 directory and returns a **CommandResult**.
 
-**CommandExecutor**
+**ShellExecutor**
 : Built-in Unix bash executor.
 
 **Agent.Run**
@@ -127,7 +127,7 @@ func (model) Query(context.Context, []clnkr.Message) (clnkr.Response, error) {
 }
 
 func main() {
-	agent := clnkr.NewAgent(model{}, &clnkr.CommandExecutor{}, ".")
+	agent := clnkr.NewAgent(model{}, &clnkr.ShellExecutor{}, ".")
 	if err := agent.Run(context.Background(), "check status"); err != nil {
 		if errors.Is(err, clnkr.ErrClarificationNeeded) {
 			log.Print("model asked for clarification")
@@ -143,7 +143,7 @@ func main() {
 The root package is the public library surface. Packages below **internal/**
 are not importable by external callers.
 
-The built-in **CommandExecutor** assumes Unix process semantics and bash.
+The built-in **ShellExecutor** assumes Unix process semantics and bash.
 Windows is unsupported.
 
 # COPYRIGHT

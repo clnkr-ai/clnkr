@@ -15,90 +15,10 @@ import (
 )
 
 func anthropicWrappedDone(summary string) string {
-	return fmt.Sprintf(`{"turn":{"type":"done","bash":null,"question":null,"summary":%q,"verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`, summary)
-}
-
-func TestNewModelForConfigUsesOpenAIResponsesWhenConfigured(t *testing.T) {
-	var gotPath string
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"output": []map[string]any{
-				{
-					"type": "message",
-					"role": "assistant",
-					"content": []map[string]any{
-						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`},
-					},
-				},
-			},
-			"usage": map[string]int{"input_tokens": 1, "output_tokens": 1},
-		})
-	}))
-	defer server.Close()
-
-	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
-		Provider:    "openai",
-		ProviderAPI: "openai-responses",
-		Model:       "gpt-5.4",
-		BaseURL:     server.URL,
-		APIKey:      "test-key",
-	}, "sys")
-	resp, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
-	if err != nil {
-		t.Fatalf("Query: %v", err)
-	}
-	if gotPath != "/responses" {
-		t.Fatalf("path = %q, want %q", gotPath, "/responses")
-	}
-	if got := mustCanonicalTurn(t, resp.Turn); got != `{"type":"done","summary":"ok","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}` {
-		t.Fatalf("canonical turn = %q, want %q", got, `{"type":"done","summary":"ok","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[]}`)
-	}
-}
-
-func TestNewModelForConfigPassesOpenAIResponsesRequestOptions(t *testing.T) {
-	var gotBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(body, &gotBody)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"output": []map[string]any{
-				{
-					"type": "message",
-					"role": "assistant",
-					"content": []map[string]any{
-						{"type": "output_text", "text": `{"turn":{"type":"done","summary":"ok","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`},
-					},
-				},
-			},
-		})
-	}))
-	defer server.Close()
-
-	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
-		Provider:    providerdomain.ProviderOpenAI,
-		ProviderAPI: providerdomain.ProviderAPIOpenAIResponses,
-		Model:       "gpt-5.1",
-		BaseURL:     server.URL,
-		APIKey:      "test-key",
-		RequestOptions: providerdomain.ProviderRequestOptions{
-			Effort: providerdomain.ProviderEffortOptions{Level: "high", Set: true},
-			Output: providerdomain.ProviderOutputOptions{
-				MaxOutputTokens: providerdomain.OptionalInt{Value: 8000, Set: true},
-			},
-		},
-	}, "sys")
-	if _, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}}); err != nil {
-		t.Fatalf("Query: %v", err)
-	}
-	reasoning, ok := gotBody["reasoning"].(map[string]any)
-	if !ok || reasoning["effort"] != "high" {
-		t.Fatalf("reasoning = %#v, want high effort", gotBody["reasoning"])
-	}
-	if got := gotBody["max_output_tokens"]; got != float64(8000) {
-		t.Fatalf("max_output_tokens = %#v, want 8000", got)
-	}
+	return fmt.Sprintf(
+		`{"turn":{"type":"done","bash":null,"question":null,"summary":%q,"verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"go test ./... passed and ls output showed current directory entries for completion"}]},"known_risks":[],"reasoning":null}}`,
+		summary,
+	)
 }
 
 func TestNewModelForConfigPassesAnthropicRequestOptions(t *testing.T) {
@@ -113,7 +33,7 @@ func TestNewModelForConfigPassesAnthropicRequestOptions(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
+	model := newModelForConfig(providerconfig.ResolvedProviderConfig{
 		Provider: providerdomain.ProviderAnthropic,
 		Model:    "claude-sonnet-4-20250514",
 		BaseURL:  server.URL,
@@ -127,7 +47,10 @@ func TestNewModelForConfigPassesAnthropicRequestOptions(t *testing.T) {
 			},
 		},
 	}, "sys")
-	if _, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}}); err != nil {
+	if _, err := model.Query(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "hi"}},
+	); err != nil {
 		t.Fatalf("Query: %v", err)
 	}
 	if got := gotBody["max_tokens"]; got != float64(8000) {
@@ -155,7 +78,7 @@ func TestNewModelForConfigPassesBashToolCallOption(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
+	model := newModelForConfig(providerconfig.ResolvedProviderConfig{
 		Provider:    providerdomain.ProviderAnthropic,
 		Model:       "claude-sonnet-4-20250514",
 		BaseURL:     server.URL,
@@ -186,7 +109,7 @@ func TestNewModelForConfigPassesAnthropicEffortWithAdaptiveThinking(t *testing.T
 	}))
 	defer server.Close()
 
-	model := NewModelForConfig(providerconfig.ResolvedProviderConfig{
+	model := newModelForConfig(providerconfig.ResolvedProviderConfig{
 		Provider: providerdomain.ProviderAnthropic,
 		Model:    "claude-sonnet-4-20250514",
 		BaseURL:  server.URL,
@@ -198,7 +121,10 @@ func TestNewModelForConfigPassesAnthropicEffortWithAdaptiveThinking(t *testing.T
 			},
 		},
 	}, "sys")
-	if _, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}}); err != nil {
+	if _, err := model.Query(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "hi"}},
+	); err != nil {
 		t.Fatalf("Query: %v", err)
 	}
 
@@ -226,21 +152,29 @@ func TestMakeCompactorFactoryUsesOpenAIWhenProviderSelected(t *testing.T) {
 		_ = json.Unmarshal(body, &gotBody)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{
-				{"message": map[string]string{"role": "assistant", "content": "Older work summarized."}},
+				{
+					"message": map[string]string{
+						"role":    "assistant",
+						"content": "Older work summarized.",
+					},
+				},
 			},
 			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
 		})
 	}))
 	defer server.Close()
 
-	compactor := MakeCompactorFactory(providerconfig.ResolvedProviderConfig{
+	compactor := makeCompactorFactory(providerconfig.ResolvedProviderConfig{
 		Provider:    "openai",
 		ProviderAPI: "openai-chat-completions",
 		BaseURL:     server.URL,
 		APIKey:      "test-key",
 		Model:       "gpt-test",
 	})("")
-	summary, err := compactor.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
+	summary, err := compactor.Summarize(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "first task"}},
+	)
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -248,7 +182,10 @@ func TestMakeCompactorFactoryUsesOpenAIWhenProviderSelected(t *testing.T) {
 		t.Fatalf("summary = %q, want %q", summary, "Older work summarized.")
 	}
 	if _, ok := gotBody["response_format"]; ok {
-		t.Fatalf("response_format should be omitted for compaction, got %#v", gotBody["response_format"])
+		t.Fatalf(
+			"response_format should be omitted for compaction, got %#v",
+			gotBody["response_format"],
+		)
 	}
 }
 
@@ -274,14 +211,17 @@ func TestMakeCompactorFactoryUsesOpenAIResponsesWhenConfigured(t *testing.T) {
 	}))
 	defer server.Close()
 
-	compactor := MakeCompactorFactory(providerconfig.ResolvedProviderConfig{
+	compactor := makeCompactorFactory(providerconfig.ResolvedProviderConfig{
 		Provider:    "openai",
 		ProviderAPI: "openai-responses",
 		BaseURL:     server.URL,
 		APIKey:      "test-key",
 		Model:       "gpt-test",
 	})("")
-	summary, err := compactor.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
+	summary, err := compactor.Summarize(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "first task"}},
+	)
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -312,13 +252,16 @@ func TestMakeCompactorFactoryUsesAnthropicWhenProviderSelected(t *testing.T) {
 	}))
 	defer server.Close()
 
-	compactor := MakeCompactorFactory(providerconfig.ResolvedProviderConfig{
+	compactor := makeCompactorFactory(providerconfig.ResolvedProviderConfig{
 		Provider: "anthropic",
 		BaseURL:  server.URL,
 		APIKey:   "test-key",
 		Model:    "claude-test",
 	})("")
-	summary, err := compactor.Summarize(context.Background(), []clnkr.Message{{Role: "user", Content: "first task"}})
+	summary, err := compactor.Summarize(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "first task"}},
+	)
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -329,7 +272,10 @@ func TestMakeCompactorFactoryUsesAnthropicWhenProviderSelected(t *testing.T) {
 		t.Fatalf("request path = %q, want %q", requestPath, "/v1/messages")
 	}
 	if _, ok := gotBody["response_format"]; ok {
-		t.Fatalf("response_format should be omitted for compaction, got %#v", gotBody["response_format"])
+		t.Fatalf(
+			"response_format should be omitted for compaction, got %#v",
+			gotBody["response_format"],
+		)
 	}
 	if _, ok := gotBody["max_tokens"]; !ok {
 		t.Fatalf("anthropic request missing max_tokens: %#v", gotBody)

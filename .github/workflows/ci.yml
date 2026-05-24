@@ -43,6 +43,35 @@ jobs:
       - name: Build site
         run: make docs
 
+  guardrails:
+    runs-on: ubuntu-latest
+    env:
+      ARCHITECTURE_RELEASE_TAG: architecture-guardrail-bin-0.5.2
+      ARCHITECTURE_SHA256: 9168a0ba9ceeb6d556bc42c800b0435ef43b4a9f9b5c1a631b583e79a180c8df
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install architecture guardrail binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p build/tools
+          gh release download "$ARCHITECTURE_RELEASE_TAG" \
+            --repo clnkr-ai/clnkr \
+            --pattern architecture-linux-amd64 \
+            --dir build/tools
+          echo "$ARCHITECTURE_SHA256  build/tools/architecture-linux-amd64" | sha256sum -c -
+          chmod +x build/tools/architecture-linux-amd64
+          build/tools/architecture-linux-amd64 --help
+          echo "THOTH_BIN=$PWD/build/tools/architecture-linux-amd64" >> "$GITHUB_ENV"
+
+      - name: Run guardrail reports
+        run: |
+          make thoth-critical-check
+          make architecture-shape-report
+          make semantic-cohesion-report
+          make test-fidelity-report
+
   evaluations:
     runs-on: ubuntu-latest
     steps:

@@ -8,78 +8,74 @@ import (
 )
 
 func TestProtocolCorrectionMessage(t *testing.T) {
-	t.Run("states prior response was ignored", func(t *testing.T) {
-		msg := protocolCorrectionMessageFor(fmt.Errorf("%w: unexpected trailing JSON value", ErrInvalidJSON), ActProtocolClnkrInline)
-		if !strings.Contains(msg, "Your previous response was ignored and no command ran.") {
-			t.Fatalf("expected ignored-response guidance, got %q", msg)
-		}
-		if !strings.Contains(msg, "If you intended to run commands, resend only that act turn.") {
-			t.Fatalf("expected resend-act guidance, got %q", msg)
-		}
-		if !strings.Contains(msg, "Do not jump to done unless prior command results in this conversation already prove the task is complete.") {
-			t.Fatalf("expected done-guard guidance, got %q", msg)
-		}
-		if !strings.Contains(msg, protocolActExample) {
-			t.Fatalf("expected canonical act guidance, got %q", msg)
-		}
-		if !strings.Contains(msg, "Do not emit multiple JSON objects in one response.") {
-			t.Fatalf("expected multiple-object warning, got %q", msg)
-		}
-		if !strings.Contains(msg, "Do not emit an act turn and a done turn together.") {
-			t.Fatalf("expected act-plus-done warning, got %q", msg)
-		}
-		if !strings.Contains(msg, "Include reasoning in every response; use null if you have nothing to add.") {
-			t.Fatalf("expected explicit reasoning-field guidance, got %q", msg)
-		}
-		if !strings.Contains(msg, `"verification"`) {
-			t.Fatalf("expected verification guidance, got %q", msg)
-		}
-		if !strings.Contains(msg, `"known_risks"`) {
-			t.Fatalf("expected known_risks guidance, got %q", msg)
-		}
-		if strings.Contains(msg, `top-level "turn" field`) {
-			t.Fatalf("expected provider-specific top-level guidance to be absent, got %q", msg)
-		}
-		if strings.Contains(msg, `{"type":"clarify"`) {
-			t.Fatalf("expected separate clarify example to be absent, got %q", msg)
-		}
-		if strings.Contains(msg, `{"type":"done"`) {
-			t.Fatalf("expected separate done example to be absent, got %q", msg)
-		}
-	})
+	tests := []struct {
+		name        string
+		err         error
+		protocol    ActProtocol
+		contains    []string
+		notContains []string
+	}{
+		{
+			name:     "states prior response was ignored",
+			err:      fmt.Errorf("%w: unexpected trailing JSON value", ErrInvalidJSON),
+			protocol: ActProtocolClnkrInline,
+			contains: []string{
+				"Your previous response was ignored and no command ran.",
+				"If you intended to run commands, resend only that act turn.",
+				"Do not jump to done unless prior command results in this conversation already prove the task is complete.",
+				protocolActExample,
+				"Do not emit multiple JSON objects in one response.",
+				"Do not emit an act turn and a done turn together.",
+				"Include reasoning in every response; use null if you have nothing to add.",
+				`"verification"`,
+				`"known_risks"`,
+			},
+			notContains: []string{
+				`top-level "turn" field`,
+				`{"type":"clarify"`,
+				`{"type":"done"`,
+			},
+		},
+		{
+			name:     "mentions invalid pipe escape",
+			err:      fmt.Errorf("%w: invalid character '|' in string escape code", ErrInvalidJSON),
+			protocol: ActProtocolClnkrInline,
+			contains: []string{`\|`, `\\|`},
+		},
+		{
+			name:     "mentions invalid backtick escape",
+			err:      fmt.Errorf("%w: invalid character '`' in string escape code", ErrInvalidJSON),
+			protocol: ActProtocolClnkrInline,
+			contains: []string{"\\`", "\\\\"},
+		},
+	}
 
-	t.Run("mentions invalid pipe escape", func(t *testing.T) {
-		msg := protocolCorrectionMessageFor(fmt.Errorf("%w: invalid character '|' in string escape code", ErrInvalidJSON), ActProtocolClnkrInline)
-		if !strings.Contains(msg, `\|`) || !strings.Contains(msg, `\\|`) {
-			t.Fatalf("expected targeted pipe escape hint, got %q", msg)
-		}
-	})
-
-	t.Run("mentions invalid backtick escape", func(t *testing.T) {
-		msg := protocolCorrectionMessageFor(fmt.Errorf("%w: invalid character '`' in string escape code", ErrInvalidJSON), ActProtocolClnkrInline)
-		if !strings.Contains(msg, "\\`") || !strings.Contains(msg, "\\\\") {
-			t.Fatalf("expected targeted backtick escape hint, got %q", msg)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := protocolCorrectionMessageFor(tt.err, tt.protocol)
+			for _, want := range tt.contains {
+				if !strings.Contains(msg, want) {
+					t.Fatalf("message missing %q: %q", want, msg)
+				}
+			}
+			for _, unwanted := range tt.notContains {
+				if strings.Contains(msg, unwanted) {
+					t.Fatalf("message contains %q: %q", unwanted, msg)
+				}
+			}
+		})
+	}
 }
 
 func TestTurnTypes(t *testing.T) {
-	t.Run("ActTurn implements Turn via value", func(t *testing.T) {
-		var turn Turn = ActTurn{Bash: BashBatch{Commands: []BashAction{{Command: "ls"}}}}
+	for _, turn := range []Turn{
+		ActTurn{Bash: BashBatch{Commands: []BashAction{{Command: "ls"}}}},
+		&ActTurn{Bash: BashBatch{Commands: []BashAction{{Command: "ls"}}}},
+		ClarifyTurn{Question: "which dir?"},
+		DoneTurn{Summary: "done"},
+	} {
 		turn.turn()
-	})
-	t.Run("ActTurn implements Turn via pointer", func(t *testing.T) {
-		var turn Turn = &ActTurn{Bash: BashBatch{Commands: []BashAction{{Command: "ls"}}}}
-		turn.turn()
-	})
-	t.Run("ClarifyTurn implements Turn", func(t *testing.T) {
-		var turn Turn = ClarifyTurn{Question: "which dir?"}
-		turn.turn()
-	})
-	t.Run("DoneTurn implements Turn", func(t *testing.T) {
-		var turn Turn = DoneTurn{Summary: "done"}
-		turn.turn()
-	})
+	}
 }
 
 func TestErrorToReason(t *testing.T) {
