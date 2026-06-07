@@ -92,16 +92,13 @@ func TestDriverTopLevelCompactDispatch(t *testing.T) {
 		t.Fatalf("AddMessages: %v", err)
 	}
 	compactor := &fakeCompactor{summary: "Older work summarized."}
-	driver := NewDriver(agent, func(instructions string) clnkr.Compactor {
-		if instructions != "focus on tests" {
-			t.Fatalf("instructions = %q, want compact instructions", instructions)
-		}
+	driver := NewDriver(agent, func() clnkr.Compactor {
 		return compactor
 	})
 
 	if err := driver.Prompt(
 		context.Background(),
-		"/compact focus on tests",
+		"/compact",
 		PromptModeApproval,
 	); err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -123,20 +120,17 @@ func TestDriverTopLevelCompactDispatch(t *testing.T) {
 	}
 }
 
-func TestDriverStructuredCompactDispatch(t *testing.T) {
+func TestDriverCompactDispatch(t *testing.T) {
 	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
 	if err := agent.AddMessages(compactableMessages()); err != nil {
 		t.Fatalf("AddMessages: %v", err)
 	}
 	compactor := &fakeCompactor{summary: "Older work summarized."}
-	driver := NewDriver(agent, func(instructions string) clnkr.Compactor {
-		if instructions != "  focus on tests  " {
-			t.Fatalf("instructions = %q, want exact structured instructions", instructions)
-		}
+	driver := NewDriver(agent, func() clnkr.Compactor {
 		return compactor
 	})
 
-	if err := driver.Compact(context.Background(), "  focus on tests  "); err != nil {
+	if err := driver.Compact(context.Background()); err != nil {
 		t.Fatalf("Compact: %v", err)
 	}
 

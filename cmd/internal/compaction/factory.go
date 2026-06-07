@@ -7,21 +7,21 @@ import (
 	clnkr "github.com/clnkr-ai/clnkr"
 )
 
-// Factory builds a compactor for the given instruction set.
-type Factory func(instructions string) clnkr.Compactor
+// Factory builds a compactor using the fixed compaction prompt.
+type Factory func() clnkr.Compactor
 
 // FreeformModel summarizes transcript messages as plain text.
 type FreeformModel interface {
 	QueryText(ctx context.Context, messages []clnkr.Message) (string, error)
 }
 
-// ModelFactory builds a summarizer model for the given instruction set.
-type ModelFactory func(instructions string) FreeformModel
+// ModelFactory builds a summarizer model using the fixed compaction prompt.
+type ModelFactory func() FreeformModel
 
 // NewFactory wraps a model factory as a clnkr compactor factory.
 func NewFactory(makeModel ModelFactory) Factory {
-	return func(instructions string) clnkr.Compactor {
-		return modelCompactor{model: makeModel(instructions)}
+	return func() clnkr.Compactor {
+		return modelCompactor{model: makeModel()}
 	}
 }
 

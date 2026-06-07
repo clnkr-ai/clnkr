@@ -23,25 +23,16 @@ func (m *stubModel) QueryText(_ context.Context, messages []clnkr.Message) (stri
 	return m.summary, nil
 }
 
-func TestNewFactoryBuildsFreshCompactorPerInstructionSet(t *testing.T) {
-	var gotInstructions []string
+func TestNewFactoryBuildsFreshCompactor(t *testing.T) {
 	var models []*stubModel
-	factory := NewFactory(func(instructions string) FreeformModel {
-		gotInstructions = append(gotInstructions, instructions)
-		model := &stubModel{summary: "  summary for " + instructions + "  "}
+	factory := NewFactory(func() FreeformModel {
+		model := &stubModel{summary: "  summary  "}
 		models = append(models, model)
 		return model
 	})
 
-	first := factory("focus tests")
-	second := factory("focus files")
-
-	if len(gotInstructions) != 2 {
-		t.Fatalf("factory built %d models, want 2", len(gotInstructions))
-	}
-	if gotInstructions[0] != "focus tests" || gotInstructions[1] != "focus files" {
-		t.Fatalf("instructions = %#v, want [focus tests focus files]", gotInstructions)
-	}
+	first := factory()
+	second := factory()
 
 	firstSummary, err := first.Summarize(
 		context.Background(),
@@ -57,14 +48,11 @@ func TestNewFactoryBuildsFreshCompactorPerInstructionSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Summarize: %v", err)
 	}
-	if firstSummary != "summary for focus tests" {
-		t.Fatalf("first summary = %q, want %q", firstSummary, "summary for focus tests")
+	if firstSummary != "summary" || secondSummary != "summary" {
+		t.Fatalf("summaries = [%q %q], want [summary summary]", firstSummary, secondSummary)
 	}
-	if secondSummary != "summary for focus files" {
-		t.Fatalf("second summary = %q, want %q", secondSummary, "summary for focus files")
-	}
-	if len(models[0].got) != 1 || len(models[1].got) != 1 {
-		t.Fatalf("model calls = [%d %d], want [1 1]", len(models[0].got), len(models[1].got))
+	if len(models) != 2 || len(models[0].got) != 1 || len(models[1].got) != 1 {
+		t.Fatalf("model calls = %#v, want two fresh called models", models)
 	}
 	if !strings.Contains(models[0].got[0][0].Content, "first task") {
 		t.Fatalf("first model query = %#v, want first task", models[0].got[0])

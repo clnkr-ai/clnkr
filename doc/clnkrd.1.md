@@ -51,11 +51,10 @@ non-empty text rejects the batch and is sent back to the model as guidance.
 ```
 
 **compact**
-: Compact older transcript history. Optional **instructions** are passed to
-the compaction summarizer.
+: Compact older transcript history.
 
 ```
-{"type":"compact","instructions":"keep test failures and decisions"}
+{"type":"compact"}
 ```
 
 **shutdown**

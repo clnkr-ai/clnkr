@@ -115,14 +115,15 @@ func (d *Driver) Prompt(ctx context.Context, text string, mode string) error {
 	return d.emit(ctx, EventDone{Summary: doneSummary})
 }
 
-func (d *Driver) Compact(ctx context.Context, instructions string) error {
+// Compact runs the compaction flow through the driver.
+func (d *Driver) Compact(ctx context.Context) error {
 	if err := d.setRunning(true); err != nil {
 		_ = d.emit(ctx, EventError{Err: err})
 		return err
 	}
 	defer d.setRunning(false) //nolint:errcheck
 
-	stats, err := compactTranscript(ctx, d.agent, instructions, d.compactorFactory)
+	stats, err := CompactTranscript(ctx, d.agent, d.compactorFactory)
 	if err != nil {
 		_ = d.emit(ctx, EventError{Err: err})
 		return err

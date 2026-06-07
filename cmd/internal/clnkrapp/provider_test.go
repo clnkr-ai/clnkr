@@ -170,7 +170,7 @@ func TestMakeCompactorFactoryUsesOpenAIWhenProviderSelected(t *testing.T) {
 		BaseURL:     server.URL,
 		APIKey:      "test-key",
 		Model:       "gpt-test",
-	})("")
+	})()
 	summary, err := compactor.Summarize(
 		context.Background(),
 		[]clnkr.Message{{Role: "user", Content: "first task"}},
@@ -217,7 +217,7 @@ func TestMakeCompactorFactoryUsesOpenAIResponsesWhenConfigured(t *testing.T) {
 		BaseURL:     server.URL,
 		APIKey:      "test-key",
 		Model:       "gpt-test",
-	})("")
+	})()
 	summary, err := compactor.Summarize(
 		context.Background(),
 		[]clnkr.Message{{Role: "user", Content: "first task"}},
@@ -257,7 +257,7 @@ func TestMakeCompactorFactoryUsesAnthropicWhenProviderSelected(t *testing.T) {
 		BaseURL:  server.URL,
 		APIKey:   "test-key",
 		Model:    "claude-test",
-	})("")
+	})()
 	summary, err := compactor.Summarize(
 		context.Background(),
 		[]clnkr.Message{{Role: "user", Content: "first task"}},

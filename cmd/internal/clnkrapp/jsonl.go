@@ -10,10 +10,9 @@ import (
 )
 
 type JSONLCommand struct {
-	Type         string `json:"type"`
-	Text         string `json:"text,omitempty"`
-	Mode         string `json:"mode,omitempty"`
-	Instructions string `json:"instructions,omitempty"`
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+	Mode string `json:"mode,omitempty"`
 }
 
 func DecodeJSONLCommand(line []byte) (JSONLCommand, error) {

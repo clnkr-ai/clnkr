@@ -273,8 +273,8 @@ model-turn budget state. It records **commands_used** and
 : A host block containing a summary of older transcript history.
 
 During compaction, clnkr replaces an older transcript prefix with one
-**[compact]** tagged JSON block containing **source**, **kind**, **summary**,
-and optional **instructions**. It keeps the recent tail starting at the selected
+**[compact]** tagged JSON block containing **source**, **kind**, and
+**summary**. It keeps the recent tail starting at the selected
 user-authored message and preserves the latest clnkr cwd state if that state
 would otherwise be lost.
 

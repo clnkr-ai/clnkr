@@ -79,7 +79,7 @@ clnkr --continue
 Compact older transcript history:
 
 ```text
-/compact focus on failing tests and edited files
+/compact
 ```
 
 Ask the model to launch a bounded JSONL process:

@@ -39,8 +39,8 @@ func TestDecodeJSONLCommand(t *testing.T) {
 		},
 		{
 			"compact command",
-			`{"type":"compact","instructions":"focus on tests"}`,
-			JSONLCommand{Type: "compact", Instructions: "focus on tests"},
+			`{"type":"compact"}`,
+			JSONLCommand{Type: "compact"},
 			"",
 		},
 		{"shutdown command", `{"type":"shutdown"}`, JSONLCommand{Type: "shutdown"}, ""},

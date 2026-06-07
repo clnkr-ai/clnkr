@@ -8,10 +8,9 @@ import (
 )
 
 type compactState struct {
-	Source       string `json:"source"`
-	Kind         string `json:"kind"`
-	Instructions string `json:"instructions,omitempty"`
-	Summary      string `json:"summary"`
+	Source  string `json:"source"`
+	Kind    string `json:"kind"`
+	Summary string `json:"summary"`
 }
 
 func messageKind(msg Message) string {
@@ -57,12 +56,11 @@ func isUserAuthoredMessage(msg Message) bool {
 }
 
 // FormatCompactMessage renders the compact-summary transcript block.
-func FormatCompactMessage(summary, instructions string) string {
+func FormatCompactMessage(summary string) string {
 	body, err := json.Marshal(compactState{
-		Source:       "clnkr",
-		Kind:         "compact",
-		Instructions: instructions,
-		Summary:      summary,
+		Source:  "clnkr",
+		Kind:    "compact",
+		Summary: summary,
 	})
 	if err != nil {
 		panic(fmt.Sprintf("marshal compact message: %v", err))
@@ -97,7 +95,7 @@ func FindCompactBoundary(messages []Message, keepRecentTurns int) (int, bool) {
 // RewriteForCompaction replaces the older transcript prefix with a compact block.
 func RewriteForCompaction(
 	messages []Message,
-	summary, instructions string,
+	summary string,
 	keepRecentTurns int,
 ) ([]Message, CompactStats, error) {
 	if keepRecentTurns < 1 {
@@ -124,7 +122,7 @@ func RewriteForCompaction(
 	rewritten := make([]Message, 0, len(keptTail)+2)
 	rewritten = append(
 		rewritten,
-		Message{Role: "user", Content: FormatCompactMessage(summary, instructions)},
+		Message{Role: "user", Content: FormatCompactMessage(summary)},
 	)
 
 	keptMessages := len(keptTail)

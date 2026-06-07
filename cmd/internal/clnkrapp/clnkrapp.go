@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode"
 
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/compaction"
@@ -54,8 +55,8 @@ func providerFactoryConfig(cfg providerconfig.ResolvedProviderConfig) providerfa
 }
 
 func makeCompactorFactory(cfg providerconfig.ResolvedProviderConfig) compaction.Factory {
-	return compaction.NewFactory(func(instructions string) compaction.FreeformModel {
-		return newModelForConfig(cfg, compaction.LoadCompactionPrompt(instructions))
+	return compaction.NewFactory(func() compaction.FreeformModel {
+		return newModelForConfig(cfg, compaction.LoadCompactionPrompt())
 	})
 }
 
@@ -284,12 +285,45 @@ func AddMessagesFile(agent *clnkr.Agent, path string) error {
 	return nil
 }
 
-func ParseCompactCommand(input string) (instructions string, ok bool) {
-	input = strings.TrimSpace(input)
-	if fields := strings.Fields(input); len(fields) == 0 || fields[0] != "/compact" {
-		return "", false
+func ParseCompactCommand(input string) bool {
+	return strings.TrimSpace(input) == "/compact"
+}
+
+// MalformedCompactCommand reports whether input is a malformed compact command.
+// It returns an error if input looks like /compact with trailing text.
+func MalformedCompactCommand(input string) error {
+	trimmed := strings.TrimSpace(input)
+	if strings.HasPrefix(trimmed, "/compact") && len(trimmed) > len("/compact") &&
+		unicode.IsSpace(rune(trimmed[len("/compact")])) {
+		return fmt.Errorf("/compact does not accept arguments")
 	}
-	return strings.TrimSpace(strings.TrimPrefix(input, "/compact")), true
+	return nil
+}
+
+// CompactTranscript runs compaction on the agent transcript.
+func CompactTranscript(
+	ctx context.Context,
+	agent *clnkr.Agent,
+	factory compaction.Factory,
+) (clnkr.CompactStats, error) {
+	if factory == nil {
+		return clnkr.CompactStats{}, fmt.Errorf(
+			"compact command: no compactor factory configured",
+		)
+	}
+	compactor := factory()
+	if compactor == nil {
+		return clnkr.CompactStats{}, fmt.Errorf("compact command: no compactor configured")
+	}
+	stats, err := agent.Compact(
+		ctx,
+		compactor,
+		clnkr.CompactOptions{KeepRecentTurns: 2},
+	)
+	if err != nil {
+		return clnkr.CompactStats{}, err
+	}
+	return stats, nil
 }
 
 func HandleCompactCommand(
@@ -298,32 +332,25 @@ func HandleCompactCommand(
 	input string,
 	factory compaction.Factory,
 ) (clnkr.CompactStats, bool, error) {
-	instructions, ok := ParseCompactCommand(input)
-	if !ok {
+	if err := MalformedCompactCommand(input); err != nil {
+		return clnkr.CompactStats{}, false, err
+	}
+	if !ParseCompactCommand(input) {
 		return clnkr.CompactStats{}, false, nil
 	}
-	stats, err := compactTranscript(ctx, agent, instructions, factory)
-	return stats, err == nil, err
-}
-
-func compactTranscript(
-	ctx context.Context, agent *clnkr.Agent, instructions string, factory compaction.Factory,
-) (clnkr.CompactStats, error) {
-	if factory == nil {
-		return clnkr.CompactStats{}, fmt.Errorf("compact command: no compactor factory configured")
+	stats, err := CompactTranscript(ctx, agent, factory)
+	if err != nil {
+		return clnkr.CompactStats{}, false, err
 	}
-	compactor := factory(instructions)
-	if compactor == nil {
-		return clnkr.CompactStats{}, fmt.Errorf("compact command: no compactor configured")
-	}
-	return agent.Compact(ctx, compactor, clnkr.CompactOptions{
-		Instructions: instructions, KeepRecentTurns: 2,
-	})
+	return stats, true, nil
 }
 
 func RejectCompactCommand(input string) error {
-	if _, ok := ParseCompactCommand(input); ok {
+	if ParseCompactCommand(input) {
 		return fmt.Errorf("/compact is only available at the conversational prompt")
+	}
+	if err := MalformedCompactCommand(input); err != nil {
+		return err
 	}
 	return nil
 }

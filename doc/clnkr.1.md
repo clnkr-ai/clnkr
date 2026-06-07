@@ -104,10 +104,10 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 
 # INTERACTIVE COMMANDS
 
-**/compact** [*instructions*]
-: At the idle conversational prompt, summarize older transcript history while keeping the recent working thread intact. Optional trailing text is passed to the compaction summarizer as extra instructions.
+**/compact**
+: At the idle conversational prompt, summarize older transcript history while keeping the recent working thread intact.
 
-This command is only available at the top-level conversational prompt. In single-task mode, approval replies, and clarification replies, the literal text is treated as normal input or rejected with an error rather than triggering compaction.
+This command is only available at the top-level conversational prompt. Trailing text after **/compact** is rejected. In single-task mode, approval replies, and clarification replies, the literal exact command is rejected with an error rather than triggering compaction.
 
 **/delegate** *task*
 : Ask the model to launch **clnkrd** through bash for bounded machine-facing

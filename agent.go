@@ -204,7 +204,6 @@ func (a *Agent) Compact(
 	rewritten, stats, err := transcript.RewriteForCompaction(
 		transcriptMessages,
 		summary,
-		opts.Instructions,
 		keepRecentTurns,
 	)
 	if err != nil {

@@ -1056,7 +1056,7 @@ func TestRunSingleTaskRejectsCompactCommand(t *testing.T) {
 		"CLNKR_PROVIDER=openai",
 		"CLNKR_MODEL=gpt-test",
 		"TERM=xterm",
-	}, "-p", "/compact focus on tests")
+	}, "-p", "/compact")
 	if err == nil {
 		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
 	}

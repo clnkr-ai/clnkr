@@ -433,7 +433,7 @@ func handleJSONLCommand(
 			return runDone, cancelRun, fmt.Errorf("compact: driver run already in progress")
 		}
 		runDone, cancelRun = startDriverRun(ctx, func(runCtx context.Context) error {
-			return driver.Compact(runCtx, command.Instructions)
+			return driver.Compact(runCtx)
 		})
 	case "shutdown":
 		if cancelRun != nil {
