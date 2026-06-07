@@ -12,7 +12,7 @@ clnkr - a minimal coding agent (plain CLI)
 
 **clnkr** is a minimal coding agent that queries LLMs and executes bash commands using an act protocol. The default protocol is **auto**, which uses provider-native **bash** tool calls when the resolved provider/API supports them and falls back to provider-portable clnkr act JSON otherwise.
 
-In default mode, **clnkr** starts an interactive REPL. With **-p**, it runs a single unattended task and exits.
+In default mode, **clnkr** starts an interactive REPL. With **-p**, it runs a single unattended task and exits. Single-task runs save the project session by default, so later **clnkr --continue** and **clnkr --list-sessions** can see them.
 
 At the main idle conversational prompt, **/compact** summarizes older transcript history while keeping recent context intact for the current working thread.
 

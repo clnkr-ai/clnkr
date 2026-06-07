@@ -449,7 +449,12 @@ func main() {
 	}
 
 	driver := startup.Driver
-	singleTaskOpts := singleTaskRunOptions{taskPrompt: opts.taskPrompt, trajectory: opts.trajectory}
+	singleTaskOpts := singleTaskRunOptions{
+		taskPrompt:  opts.taskPrompt,
+		trajectory:  opts.trajectory,
+		cwd:         cwd,
+		runMetadata: runMetadata,
+	}
 	replOpts := replRunOptions{fullSend: opts.fullSend, verbose: opts.verbose}
 
 	if opts.singleTask {
@@ -461,8 +466,8 @@ func main() {
 }
 
 type singleTaskRunOptions struct {
-	taskPrompt string
-	trajectory string
+	taskPrompt, trajectory, cwd string
+	runMetadata                 clnkrapp.RunMetadata
 }
 
 type replRunOptions struct {
@@ -557,17 +562,34 @@ func runSingleTask(
 	if opts.trajectory != "" {
 		if err := clnkrapp.WriteTrajectory(opts.trajectory, agent.Messages()); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			saveSessionIfMessages(agent, opts.cwd, opts.runMetadata, false)
 			if runErr != nil {
 				_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", runErr)
 			}
 			os.Exit(1)
 		}
 	}
+	saveSessionIfMessages(agent, opts.cwd, opts.runMetadata, false)
 	if errors.Is(runErr, clnkr.ErrClarificationNeeded) {
 		_, _ = fmt.Fprintln(os.Stderr, "clarify not allowed in unattended mode")
 		os.Exit(2)
 	}
 	exitRunErr(runErr)
+}
+
+func saveSessionIfMessages(
+	agent *clnkr.Agent,
+	cwd string,
+	runMetadata clnkrapp.RunMetadata,
+	notice bool,
+) {
+	if msgs := agent.Messages(); len(msgs) > 0 {
+		if dir, err := clnkrapp.SaveSession(cwd, msgs, runMetadata); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", err)
+		} else if notice {
+			_, _ = fmt.Fprintf(os.Stderr, "[Session saved to %s]\n", dir)
+		}
+	}
 }
 
 func runREPL(
@@ -597,13 +619,7 @@ func runREPL(
 		}
 	}
 	loopErr := runPromptLoop(driver, reader, *modelWait, showPrompt, mode, eventLog)
-	if msgs := agent.Messages(); len(msgs) > 0 {
-		if dir, err := clnkrapp.SaveSession(cwd, msgs, runMetadata); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", err)
-		} else {
-			_, _ = fmt.Fprintf(os.Stderr, "[Session saved to %s]\n", dir)
-		}
-	}
+	saveSessionIfMessages(agent, cwd, runMetadata, true)
 	exitRunErr(loopErr)
 }
 
