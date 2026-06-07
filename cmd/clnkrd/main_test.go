@@ -228,22 +228,24 @@ func TestRunJSONLCompactRoutesInstructionsThroughDriver(t *testing.T) {
 		t.Fatalf("AddMessages: %v", err)
 	}
 	compactor := &fakeCompactor{summary: "Older work summarized."}
+	var gotInstructions string
 	driver := clnkrapp.NewDriver(agent, func(instructions string) clnkr.Compactor {
-		if instructions != "focus tests" {
-			t.Fatalf("instructions = %q, want focus tests", instructions)
-		}
+		gotInstructions = instructions
 		return compactor
 	})
 
 	err := runJSONL(
 		context.Background(),
-		strings.NewReader(`{"type":"compact","instructions":"focus tests"}`+"\n"),
+		strings.NewReader(`{"type":"compact","instructions":"  focus tests  "}`+"\n"),
 		&out,
 		&errOut,
 		driver,
 	)
 	if err != nil {
 		t.Fatalf("runJSONL: %v", err)
+	}
+	if gotInstructions != "  focus tests  " {
+		t.Fatalf("instructions = %q, want exact JSONL instructions", gotInstructions)
 	}
 
 	wantTypes := []string{"compacted"}

@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 
 	"github.com/clnkr-ai/clnkr"
@@ -421,7 +420,9 @@ func handleJSONLCommand(
 		if runDone != nil {
 			return runDone, cancelRun, fmt.Errorf("prompt: driver run already in progress")
 		}
-		runDone, cancelRun = startDriverPrompt(ctx, driver, command.Text, command.Mode)
+		runDone, cancelRun = startDriverRun(ctx, func(runCtx context.Context) error {
+			return driver.Prompt(runCtx, command.Text, command.Mode)
+		})
 	case "reply":
 		if driver.Pending() == clnkrapp.PendingNone {
 			return runDone, cancelRun, fmt.Errorf("reply: no pending request")
@@ -431,12 +432,9 @@ func handleJSONLCommand(
 		if runDone != nil {
 			return runDone, cancelRun, fmt.Errorf("compact: driver run already in progress")
 		}
-		runDone, cancelRun = startDriverPrompt(
-			ctx,
-			driver,
-			compactPrompt(command.Instructions),
-			clnkrapp.PromptModeApproval,
-		)
+		runDone, cancelRun = startDriverRun(ctx, func(runCtx context.Context) error {
+			return driver.Compact(runCtx, command.Instructions)
+		})
 	case "shutdown":
 		if cancelRun != nil {
 			cancelRun()
@@ -447,24 +445,14 @@ func handleJSONLCommand(
 	return runDone, cancelRun, nil
 }
 
-func startDriverPrompt(
+func startDriverRun(
 	ctx context.Context,
-	driver *clnkrapp.Driver,
-	text string,
-	mode string,
+	run func(context.Context) error,
 ) (<-chan error, context.CancelFunc) {
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() {
-		done <- driver.Prompt(runCtx, text, mode)
+		done <- run(runCtx)
 	}()
 	return done, cancel
-}
-
-func compactPrompt(instructions string) string {
-	instructions = strings.TrimSpace(instructions)
-	if instructions == "" {
-		return "/compact"
-	}
-	return "/compact " + instructions
 }

@@ -302,24 +302,23 @@ func HandleCompactCommand(
 	if !ok {
 		return clnkr.CompactStats{}, false, nil
 	}
+	stats, err := compactTranscript(ctx, agent, instructions, factory)
+	return stats, err == nil, err
+}
+
+func compactTranscript(
+	ctx context.Context, agent *clnkr.Agent, instructions string, factory compaction.Factory,
+) (clnkr.CompactStats, error) {
 	if factory == nil {
-		return clnkr.CompactStats{}, false, fmt.Errorf(
-			"compact command: no compactor factory configured",
-		)
+		return clnkr.CompactStats{}, fmt.Errorf("compact command: no compactor factory configured")
 	}
 	compactor := factory(instructions)
 	if compactor == nil {
-		return clnkr.CompactStats{}, false, fmt.Errorf("compact command: no compactor configured")
+		return clnkr.CompactStats{}, fmt.Errorf("compact command: no compactor configured")
 	}
-	stats, err := agent.Compact(
-		ctx,
-		compactor,
-		clnkr.CompactOptions{Instructions: instructions, KeepRecentTurns: 2},
-	)
-	if err != nil {
-		return clnkr.CompactStats{}, false, err
-	}
-	return stats, true, nil
+	return agent.Compact(ctx, compactor, clnkr.CompactOptions{
+		Instructions: instructions, KeepRecentTurns: 2,
+	})
 }
 
 func RejectCompactCommand(input string) error {

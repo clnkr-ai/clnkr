@@ -115,6 +115,21 @@ func (d *Driver) Prompt(ctx context.Context, text string, mode string) error {
 	return d.emit(ctx, EventDone{Summary: doneSummary})
 }
 
+func (d *Driver) Compact(ctx context.Context, instructions string) error {
+	if err := d.setRunning(true); err != nil {
+		_ = d.emit(ctx, EventError{Err: err})
+		return err
+	}
+	defer d.setRunning(false) //nolint:errcheck
+
+	stats, err := compactTranscript(ctx, d.agent, instructions, d.compactorFactory)
+	if err != nil {
+		_ = d.emit(ctx, EventError{Err: err})
+		return err
+	}
+	return d.emit(ctx, EventCompacted{Stats: stats})
+}
+
 func (d *Driver) Reply(ctx context.Context, text string) error {
 	d.mu.Lock()
 	pending := d.pending

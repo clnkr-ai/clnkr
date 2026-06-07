@@ -123,6 +123,36 @@ func TestDriverTopLevelCompactDispatch(t *testing.T) {
 	}
 }
 
+func TestDriverStructuredCompactDispatch(t *testing.T) {
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+	compactor := &fakeCompactor{summary: "Older work summarized."}
+	driver := NewDriver(agent, func(instructions string) clnkr.Compactor {
+		if instructions != "  focus on tests  " {
+			t.Fatalf("instructions = %q, want exact structured instructions", instructions)
+		}
+		return compactor
+	})
+
+	if err := driver.Compact(context.Background(), "  focus on tests  "); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+
+	event := nextDriverEvent(t, driver)
+	compacted, ok := event.(EventCompacted)
+	if !ok {
+		t.Fatalf("event = %T, want EventCompacted", event)
+	}
+	if compacted.Stats.CompactedMessages != 2 || compacted.Stats.KeptMessages != 4 {
+		t.Fatalf("stats = %#v, want 2 compacted and 4 kept", compacted.Stats)
+	}
+	if got := driver.Pending(); got != PendingNone {
+		t.Fatalf("Pending() = %q, want %q", got, PendingNone)
+	}
+}
+
 func TestDriverDelegateTextReachesModelAsOrdinaryPrompt(t *testing.T) {
 	agent := clnkr.NewAgent(&fakeModel{responses: []clnkr.Response{
 		mustResponse(`{"type":"done","summary":"done"}`),

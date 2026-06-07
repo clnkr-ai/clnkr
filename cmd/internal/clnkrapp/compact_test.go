@@ -87,6 +87,35 @@ func TestHandleCompactCommandDoesNotAppendLiteralUserMessage(t *testing.T) {
 	}
 }
 
+func TestCompactTranscriptUsesStructuredInstructions(t *testing.T) {
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+
+	compactor := &fakeCompactor{summary: "Older work summarized."}
+	stats, err := compactTranscript(
+		context.Background(),
+		agent,
+		"  focus on failing tests  ",
+		func(instructions string) clnkr.Compactor {
+			if instructions != "  focus on failing tests  " {
+				t.Fatalf("instructions = %q, want exact structured instructions", instructions)
+			}
+			return compactor
+		},
+	)
+	if err != nil {
+		t.Fatalf("compactTranscript: %v", err)
+	}
+	if stats.CompactedMessages != 2 || stats.KeptMessages != 4 {
+		t.Fatalf("stats = %#v, want 2 compacted and 4 kept", stats)
+	}
+	if hasUserMessage(agent.Messages(), "/compact   focus on failing tests  ") {
+		t.Fatalf("structured compact instructions leaked into transcript: %#v", agent.Messages())
+	}
+}
+
 func TestHandleCompactCommandFailureLeavesMessagesUnchanged(t *testing.T) {
 	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
 	if err := agent.AddMessages(compactableMessages()); err != nil {
