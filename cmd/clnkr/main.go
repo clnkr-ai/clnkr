@@ -33,7 +33,7 @@ var usageText = `clnkr - a minimal coding agent
 
 Usage:
   clnkr                     Start conversational mode
-  Models may run clnkrd through bash for bounded child work.
+  Models may run clnkrd through bash for bounded JSONL work.
 
 Options:
   -p, --prompt string       Task to run unattended and exit

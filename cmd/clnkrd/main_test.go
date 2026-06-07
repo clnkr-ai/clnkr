@@ -25,7 +25,7 @@ func TestHelpWritesRichUsageToStdout(t *testing.T) {
 	}
 	for _, want := range []string{
 		"clnkrd - stdio JSONL adapter for clnkr",
-		"May be launched by clnkr through bash for bounded child work.",
+		"Machine-facing stdio JSONL for tools, editors, wrappers, evals, automation,",
 		"Usage:",
 		"JSONL commands:",
 		"JSONL events:",

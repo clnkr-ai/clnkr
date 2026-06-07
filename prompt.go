@@ -13,38 +13,38 @@ const shellEscapePromptExample = `"grep 'A\\\\|B' file.txt"`
 const parallelWorkPromptBlock = `
 
 <parallel-work>
-Bash is your only tool. You may use bash to run ` + "`clnkrd`" + ` as another ordinary process whenever it would materially reduce uncertainty, parallelize independent work, verify a claim, or explore a non-blocking question.
+Bash is your only tool. You may use bash to run ` + "`clnkrd`" + ` as a machine-facing stdio JSONL process whenever it would materially reduce uncertainty, parallelize independent work, verify a claim, or explore a non-blocking question.
 
 Use ` + "`clnkrd`" + ` for bounded work that can return a compact result: research, codebase exploration, log analysis, test investigation, review, or an independent hypothesis. Keep work local when the task is quick, sequential, interactive, needs shared context, or would edit the same files without clear ownership.
 
 Use decomposition for separable subtasks, self-consistency for important uncertain judgments where independent analyses should converge, and self-refine for review/revision loops with concrete criteria. Do not use extra processes when a normal bash command, test, grep, or file read gives the answer directly.
 
-If the user writes ` + "`/delegate ...`" + `, treat it as an instruction to launch ` + "`clnkrd`" + ` through bash for that bounded child task; do not treat it as a host command.
+If the user writes ` + "`/delegate ...`" + `, treat it as prompt text asking you to launch ` + "`clnkrd`" + ` through bash for bounded machine-facing JSONL work; do not treat it as a host command.
 
 Examples:
 - Reduce uncertainty:
-  children=$(mktemp -d /tmp/clnkr-children.$$.XXXXXX)
-  mkdir -p "$children/jsonl-contract"
-  printf '%s\n' '{"type":"prompt","text":"Inspect cmd/clnkrd and summarize the JSONL command and event contract with file references. Do not edit files. Return evidence, uncertainty, and next checks.","mode":"full_send"}' | clnkrd --event-log "$children/jsonl-contract/events.jsonl" > "$children/jsonl-contract/out.jsonl" 2> "$children/jsonl-contract/err"
-  sed -n '1,200p' "$children/jsonl-contract/out.jsonl"
+  workdir=$(mktemp -d /tmp/clnkr-processes.$$.XXXXXX)
+  mkdir -p "$workdir/jsonl-contract"
+  printf '%s\n' '{"type":"prompt","text":"Inspect cmd/clnkrd and summarize the JSONL command and event contract with file references. Do not edit files. Return evidence, uncertainty, and next checks.","mode":"full_send"}' | clnkrd --event-log "$workdir/jsonl-contract/events.jsonl" > "$workdir/jsonl-contract/out.jsonl" 2> "$workdir/jsonl-contract/err"
+  sed -n '1,200p' "$workdir/jsonl-contract/out.jsonl"
 
 - Parallelize independent work:
-  children=$(mktemp -d /tmp/clnkr-children.$$.XXXXXX)
-  mkdir -p "$children/prompt-review" "$children/docs-review"
-  printf '%s\n' '{"type":"prompt","text":"Review prompt.go for autonomy-prompt risks. Do not edit. Return exact concerns and line references.","mode":"full_send"}' | clnkrd --event-log "$children/prompt-review/events.jsonl" > "$children/prompt-review/out.jsonl" 2> "$children/prompt-review/err" & pid1=$!
-  printf '%s\n' '{"type":"prompt","text":"Review README.md, AGENTS.md, and doc/*.1.md for clnkrd orchestration docs that need updating. Do not edit. Return files and proposed changes.","mode":"full_send"}' | clnkrd --event-log "$children/docs-review/events.jsonl" > "$children/docs-review/out.jsonl" 2> "$children/docs-review/err" & pid2=$!
-  # Do independent local work here before reading child output.
+  workdir=$(mktemp -d /tmp/clnkr-processes.$$.XXXXXX)
+  mkdir -p "$workdir/prompt-review" "$workdir/docs-review"
+  printf '%s\n' '{"type":"prompt","text":"Review prompt.go for autonomy-prompt risks. Do not edit. Return exact concerns and line references.","mode":"full_send"}' | clnkrd --event-log "$workdir/prompt-review/events.jsonl" > "$workdir/prompt-review/out.jsonl" 2> "$workdir/prompt-review/err" & pid1=$!
+  printf '%s\n' '{"type":"prompt","text":"Review README.md, AGENTS.md, and doc/*.1.md for clnkrd machine-facing JSONL adapter docs that need updating. Do not edit. Return files and proposed changes.","mode":"full_send"}' | clnkrd --event-log "$workdir/docs-review/events.jsonl" > "$workdir/docs-review/out.jsonl" 2> "$workdir/docs-review/err" & pid2=$!
+  # Do independent local work here before reading process output.
   wait "$pid1" "$pid2"
-  sed -n '1,200p' "$children/prompt-review/out.jsonl"
-  sed -n '1,200p' "$children/docs-review/out.jsonl"
+  sed -n '1,200p' "$workdir/prompt-review/out.jsonl"
+  sed -n '1,200p' "$workdir/docs-review/out.jsonl"
 
 - Verify a claim:
-  children=$(mktemp -d /tmp/clnkr-children.$$.XXXXXX)
-  mkdir -p "$children/delegation-reachability"
-  printf '%s\n' '{"type":"prompt","text":"Independently verify whether internal/delegation is still reachable from shipped commands. Do not edit. Return import paths, command paths, and confidence.","mode":"full_send"}' | clnkrd --event-log "$children/delegation-reachability/events.jsonl" > "$children/delegation-reachability/out.jsonl" 2> "$children/delegation-reachability/err"
-  sed -n '1,200p' "$children/delegation-reachability/out.jsonl"
+  workdir=$(mktemp -d /tmp/clnkr-processes.$$.XXXXXX)
+  mkdir -p "$workdir/jsonl-events"
+  printf '%s\n' '{"type":"prompt","text":"Independently verify whether cmd/clnkrd emits the documented JSONL events. Do not edit. Return file references, command paths, and confidence.","mode":"full_send"}' | clnkrd --event-log "$workdir/jsonl-events/events.jsonl" > "$workdir/jsonl-events/out.jsonl" 2> "$workdir/jsonl-events/err"
+  sed -n '1,200p' "$workdir/jsonl-events/out.jsonl"
 
-After a ` + "`clnkrd`" + ` process finishes, read its stdout/stderr or event log, synthesize the useful result, and verify important claims locally. Treat child output as evidence to evaluate, not proof.
+After a ` + "`clnkrd`" + ` process finishes, read its stdout/stderr or event log, synthesize the useful result, and verify important claims locally. Treat process output as evidence to evaluate, not proof.
 </parallel-work>`
 
 const basePromptTemplate = `You are an expert software engineer that solves problems using bash commands. Be concise.

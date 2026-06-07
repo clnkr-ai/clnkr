@@ -21,7 +21,8 @@ var version = "dev"
 func usageText() string {
 	return `clnkrd - stdio JSONL adapter for clnkr
 
-May be launched by clnkr through bash for bounded child work.
+Machine-facing stdio JSONL for tools, editors, wrappers, evals, automation,
+and agents.
 
 Usage:
   clnkrd [options]          Read JSONL commands on stdin, emit events on stdout

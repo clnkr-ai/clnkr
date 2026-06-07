@@ -21,13 +21,16 @@ protocol events.
 clnkrd is a stdio adapter. It does not open sockets, authenticate clients,
 serve HTTP, host plugins, or manage a background service lifecycle.
 
-clnkr can launch clnkrd through bash for bounded child work. In that use,
-clnkrd is still just a stdio JSONL process; stdout, stderr, and **--event-log**
-are the child artifact surfaces.
+Tools, editors, wrappers, evals, automation, and agents can launch clnkrd
+through bash for bounded work. In that use, clnkrd is still just a
+machine-facing stdio JSONL process; stdout, stderr, and **--event-log** are the
+process artifact surfaces.
 
 # JSONL COMMANDS
 
 Every stdin line is one JSON object with a **type** field.
+Each command line may be up to 16 MiB. Longer lines are rejected as bad JSONL
+input, with diagnostics on stderr and exit status **1**.
 
 **prompt**
 : Start a run.
@@ -113,34 +116,34 @@ the clnkr CLI where they apply to non-interactive operation:
 **--event-log** writes the same JSONL event stream to a file while also writing
 events to stdout.
 
-# CHILD ORCHESTRATION EXAMPLE
+# MACHINE-FACING JSONL EXAMPLES
 
-Run one bounded child and inspect its JSONL events:
+Run one bounded process and inspect its JSONL events:
 
 ```bash
-children=$(mktemp -d /tmp/clnkr-children.$$.XXXXXX)
-mkdir -p "$children/readme"
+workdir=$(mktemp -d /tmp/clnkr-processes.$$.XXXXXX)
+mkdir -p "$workdir/readme"
 printf '%s\n' '{"type":"prompt","text":"Inspect README.md. Do not edit files. Return evidence and uncertainty.","mode":"full_send"}' |
-  clnkrd --event-log "$children/readme/events.jsonl" \
-    > "$children/readme/out.jsonl" \
-    2> "$children/readme/err"
-sed -n '1,200p' "$children/readme/out.jsonl"
+  clnkrd --event-log "$workdir/readme/events.jsonl" \
+    > "$workdir/readme/out.jsonl" \
+    2> "$workdir/readme/err"
+sed -n '1,200p' "$workdir/readme/out.jsonl"
 ```
 
-Run two independent children in parallel, then synthesize their output:
+Run two independent processes in parallel, then synthesize their output:
 
 ```bash
-children=$(mktemp -d /tmp/clnkr-children.$$.XXXXXX)
-mkdir -p "$children/code" "$children/docs"
-printf '%s\n' '{"type":"prompt","text":"Review prompt.go for clnkrd child orchestration risks. Do not edit.","mode":"full_send"}' |
-  clnkrd --event-log "$children/code/events.jsonl" \
-    > "$children/code/out.jsonl" 2> "$children/code/err" & pid1=$!
-printf '%s\n' '{"type":"prompt","text":"Review doc/*.1.md for child orchestration docs. Do not edit.","mode":"full_send"}' |
-  clnkrd --event-log "$children/docs/events.jsonl" \
-    > "$children/docs/out.jsonl" 2> "$children/docs/err" & pid2=$!
+workdir=$(mktemp -d /tmp/clnkr-processes.$$.XXXXXX)
+mkdir -p "$workdir/code" "$workdir/docs"
+printf '%s\n' '{"type":"prompt","text":"Review prompt.go for clnkrd machine-facing JSONL adapter risks. Do not edit.","mode":"full_send"}' |
+  clnkrd --event-log "$workdir/code/events.jsonl" \
+    > "$workdir/code/out.jsonl" 2> "$workdir/code/err" & pid1=$!
+printf '%s\n' '{"type":"prompt","text":"Review doc/*.1.md for clnkrd machine-facing JSONL adapter docs. Do not edit.","mode":"full_send"}' |
+  clnkrd --event-log "$workdir/docs/events.jsonl" \
+    > "$workdir/docs/out.jsonl" 2> "$workdir/docs/err" & pid2=$!
 wait "$pid1" "$pid2"
-sed -n '1,200p' "$children/code/out.jsonl"
-sed -n '1,200p' "$children/docs/out.jsonl"
+sed -n '1,200p' "$workdir/code/out.jsonl"
+sed -n '1,200p' "$workdir/docs/out.jsonl"
 ```
 
 # EXIT STATUS

@@ -27,7 +27,7 @@ Run `make _fmt` then `make check` before committing. Do not commit if either fai
 - CLI config resolution stays in `cmd/internal/providerconfig`: env/flag precedence, `CLNKR_*`, API keys, base URL parsing, provider parsing, and user-facing config errors.
 - Provider request semantics stay in `internal/providers/providerconfig`: provider/API constants, request options, model capability checks, and provider-specific validation.
 - Provider adapters serialize validated options; they do not resolve CLI config.
-- Child-agent orchestration is prompt-guided Unix process composition. Bash may launch `clnkrd`; the host does not special-case child agents, `/delegate`, child counters, or child lifecycle events.
+- `clnkrd` is a machine-facing stdio JSONL adapter over shared driver behavior for tools, editors, wrappers, evals, automation, and agents. Agent-launched processes are one use case of that interface; they are not its product identity. The host does not special-case `/delegate`, process counters, or process lifecycle events.
 - Wrap errors: `fmt.Errorf("context: %w", err)`. No bare returns or third-party error packages.
 - Adapter tests use external packages (`package anthropic_test`). Core tests use internal (`package clnkr`). CLI tests use internal (`package main`). Match the existing pattern.
 - `exhaustive` linter is enabled. Switch on sealed types must cover all cases. `default` counts as exhaustive.
@@ -57,7 +57,7 @@ clnkr/                  # core: types, Agent, events (stdlib only)
 
 **Command results (host→model):** JSON with `stdout`, `stderr`, `outcome`, and optional `feedback`. Exit outcomes include `exit_code`; non-exit outcomes include timeout, cancelled, denied, skipped, and error.
 
-**Child process boundary:** `clnkrd` is the composable process surface. The prompt teaches models when to launch `clnkrd` through bash for bounded child work and how to read stdout/stderr or event logs. `Driver`, provider adapters, `ShellExecutor`, and `Agent.Step()` do not participate in child-agent policy.
+**Machine-facing stdio adapter:** `clnkrd` is the composable JSONL process surface over shared driver behavior. Tools, editors, wrappers, evals, automation, and agents may launch it through bash and read stdout, stderr, or event logs. Agent-launched processes are one use case of that interface, not its product identity. `Driver`, provider adapters, `ShellExecutor`, and `Agent.Step()` do not participate in caller-specific orchestration policy.
 
 ## Allium Specs
 Allium specs live under `specs/`. They describe observable behavior, not implementation history or Go structure. Keep them current when a change alters the intended behavior of a specified area.
