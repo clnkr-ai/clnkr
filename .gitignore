@@ -46,3 +46,6 @@ eval/artifacts*
 
 # Local agent skills
 /.agents/
+
+# Misc
+.envrc
