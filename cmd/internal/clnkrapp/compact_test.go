@@ -34,6 +34,55 @@ func TestParseCompactCommand(t *testing.T) {
 	}
 }
 
+func TestMalformedCompactCommand(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "exact", input: "/compact", want: ""},
+		{name: "surrounding whitespace", input: "  /compact  ", want: ""},
+		{
+			name:  "trailing space",
+			input: "/compact focus",
+			want:  "/compact does not accept arguments",
+		},
+		{
+			name:  "trailing tab",
+			input: "/compact\tfocus",
+			want:  "/compact does not accept arguments",
+		},
+		{
+			name:  "trailing unicode space",
+			input: "/compact\u00a0focus",
+			want:  "/compact does not accept arguments",
+		},
+		{name: "no space suffix", input: "/compactfoo", want: "/compact does not accept arguments"},
+		{
+			name:  "slash suffix",
+			input: "/compact/anything",
+			want:  "/compact does not accept arguments",
+		},
+		{name: "compaction word", input: "/compaction", want: "/compact does not accept arguments"},
+		{name: "compact no prefix", input: "compact", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := MalformedCompactCommand(tt.input)
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("MalformedCompactCommand(%q) = %v, want nil", tt.input, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("MalformedCompactCommand(%q) = %v, want %q", tt.input, err, tt.want)
+			}
+		})
+	}
+}
+
 func TestHandleCompactCommandDoesNotAppendLiteralUserMessage(t *testing.T) {
 	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
 	if err := agent.AddMessages(compactableMessages()); err != nil {

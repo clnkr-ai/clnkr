@@ -62,6 +62,30 @@ func TestDecodeJSONLCommand(t *testing.T) {
 			JSONLCommand{},
 			`unknown JSONL prompt mode ""`,
 		},
+		{
+			"compact with extra field instructions",
+			`{"type":"compact","instructions":"focus tests"}`,
+			JSONLCommand{},
+			"JSONL compact supports only {\"type\":\"compact\"}",
+		},
+		{
+			"compact with extra field foo",
+			`{"type":"compact","foo":"bar"}`,
+			JSONLCommand{},
+			"JSONL compact supports only {\"type\":\"compact\"}",
+		},
+		{
+			"compact with extra field text",
+			`{"type":"compact","text":"anything"}`,
+			JSONLCommand{},
+			"JSONL compact supports only {\"type\":\"compact\"}",
+		},
+		{
+			"compact with extra field mode",
+			`{"type":"compact","mode":"approval"}`,
+			JSONLCommand{},
+			"JSONL compact supports only {\"type\":\"compact\"}",
+		},
 	}
 
 	for _, tt := range tests {

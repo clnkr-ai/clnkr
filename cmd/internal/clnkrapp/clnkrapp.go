@@ -290,12 +290,16 @@ func ParseCompactCommand(input string) bool {
 }
 
 // MalformedCompactCommand reports whether input is a malformed compact command.
-// It returns an error if input looks like /compact with trailing text.
+// It returns an error if input looks like /compact with trailing non-whitespace text.
 func MalformedCompactCommand(input string) error {
 	trimmed := strings.TrimSpace(input)
-	if strings.HasPrefix(trimmed, "/compact") && len(trimmed) > len("/compact") &&
-		unicode.IsSpace(rune(trimmed[len("/compact")])) {
-		return fmt.Errorf("/compact does not accept arguments")
+	if !strings.HasPrefix(trimmed, "/compact") || trimmed == "/compact" {
+		return nil
+	}
+	for _, r := range strings.TrimPrefix(trimmed, "/compact") {
+		if !unicode.IsSpace(r) {
+			return fmt.Errorf("/compact does not accept arguments")
+		}
 	}
 	return nil
 }

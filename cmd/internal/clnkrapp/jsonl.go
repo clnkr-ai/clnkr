@@ -31,7 +31,16 @@ func DecodeJSONLCommand(line []byte) (JSONLCommand, error) {
 		default:
 			return JSONLCommand{}, fmt.Errorf("unknown JSONL prompt mode %q", command.Mode)
 		}
-	case "reply", "compact", "shutdown":
+	case "reply", "shutdown":
+		return command, nil
+	case "compact":
+		var m map[string]any
+		if err := json.Unmarshal(line, &m); err != nil {
+			return JSONLCommand{}, fmt.Errorf("decode JSONL command: %w", err)
+		}
+		if len(m) != 1 || m["type"] != "compact" {
+			return JSONLCommand{}, fmt.Errorf("JSONL compact supports only {\"type\":\"compact\"}")
+		}
 		return command, nil
 	default:
 		return JSONLCommand{}, fmt.Errorf("unknown JSONL command type %q", command.Type)
