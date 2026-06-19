@@ -19,6 +19,8 @@ jobs:
   ci-preflight:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
+
       - name: Require latest main checks success
         env:
           GH_TOKEN: ${{ github.token }}
