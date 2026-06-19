@@ -241,7 +241,11 @@ func TestExecuteTurnCoordinatesCommandBatch(t *testing.T) {
 			Guidance string `json:"guidance"`
 		}
 		if err := json.Unmarshal([]byte(agent.Messages()[0].Content), &payload); err != nil {
-			t.Fatalf("timeout command message is not JSON: %v\n%s", err, agent.Messages()[0].Content)
+			t.Fatalf(
+				"timeout command message is not JSON: %v\n%s",
+				err,
+				agent.Messages()[0].Content,
+			)
 		}
 		if payload.Guidance != timeoutGuidance {
 			t.Fatalf("timeout guidance = %q, want %q", payload.Guidance, timeoutGuidance)

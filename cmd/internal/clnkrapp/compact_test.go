@@ -144,7 +144,8 @@ func TestCompactTranscriptRunsCompaction(t *testing.T) {
 	if stats.CompactedMessages != 2 || stats.KeptMessages != 4 {
 		t.Fatalf("stats = %#v, want 2 compacted and 4 kept", stats)
 	}
-	if len(agent.Messages()) == 0 || !strings.HasPrefix(agent.Messages()[0].Content, "[compact]\n") {
+	if len(agent.Messages()) == 0 ||
+		!strings.HasPrefix(agent.Messages()[0].Content, "[compact]\n") {
 		t.Fatalf("expected compact block at start, got %#v", agent.Messages())
 	}
 }
