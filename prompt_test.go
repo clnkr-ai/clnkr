@@ -28,6 +28,7 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		"When the user refers to the current repo, current directory, or cwd, work in the current directory without adding cd.",
 		"If the user names a file or path, inspect that exact path first.",
 		`You may also receive JSON host state messages such as {"type":"state","source":"clnkr","cwd":"/repo"} and resource_state`,
+		"resource_state may include pressure and guidance",
 		"commands_used",
 		"commands_remaining",
 		"model_turns_used",
@@ -37,6 +38,8 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		`"observation" metadata when stdout/stderr were compressed`,
 		"clean pre-command git baseline",
 		`do not emit "done" until you have completed the change with at least one "act" turn`,
+		"Before done, run the cheapest task-visible check of the exact deliverable when feasible.",
+		"If a check fails, inspect the failure and change one hypothesis; do not repeat the same failed command blindly.",
 		"Never claim to have created, modified, or verified something unless that happened through a prior command result in this conversation.",
 		"If a verification command shows the result does not match the request exactly, issue another \"act\" turn to fix it instead of emitting \"done\".",
 		"For exact literal text writes, prefer quoted literals such as printf 'hello\\n' > note.txt instead of shell-fragile format strings.",
@@ -117,8 +120,19 @@ func TestLoadPromptWithOptions_UnattendedPrompt(t *testing.T) {
 		"commands_used",
 		"commands_remaining",
 		"model_turns_used",
+		"Assume no human rescue during unattended work.",
 		"Prefer cheap inspection before expensive builds, downloads, training runs, or brute force.",
-		"When resources are low, produce the best verifiable artifact you can and finish.",
+		"When execution pressure is critical, stop broad exploration",
+	})
+}
+
+func TestLoadPromptWithOptions_ToolCallsPromptMentionsPressure(t *testing.T) {
+	prompt := loadPromptWithCleanEnv(t, PromptOptions{ActProtocol: ActProtocolToolCalls})
+
+	mustContainAll(t, prompt, []string{
+		"resource_state may include pressure and guidance",
+		"Before done, run the cheapest task-visible check of the exact deliverable when feasible.",
+		"If a check fails, inspect the failure and change one hypothesis; do not repeat the same failed command blindly.",
 	})
 }
 

@@ -13,6 +13,7 @@ type commandPayload struct {
 	Stderr      string          `json:"stderr"`
 	Outcome     CommandOutcome  `json:"outcome"`
 	Feedback    CommandFeedback `json:"feedback"`
+	Guidance    string          `json:"guidance"`
 	Observation struct {
 		Source  string             `json:"source"`
 		Version int                `json:"version"`
@@ -642,4 +643,25 @@ func TestFormatCommandResultFeedback(t *testing.T) {
 			t.Fatalf("feedback diff = %q", payload.Feedback.Diff)
 		}
 	})
+}
+
+func TestFormatCommandResultIncludesGuidance(t *testing.T) {
+	guidance := "Use a narrower command."
+	payload := decodeCommandPayload(t, FormatCommandResult(CommandResult{
+		Command:  "sleep 60",
+		Stderr:   "timed out\n",
+		Outcome:  CommandOutcome{Type: CommandOutcomeTimeout},
+		Guidance: guidance,
+	}))
+	if payload.Guidance != guidance {
+		t.Fatalf("guidance = %q, want %q", payload.Guidance, guidance)
+	}
+	if payload.Outcome.Type != CommandOutcomeTimeout {
+		t.Fatalf("outcome = %#v, want timeout", payload.Outcome)
+	}
+
+	raw := FormatCommandResult(CommandResult{Command: "printf hi", ExitCode: 0})
+	if _, ok := decodeCommandFields(t, raw)["guidance"]; ok {
+		t.Fatalf("unexpected guidance field: %q", raw)
+	}
 }

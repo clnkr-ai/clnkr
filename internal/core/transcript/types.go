@@ -65,6 +65,7 @@ type CommandResult struct {
 	ExitCode int
 	Outcome  CommandOutcome
 	Feedback CommandFeedback
+	Guidance string
 }
 
 // CompactStats reports how many transcript messages were summarized and kept.

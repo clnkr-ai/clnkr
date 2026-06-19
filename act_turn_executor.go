@@ -13,6 +13,8 @@ type actTurnExecutor struct {
 	agent *Agent
 }
 
+const timeoutGuidance = "The previous command timed out. Use a narrower command, inspect partial output if available, or choose a cheaper verification path. Do not rerun the same long command unchanged."
+
 func (e actTurnExecutor) Execute(
 	ctx context.Context,
 	act *ActTurn,
@@ -108,6 +110,10 @@ func (e actTurnExecutor) applyPostCommandState(result CommandResult) {
 }
 
 func (e actTurnExecutor) formatCommandResult(result CommandResult) string {
+	guidance := ""
+	if result.Outcome.Type == CommandOutcomeTimeout {
+		guidance = timeoutGuidance
+	}
 	return transcript.FormatCommandResult(transcript.CommandResult{
 		Command:  result.Command,
 		Stdout:   result.Stdout,
@@ -115,6 +121,7 @@ func (e actTurnExecutor) formatCommandResult(result CommandResult) string {
 		ExitCode: result.ExitCode,
 		Outcome:  result.Outcome,
 		Feedback: result.Feedback,
+		Guidance: guidance,
 	})
 }
 
