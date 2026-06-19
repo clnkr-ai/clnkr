@@ -52,18 +52,25 @@ func verifiedDone(summary string) *clnkr.DoneTurn {
 }
 
 type fakeModel struct {
-	responses []clnkr.Response
-	calls     int
-	queries   [][]clnkr.Message
+	responses     []clnkr.Response
+	errs          []error
+	calls         int
+	responseCalls int
+	queries       [][]clnkr.Message
 }
 
 func (m *fakeModel) Query(_ context.Context, messages []clnkr.Message) (clnkr.Response, error) {
 	m.queries = append(m.queries, append([]clnkr.Message{}, messages...))
-	if m.calls >= len(m.responses) {
+	call := m.calls
+	m.calls++
+	if call < len(m.errs) && m.errs[call] != nil {
+		return clnkr.Response{}, m.errs[call]
+	}
+	if m.responseCalls >= len(m.responses) {
 		return clnkr.Response{}, fmt.Errorf("no more responses")
 	}
-	resp := m.responses[m.calls]
-	m.calls++
+	resp := m.responses[m.responseCalls]
+	m.responseCalls++
 	return resp, nil
 }
 
@@ -127,4 +134,14 @@ func hasUserMessage(msgs []clnkr.Message, want string) bool {
 		}
 	}
 	return false
+}
+
+func countUserMessages(msgs []clnkr.Message, want string) int {
+	count := 0
+	for _, msg := range msgs {
+		if msg.Role == "user" && msg.Content == want {
+			count++
+		}
+	}
+	return count
 }

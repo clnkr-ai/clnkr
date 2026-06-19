@@ -162,6 +162,25 @@ func extractErrorMessage(body []byte) string {
 	return string(body)
 }
 
+func apiError(statusCode int, message string) error {
+	err := fmt.Errorf("api error (status %d): %s", statusCode, message)
+	if isContextLengthError(statusCode, message) {
+		return fmt.Errorf("%w: %w", clnkr.ErrContextLengthExceeded, err)
+	}
+	return err
+}
+
+func isContextLengthError(statusCode int, message string) bool {
+	if statusCode != http.StatusBadRequest {
+		return false
+	}
+	normalized := strings.ToLower(message)
+	return strings.Contains(normalized, "context window") ||
+		strings.Contains(normalized, "prompt is too long") ||
+		strings.Contains(normalized, "too many tokens") ||
+		strings.Contains(normalized, "context length")
+}
+
 func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
 	var tools []anthropicTool
 	schema := requestSchema()
@@ -600,11 +619,7 @@ func (m *Model) doRequest(ctx context.Context, body []byte) ([]byte, error) {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf(
-			"api error (status %d): %s",
-			resp.StatusCode,
-			extractErrorMessage(respBody),
-		)
+		return nil, apiError(resp.StatusCode, extractErrorMessage(respBody))
 	}
 	return respBody, nil
 }

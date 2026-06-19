@@ -502,6 +502,12 @@ func installAgentNotify(agent *clnkr.Agent, modelWait **modelWaitIndicator, opts
 				_, _ = fmt.Fprintf(os.Stderr, "[clnkr] protocol error: %s\n", e.Reason)
 			}
 		case clnkr.EventDebug:
+			if e.Message == clnkr.ContextLengthBackstopCompactingDebug {
+				_, _ = fmt.Fprintln(
+					os.Stderr,
+					"[Context limit reached; compacting session and retrying once]",
+				)
+			}
 			if opts.verbose {
 				_, _ = fmt.Fprintf(os.Stderr, "[clnkr] %s\n", e.Message)
 			}

@@ -132,6 +132,11 @@ func TestWriteJSONL(t *testing.T) {
 			typ:   "command_done",
 		},
 		{
+			name:  "context backstop debug event",
+			event: clnkr.EventDebug{Message: clnkr.ContextLengthBackstopRetryingDebug},
+			typ:   "debug",
+		},
+		{
 			name:  "clarification request",
 			event: EventClarificationRequest{Question: "Which repo?"},
 			typ:   "clarify",

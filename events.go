@@ -43,6 +43,10 @@ type EventCompletionGate struct {
 // EventDebug carries internal diagnostic messages.
 type EventDebug struct{ Message string }
 
+const ContextLengthBackstopCompactingDebug = "context_length_backstop: compacting after provider context limit"
+
+const ContextLengthBackstopRetryingDebug = "context_length_backstop: retrying failed model step once"
+
 func (EventResponse) event()        {}
 func (EventCommandStart) event()    {}
 func (EventCommandDone) event()     {}

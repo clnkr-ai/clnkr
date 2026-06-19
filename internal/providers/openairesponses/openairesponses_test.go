@@ -128,6 +128,52 @@ func TestModelQueryDoesNotRetryBadRequest(t *testing.T) {
 	}
 }
 
+func TestModelClassifiesContextLengthErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		message string
+	}{
+		{
+			name:    "context length exceeded code",
+			message: "context_length_exceeded",
+		},
+		{
+			name:    "maximum context length",
+			message: "This model's maximum context length is 128000 tokens. However, your messages resulted in 130000 tokens.",
+		},
+		{
+			name:    "context length",
+			message: "Request exceeds context length.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusBadRequest)
+					writeJSON(t, w, map[string]any{
+						"error": map[string]any{"message": tt.message},
+					})
+				}),
+			)
+			defer server.Close()
+
+			model := openairesponses.NewModel(server.URL, "test-key", "gpt-test", "sys")
+			_, err := model.Query(
+				context.Background(),
+				[]clnkr.Message{{Role: "user", Content: "hi"}},
+			)
+			if !errors.Is(err, clnkr.ErrContextLengthExceeded) {
+				t.Fatalf("Query error = %v, want ErrContextLengthExceeded", err)
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.message) {
+				t.Fatalf("Query error = %v, want provider message %q", err, tt.message)
+			}
+		})
+	}
+}
+
 func TestModelQueryJoinsBaseURLPath(t *testing.T) {
 	tests := []struct {
 		name            string

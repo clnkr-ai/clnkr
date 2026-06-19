@@ -16,6 +16,12 @@ In default mode, **clnkr** starts an interactive REPL. With **-p**, it runs a si
 
 At the main idle conversational prompt, **/compact** summarizes older transcript history while keeping recent context intact for the current working thread.
 
+If a provider rejects a model step because the transcript exceeds the model
+context window, clnkr automatically compacts older transcript history, reports
+the compacted message counts on stderr, and retries that failed model step
+once. The automatic retry uses the same **[compact]** transcript format as
+**/compact** and is saved in ordinary project sessions.
+
 The built-in prompt teaches the model when to launch **clnkrd** through bash as
 a machine-facing stdio JSONL process. The process exposes stdout, stderr, and
 optional **--event-log** artifacts. **/delegate** *task* is ordinary prompt

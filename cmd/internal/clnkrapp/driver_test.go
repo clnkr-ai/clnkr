@@ -2,6 +2,9 @@ package clnkrapp
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -182,6 +185,131 @@ func TestDriverCompactDispatch(t *testing.T) {
 	}
 }
 
+func TestDriverContextLengthBackstopCompactsAndRetries(t *testing.T) {
+	contextErr := fmt.Errorf("%w: provider context too long", clnkr.ErrContextLengthExceeded)
+	model := &fakeModel{
+		errs: []error{contextErr, nil},
+		responses: []clnkr.Response{
+			mustResponse(`{"type":"done","summary":"done"}`),
+		},
+	}
+	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+	compactor := &fakeCompactor{summary: "Older work summarized."}
+	driver := NewDriver(agent, func() clnkr.Compactor {
+		return compactor
+	})
+
+	if err := driver.Prompt(context.Background(), "continue", PromptModeFullSend); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+
+	events := drainDriverEvents(t, driver, 2)
+	if _, ok := events[0].(EventCompacted); !ok {
+		t.Fatalf("first event = %T, want EventCompacted", events[0])
+	}
+	if done, ok := events[1].(EventDone); !ok || done.Summary != "done" {
+		t.Fatalf("second event = %#v, want done", events[1])
+	}
+	if compactor.calls != 1 {
+		t.Fatalf("compactor calls = %d, want 1", compactor.calls)
+	}
+	if model.calls != 2 {
+		t.Fatalf("model calls = %d, want 2", model.calls)
+	}
+	if countUserMessages(agent.Messages(), "continue") != 1 {
+		t.Fatalf("prompt was appended more than once: %#v", agent.Messages())
+	}
+	if len(agent.Messages()) == 0 ||
+		!strings.HasPrefix(agent.Messages()[0].Content, "[compact]\n") {
+		t.Fatalf("messages were not compacted: %#v", agent.Messages())
+	}
+}
+
+func TestDriverContextLengthBackstopCompactionFailureReportsBothErrors(t *testing.T) {
+	contextErr := fmt.Errorf("%w: provider context too long", clnkr.ErrContextLengthExceeded)
+	compactionErr := errors.New("compact boom")
+	agent := clnkr.NewAgent(&fakeModel{errs: []error{contextErr}}, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+	driver := NewDriver(agent, func() clnkr.Compactor {
+		return &fakeCompactor{err: compactionErr}
+	})
+
+	err := driver.Prompt(context.Background(), "continue", PromptModeFullSend)
+	if err == nil {
+		t.Fatal("Prompt error = nil, want failure")
+	}
+	if !errors.Is(err, clnkr.ErrContextLengthExceeded) {
+		t.Fatalf("error = %v, want context failure", err)
+	}
+	if !errors.Is(err, compactionErr) {
+		t.Fatalf("error = %v, want compaction failure", err)
+	}
+	event := nextDriverEvent(t, driver)
+	if eventErr, ok := event.(EventError); !ok || !errors.Is(eventErr.Err, compactionErr) {
+		t.Fatalf("event = %#v, want compaction EventError", event)
+	}
+}
+
+func TestDriverContextLengthBackstopRetryFailureReportsBothErrors(t *testing.T) {
+	contextErr := fmt.Errorf("%w: provider context too long", clnkr.ErrContextLengthExceeded)
+	retryErr := errors.New("network down")
+	model := &fakeModel{errs: []error{contextErr, retryErr}}
+	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+	driver := NewDriver(agent, func() clnkr.Compactor {
+		return &fakeCompactor{summary: "Older work summarized."}
+	})
+
+	err := driver.Prompt(context.Background(), "continue", PromptModeFullSend)
+	if err == nil {
+		t.Fatal("Prompt error = nil, want failure")
+	}
+	if !errors.Is(err, clnkr.ErrContextLengthExceeded) {
+		t.Fatalf("error = %v, want original context failure", err)
+	}
+	if !errors.Is(err, retryErr) {
+		t.Fatalf("error = %v, want retry failure", err)
+	}
+	events := drainDriverEvents(t, driver, 2)
+	if _, ok := events[0].(EventCompacted); !ok {
+		t.Fatalf("first event = %T, want EventCompacted", events[0])
+	}
+	if eventErr, ok := events[1].(EventError); !ok || !errors.Is(eventErr.Err, retryErr) {
+		t.Fatalf("second event = %#v, want retry EventError", events[1])
+	}
+}
+
+func TestDriverContextLengthBackstopDoesNotRetryTwice(t *testing.T) {
+	contextErr := fmt.Errorf("%w: provider context too long", clnkr.ErrContextLengthExceeded)
+	model := &fakeModel{errs: []error{contextErr, contextErr}}
+	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+	compactor := &fakeCompactor{summary: "Older work summarized."}
+	driver := NewDriver(agent, func() clnkr.Compactor {
+		return compactor
+	})
+
+	err := driver.Prompt(context.Background(), "continue", PromptModeFullSend)
+	if err == nil {
+		t.Fatal("Prompt error = nil, want failure")
+	}
+	if compactor.calls != 1 {
+		t.Fatalf("compactor calls = %d, want 1", compactor.calls)
+	}
+	if model.calls != 2 {
+		t.Fatalf("model calls = %d, want 2", model.calls)
+	}
+}
+
 func TestDriverDelegateTextReachesModelAsOrdinaryPrompt(t *testing.T) {
 	agent := clnkr.NewAgent(&fakeModel{responses: []clnkr.Response{
 		mustResponse(`{"type":"done","summary":"done"}`),
@@ -201,6 +329,15 @@ func TestDriverDelegateTextReachesModelAsOrdinaryPrompt(t *testing.T) {
 	if !hasUserMessage(agent.Messages(), "/delegate inspect README") {
 		t.Fatalf("delegate prompt did not reach transcript: %#v", agent.Messages())
 	}
+}
+
+func drainDriverEvents(t *testing.T, driver *Driver, count int) []DriverEvent {
+	t.Helper()
+	events := make([]DriverEvent, 0, count)
+	for len(events) < count {
+		events = append(events, nextDriverEvent(t, driver))
+	}
+	return events
 }
 
 func promptAsync(driver *Driver, prompt string) <-chan error {

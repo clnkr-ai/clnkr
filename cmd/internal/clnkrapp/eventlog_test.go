@@ -80,6 +80,16 @@ func TestWriteEventLogSnakeCasePayloads(t *testing.T) {
 			},
 		},
 		{
+			name:      "context backstop debug",
+			event:     clnkr.EventDebug{Message: clnkr.ContextLengthBackstopCompactingDebug},
+			wantType:  "debug",
+			wantKey:   "message",
+			rejectKey: "Message",
+			wantFields: map[string]any{
+				"message": clnkr.ContextLengthBackstopCompactingDebug,
+			},
+		},
+		{
 			name:      "protocol failure",
 			event:     clnkr.EventProtocolFailure{Reason: "bad json", Raw: "nope"},
 			wantType:  "protocol_failure",

@@ -433,6 +433,135 @@ func TestRunWithPolicyStopsCleanlyOnPolicyErrors(t *testing.T) {
 	}
 }
 
+func TestRunWithPolicyOptionsBackstopsContextLengthOnce(t *testing.T) {
+	contextErr := fmt.Errorf("%w: provider said context too long", ErrContextLengthExceeded)
+	model := &fakeModel{
+		errs: []error{contextErr, nil},
+		responses: []Response{
+			{Turn: verifiedDone("done")},
+		},
+	}
+	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+	backstopCalls := 0
+
+	err := agent.RunWithPolicyOptions(
+		context.Background(),
+		"inspect",
+		FullSendPolicy{},
+		RunOptions{
+			ContextLengthBackstop: func(context.Context, error) error {
+				backstopCalls++
+				agent.AppendUserMessage("compacted marker")
+				return nil
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("RunWithPolicyOptions: %v", err)
+	}
+	if backstopCalls != 1 {
+		t.Fatalf("backstop calls = %d, want 1", backstopCalls)
+	}
+	if model.calls != 2 {
+		t.Fatalf("model calls = %d, want 2", model.calls)
+	}
+	if countUserMessages(agent.Messages(), "inspect") != 1 {
+		t.Fatalf("prompt was appended more than once: %#v", agent.Messages())
+	}
+	if countUserMessages(agent.Messages(), "compacted marker") != 1 {
+		t.Fatalf("backstop marker not appended once: %#v", agent.Messages())
+	}
+}
+
+func TestRunWithPolicyOptionsReportsCompactionFailureWithOriginalContextFailure(t *testing.T) {
+	contextErr := fmt.Errorf("%w: provider said context too long", ErrContextLengthExceeded)
+	compactionErr := errors.New("compact boom")
+	model := &fakeModel{errs: []error{contextErr}}
+	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+
+	err := agent.RunWithPolicyOptions(
+		context.Background(),
+		"inspect",
+		FullSendPolicy{},
+		RunOptions{
+			ContextLengthBackstop: func(context.Context, error) error {
+				return compactionErr
+			},
+		},
+	)
+	if err == nil {
+		t.Fatal("RunWithPolicyOptions error = nil, want failure")
+	}
+	if !errors.Is(err, ErrContextLengthExceeded) {
+		t.Fatalf("error = %v, want ErrContextLengthExceeded", err)
+	}
+	if !errors.Is(err, compactionErr) {
+		t.Fatalf("error = %v, want compaction failure", err)
+	}
+	if !strings.Contains(err.Error(), "context_length_backstop") ||
+		!strings.Contains(err.Error(), "compaction failed") {
+		t.Fatalf("error = %q, want backstop compaction context", err.Error())
+	}
+}
+
+func TestRunWithPolicyOptionsReportsRetryFailureWithOriginalContextFailure(t *testing.T) {
+	contextErr := fmt.Errorf("%w: provider said context too long", ErrContextLengthExceeded)
+	retryErr := errors.New("network down")
+	model := &fakeModel{errs: []error{contextErr, retryErr}}
+	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+
+	err := agent.RunWithPolicyOptions(
+		context.Background(),
+		"inspect",
+		FullSendPolicy{},
+		RunOptions{
+			ContextLengthBackstop: func(context.Context, error) error {
+				return nil
+			},
+		},
+	)
+	if err == nil {
+		t.Fatal("RunWithPolicyOptions error = nil, want failure")
+	}
+	if !errors.Is(err, ErrContextLengthExceeded) {
+		t.Fatalf("error = %v, want original context failure", err)
+	}
+	if !errors.Is(err, retryErr) {
+		t.Fatalf("error = %v, want retry failure", err)
+	}
+	if !strings.Contains(err.Error(), "retry failed") {
+		t.Fatalf("error = %q, want retry failure context", err.Error())
+	}
+}
+
+func TestRunWithPolicyOptionsDoesNotBackstopTwice(t *testing.T) {
+	contextErr := fmt.Errorf("%w: provider said context too long", ErrContextLengthExceeded)
+	model := &fakeModel{errs: []error{contextErr, contextErr}}
+	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+	backstopCalls := 0
+
+	err := agent.RunWithPolicyOptions(
+		context.Background(),
+		"inspect",
+		FullSendPolicy{},
+		RunOptions{
+			ContextLengthBackstop: func(context.Context, error) error {
+				backstopCalls++
+				return nil
+			},
+		},
+	)
+	if err == nil {
+		t.Fatal("RunWithPolicyOptions error = nil, want failure")
+	}
+	if backstopCalls != 1 {
+		t.Fatalf("backstop calls = %d, want 1", backstopCalls)
+	}
+	if model.calls != 2 {
+		t.Fatalf("model calls = %d, want 2", model.calls)
+	}
+}
+
 func TestRunCommandBudgetIsLocalToEachRun(t *testing.T) {
 	model := &fakeModel{responses: []Response{
 		{Turn: &ActTurn{Bash: BashBatch{Commands: []BashAction{{Command: "echo one"}}}}},
@@ -912,18 +1041,25 @@ func TestAgentCompactFacade(t *testing.T) {
 }
 
 type fakeModel struct {
-	responses []Response
-	calls     int
-	got       [][]Message
+	responses     []Response
+	errs          []error
+	calls         int
+	responseCalls int
+	got           [][]Message
 }
 
 func (m *fakeModel) Query(_ context.Context, messages []Message) (Response, error) {
 	m.got = append(m.got, transcript.CloneMessages(messages))
-	if m.calls >= len(m.responses) {
+	call := m.calls
+	m.calls++
+	if call < len(m.errs) && m.errs[call] != nil {
+		return Response{}, m.errs[call]
+	}
+	if m.responseCalls >= len(m.responses) {
 		return Response{}, fmt.Errorf("no more responses")
 	}
-	resp := m.responses[m.calls]
-	m.calls++
+	resp := m.responses[m.responseCalls]
+	m.responseCalls++
 	return resp, nil
 }
 
@@ -960,6 +1096,16 @@ func (c *fakeCompactor) Summarize(_ context.Context, messages []Message) (string
 		return "", c.err
 	}
 	return c.summary, nil
+}
+
+func countUserMessages(messages []Message, content string) int {
+	count := 0
+	for _, msg := range messages {
+		if msg.Role == "user" && msg.Content == content {
+			count++
+		}
+	}
+	return count
 }
 
 type fakeExecutor struct {

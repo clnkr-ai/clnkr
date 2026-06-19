@@ -102,6 +102,11 @@ Each command has **command** and optional **workdir**.
 **error**
 : Driver-visible run error. Payload: **message**.
 
+When the context length backstop runs, **clnkrd** emits debug events for
+compaction and retry progress, emits the normal **compacted** event with
+compacted and kept message counts, then continues with the normal **response**,
+**done**, or **error** event. No separate JSONL command is required.
+
 # OPTIONS
 
 clnkrd accepts the same provider, prompt, session, and run-control options as

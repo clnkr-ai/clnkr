@@ -2,27 +2,33 @@ package clnkr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
-type runPolicyState struct {
-	policy            RunPolicy
-	commandsUsed      int
-	modelTurns        int
-	protocolErrors    int
-	completionGate    CompletionGate
-	completionRejects int
-	gateCompletions   bool
-	guidancePressure  resourcePressure
+type RunOptions struct {
+	ContextLengthBackstop func(context.Context, error) error
 }
 
-func newRunPolicyState(policy RunPolicy) runPolicyState {
+type runPolicyState struct {
+	policy                            RunPolicy
+	commandsUsed, modelTurns          int
+	protocolErrors, completionRejects int
+	completionGate                    CompletionGate
+	gateCompletions                   bool
+	guidancePressure                  resourcePressure
+	contextLengthBackstop             func(context.Context, error) error
+	contextLengthBackstopOriginal     error
+}
+
+func newRunPolicyStateOptions(policy RunPolicy, opts RunOptions) runPolicyState {
 	if policy == nil {
 		policy = FullSendPolicy{}
 	}
 	return runPolicyState{
-		policy:          policy,
-		gateCompletions: policyUsesCompletionGate(policy),
+		policy:                policy,
+		gateCompletions:       policyUsesCompletionGate(policy),
+		contextLengthBackstop: opts.ContextLengthBackstop,
 	}
 }
 
@@ -36,8 +42,9 @@ func (s *runPolicyState) step(ctx context.Context, a *Agent) (bool, error) {
 	result, err := a.Step(ctx)
 	s.modelTurns++
 	if err != nil {
-		return false, s.runError(a, err)
+		return s.handleStepError(ctx, a, err)
 	}
+	s.contextLengthBackstopOriginal = nil
 	if result.ParseErr != nil {
 		return s.handleProtocolFailure(a)
 	}
@@ -53,6 +60,28 @@ func (s *runPolicyState) step(ctx context.Context, a *Agent) (bool, error) {
 	default:
 		return false, s.runError(a, fmt.Errorf("unhandled turn type %T", turn))
 	}
+}
+
+func (s *runPolicyState) handleStepError(ctx context.Context, a *Agent, err error) (bool, error) {
+	if s.contextLengthBackstopOriginal != nil {
+		retryErr := fmt.Errorf("context_length_backstop: retry failed: %w", err)
+		return false, s.runError(a, errors.Join(s.contextLengthBackstopOriginal, retryErr))
+	}
+	if !errors.Is(err, ErrContextLengthExceeded) ||
+		s.contextLengthBackstop == nil {
+		return false, s.runError(a, err)
+	}
+
+	backstop := s.contextLengthBackstop
+	s.contextLengthBackstop = nil
+	s.contextLengthBackstopOriginal = err
+	a.notify(EventDebug{Message: ContextLengthBackstopCompactingDebug})
+	if compactErr := backstop(ctx, err); compactErr != nil {
+		compactErr = fmt.Errorf("context_length_backstop: compaction failed: %w", compactErr)
+		return false, s.runError(a, errors.Join(err, compactErr))
+	}
+	a.notify(EventDebug{Message: ContextLengthBackstopRetryingDebug})
+	return false, nil
 }
 
 func (s *runPolicyState) handleProtocolFailure(a *Agent) (bool, error) {

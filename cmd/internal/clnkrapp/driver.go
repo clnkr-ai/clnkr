@@ -100,11 +100,14 @@ func (d *Driver) Prompt(ctx context.Context, text string, mode string) error {
 		d.agent.Notify = previousNotify
 	}()
 
+	runOpts := clnkr.RunOptions{
+		ContextLengthBackstop: d.contextLengthBackstop,
+	}
 	switch mode {
 	case PromptModeFullSend:
-		err = d.agent.Run(ctx, text)
+		err = d.agent.RunWithPolicyOptions(ctx, text, clnkr.FullSendPolicy{}, runOpts)
 	case PromptModeApproval, "":
-		err = d.agent.RunWithPolicy(ctx, text, d)
+		err = d.agent.RunWithPolicyOptions(ctx, text, d, runOpts)
 	default:
 		err = fmt.Errorf("unknown prompt mode %q", mode)
 	}
@@ -113,6 +116,14 @@ func (d *Driver) Prompt(ctx context.Context, text string, mode string) error {
 		return err
 	}
 	return d.emit(ctx, EventDone{Summary: doneSummary})
+}
+
+func (d *Driver) contextLengthBackstop(ctx context.Context, _ error) error {
+	stats, err := compactTranscript(ctx, d.agent, d.compactorFactory)
+	if err != nil {
+		return err
+	}
+	return d.emit(ctx, EventCompacted{Stats: stats})
 }
 
 // Compact runs the compaction flow through the driver.

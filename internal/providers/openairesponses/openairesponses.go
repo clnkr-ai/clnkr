@@ -221,7 +221,7 @@ func (m *Model) queryStructured(
 			return parseStructuredResponse(respBody)
 		}
 
-		apiErr := fmt.Errorf("api error (status %d): %s", statusCode, extractErrorMessage(respBody))
+		apiErr := apiError(statusCode, extractErrorMessage(respBody))
 		if !retryableStatus(statusCode) || attempt == maxAttempts {
 			return clnkr.Response{}, apiErr
 		}
@@ -254,7 +254,7 @@ func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string
 			return parseTextResponse(respBody)
 		}
 
-		apiErr := fmt.Errorf("api error (status %d): %s", statusCode, extractErrorMessage(respBody))
+		apiErr := apiError(statusCode, extractErrorMessage(respBody))
 		if !retryableStatus(statusCode) || attempt == maxAttempts {
 			return "", apiErr
 		}
@@ -604,6 +604,24 @@ func extractErrorMessage(body []byte) string {
 	}
 
 	return string(body)
+}
+
+func apiError(statusCode int, message string) error {
+	err := fmt.Errorf("api error (status %d): %s", statusCode, message)
+	if isContextLengthError(statusCode, message) {
+		return fmt.Errorf("%w: %w", clnkr.ErrContextLengthExceeded, err)
+	}
+	return err
+}
+
+func isContextLengthError(statusCode int, message string) bool {
+	if statusCode != http.StatusBadRequest {
+		return false
+	}
+	normalized := strings.ToLower(message)
+	return strings.Contains(normalized, "context_length_exceeded") ||
+		strings.Contains(normalized, "maximum context length") ||
+		strings.Contains(normalized, "context length")
 }
 
 func retryableStatus(statusCode int) bool {

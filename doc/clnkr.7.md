@@ -66,6 +66,14 @@ transcript blocks, including state messages, compact blocks, and bounded
 command observations. Command-done events keep raw
 stdout/stderr; the transcript receives bounded command result JSON.
 
+**Context length backstop**
+: Reactive provider context-window failure handling. When a provider reports
+that the transcript exceeds the model context window, clnkr compacts older
+transcript history through the existing transcript compaction path and retries
+the failed model step once. Provider adapters classify the provider failure;
+the driver supplies compaction and the run loop owns the failed-step retry
+boundary.
+
 **Session persistence**
 : The **cmd/internal/clnkrapp** boundary service for frontend saved-session
 operations. **cmd/clnkr** lists, saves, and resumes sessions; **cmd/clnkrd**
@@ -131,6 +139,10 @@ event, appends guidance after rejected or challenged completions, and exits
 after repeated invalid completions. **Run** is the full-send entry point; it
 delegates to **RunWithPolicy** with a policy that approves act turns and leaves
 clarify turns unanswered.
+
+**Agent.Step** remains a single query/parse cycle. The context length backstop,
+when configured by the driver, is handled by **RunWithPolicy** after a failed
+step so the original user prompt is not appended a second time.
 
 The frontend boundary is **Driver** versus command adapters. **Driver**
 coordinates frontend interaction around **RunWithPolicy** by turning approval
