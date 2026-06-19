@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/compaction"
@@ -290,22 +291,24 @@ func ParseCompactCommand(input string) bool {
 }
 
 // MalformedCompactCommand reports whether input is a malformed compact command.
-// It returns an error if input looks like /compact with trailing non-whitespace text.
+// It returns an error if input is /compact followed by whitespace and arguments.
 func MalformedCompactCommand(input string) error {
 	trimmed := strings.TrimSpace(input)
 	if !strings.HasPrefix(trimmed, "/compact") || trimmed == "/compact" {
 		return nil
 	}
-	for _, r := range strings.TrimPrefix(trimmed, "/compact") {
-		if !unicode.IsSpace(r) {
-			return fmt.Errorf("/compact does not accept arguments")
-		}
+	suffix := strings.TrimPrefix(trimmed, "/compact")
+	first, _ := utf8.DecodeRuneInString(suffix)
+	if first == utf8.RuneError || !unicode.IsSpace(first) {
+		return nil
+	}
+	if strings.TrimSpace(suffix) != "" {
+		return fmt.Errorf("/compact does not accept arguments")
 	}
 	return nil
 }
 
-// CompactTranscript runs compaction on the agent transcript.
-func CompactTranscript(
+func compactTranscript(
 	ctx context.Context,
 	agent *clnkr.Agent,
 	factory compaction.Factory,
@@ -342,7 +345,7 @@ func HandleCompactCommand(
 	if !ParseCompactCommand(input) {
 		return clnkr.CompactStats{}, false, nil
 	}
-	stats, err := CompactTranscript(ctx, agent, factory)
+	stats, err := compactTranscript(ctx, agent, factory)
 	if err != nil {
 		return clnkr.CompactStats{}, false, err
 	}

@@ -112,11 +112,46 @@ func TestDriverTopLevelCompactDispatch(t *testing.T) {
 	if compacted.Stats.CompactedMessages != 2 || compacted.Stats.KeptMessages != 4 {
 		t.Fatalf("stats = %#v, want 2 compacted and 4 kept", compacted.Stats)
 	}
-	if hasUserMessage(agent.Messages(), "/compact focus on tests") {
+	if hasUserMessage(agent.Messages(), "/compact") {
 		t.Fatalf("compact command leaked into transcript: %#v", agent.Messages())
 	}
 	if got := driver.Pending(); got != PendingNone {
 		t.Fatalf("Pending() = %q, want %q", got, PendingNone)
+	}
+}
+
+func TestDriverCompactLookalikesReachModelAsOrdinaryPrompts(t *testing.T) {
+	tests := []string{
+		"/compactfoo",
+		"/compact/anything",
+		"/compaction",
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			model := &fakeModel{responses: []clnkr.Response{
+				mustResponse(`{"type":"done","summary":"done"}`),
+			}}
+			agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
+			factoryCalls := 0
+			driver := NewDriver(agent, func() clnkr.Compactor {
+				factoryCalls++
+				return &fakeCompactor{summary: "should not compact"}
+			})
+
+			if err := driver.Prompt(context.Background(), input, PromptModeApproval); err != nil {
+				t.Fatalf("Prompt: %v", err)
+			}
+			if event := nextDriverEvent(t, driver); event != (EventDone{Summary: "done"}) {
+				t.Fatalf("event = %#v, want done", event)
+			}
+			if factoryCalls != 0 {
+				t.Fatalf("compactor factory calls = %d, want 0", factoryCalls)
+			}
+			if len(model.queries) != 1 || !hasUserMessage(model.queries[0], input) {
+				t.Fatalf("model queries = %#v, want user prompt %q", model.queries, input)
+			}
+		})
 	}
 }
 

@@ -19,6 +19,8 @@ func TestParseCompactCommand(t *testing.T) {
 		{input: "  /compact  ", ok: true},
 		{input: "compact"},
 		{input: "/compaction"},
+		{input: "/compactfoo"},
+		{input: "/compact/anything"},
 		{input: "/compact focus on tests"},
 		{input: "/compact	focus on tests"},
 		{input: "/compact\tfocus on tests"},
@@ -57,13 +59,9 @@ func TestMalformedCompactCommand(t *testing.T) {
 			input: "/compact\u00a0focus",
 			want:  "/compact does not accept arguments",
 		},
-		{name: "no space suffix", input: "/compactfoo", want: "/compact does not accept arguments"},
-		{
-			name:  "slash suffix",
-			input: "/compact/anything",
-			want:  "/compact does not accept arguments",
-		},
-		{name: "compaction word", input: "/compaction", want: "/compact does not accept arguments"},
+		{name: "no space suffix", input: "/compactfoo", want: ""},
+		{name: "slash suffix", input: "/compact/anything", want: ""},
+		{name: "compaction word", input: "/compaction", want: ""},
 		{name: "compact no prefix", input: "compact", want: ""},
 	}
 
@@ -131,7 +129,7 @@ func TestCompactTranscriptRunsCompaction(t *testing.T) {
 	}
 
 	compactor := &fakeCompactor{summary: "Older work summarized."}
-	stats, err := CompactTranscript(
+	stats, err := compactTranscript(
 		context.Background(),
 		agent,
 		func() clnkr.Compactor {
@@ -209,11 +207,20 @@ func TestRejectCompactCommandOutsideConversation(t *testing.T) {
 	}{
 		{input: "/compact", want: "/compact is only available at the conversational prompt"},
 		{input: "/compact focus on tests", want: "/compact does not accept arguments"},
+		{input: "/compactfoo"},
+		{input: "/compact/anything"},
+		{input: "/compaction"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			err := RejectCompactCommand(tt.input)
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("got %v, want nil", err)
+				}
+				return
+			}
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("got %v, want %q", err, tt.want)
 			}
