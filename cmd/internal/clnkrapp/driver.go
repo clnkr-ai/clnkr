@@ -123,7 +123,7 @@ func (d *Driver) Compact(ctx context.Context) error {
 	}
 	defer d.setRunning(false) //nolint:errcheck
 
-	stats, err := CompactTranscript(ctx, d.agent, d.compactorFactory)
+	stats, err := compactTranscript(ctx, d.agent, d.compactorFactory)
 	if err != nil {
 		_ = d.emit(ctx, EventError{Err: err})
 		return err

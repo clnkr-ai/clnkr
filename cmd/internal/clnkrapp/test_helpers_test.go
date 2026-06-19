@@ -54,9 +54,11 @@ func verifiedDone(summary string) *clnkr.DoneTurn {
 type fakeModel struct {
 	responses []clnkr.Response
 	calls     int
+	queries   [][]clnkr.Message
 }
 
-func (m *fakeModel) Query(_ context.Context, _ []clnkr.Message) (clnkr.Response, error) {
+func (m *fakeModel) Query(_ context.Context, messages []clnkr.Message) (clnkr.Response, error) {
+	m.queries = append(m.queries, append([]clnkr.Message{}, messages...))
 	if m.calls >= len(m.responses) {
 		return clnkr.Response{}, fmt.Errorf("no more responses")
 	}
