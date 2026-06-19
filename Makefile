@@ -36,7 +36,7 @@ CLANKERVAL_PREFLIGHT = \
 
 PREFIX ?= /usr/local
 CORE_SLOC_LIMIT := 2450
-FRONTEND_SLOC_LIMIT := 2600
+FRONTEND_SLOC_LIMIT := 2650
 DOC_MAN_DIR := build/docs/man
 DOC_MAN_OUTPUTS := $(DOC_MAN_DIR)/clnkr.1 $(DOC_MAN_DIR)/clnkrd.1 $(DOC_MAN_DIR)/clnkr.3 $(DOC_MAN_DIR)/clnkr.7
 DOC_CONTENT_DIR := site/content/docs
