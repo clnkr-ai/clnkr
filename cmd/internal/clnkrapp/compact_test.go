@@ -12,30 +12,72 @@ import (
 
 func TestParseCompactCommand(t *testing.T) {
 	tests := []struct {
-		input        string
-		instructions string
-		ok           bool
+		input string
+		ok    bool
 	}{
 		{input: "/compact", ok: true},
 		{input: "  /compact  ", ok: true},
-		{input: "/compact focus on tests", instructions: "focus on tests", ok: true},
-		{input: "/compact	focus on tests", instructions: "focus on tests", ok: true},
 		{input: "compact"},
 		{input: "/compaction"},
+		{input: "/compact focus on tests"},
+		{input: "/compact	focus on tests"},
+		{input: "/compact\tfocus on tests"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			gotInstructions, gotOK := ParseCompactCommand(tt.input)
-			if gotInstructions != tt.instructions || gotOK != tt.ok {
-				t.Fatalf(
-					"ParseCompactCommand(%q) = (%q, %v), want (%q, %v)",
-					tt.input,
-					gotInstructions,
-					gotOK,
-					tt.instructions,
-					tt.ok,
-				)
+			got := ParseCompactCommand(tt.input)
+			if got != tt.ok {
+				t.Fatalf("ParseCompactCommand(%q) = %v, want %v", tt.input, got, tt.ok)
+			}
+		})
+	}
+}
+
+func TestMalformedCompactCommand(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "exact", input: "/compact", want: ""},
+		{name: "surrounding whitespace", input: "  /compact  ", want: ""},
+		{
+			name:  "trailing space",
+			input: "/compact focus",
+			want:  "/compact does not accept arguments",
+		},
+		{
+			name:  "trailing tab",
+			input: "/compact\tfocus",
+			want:  "/compact does not accept arguments",
+		},
+		{
+			name:  "trailing unicode space",
+			input: "/compact\u00a0focus",
+			want:  "/compact does not accept arguments",
+		},
+		{name: "no space suffix", input: "/compactfoo", want: "/compact does not accept arguments"},
+		{
+			name:  "slash suffix",
+			input: "/compact/anything",
+			want:  "/compact does not accept arguments",
+		},
+		{name: "compaction word", input: "/compaction", want: "/compact does not accept arguments"},
+		{name: "compact no prefix", input: "compact", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := MalformedCompactCommand(tt.input)
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("MalformedCompactCommand(%q) = %v, want nil", tt.input, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("MalformedCompactCommand(%q) = %v, want %q", tt.input, err, tt.want)
 			}
 		})
 	}
@@ -48,13 +90,11 @@ func TestHandleCompactCommandDoesNotAppendLiteralUserMessage(t *testing.T) {
 	}
 
 	compactor := &fakeCompactor{summary: "Older work summarized."}
-	var gotInstructions string
 	stats, ran, err := HandleCompactCommand(
 		context.Background(),
 		agent,
-		"/compact focus on failing tests",
-		func(instructions string) clnkr.Compactor {
-			gotInstructions = instructions
+		"/compact",
+		func() clnkr.Compactor {
 			return compactor
 		},
 	)
@@ -67,9 +107,6 @@ func TestHandleCompactCommandDoesNotAppendLiteralUserMessage(t *testing.T) {
 	if got := [2]int{stats.CompactedMessages, stats.KeptMessages}; got != [2]int{2, 4} {
 		t.Fatalf("stats = %#v, want 2 compacted and 4 kept", stats)
 	}
-	if gotInstructions != "focus on failing tests" {
-		t.Fatalf("factory instructions = %q, want focus on failing tests", gotInstructions)
-	}
 	if compactor.calls != 1 || len(compactor.messages) != 2 {
 		t.Fatalf(
 			"compactor got %d calls and %d messages, want 1 call and 2 messages",
@@ -79,11 +116,37 @@ func TestHandleCompactCommandDoesNotAppendLiteralUserMessage(t *testing.T) {
 	}
 
 	msgs := agent.Messages()
-	if hasUserMessage(msgs, "/compact focus on failing tests") {
+	if hasUserMessage(msgs, "/compact") {
 		t.Fatalf("literal compact command was appended: %#v", msgs)
 	}
 	if len(msgs) == 0 || !strings.HasPrefix(msgs[0].Content, "[compact]\n") {
 		t.Fatalf("expected compact block at start, got %#v", msgs)
+	}
+}
+
+func TestCompactTranscriptRunsCompaction(t *testing.T) {
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+
+	compactor := &fakeCompactor{summary: "Older work summarized."}
+	stats, err := CompactTranscript(
+		context.Background(),
+		agent,
+		func() clnkr.Compactor {
+			return compactor
+		},
+	)
+	if err != nil {
+		t.Fatalf("CompactTranscript: %v", err)
+	}
+	if stats.CompactedMessages != 2 || stats.KeptMessages != 4 {
+		t.Fatalf("stats = %#v, want 2 compacted and 4 kept", stats)
+	}
+	if len(agent.Messages()) == 0 ||
+		!strings.HasPrefix(agent.Messages()[0].Content, "[compact]\n") {
+		t.Fatalf("expected compact block at start, got %#v", agent.Messages())
 	}
 }
 
@@ -98,7 +161,7 @@ func TestHandleCompactCommandFailureLeavesMessagesUnchanged(t *testing.T) {
 		context.Background(),
 		agent,
 		"/compact",
-		func(string) clnkr.Compactor {
+		func() clnkr.Compactor {
 			return &fakeCompactor{err: errors.New("boom")}
 		},
 	)
@@ -118,13 +181,13 @@ func TestHandleCompactCommandRejectsMissingCompactor(t *testing.T) {
 	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
 	tests := []struct {
 		name    string
-		factory func(string) clnkr.Compactor
+		factory func() clnkr.Compactor
 		want    string
 	}{
 		{name: "factory", want: "no compactor factory configured"},
 		{
 			name:    "compactor",
-			factory: func(string) clnkr.Compactor { return nil },
+			factory: func() clnkr.Compactor { return nil },
 			want:    "no compactor configured",
 		},
 	}
@@ -140,9 +203,20 @@ func TestHandleCompactCommandRejectsMissingCompactor(t *testing.T) {
 }
 
 func TestRejectCompactCommandOutsideConversation(t *testing.T) {
-	err := RejectCompactCommand("/compact focus on tests")
-	if err == nil ||
-		!strings.Contains(err.Error(), "/compact is only available at the conversational prompt") {
-		t.Fatalf("got %v, want compact rejection", err)
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "/compact", want: "/compact is only available at the conversational prompt"},
+		{input: "/compact focus on tests", want: "/compact does not accept arguments"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			err := RejectCompactCommand(tt.input)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("got %v, want %q", err, tt.want)
+			}
+		})
 	}
 }

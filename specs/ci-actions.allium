@@ -1,0 +1,452 @@
+-- allium: 3
+-- ci-actions.allium
+
+-- Scope: GitHub Actions automation for clnkr.
+-- Includes: pull request and main-branch validation, thoth guardrails,
+--   mocked evaluations, release-gated live evaluations, release artifact
+--   publication, Debian branch updates, Homebrew tap updates, and site deployment.
+-- Excludes:
+--   - Provider-specific evaluation scoring internals.
+--   - GitHub Actions runner implementation details.
+--   - The internal behavior of thoth architecture reports.
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value GitRef {
+    name: String
+    kind: branch | pull_request | semver_tag
+}
+
+value ReleaseAsset {
+    name: String
+    kind: debian_package | binary | source_archive | checksum
+}
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum RunStatus { requested | running | passed | failed | skipped }
+enum ValidationRequirement { actionlint | make_check | race_tests | thoth_guardrails }
+enum EvaluationProvider { openai | anthropic }
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+entity RepositoryHost {}
+
+entity Maintainer {}
+
+entity ValidationRun {
+    ref: GitRef
+    status: RunStatus
+    requirements: Set<ValidationRequirement>
+
+    transitions status {
+        requested -> running
+        running -> passed
+        running -> failed
+        terminal: passed, failed, skipped
+    }
+}
+
+entity LiveEvaluationRun {
+    ref: GitRef
+    provider: EvaluationProvider
+    status: RunStatus
+    artifacts_published: Boolean
+
+    transitions status {
+        requested -> running
+        running -> passed
+        running -> failed
+        terminal: passed, failed
+    }
+}
+
+entity ReleaseRun {
+    ref: GitRef
+    status: RunStatus
+    assets: Set<ReleaseAsset>
+    live_evaluations_passed: Boolean
+    main_status_required: Boolean
+    tag_latest_main_intended: Boolean
+    tag_latest_main_enforced: Boolean
+    site_deployment_required: Boolean
+    debian_branch_updated: Boolean
+    debian_changelog_updated: Boolean
+    project_changelog_updated: Boolean
+    generated_manpages_packaged: Boolean
+    generated_docs_committed: Boolean
+    homebrew_tap_updated: Boolean
+
+    transitions status {
+        requested -> running
+        running -> passed
+        running -> failed
+        terminal: passed, failed
+    }
+}
+
+entity SiteDeployment {
+    ref: GitRef
+    status: RunStatus
+    reports_repository_status: Boolean
+
+    transitions status {
+        requested -> running
+        running -> passed
+        running -> failed
+        terminal: passed, failed
+    }
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+rule ValidateMainPush {
+    when: MainBranchPushed(host, ref)
+    requires: ref.kind = branch
+    requires: ref.name = "main"
+
+    ensures: ValidationRun.created(
+        ref: ref,
+        status: requested,
+        requirements: { actionlint, make_check, race_tests, thoth_guardrails }
+    )
+}
+
+rule ValidatePullRequest {
+    when: PullRequestTargetingMain(host, ref)
+    requires: ref.kind = pull_request
+
+    ensures: ValidationRun.created(
+        ref: ref,
+        status: requested,
+        requirements: { actionlint, make_check, race_tests, thoth_guardrails }
+    )
+}
+
+rule MakeCheckContainsRepositoryQualityGates {
+    when: run: ValidationRun.status transitions_to running
+    requires: make_check in run.requirements
+
+    ensures: MakeCheckRequires(
+        run: run,
+        obligations: {
+            formatting,
+            vet,
+            lint,
+            architecture_imports,
+            script_tests,
+            core_sloc,
+            frontend_sloc,
+            workflow_make_targets,
+            docs,
+            unit_tests,
+            mocked_evaluations
+        }
+    )
+}
+
+rule ThothGuardrailsRemainSeparateFromMakeCheck {
+    when: run: ValidationRun.status transitions_to running
+    requires: thoth_guardrails in run.requirements
+
+    ensures: GuardrailReportsRequired(
+        run: run,
+        reports: {
+            thoth_critical,
+            architecture_shape,
+            semantic_cohesion,
+            test_fidelity
+        }
+    )
+}
+
+rule ValidationPassesWhenAllRequirementsPass {
+    when: ValidationRequirementsCompleted(host, run)
+    requires: AllValidationRequirementsPassed(run)
+
+    ensures: run.status = passed
+}
+
+rule ValidationFailsWhenAnyRequirementFails {
+    when: ValidationRequirementsCompleted(host, run)
+    requires: AnyValidationRequirementFailed(run)
+
+    ensures: run.status = failed
+}
+
+rule ReleaseRequiresLiveEvaluations {
+    when: SemverTagPushed(host, ref)
+    requires: ref.kind = semver_tag
+
+    ensures:
+        LiveEvaluationRun.created(
+            ref: ref,
+            provider: openai,
+            status: requested,
+            artifacts_published: false
+        )
+        LiveEvaluationRun.created(
+            ref: ref,
+            provider: anthropic,
+            status: requested,
+            artifacts_published: false
+        )
+}
+
+rule RunLiveEvaluationsWhenMaintainerRequests {
+    when: MaintainerRequestsLiveEvaluations(maintainer, ref)
+
+    ensures:
+        LiveEvaluationRun.created(
+            ref: ref,
+            provider: openai,
+            status: requested,
+            artifacts_published: false
+        )
+        LiveEvaluationRun.created(
+            ref: ref,
+            provider: anthropic,
+            status: requested,
+            artifacts_published: false
+        )
+}
+
+rule FailLiveEvaluationWhenProviderSecretMissing {
+    when: run: LiveEvaluationRun.status transitions_to running
+    requires: not ProviderSecretAvailable(run.provider)
+
+    ensures: run.status = failed
+}
+
+rule PublishLiveEvaluationArtifacts {
+    when: run: LiveEvaluationRun.status transitions_to failed
+
+    ensures: run.artifacts_published = true
+}
+
+rule ReleaseSemverTag {
+    when: SemverTagPushed(host, ref)
+    requires: ref.kind = semver_tag
+    requires: LiveEvaluationsPassed(ref)
+
+    ensures: ReleaseRun.created(
+        ref: ref,
+        status: requested,
+        assets: {
+            ReleaseAsset{name: "debian-amd64", kind: debian_package},
+            ReleaseAsset{name: "debian-arm64", kind: debian_package},
+            ReleaseAsset{name: "linux-amd64", kind: binary},
+            ReleaseAsset{name: "linux-arm64", kind: binary},
+            ReleaseAsset{name: "darwin-amd64", kind: binary},
+            ReleaseAsset{name: "darwin-arm64", kind: binary},
+            ReleaseAsset{name: "source", kind: source_archive},
+            ReleaseAsset{name: "checksums", kind: checksum}
+        },
+        live_evaluations_passed: true,
+        main_status_required: true,
+        tag_latest_main_intended: true,
+        tag_latest_main_enforced: false,
+        site_deployment_required: false,
+        debian_branch_updated: false,
+        debian_changelog_updated: false,
+        project_changelog_updated: false,
+        generated_manpages_packaged: false,
+        generated_docs_committed: false,
+        homebrew_tap_updated: false
+    )
+}
+
+rule ReleasePublishesDownstreamState {
+    when: run: ReleaseRun.status transitions_to running
+    requires: run.live_evaluations_passed = true
+    requires: MainRepositoryStatusIsGreen(run.ref)
+    requires: run.tag_latest_main_intended = true
+    requires: run.tag_latest_main_enforced = false
+    requires: run.site_deployment_required = false
+
+    ensures:
+        run.debian_branch_updated = true
+        run.debian_changelog_updated = true
+        run.project_changelog_updated = true
+        run.generated_manpages_packaged = true
+        run.generated_docs_committed = false
+        run.homebrew_tap_updated = true
+}
+
+rule MainIsGreenWhenValidationAndSitePass {
+    when: MainStatusChecked(ref)
+    requires: MainValidationPassed(ref)
+    requires: MainSiteDeploymentPassed(ref)
+
+    ensures: MainRepositoryStatusIsGreen(ref)
+}
+
+rule ReleasePassesWhenArtifactsAndDownstreamStateExist {
+    when: ReleaseWorkCompleted(host, run)
+    requires: run.live_evaluations_passed = true
+    requires: MainRepositoryStatusIsGreen(run.ref)
+    requires: run.site_deployment_required = false
+    requires: ReleaseAssetsPublished(run)
+    requires: run.debian_branch_updated = true
+    requires: run.debian_changelog_updated = true
+    requires: run.project_changelog_updated = true
+    requires: run.generated_manpages_packaged = true
+    requires: run.generated_docs_committed = false
+    requires: run.homebrew_tap_updated = true
+
+    ensures: run.status = passed
+}
+
+rule DeploySiteForMainPush {
+    when: MainBranchPushed(host, ref)
+    requires: ref.kind = branch
+    requires: ref.name = "main"
+
+    ensures: SiteDeployment.created(
+        ref: ref,
+        status: requested,
+        reports_repository_status: true
+    )
+}
+
+rule DeploySiteForPullRequest {
+    when: PullRequestTargetingMain(host, ref)
+    requires: ref.kind = pull_request
+
+    ensures: SiteDeployment.created(
+        ref: ref,
+        status: requested,
+        reports_repository_status: true
+    )
+}
+
+rule DeploySiteWhenMaintainerRequests {
+    when: MaintainerRequestsSiteDeployment(maintainer, ref)
+
+    ensures: SiteDeployment.created(
+        ref: ref,
+        status: requested,
+        reports_repository_status: true
+    )
+}
+
+rule SiteDeploymentPassesWhenPublished {
+    when: SitePublishCompleted(host, deployment)
+    requires: SiteContentPublished(deployment)
+
+    ensures: deployment.status = passed
+}
+
+rule SiteDeploymentFailureReportsRedStatus {
+    when: deployment: SiteDeployment.status transitions_to failed
+    requires: deployment.reports_repository_status = true
+
+    ensures: RepositoryStatusRed(ref: deployment.ref, source: site_deployment)
+}
+
+------------------------------------------------------------
+-- Actor Declarations
+------------------------------------------------------------
+
+actor RepositoryHostActor {
+    identified_by: RepositoryHost where true
+}
+
+actor MaintainerActor {
+    identified_by: Maintainer where true
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface GitHubEvents {
+    facing host: RepositoryHostActor
+
+    provides:
+        MainBranchPushed(host, ref)
+        PullRequestTargetingMain(host, ref)
+        SemverTagPushed(host, ref)
+}
+
+surface MaintainerDispatch {
+    facing maintainer: MaintainerActor
+
+    provides:
+        MaintainerRequestsLiveEvaluations(maintainer, ref)
+        MaintainerRequestsSiteDeployment(maintainer, ref)
+}
+
+surface WorkflowRuntime {
+    facing host: RepositoryHostActor
+
+    provides:
+        ValidationRequirementsCompleted(host, run)
+        MainStatusChecked(ref)
+        ReleaseWorkCompleted(host, run)
+        SitePublishCompleted(host, deployment)
+}
+
+surface ValidationStatus {
+    facing host: RepositoryHostActor
+
+    context run: ValidationRun
+
+    exposes:
+        run.ref
+        run.status
+        run.requirements
+}
+
+surface LiveEvaluationStatus {
+    facing host: RepositoryHostActor
+
+    context run: LiveEvaluationRun
+
+    exposes:
+        run.ref
+        run.provider
+        run.status
+        run.artifacts_published
+}
+
+surface ReleaseStatus {
+    facing host: RepositoryHostActor
+
+    context run: ReleaseRun
+
+    exposes:
+        run.ref
+        run.status
+        run.assets
+        run.live_evaluations_passed
+        run.main_status_required
+        run.tag_latest_main_intended
+        run.tag_latest_main_enforced
+        run.site_deployment_required
+        run.debian_branch_updated
+        run.debian_changelog_updated
+        run.project_changelog_updated
+        run.generated_manpages_packaged
+        run.generated_docs_committed
+        run.homebrew_tap_updated
+}
+
+surface SiteDeploymentStatus {
+    facing host: RepositoryHostActor
+
+    context deployment: SiteDeployment
+
+    exposes:
+        deployment.ref
+        deployment.status
+        deployment.reports_repository_status
+}

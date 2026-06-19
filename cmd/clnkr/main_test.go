@@ -359,6 +359,7 @@ func newOpenAIChatServer(t *testing.T, content func(call int) string) (*httptest
 }
 
 func TestPromptRunsSingleTask(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	server, _ := newOpenAIChatServer(t, func(int) string { return openAIWrappedDone("ok") })
 	defer server.Close()
 
@@ -419,6 +420,7 @@ func TestMainHelper(t *testing.T) {
 }
 
 func TestCommandProgressWritesToStderr(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	server, calls := newOpenAIChatServer(t, func(call int) string {
 		if call == 1 {
 			return `{"turn":{"type":"act","bash":{"commands":[{"command":"printf %s \"$COMMAND_OUTPUT_SENTINEL\"; printf err-no-newline >&2","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`
@@ -482,6 +484,7 @@ func TestCommandProgressWritesToStderr(t *testing.T) {
 }
 
 func TestStepLimitInvalidSummaryExitsNonzero(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	server, _ := newOpenAIChatServer(t, func(call int) string {
 		if call > 1 {
 			return `not-json`
@@ -508,6 +511,7 @@ func TestStepLimitInvalidSummaryExitsNonzero(t *testing.T) {
 }
 
 func TestSingleTaskFullSendClarificationCrashesWithoutQuestion(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	server, calls := newOpenAIChatServer(t, func(int) string {
 		return `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":null,"reasoning":null}}`
 	})
@@ -644,6 +648,7 @@ func TestReplPromptIsSuppressedForNonTTY(t *testing.T) {
 }
 
 func TestSingleTaskPromptImpliesFullSend(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	server, calls := newOpenAIChatServer(t, func(int) string { return openAIWrappedDone("done") })
 	defer server.Close()
 
@@ -666,9 +671,201 @@ func TestSingleTaskPromptImpliesFullSend(t *testing.T) {
 	if *calls != 1 {
 		t.Fatalf("model calls = %d, want 1", *calls)
 	}
+	requireOneSavedSession(t)
+}
+
+func requireOneSavedSession(t *testing.T) {
+	t.Helper()
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := clnkrapp.ListSessions(cwd)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %#v, want one saved session", sessions)
+	}
+}
+
+func TestSingleTaskListSessionsShapeStaysGeneric(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	server, _ := newOpenAIChatServer(t, func(int) string { return openAIWrappedDone("done") })
+	defer server.Close()
+
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
+		"--provider", "openai",
+		"--provider-api", "openai-chat-completions",
+		"--base-url", server.URL,
+		"--model", "gpt-test",
+		"-p", "hi",
+	)
+	if err != nil {
+		t.Fatalf("run main: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	listStdout, listStderr, err := runMainHelperWithEnv(
+		t,
+		[]string{"XDG_STATE_HOME=" + os.Getenv("XDG_STATE_HOME")},
+		"--list-sessions",
+	)
+	if err != nil {
+		t.Fatalf(
+			"list sessions: %v\nstdout: %s\nstderr: %s",
+			err,
+			listStdout.String(),
+			listStderr.String(),
+		)
+	}
+	if listStderr.String() != "" {
+		t.Fatalf("list stderr = %q, want empty", listStderr.String())
+	}
+	if !strings.HasPrefix(listStdout.String(), "Saved sessions:\n  1. ") ||
+		!strings.Contains(listStdout.String(), " messages) - ") {
+		t.Fatalf("list stdout = %q, want existing generic session shape", listStdout.String())
+	}
+	if strings.Contains(listStdout.String(), "single-task") ||
+		strings.Contains(listStdout.String(), "prompt") {
+		t.Fatalf("list stdout = %q, want no one-shot session label", listStdout.String())
+	}
+}
+
+func TestSingleTaskRunErrorSavesSessionBeforeExit(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	server, _ := newOpenAIChatServer(t, func(call int) string {
+		if call > 1 {
+			return `not-json`
+		}
+		return `{"turn":{"type":"act","bash":{"commands":[{"command":"printf reached-limit","workdir":null}]},"question":null,"summary":null,"reasoning":null}}`
+	})
+	defer server.Close()
+
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
+		"--provider", "openai",
+		"--provider-api", "openai-chat-completions",
+		"--base-url", server.URL,
+		"--model", "gpt-test",
+		"--max-steps", "1",
+		"-p", "hit the limit",
+	)
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok || exitErr.ExitCode() != 1 {
+		t.Fatalf("run main err = %v, want exit 1", err)
+	}
+	if stdout.String() != "reached-limit\n" {
+		t.Fatalf("stdout = %q, want command output", stdout.String())
+	}
+	if strings.Contains(stderr.String(), "[Session saved to ") {
+		t.Fatalf("stderr = %q, want no saved-session success notice", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "Error: query model (final):") {
+		t.Fatalf("stderr = %q, want final query error", stderr.String())
+	}
+	requireOneSavedSession(t)
+}
+
+func TestSingleTaskClarificationSavesSessionBeforeExit(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	server, calls := newOpenAIChatServer(t, func(int) string {
+		return `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":null,"reasoning":null}}`
+	})
+	defer server.Close()
+
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
+		"--provider", "openai",
+		"--provider-api", "openai-chat-completions",
+		"--base-url", server.URL,
+		"--model", "gpt-test",
+		"-p", "inspect",
+	)
+	exitErr, ok := err.(*exec.ExitError)
+	const clarificationExit = 2
+	if !ok || exitErr.ExitCode() != clarificationExit {
+		t.Fatalf("run main err = %v, want exit %d", err, clarificationExit)
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if stderr.String() != "clarify not allowed in unattended mode\n" {
+		t.Fatalf("stderr = %q, want unattended clarify error", stderr.String())
+	}
+	if *calls != 1 {
+		t.Fatalf("model calls = %d, want 1", *calls)
+	}
+	requireOneSavedSession(t)
+}
+
+func TestSingleTaskTrajectoryWriteFailureStillSavesSession(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	server, _ := newOpenAIChatServer(t, func(int) string { return openAIWrappedDone("done") })
+	defer server.Close()
+	trajectoryPath := filepath.Join(t.TempDir(), "missing", "trajectory.json")
+
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
+		"--provider", "openai",
+		"--provider-api", "openai-chat-completions",
+		"--base-url", server.URL,
+		"--model", "gpt-test",
+		"--trajectory", trajectoryPath,
+		"-p", "hi",
+	)
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok || exitErr.ExitCode() != 1 {
+		t.Fatalf("run main err = %v, want exit 1", err)
+	}
+	if stdout.String() != "done\n" {
+		t.Fatalf("stdout = %q, want summary before trajectory write failure", stdout.String())
+	}
+	if strings.Contains(stderr.String(), "[Session saved to ") {
+		t.Fatalf("stderr = %q, want no saved-session success notice", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "Error: cannot write trajectory") {
+		t.Fatalf("stderr = %q, want trajectory write error", stderr.String())
+	}
+	requireOneSavedSession(t)
+}
+
+func TestSingleTaskTrajectoryAlsoSavesSession(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	server, _ := newOpenAIChatServer(t, func(int) string { return openAIWrappedDone("done") })
+	defer server.Close()
+	trajectoryPath := filepath.Join(t.TempDir(), "trajectory.json")
+
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
+		"--provider", "openai",
+		"--provider-api", "openai-chat-completions",
+		"--base-url", server.URL,
+		"--model", "gpt-test",
+		"--trajectory", trajectoryPath,
+		"-p", "hi",
+	)
+	if err != nil {
+		t.Fatalf("run main: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+	}
+	if stdout.String() != "done\n" {
+		t.Fatalf("stdout = %q, want summary", stdout.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	data, err := os.ReadFile(trajectoryPath)
+	if err != nil {
+		t.Fatalf("ReadFile trajectory: %v", err)
+	}
+	if !strings.Contains(string(data), `"role": "user"`) ||
+		!strings.Contains(string(data), `"content": "hi"`) {
+		t.Fatalf("trajectory = %s, want saved prompt message", data)
+	}
+	requireOneSavedSession(t)
 }
 
 func TestSingleTaskSeedsCommandEnvFromResolvedProviderFlags(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	server, _ := newOpenAIChatServer(t, func(call int) string {
 		if call == 1 {
 			return `{"turn":{"type":"act","bash":{"commands":[{"command":"printf '%s|%s|%s|%s' \"$CLNKR_PROVIDER\" \"$CLNKR_PROVIDER_API\" \"$CLNKR_MODEL\" \"$CLNKR_BASE_URL\"","workdir":null}]},"question":null,"summary":null,"reasoning":"inspect child env"}}`
@@ -694,6 +891,7 @@ func TestSingleTaskSeedsCommandEnvFromResolvedProviderFlags(t *testing.T) {
 }
 
 func TestOpenAIResponsesHarnessFlagsReachRequestAndMetadata(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -858,7 +1056,7 @@ func TestRunSingleTaskRejectsCompactCommand(t *testing.T) {
 		"CLNKR_PROVIDER=openai",
 		"CLNKR_MODEL=gpt-test",
 		"TERM=xterm",
-	}, "-p", "/compact focus on tests")
+	}, "-p", "/compact")
 	if err == nil {
 		t.Fatalf("run main succeeded; stdout: %s\nstderr: %s", stdout.String(), stderr.String())
 	}

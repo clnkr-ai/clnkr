@@ -1,0 +1,181 @@
+-- allium: 3
+-- executor.allium
+
+-- Scope: host command execution only.
+-- Includes: bash action execution, command result outcomes, post-command state,
+--   base environment snapshots, cancellation, and git-backed feedback.
+-- Excludes: provider request construction and act-turn approval policy.
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value Path {
+    raw: String
+}
+
+value EnvironmentVariable {
+    name: String
+    value: String
+}
+
+value EnvironmentSnapshot {
+    working_directory: Path
+    variables: Set<EnvironmentVariable>
+}
+
+value BashAction {
+    command: String
+    working_directory: Path
+}
+
+value CommandFeedback {
+    changed_files: Set<Path>
+    diff: String
+}
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+entity Executor {
+    base_environment: EnvironmentSnapshot?
+}
+
+entity CommandResult {
+    action: BashAction
+    stdout: String
+    stderr: String
+    outcome: exit | timeout | cancelled | denied | skipped | error
+    exit_code: Integer? when outcome = exit
+    message: String? when outcome = error
+    post_command_state: EnvironmentSnapshot?
+    feedback: CommandFeedback?
+}
+
+entity Host {}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+rule ExecuteAcceptedBashAction {
+    when: ExecuteCommand(host, executor, action)
+
+    ensures:
+        let result = CommandResult.created(
+            action: action,
+            stdout: CapturedStdout(action),
+            stderr: CapturedStderr(action),
+            outcome: CommandOutcome(action)
+        )
+        if result.outcome = exit:
+            result.exit_code = CapturedExitCode(action)
+        if PostCommandStateCaptured(action):
+            result.post_command_state = CapturedPostCommandState(action)
+}
+
+rule BaseEnvironmentOverridesParentEnvironment {
+    when: ExecuteCommand(host, executor, action)
+    requires: executor.base_environment != null
+
+    ensures: CommandEnvironment(action).variables = executor.base_environment.variables
+}
+
+rule HostControlVariablesAreAddedForExecution {
+    when: ExecuteCommand(host, executor, action)
+
+    ensures: CommandEnvironment(action).variables = CommandEnvironment(action).variables + HostControlVariables()
+    ensures: not StateFileVariable() in CapturedPostCommandState(action).variables
+}
+
+rule CancellationKillsCommandProcessGroup {
+    when: CommandCancelled(host, action)
+
+    ensures: CommandResult.created(
+        action: action,
+        outcome: cancelled
+    )
+    ensures: ProcessGroupTerminated(action)
+}
+
+rule TimeoutRecordsTimeoutOutcome {
+    when: CommandTimedOut(host, action)
+
+    ensures: CommandResult.created(
+        action: action,
+        outcome: timeout
+    )
+}
+
+rule ErrorRecordsHostExecutionFailure {
+    when: HostExecutionFailed(host, action, message)
+
+    ensures: CommandResult.created(
+        action: action,
+        outcome: error,
+        message: message
+    )
+}
+
+rule AttachFeedbackFromCleanGitBaseline {
+    when: ExecuteCommandFromGitBaseline(host, executor, action, baseline)
+    requires: baseline.status = clean
+    requires: GitChangesExistAfterCommand(action)
+
+    ensures: CommandResult{action}.feedback = CommandFeedback{
+        changed_files: ChangedPathsRelativeToFinalWorkingDirectory(action),
+        diff: CombinedTrackedDiff(action)
+    }
+}
+
+rule OmitFeedbackFromDirtyOrUnavailableGitBaseline {
+    when: ExecuteCommandFromGitBaseline(host, executor, action, baseline)
+    requires: baseline.status = dirty or baseline.status = unavailable
+
+    ensures: CommandResult{action}.feedback = null
+}
+
+------------------------------------------------------------
+-- Actor Declarations
+------------------------------------------------------------
+
+actor HostActor {
+    identified_by: Host where true
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface CommandExecution {
+    facing host: HostActor
+
+    context executor: Executor
+
+    exposes:
+        executor.base_environment
+
+    provides:
+        ExecuteCommand(host, executor, action)
+        CommandCancelled(host, action)
+        CommandTimedOut(host, action)
+        HostExecutionFailed(host, action, message)
+        ExecuteCommandFromGitBaseline(host, executor, action, baseline)
+}
+
+surface CommandResultObservation {
+    facing host: HostActor
+
+    context result: CommandResult
+
+    exposes:
+        result.action
+        result.stdout
+        result.stderr
+        result.outcome
+        result.exit_code
+        result.message
+        result.post_command_state
+        result.feedback
+}

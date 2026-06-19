@@ -31,6 +31,9 @@ func FormatCommandResult(result CommandResult) string {
 	if len(result.Feedback.ChangedFiles) > 0 || result.Feedback.Diff != "" {
 		payload["feedback"] = result.Feedback
 	}
+	if strings.TrimSpace(result.Guidance) != "" {
+		payload["guidance"] = result.Guidance
+	}
 	if stdoutMeta != nil || stderrMeta != nil {
 		payload["observation"] = map[string]any{
 			"source":  "clnkr",

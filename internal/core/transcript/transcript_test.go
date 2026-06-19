@@ -13,6 +13,7 @@ type commandPayload struct {
 	Stderr      string          `json:"stderr"`
 	Outcome     CommandOutcome  `json:"outcome"`
 	Feedback    CommandFeedback `json:"feedback"`
+	Guidance    string          `json:"guidance"`
 	Observation struct {
 		Source  string             `json:"source"`
 		Version int                `json:"version"`
@@ -85,7 +86,7 @@ func TestFindCompactBoundaryIgnoresHostBlocks(t *testing.T) {
 					),
 				},
 				{Role: "user", Content: FormatStateMessage("/tmp/old")},
-				{Role: "user", Content: FormatCompactMessage("older summary", "")},
+				{Role: "user", Content: FormatCompactMessage("older summary")},
 				{Role: "user", Content: "[protocol_error]\nmissing command\n[/protocol_error]"},
 				{Role: "user", Content: "second task"},
 				{Role: "assistant", Content: `{"type":"done","summary":"done again"}`},
@@ -165,7 +166,7 @@ func TestFindCompactBoundaryIgnoresHostBlocks(t *testing.T) {
 
 func TestRewriteForCompaction(t *testing.T) {
 	foreignState := `{"type":"state","source":"user","cwd":"/wrong"}`
-	staleCompact := FormatCompactMessage("stale summary", "old instructions")
+	staleCompact := FormatCompactMessage("stale summary")
 
 	t.Run("keeps recent tail", func(t *testing.T) {
 		messages := []Message{
@@ -183,12 +184,12 @@ func TestRewriteForCompaction(t *testing.T) {
 			{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
 		}
 
-		got, stats, err := RewriteForCompaction(messages, "summary", "focus on recent changes", 2)
+		got, stats, err := RewriteForCompaction(messages, "summary", 2)
 		if err != nil {
 			t.Fatalf("RewriteForCompaction: %v", err)
 		}
 		assertMessages(t, got, []Message{
-			{Role: "user", Content: FormatCompactMessage("summary", "focus on recent changes")},
+			{Role: "user", Content: FormatCompactMessage("summary")},
 			{Role: "user", Content: "second task"},
 			{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
 			{Role: "user", Content: "third task"},
@@ -215,12 +216,12 @@ func TestRewriteForCompaction(t *testing.T) {
 			{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
 		}
 
-		got, stats, err := RewriteForCompaction(messages, "summary", "", 1)
+		got, stats, err := RewriteForCompaction(messages, "summary", 1)
 		if err != nil {
 			t.Fatalf("RewriteForCompaction: %v", err)
 		}
 		assertMessages(t, got, []Message{
-			{Role: "user", Content: FormatCompactMessage("summary", "")},
+			{Role: "user", Content: FormatCompactMessage("summary")},
 			{Role: "user", Content: FormatStateMessage("/tmp/latest")},
 			{Role: "user", Content: "third task"},
 			{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
@@ -242,7 +243,7 @@ func TestRewriteForCompaction(t *testing.T) {
 			{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
 		}
 
-		got, stats, err := RewriteForCompaction(messages, "summary", "", 2)
+		got, stats, err := RewriteForCompaction(messages, "summary", 2)
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -265,7 +266,7 @@ func TestRewriteForCompaction(t *testing.T) {
 			{Role: "assistant", Content: `{"type":"done","summary":"foreign echoed"}`},
 		}
 
-		got, _, err := RewriteForCompaction(messages, "summary", "", 1)
+		got, _, err := RewriteForCompaction(messages, "summary", 1)
 		if err != nil {
 			t.Fatalf("RewriteForCompaction: %v", err)
 		}
@@ -288,7 +289,7 @@ func TestRewriteForCompaction(t *testing.T) {
 			{Role: "user", Content: FormatStateMessage("/tmp/recent")},
 		}
 
-		got, _, err := RewriteForCompaction(messages, "fresh summary", "new instructions", 1)
+		got, _, err := RewriteForCompaction(messages, "fresh summary", 1)
 		if err != nil {
 			t.Fatalf("RewriteForCompaction: %v", err)
 		}
@@ -299,7 +300,7 @@ func TestRewriteForCompaction(t *testing.T) {
 			got[0],
 			Message{
 				Role:    "user",
-				Content: FormatCompactMessage("fresh summary", "new instructions"),
+				Content: FormatCompactMessage("fresh summary"),
 			},
 		) {
 			t.Fatalf("first message = %#v, want new compact block", got[0])
@@ -321,7 +322,7 @@ func TestRewriteForCompaction(t *testing.T) {
 }
 
 func TestFormatCompactMessageRoundTripsAsTaggedJSON(t *testing.T) {
-	msg := Message{Role: "user", Content: FormatCompactMessage("summary text", "focus on tests")}
+	msg := Message{Role: "user", Content: FormatCompactMessage("summary text")}
 	if !IsCompactMessage(msg) {
 		t.Fatal("formatted compact message should be recognized")
 	}
@@ -335,13 +336,15 @@ func TestFormatCompactMessageRoundTripsAsTaggedJSON(t *testing.T) {
 	}
 
 	want := compactState{
-		Source:       "clnkr",
-		Kind:         "compact",
-		Instructions: "focus on tests",
-		Summary:      "summary text",
+		Source:  "clnkr",
+		Kind:    "compact",
+		Summary: "summary text",
 	}
 	if got != want {
 		t.Fatalf("compact body = %#v, want %#v", got, want)
+	}
+	if got.Source != "clnkr" || got.Kind != "compact" || got.Summary != "summary text" {
+		t.Fatalf("compact body fields incorrect: %#v", got)
 	}
 }
 
@@ -640,4 +643,25 @@ func TestFormatCommandResultFeedback(t *testing.T) {
 			t.Fatalf("feedback diff = %q", payload.Feedback.Diff)
 		}
 	})
+}
+
+func TestFormatCommandResultIncludesGuidance(t *testing.T) {
+	guidance := "Use a narrower command."
+	payload := decodeCommandPayload(t, FormatCommandResult(CommandResult{
+		Command:  "sleep 60",
+		Stderr:   "timed out\n",
+		Outcome:  CommandOutcome{Type: CommandOutcomeTimeout},
+		Guidance: guidance,
+	}))
+	if payload.Guidance != guidance {
+		t.Fatalf("guidance = %q, want %q", payload.Guidance, guidance)
+	}
+	if payload.Outcome.Type != CommandOutcomeTimeout {
+		t.Fatalf("outcome = %#v, want timeout", payload.Outcome)
+	}
+
+	raw := FormatCommandResult(CommandResult{Command: "printf hi", ExitCode: 0})
+	if _, ok := decodeCommandFields(t, raw)["guidance"]; ok {
+		t.Fatalf("unexpected guidance field: %q", raw)
+	}
 }

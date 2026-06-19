@@ -25,7 +25,7 @@ func TestHelpWritesRichUsageToStdout(t *testing.T) {
 	}
 	for _, want := range []string{
 		"clnkrd - stdio JSONL adapter for clnkr",
-		"May be launched by clnkr through bash for bounded child work.",
+		"Machine-facing stdio JSONL for tools, editors, wrappers, evals, automation,",
 		"Usage:",
 		"JSONL commands:",
 		"JSONL events:",
@@ -221,23 +221,20 @@ func TestRunJSONLReplyWithoutPendingRequestDoesNotCarryAcrossRuns(t *testing.T) 
 	}
 }
 
-func TestRunJSONLCompactRoutesInstructionsThroughDriver(t *testing.T) {
+func TestRunJSONLCompactRunsDriverCompaction(t *testing.T) {
 	var out, errOut bytes.Buffer
 	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
 	if err := agent.AddMessages(compactableMessages()); err != nil {
 		t.Fatalf("AddMessages: %v", err)
 	}
 	compactor := &fakeCompactor{summary: "Older work summarized."}
-	driver := clnkrapp.NewDriver(agent, func(instructions string) clnkr.Compactor {
-		if instructions != "focus tests" {
-			t.Fatalf("instructions = %q, want focus tests", instructions)
-		}
+	driver := clnkrapp.NewDriver(agent, func() clnkr.Compactor {
 		return compactor
 	})
 
 	err := runJSONL(
 		context.Background(),
-		strings.NewReader(`{"type":"compact","instructions":"focus tests"}`+"\n"),
+		strings.NewReader(`{"type":"compact"}`+"\n"),
 		&out,
 		&errOut,
 		driver,

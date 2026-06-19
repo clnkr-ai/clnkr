@@ -71,7 +71,7 @@ func compactTranscript(t *testing.T, cwd string, messages []clnkr.Message) []cln
 		context.Background(),
 		fakeCompactor{summary: "Older work summarized."},
 		clnkr.CompactOptions{
-			Instructions:    "focus on failing tests",
+
 			KeepRecentTurns: 2,
 		},
 	)

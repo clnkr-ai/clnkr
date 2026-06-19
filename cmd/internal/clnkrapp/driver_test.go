@@ -92,16 +92,13 @@ func TestDriverTopLevelCompactDispatch(t *testing.T) {
 		t.Fatalf("AddMessages: %v", err)
 	}
 	compactor := &fakeCompactor{summary: "Older work summarized."}
-	driver := NewDriver(agent, func(instructions string) clnkr.Compactor {
-		if instructions != "focus on tests" {
-			t.Fatalf("instructions = %q, want compact instructions", instructions)
-		}
+	driver := NewDriver(agent, func() clnkr.Compactor {
 		return compactor
 	})
 
 	if err := driver.Prompt(
 		context.Background(),
-		"/compact focus on tests",
+		"/compact",
 		PromptModeApproval,
 	); err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -117,6 +114,33 @@ func TestDriverTopLevelCompactDispatch(t *testing.T) {
 	}
 	if hasUserMessage(agent.Messages(), "/compact focus on tests") {
 		t.Fatalf("compact command leaked into transcript: %#v", agent.Messages())
+	}
+	if got := driver.Pending(); got != PendingNone {
+		t.Fatalf("Pending() = %q, want %q", got, PendingNone)
+	}
+}
+
+func TestDriverCompactDispatch(t *testing.T) {
+	agent := clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+	if err := agent.AddMessages(compactableMessages()); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+	compactor := &fakeCompactor{summary: "Older work summarized."}
+	driver := NewDriver(agent, func() clnkr.Compactor {
+		return compactor
+	})
+
+	if err := driver.Compact(context.Background()); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+
+	event := nextDriverEvent(t, driver)
+	compacted, ok := event.(EventCompacted)
+	if !ok {
+		t.Fatalf("event = %T, want EventCompacted", event)
+	}
+	if compacted.Stats.CompactedMessages != 2 || compacted.Stats.KeptMessages != 4 {
+		t.Fatalf("stats = %#v, want 2 compacted and 4 kept", compacted.Stats)
 	}
 	if got := driver.Pending(); got != PendingNone {
 		t.Fatalf("Pending() = %q, want %q", got, PendingNone)

@@ -11,7 +11,6 @@ type Compactor interface {
 }
 
 type CompactOptions struct {
-	Instructions    string
 	KeepRecentTurns int
 }
 

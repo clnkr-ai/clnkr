@@ -11,6 +11,14 @@ import (
 
 const DefaultMaxSteps = 100
 
+type resourcePressure string
+
+const (
+	resourcePressureNormal   resourcePressure = "normal"
+	resourcePressureLow      resourcePressure = "low"
+	resourcePressureCritical resourcePressure = "critical"
+)
+
 var ErrClarificationNeeded = errors.New("clarification needed")
 
 // Agent coordinates model turns and command execution.
@@ -100,20 +108,63 @@ func (a *Agent) appendStateMessageIfNeeded() {
 	)
 }
 
-func (a *Agent) appendResourceStateMessage(commandsUsed, modelTurnsUsed int) {
+func commandBudgetPressure(commandsUsed, maxCommands int) resourcePressure {
+	if maxCommands <= 0 {
+		return resourcePressureNormal
+	}
+	remaining := max(maxCommands-commandsUsed, 0)
+	if remaining <= 1 {
+		return resourcePressureCritical
+	}
+	lowThreshold := (maxCommands + 3) / 4
+	if remaining <= lowThreshold {
+		return resourcePressureLow
+	}
+	return resourcePressureNormal
+}
+
+func resourcePressureGuidance(pressure resourcePressure) string {
+	switch pressure {
+	case resourcePressureLow:
+		return "Command budget pressure is low. Prefer targeted checks and edits over broad exploration."
+	case resourcePressureCritical:
+		return "Command budget pressure is critical. Stop broad exploration, produce the smallest viable result, run one cheap check, then finish."
+	default:
+		return ""
+	}
+}
+
+func (a *Agent) appendResourceStateMessage(
+	commandsUsed,
+	modelTurnsUsed int,
+	includeGuidance bool,
+) {
 	content := fmt.Sprintf(
 		`{"type":"resource_state","source":"clnkr","commands_used":%d,"model_turns_used":%d}`,
 		commandsUsed,
 		modelTurnsUsed,
 	)
 	if a.MaxSteps > 0 {
+		pressure := commandBudgetPressure(commandsUsed, a.MaxSteps)
 		content = fmt.Sprintf(
-			`{"type":"resource_state","source":"clnkr","commands_used":%d,"commands_remaining":%d,"max_commands":%d,"model_turns_used":%d}`,
+			`{"type":"resource_state","source":"clnkr","commands_used":%d,"commands_remaining":%d,"max_commands":%d,"model_turns_used":%d,"pressure":%q}`,
 			commandsUsed,
 			max(a.MaxSteps-commandsUsed, 0),
 			a.MaxSteps,
 			modelTurnsUsed,
+			string(pressure),
 		)
+		if guidance := resourcePressureGuidance(pressure); includeGuidance && guidance != "" {
+			content = fmt.Sprintf(
+				`{"type":"resource_state","source":"clnkr","commands_used":%d,"commands_remaining":%d,"max_commands":%d,"model_turns_used":%d,"pressure":%q,"guidance":%q}`,
+				commandsUsed,
+				max(a.MaxSteps-commandsUsed, 0),
+				a.MaxSteps,
+				modelTurnsUsed,
+				string(pressure),
+				guidance,
+			)
+		}
 	}
 	if len(a.messages) > 0 && a.messages[len(a.messages)-1].Role == "user" &&
 		a.messages[len(a.messages)-1].Content == content {
@@ -204,7 +255,6 @@ func (a *Agent) Compact(
 	rewritten, stats, err := transcript.RewriteForCompaction(
 		transcriptMessages,
 		summary,
-		opts.Instructions,
 		keepRecentTurns,
 	)
 	if err != nil {

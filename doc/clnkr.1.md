@@ -12,14 +12,14 @@ clnkr - a minimal coding agent (plain CLI)
 
 **clnkr** is a minimal coding agent that queries LLMs and executes bash commands using an act protocol. The default protocol is **auto**, which uses provider-native **bash** tool calls when the resolved provider/API supports them and falls back to provider-portable clnkr act JSON otherwise.
 
-In default mode, **clnkr** starts an interactive REPL. With **-p**, it runs a single unattended task and exits.
+In default mode, **clnkr** starts an interactive REPL. With **-p**, it runs a single unattended task and exits. Single-task runs save the project session by default, so later **clnkr --continue** and **clnkr --list-sessions** can see them.
 
 At the main idle conversational prompt, **/compact** summarizes older transcript history while keeping recent context intact for the current working thread.
 
-The built-in prompt teaches the model when to launch **clnkrd** through bash for
-bounded child work. A child is an ordinary process with stdout, stderr, and
-optional **--event-log** artifacts. **/delegate** *task* is ordinary prompt text;
-the host does not intercept it.
+The built-in prompt teaches the model when to launch **clnkrd** through bash as
+a machine-facing stdio JSONL process. The process exposes stdout, stderr, and
+optional **--event-log** artifacts. **/delegate** *task* is ordinary prompt
+text; the host does not intercept it.
 
 **clnkr** has no external dependencies beyond the Go standard library.
 
@@ -104,17 +104,18 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 
 # INTERACTIVE COMMANDS
 
-**/compact** [*instructions*]
-: At the idle conversational prompt, summarize older transcript history while keeping the recent working thread intact. Optional trailing text is passed to the compaction summarizer as extra instructions.
+**/compact**
+: At the idle conversational prompt, summarize older transcript history while keeping the recent working thread intact.
 
-This command is only available at the top-level conversational prompt. In single-task mode, approval replies, and clarification replies, the literal text is treated as normal input or rejected with an error rather than triggering compaction.
+This command is only available at the top-level conversational prompt. Trailing text after **/compact** is rejected. In single-task mode, approval replies, and clarification replies, the literal exact command is rejected with an error rather than triggering compaction.
 
 **/delegate** *task*
-: Ask the model to launch **clnkrd** through bash for a bounded child task.
+: Ask the model to launch **clnkrd** through bash for bounded machine-facing
+JSONL work.
 The text reaches the model like any other prompt. The model is expected to use
 ordinary shell redirection, temporary directories, **--event-log**, and **wait**
-when it runs child processes. Treat child output as evidence, not authority;
-verify important child claims before using them for edits or final answers.
+when it runs extra processes. Treat process output as evidence, not authority;
+verify important claims before using them for edits or final answers.
 
 # ENVIRONMENT
 

@@ -205,6 +205,52 @@ func TestExecuteTurnCoordinatesCommandBatch(t *testing.T) {
 			}
 		},
 	)
+
+	t.Run("appends timeout guidance as structured command JSON", func(t *testing.T) {
+		execErr := errors.New("run command: timeout")
+		executor := &fakeExecutor{
+			results: []CommandResult{{
+				Stderr:  "timed out\n",
+				Outcome: CommandOutcome{Type: CommandOutcomeTimeout},
+			}},
+			errs: []error{execErr},
+		}
+		agent := NewAgent(&fakeModel{}, executor, "/repo")
+
+		result, err := agent.ExecuteTurn(
+			context.Background(),
+			&ActTurn{Bash: BashBatch{Commands: []BashAction{{Command: "sleep 60"}}}},
+		)
+		if err != nil {
+			t.Fatalf("ExecuteTurn API error: %v", err)
+		}
+		if !errors.Is(result.ExecErr, execErr) {
+			t.Fatalf("ExecuteTurn ExecErr = %v, want timeout command error", result.ExecErr)
+		}
+
+		got := messagesText(agent.Messages())
+		for _, want := range []string{
+			`"type":"timeout"`,
+			timeoutGuidance,
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("messages missing %q:\n%s", want, got)
+			}
+		}
+		var payload struct {
+			Guidance string `json:"guidance"`
+		}
+		if err := json.Unmarshal([]byte(agent.Messages()[0].Content), &payload); err != nil {
+			t.Fatalf(
+				"timeout command message is not JSON: %v\n%s",
+				err,
+				agent.Messages()[0].Content,
+			)
+		}
+		if payload.Guidance != timeoutGuidance {
+			t.Fatalf("timeout guidance = %q, want %q", payload.Guidance, timeoutGuidance)
+		}
+	})
 }
 
 func TestRunWithPolicyCoordinatesTheFacadeLoop(t *testing.T) {
@@ -293,6 +339,47 @@ func TestRunWithPolicyCoordinatesTheFacadeLoop(t *testing.T) {
 			}
 		},
 	)
+
+	t.Run("resource pressure guidance appears only on pressure transitions", func(t *testing.T) {
+		firstBatch := make([]BashAction, 7)
+		secondBatch := make([]BashAction, 2)
+		results := make([]CommandResult, 9)
+		for i := range firstBatch {
+			firstBatch[i] = BashAction{Command: fmt.Sprintf("echo first-%d", i)}
+			results[i] = CommandResult{Stdout: "ok\n", ExitCode: 0}
+		}
+		for i := range secondBatch {
+			secondBatch[i] = BashAction{Command: fmt.Sprintf("echo second-%d", i)}
+			results[len(firstBatch)+i] = CommandResult{Stdout: "ok\n", ExitCode: 0}
+		}
+		model := &fakeModel{responses: []Response{
+			{Turn: &ActTurn{Bash: BashBatch{Commands: firstBatch}}},
+			{Turn: &ActTurn{Bash: BashBatch{Commands: secondBatch}}},
+			{Turn: verifiedDone("finished")},
+		}}
+		agent := NewAgent(model, &fakeExecutor{results: results}, "/tmp")
+		agent.MaxSteps = 10
+
+		if err := agent.Run(context.Background(), "use budget"); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+
+		got := messagesText(agent.Messages())
+		lowGuidance := resourcePressureGuidance(resourcePressureLow)
+		criticalGuidance := resourcePressureGuidance(resourcePressureCritical)
+		for _, want := range []string{
+			`"pressure":"normal"`,
+			`"pressure":"low","guidance":"` + lowGuidance + `"`,
+			`"pressure":"critical","guidance":"` + criticalGuidance + `"`,
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("transcript missing %q:\n%s", want, got)
+			}
+		}
+		if strings.Count(got, lowGuidance) != 1 || strings.Count(got, criticalGuidance) != 1 {
+			t.Fatalf("guidance should be transition-only:\n%s", got)
+		}
+	})
 }
 
 func TestRunWithPolicyCompletesDeniedToolResults(t *testing.T) {
@@ -660,6 +747,120 @@ func TestAgentPublicAPIGuards(t *testing.T) {
 			got.BashToolResult.Content != "payload" ||
 			string(got.ProviderReplay[0].JSON) != `["x"]` {
 			t.Fatalf("stored message was mutated: %#v", got)
+		}
+	})
+}
+
+func TestCommandBudgetPressure(t *testing.T) {
+	tests := []struct {
+		name         string
+		commandsUsed int
+		maxCommands  int
+		wantPressure resourcePressure
+		wantGuidance string
+	}{
+		{name: "disabled", commandsUsed: 4, maxCommands: 0, wantPressure: resourcePressureNormal},
+		{name: "normal", commandsUsed: 5, maxCommands: 10, wantPressure: resourcePressureNormal},
+		{
+			name:         "low at rounded quarter",
+			commandsUsed: 7,
+			maxCommands:  10,
+			wantPressure: resourcePressureLow,
+			wantGuidance: "Command budget pressure is low. Prefer targeted checks and edits over broad exploration.",
+		},
+		{
+			name:         "critical at one remaining",
+			commandsUsed: 9,
+			maxCommands:  10,
+			wantPressure: resourcePressureCritical,
+			wantGuidance: "Command budget pressure is critical. Stop broad exploration, produce the smallest viable result, run one cheap check, then finish.",
+		},
+		{
+			name:         "critical when exhausted",
+			commandsUsed: 10,
+			maxCommands:  10,
+			wantPressure: resourcePressureCritical,
+			wantGuidance: "Command budget pressure is critical. Stop broad exploration, produce the smallest viable result, run one cheap check, then finish.",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := commandBudgetPressure(tc.commandsUsed, tc.maxCommands)
+			if got != tc.wantPressure {
+				t.Fatalf(
+					"commandBudgetPressure(%d, %d) = %q, want %q",
+					tc.commandsUsed,
+					tc.maxCommands,
+					got,
+					tc.wantPressure,
+				)
+			}
+			if gotGuidance := resourcePressureGuidance(got); gotGuidance != tc.wantGuidance {
+				t.Fatalf(
+					"resourcePressureGuidance(%q) = %q, want %q",
+					got,
+					gotGuidance,
+					tc.wantGuidance,
+				)
+			}
+		})
+	}
+}
+
+func TestAppendResourceStateMessageIncludesPressure(t *testing.T) {
+	t.Run("budgeted state includes pressure without guidance", func(t *testing.T) {
+		agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+		agent.MaxSteps = 10
+
+		agent.appendResourceStateMessage(8, 6, false)
+
+		got := agent.Messages()[0].Content
+		for _, want := range []string{
+			`"type":"resource_state"`,
+			`"commands_used":8`,
+			`"commands_remaining":2`,
+			`"max_commands":10`,
+			`"model_turns_used":6`,
+			`"pressure":"low"`,
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("resource state missing %q: %s", want, got)
+			}
+		}
+		if strings.Contains(got, `"guidance"`) {
+			t.Fatalf("resource state included guidance unexpectedly: %s", got)
+		}
+	})
+
+	t.Run("budgeted state includes transition guidance", func(t *testing.T) {
+		agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+		agent.MaxSteps = 10
+
+		agent.appendResourceStateMessage(9, 6, true)
+
+		got := agent.Messages()[0].Content
+		for _, want := range []string{
+			`"pressure":"critical"`,
+			`"guidance":"Command budget pressure is critical. Stop broad exploration, produce the smallest viable result, run one cheap check, then finish."`,
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("resource state missing %q: %s", want, got)
+			}
+		}
+	})
+
+	t.Run("unbudgeted state keeps existing fields only", func(t *testing.T) {
+		agent := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp")
+		agent.MaxSteps = 0
+
+		agent.appendResourceStateMessage(8, 6, true)
+
+		got := agent.Messages()[0].Content
+		for _, notWant := range []string{`"commands_remaining"`, `"max_commands"`, `"pressure"`, `"guidance"`} {
+			if strings.Contains(got, notWant) {
+				t.Fatalf("unbudgeted resource state included %q: %s", notWant, got)
+			}
 		}
 	})
 }

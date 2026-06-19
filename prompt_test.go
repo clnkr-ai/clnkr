@@ -28,6 +28,7 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		"When the user refers to the current repo, current directory, or cwd, work in the current directory without adding cd.",
 		"If the user names a file or path, inspect that exact path first.",
 		`You may also receive JSON host state messages such as {"type":"state","source":"clnkr","cwd":"/repo"} and resource_state`,
+		"resource_state may include pressure and guidance",
 		"commands_used",
 		"commands_remaining",
 		"model_turns_used",
@@ -37,6 +38,8 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 		`"observation" metadata when stdout/stderr were compressed`,
 		"clean pre-command git baseline",
 		`do not emit "done" until you have completed the change with at least one "act" turn`,
+		"Before done, run the cheapest task-visible check of the exact deliverable when feasible.",
+		"If a check fails, inspect the failure and change one hypothesis; do not repeat the same failed command blindly.",
 		"Never claim to have created, modified, or verified something unless that happened through a prior command result in this conversation.",
 		"If a verification command shows the result does not match the request exactly, issue another \"act\" turn to fix it instead of emitting \"done\".",
 		"For exact literal text writes, prefer quoted literals such as printf 'hello\\n' > note.txt instead of shell-fragile format strings.",
@@ -73,12 +76,12 @@ func TestLoadPromptWithOptions_ClnkrdProcessAutonomy(t *testing.T) {
 			name: "inline protocol",
 			want: []string{
 				"<parallel-work>",
-				"Bash is your only tool. You may use bash to run `clnkrd` as another ordinary process whenever it would materially reduce uncertainty, parallelize independent work, verify a claim, or explore a non-blocking question.",
-				"If the user writes `/delegate ...`, treat it as an instruction to launch `clnkrd` through bash for that bounded child task; do not treat it as a host command.",
-				"children=$(mktemp -d /tmp/clnkr-children.$$.XXXXXX)",
-				`clnkrd --event-log "$children/prompt-review/events.jsonl"`,
+				"Bash is your only tool. You may use bash to run `clnkrd` as a machine-facing stdio JSONL process whenever it would materially reduce uncertainty, parallelize independent work, verify a claim, or explore a non-blocking question.",
+				"If the user writes `/delegate ...`, treat it as prompt text asking you to launch `clnkrd` through bash for bounded machine-facing JSONL work; do not treat it as a host command.",
+				"workdir=$(mktemp -d /tmp/clnkr-processes.$$.XXXXXX)",
+				`clnkrd --event-log "$workdir/prompt-review/events.jsonl"`,
 				`wait "$pid1" "$pid2"`,
-				"Treat child output as evidence to evaluate, not proof.",
+				"Treat process output as evidence to evaluate, not proof.",
 			},
 		},
 		{
@@ -86,10 +89,10 @@ func TestLoadPromptWithOptions_ClnkrdProcessAutonomy(t *testing.T) {
 			opts: PromptOptions{ActProtocol: ActProtocolToolCalls},
 			want: []string{
 				"<parallel-work>",
-				"Bash is your only tool. You may use bash to run `clnkrd` as another ordinary process whenever it would materially reduce uncertainty, parallelize independent work, verify a claim, or explore a non-blocking question.",
-				"If the user writes `/delegate ...`, treat it as an instruction to launch `clnkrd` through bash for that bounded child task; do not treat it as a host command.",
-				"children=$(mktemp -d /tmp/clnkr-children.$$.XXXXXX)",
-				`clnkrd --event-log "$children/docs-review/events.jsonl"`,
+				"Bash is your only tool. You may use bash to run `clnkrd` as a machine-facing stdio JSONL process whenever it would materially reduce uncertainty, parallelize independent work, verify a claim, or explore a non-blocking question.",
+				"If the user writes `/delegate ...`, treat it as prompt text asking you to launch `clnkrd` through bash for bounded machine-facing JSONL work; do not treat it as a host command.",
+				"workdir=$(mktemp -d /tmp/clnkr-processes.$$.XXXXXX)",
+				`clnkrd --event-log "$workdir/docs-review/events.jsonl"`,
 				"Do not use extra processes when a normal bash command, test, grep, or file read gives the answer directly.",
 			},
 		},
@@ -117,8 +120,19 @@ func TestLoadPromptWithOptions_UnattendedPrompt(t *testing.T) {
 		"commands_used",
 		"commands_remaining",
 		"model_turns_used",
+		"Assume no human rescue during unattended work.",
 		"Prefer cheap inspection before expensive builds, downloads, training runs, or brute force.",
-		"When resources are low, produce the best verifiable artifact you can and finish.",
+		"When execution pressure is critical, stop broad exploration",
+	})
+}
+
+func TestLoadPromptWithOptions_ToolCallsPromptMentionsPressure(t *testing.T) {
+	prompt := loadPromptWithCleanEnv(t, PromptOptions{ActProtocol: ActProtocolToolCalls})
+
+	mustContainAll(t, prompt, []string{
+		"resource_state may include pressure and guidance",
+		"Before done, run the cheapest task-visible check of the exact deliverable when feasible.",
+		"If a check fails, inspect the failure and change one hypothesis; do not repeat the same failed command blindly.",
 	})
 }
 

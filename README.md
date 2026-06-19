@@ -79,19 +79,19 @@ clnkr --continue
 Compact older transcript history:
 
 ```text
-/compact focus on failing tests and edited files
+/compact
 ```
 
-Ask the model to launch a bounded child process:
+Ask the model to launch a bounded JSONL process:
 
 ```text
 /delegate inspect cmd/clnkrd and summarize the JSONL contract
 ```
 
 `clnkr` treats `/delegate` as prompt text. The built-in prompt tells the model
-to run `clnkrd` as a normal process, keep child artifacts under `/tmp`, read
-stdout/stderr or event logs, and verify important child claims in the parent
-session.
+to run `clnkrd` as a normal machine-facing stdio JSONL process, keep process
+artifacts under `/tmp`, read stdout/stderr or event logs, and verify important
+claims in the parent session.
 
 Emit events or reuse transcripts:
 
@@ -104,10 +104,10 @@ clnkr -p "write a fix based on the investigation" --load-messages /tmp/investiga
 Launch `clnkrd` directly from bash:
 
 ```bash
-children=$(mktemp -d /tmp/clnkr-children.$$.XXXXXX)
+workdir=$(mktemp -d /tmp/clnkr-processes.$$.XXXXXX)
 printf '%s\n' '{"type":"prompt","text":"inspect README.md; do not edit","mode":"full_send"}' |
-  clnkrd --event-log "$children/events.jsonl" > "$children/out.jsonl" 2> "$children/err"
-sed -n '1,200p' "$children/out.jsonl"
+  clnkrd --event-log "$workdir/events.jsonl" > "$workdir/out.jsonl" 2> "$workdir/err"
+sed -n '1,200p' "$workdir/out.jsonl"
 ```
 
 OpenAI-compatible endpoint:

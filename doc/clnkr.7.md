@@ -51,10 +51,11 @@ request options, model capability checks, and request-option validation.
 : The host component that runs one bash action and returns a structured command
 result.
 
-**Child process**
-: A **clnkrd** process launched through bash for bounded work such as
+**Machine-facing process**
+: A **clnkrd** process launched through bash for bounded JSONL work such as
 research, codebase exploration, log analysis, test investigation, or review.
-It is an ordinary Unix process, not a host-owned agent subtype.
+Its stdout, stderr, and event logs are ordinary process artifacts that the
+caller must read and synthesize.
 
 **Transcript**
 : The ordered message history sent to the model.
@@ -146,13 +147,14 @@ model/request-option combinations before adapters serialize requests. Provider
 structured-output schemas and adapters own provider-specific response shapes
 and projection into canonical turns.
 
-Child-agent orchestration is outside host policy. Bash is the model's only
-tool; the built-in prompt teaches the model when to launch
-**clnkrd** as another ordinary process and how to read stdout, stderr, and
-event-log artifacts. **/delegate** is ordinary user prompt text that instructs
-the model to run **clnkrd** for the bounded child task. **Driver**,
+Process orchestration is outside host policy. Bash is the model's only tool;
+the built-in prompt teaches the model when to launch **clnkrd** as a
+machine-facing stdio JSONL process and how to read stdout, stderr, and
+event-log artifacts. **/delegate** is ordinary user prompt text that asks the
+model to run **clnkrd** for bounded machine-facing JSONL work. Tools, editors,
+wrappers, evals, automation, and agents can use the same interface. **Driver**,
 **ShellExecutor**, provider adapters, provider request semantics, canonical
-turns, and **Agent.Step** are unchanged by child-process orchestration.
+turns, and **Agent.Step** are unchanged by caller-specific orchestration.
 
 # ACT PROTOCOL
 
@@ -271,8 +273,8 @@ model-turn budget state. It records **commands_used** and
 : A host block containing a summary of older transcript history.
 
 During compaction, clnkr replaces an older transcript prefix with one
-**[compact]** tagged JSON block containing **source**, **kind**, **summary**,
-and optional **instructions**. It keeps the recent tail starting at the selected
+**[compact]** tagged JSON block containing **source**, **kind**, and
+**summary**. It keeps the recent tail starting at the selected
 user-authored message and preserves the latest clnkr cwd state if that state
 would otherwise be lost.
 
@@ -468,11 +470,6 @@ requests into terminal or JSONL interaction.
 **Executor**
 : The interface for running one shell command and returning a structured
 command result.
-
-**Child process**
-: A **clnkrd** process launched by bash for bounded child work. Its stdout,
-stderr, and event logs are ordinary process artifacts that the model must read
-and synthesize.
 
 **Effective metadata**
 : The provider request state after validation, defaults, and provider-specific

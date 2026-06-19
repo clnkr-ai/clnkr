@@ -39,8 +39,8 @@ func TestDecodeJSONLCommand(t *testing.T) {
 		},
 		{
 			"compact command",
-			`{"type":"compact","instructions":"focus on tests"}`,
-			JSONLCommand{Type: "compact", Instructions: "focus on tests"},
+			`{"type":"compact"}`,
+			JSONLCommand{Type: "compact"},
 			"",
 		},
 		{"shutdown command", `{"type":"shutdown"}`, JSONLCommand{Type: "shutdown"}, ""},
@@ -61,6 +61,30 @@ func TestDecodeJSONLCommand(t *testing.T) {
 			`{"type":"prompt","text":"inspect"}`,
 			JSONLCommand{},
 			`unknown JSONL prompt mode ""`,
+		},
+		{
+			"compact with extra field instructions",
+			`{"type":"compact","instructions":"focus tests"}`,
+			JSONLCommand{},
+			"JSONL compact supports only {\"type\":\"compact\"}",
+		},
+		{
+			"compact with extra field foo",
+			`{"type":"compact","foo":"bar"}`,
+			JSONLCommand{},
+			"JSONL compact supports only {\"type\":\"compact\"}",
+		},
+		{
+			"compact with extra field text",
+			`{"type":"compact","text":"anything"}`,
+			JSONLCommand{},
+			"JSONL compact supports only {\"type\":\"compact\"}",
+		},
+		{
+			"compact with extra field mode",
+			`{"type":"compact","mode":"approval"}`,
+			JSONLCommand{},
+			"JSONL compact supports only {\"type\":\"compact\"}",
 		},
 	}
 

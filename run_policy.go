@@ -13,6 +13,7 @@ type runPolicyState struct {
 	completionGate    CompletionGate
 	completionRejects int
 	gateCompletions   bool
+	guidancePressure  resourcePressure
 }
 
 func newRunPolicyState(policy RunPolicy) runPolicyState {
@@ -27,7 +28,11 @@ func newRunPolicyState(policy RunPolicy) runPolicyState {
 
 func (s *runPolicyState) step(ctx context.Context, a *Agent) (bool, error) {
 	a.appendStateMessageIfNeeded()
-	a.appendResourceStateMessage(s.commandsUsed, s.modelTurns)
+	a.appendResourceStateMessage(
+		s.commandsUsed,
+		s.modelTurns,
+		s.resourcePressureGuidanceDue(a),
+	)
 	result, err := a.Step(ctx)
 	s.modelTurns++
 	if err != nil {
@@ -154,13 +159,26 @@ func (s *runPolicyState) limitActTurn(a *Agent, turn *ActTurn) (*ActTurn, []Bash
 }
 
 func (s *runPolicyState) requestStepLimitSummary(ctx context.Context, a *Agent) (bool, error) {
-	a.appendResourceStateMessage(s.commandsUsed, s.modelTurns)
+	a.appendResourceStateMessage(
+		s.commandsUsed,
+		s.modelTurns,
+		s.resourcePressureGuidanceDue(a),
+	)
 	if err := a.RequestStepLimitSummary(ctx); err != nil {
 		s.modelTurns++
 		return false, s.runError(a, err)
 	}
 	s.modelTurns++
 	return true, nil
+}
+
+func (s *runPolicyState) resourcePressureGuidanceDue(a *Agent) bool {
+	pressure := commandBudgetPressure(s.commandsUsed, a.MaxSteps)
+	if pressure == resourcePressureNormal || pressure == s.guidancePressure {
+		return false
+	}
+	s.guidancePressure = pressure
+	return true
 }
 
 func (s *runPolicyState) runError(a *Agent, err error) error {
