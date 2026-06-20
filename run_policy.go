@@ -34,15 +34,11 @@ func newRunPolicyStateOptions(policy RunPolicy, opts RunOptions) runPolicyState 
 
 func (s *runPolicyState) step(ctx context.Context, a *Agent) (bool, error) {
 	a.appendStateMessageIfNeeded()
-	a.appendResourceStateMessage(
-		s.commandsUsed,
-		s.modelTurns,
-		s.resourcePressureGuidanceDue(a),
-	)
+	a.appendResourceStateMessage(s.commandsUsed, s.modelTurns, s.resourcePressureGuidanceDue(a))
 	result, err := a.Step(ctx)
 	s.modelTurns++
 	if err != nil {
-		return s.handleStepError(ctx, a, err)
+		return false, s.handleStepError(ctx, a, err)
 	}
 	s.contextLengthBackstopOriginal = nil
 	if result.ParseErr != nil {
@@ -62,14 +58,13 @@ func (s *runPolicyState) step(ctx context.Context, a *Agent) (bool, error) {
 	}
 }
 
-func (s *runPolicyState) handleStepError(ctx context.Context, a *Agent, err error) (bool, error) {
+func (s *runPolicyState) handleStepError(ctx context.Context, a *Agent, err error) error {
 	if s.contextLengthBackstopOriginal != nil {
 		retryErr := fmt.Errorf("context_length_backstop: retry failed: %w", err)
-		return false, s.runError(a, errors.Join(s.contextLengthBackstopOriginal, retryErr))
+		return s.runError(a, errors.Join(s.contextLengthBackstopOriginal, retryErr))
 	}
-	if !errors.Is(err, ErrContextLengthExceeded) ||
-		s.contextLengthBackstop == nil {
-		return false, s.runError(a, err)
+	if !errors.Is(err, ErrContextLengthExceeded) || s.contextLengthBackstop == nil {
+		return s.runError(a, err)
 	}
 
 	backstop := s.contextLengthBackstop
@@ -78,10 +73,10 @@ func (s *runPolicyState) handleStepError(ctx context.Context, a *Agent, err erro
 	a.notify(EventDebug{Message: ContextLengthBackstopCompactingDebug})
 	if compactErr := backstop(ctx, err); compactErr != nil {
 		compactErr = fmt.Errorf("context_length_backstop: compaction failed: %w", compactErr)
-		return false, s.runError(a, errors.Join(err, compactErr))
+		return s.runError(a, errors.Join(err, compactErr))
 	}
 	a.notify(EventDebug{Message: ContextLengthBackstopRetryingDebug})
-	return false, nil
+	return nil
 }
 
 func (s *runPolicyState) handleProtocolFailure(a *Agent) (bool, error) {
@@ -99,15 +94,17 @@ func (s *runPolicyState) handleDone(a *Agent, turn *DoneTurn) (bool, error) {
 	}
 
 	decision, reasons, guidance := s.completionGate.Decide(turn, s.commandsUsed, a.MaxSteps)
-	a.notify(EventCompletionGate{
-		Decision: decision,
-		Reasons:  cloneStrings(reasons),
-		Summary:  turn.Summary,
-	})
-	if decision == CompletionAccept {
+	a.notify(
+		EventCompletionGate{
+			Decision: decision,
+			Reasons:  cloneStrings(reasons),
+			Summary:  turn.Summary,
+		},
+	)
+	switch decision {
+	case CompletionAccept:
 		return true, nil
-	}
-	if decision == CompletionReject {
+	case CompletionReject:
 		s.completionRejects++
 		if s.completionRejects >= 3 {
 			return false, s.runError(
@@ -115,8 +112,7 @@ func (s *runPolicyState) handleDone(a *Agent, turn *DoneTurn) (bool, error) {
 				fmt.Errorf("consecutive completion gate rejections, exiting"),
 			)
 		}
-	}
-	if decision == CompletionChallenge {
+	case CompletionChallenge:
 		s.completionRejects = 0
 	}
 	a.AppendUserMessage(guidance)
@@ -188,17 +184,20 @@ func (s *runPolicyState) limitActTurn(a *Agent, turn *ActTurn) (*ActTurn, []Bash
 }
 
 func (s *runPolicyState) requestStepLimitSummary(ctx context.Context, a *Agent) (bool, error) {
-	a.appendResourceStateMessage(
-		s.commandsUsed,
-		s.modelTurns,
-		s.resourcePressureGuidanceDue(a),
-	)
-	if err := a.RequestStepLimitSummary(ctx); err != nil {
+	a.appendResourceStateMessage(s.commandsUsed, s.modelTurns, s.resourcePressureGuidanceDue(a))
+	summarize := a.RequestStepLimitSummary
+	for {
+		err := summarize(ctx)
 		s.modelTurns++
-		return false, s.runError(a, err)
+		if err == nil {
+			s.contextLengthBackstopOriginal = nil
+			return true, nil
+		}
+		if handleErr := s.handleStepError(ctx, a, err); handleErr != nil {
+			return false, handleErr
+		}
+		summarize = a.retryStepLimitSummary
 	}
-	s.modelTurns++
-	return true, nil
 }
 
 func (s *runPolicyState) resourcePressureGuidanceDue(a *Agent) bool {
@@ -218,7 +217,6 @@ func policyUsesCompletionGate(policy RunPolicy) bool {
 	switch policy.(type) {
 	case FullSendPolicy, *FullSendPolicy:
 		return true
-	default:
-		return false
 	}
+	return false
 }

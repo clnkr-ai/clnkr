@@ -369,6 +369,36 @@ func TestModelQueryToolCallsRejectsInvalidOutputShape(t *testing.T) {
 	}
 }
 
+func TestToolCallModelClassifiesFailedResponseContextLengthError(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, map[string]any{
+				"status": "failed",
+				"error": map[string]any{
+					"code":    "context_length_exceeded",
+					"message": "Your input exceeds the context window of this model.",
+				},
+			})
+		}),
+	)
+	defer server.Close()
+
+	model := openairesponses.NewModelWithOptions(
+		server.URL,
+		"test-key",
+		"gpt-test",
+		"sys",
+		openairesponses.Options{UseBashToolCalls: true},
+	)
+	_, err := model.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+	if !errors.Is(err, clnkr.ErrContextLengthExceeded) {
+		t.Fatalf("Query error = %v, want ErrContextLengthExceeded", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "context_length_exceeded") {
+		t.Fatalf("Query error = %v, want error code", err)
+	}
+}
+
 func TestModelQueryToolCallsReplayToolMessagesWithoutDuplicateText(t *testing.T) {
 	tests := []struct {
 		name         string

@@ -23,6 +23,9 @@ func parseToolCallResponse(respBody []byte) (clnkr.Response, error) {
 	if err != nil {
 		return clnkr.Response{}, err
 	}
+	if err := failedResponseError(apiResp); err != nil {
+		return clnkr.Response{}, err
+	}
 
 	parts, err := collectToolCallResponseParts(apiResp, string(respBody))
 	if err != nil {

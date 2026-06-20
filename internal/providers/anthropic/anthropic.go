@@ -122,8 +122,9 @@ type anthropicTool struct {
 }
 
 type response struct {
-	Content []contentBlock `json:"content"`
-	Usage   struct {
+	Content    []contentBlock `json:"content"`
+	StopReason string         `json:"stop_reason"`
+	Usage      struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage"`
@@ -170,15 +171,29 @@ func apiError(statusCode int, message string) error {
 	return err
 }
 
+func contextWindowStopReasonError(stopReason string) error {
+	if stopReason != "model_context_window_exceeded" {
+		return nil
+	}
+	err := fmt.Errorf("api response stop_reason: %s", stopReason)
+	return fmt.Errorf("%w: %w", clnkr.ErrContextLengthExceeded, err)
+}
+
 func isContextLengthError(statusCode int, message string) bool {
 	if statusCode != http.StatusBadRequest {
 		return false
 	}
 	normalized := strings.ToLower(message)
+	if strings.Contains(normalized, "rate limit") ||
+		strings.Contains(normalized, "too many requests") ||
+		strings.Contains(normalized, "throttling") {
+		return false
+	}
 	return strings.Contains(normalized, "context window") ||
 		strings.Contains(normalized, "prompt is too long") ||
-		strings.Contains(normalized, "too many tokens") ||
-		strings.Contains(normalized, "context length")
+		strings.Contains(normalized, "context limit") ||
+		strings.Contains(normalized, "context length") ||
+		strings.Contains(normalized, "too many tokens")
 }
 
 func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
@@ -223,6 +238,10 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 	var apiResp response
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
 		return clnkr.Response{}, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	if err := contextWindowStopReasonError(apiResp.StopReason); err != nil {
+		return clnkr.Response{}, err
 	}
 
 	if m.useBashToolCalls {
@@ -291,6 +310,9 @@ func (m *Model) QueryFinal(ctx context.Context, messages []clnkr.Message) (clnkr
 	var apiResp response
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
 		return clnkr.Response{}, fmt.Errorf("unmarshal response: %w", err)
+	}
+	if err := contextWindowStopReasonError(apiResp.StopReason); err != nil {
+		return clnkr.Response{}, err
 	}
 	return parseStructuredResponse(apiResp, "structured output response")
 }
@@ -464,6 +486,9 @@ func (m *Model) QueryText(ctx context.Context, messages []clnkr.Message) (string
 	var apiResp response
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
 		return "", fmt.Errorf("unmarshal response: %w", err)
+	}
+	if err := contextWindowStopReasonError(apiResp.StopReason); err != nil {
+		return "", err
 	}
 	text, textBlocks := extractTextBlocks(apiResp.Content)
 	if textBlocks == 0 {

@@ -123,12 +123,19 @@ type responsesContentItem struct {
 }
 
 type response struct {
+	Status    string            `json:"status"`
+	Error     *responseError    `json:"error"`
 	Output    []outputItem      `json:"output"`
 	RawOutput []json.RawMessage `json:"-"`
 	Usage     struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage"`
+}
+
+type responseError struct {
+	Code    json.RawMessage `json:"code"`
+	Message string          `json:"message"`
 }
 
 type outputItem struct {
@@ -524,6 +531,8 @@ func parseStructuredResponse(respBody []byte) (clnkr.Response, error) {
 
 func unmarshalResponse(respBody []byte) (response, error) {
 	var raw struct {
+		Status string            `json:"status"`
+		Error  *responseError    `json:"error"`
 		Output []json.RawMessage `json:"output"`
 		Usage  struct {
 			InputTokens  int `json:"input_tokens"`
@@ -533,7 +542,7 @@ func unmarshalResponse(respBody []byte) (response, error) {
 	if err := json.Unmarshal(respBody, &raw); err != nil {
 		return response{}, fmt.Errorf("unmarshal response: %w", err)
 	}
-	apiResp := response{RawOutput: raw.Output}
+	apiResp := response{Status: raw.Status, Error: raw.Error, RawOutput: raw.Output}
 	apiResp.Usage = raw.Usage
 	apiResp.Output = make([]outputItem, len(raw.Output))
 	for i, item := range raw.Output {
@@ -556,6 +565,9 @@ func extractOutputText(respBody []byte, mode string) (string, clnkr.Usage, error
 	var apiResp response
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
 		return "", clnkr.Usage{}, fmt.Errorf("unmarshal response: %w", err)
+	}
+	if err := failedResponseError(apiResp); err != nil {
+		return "", clnkr.Usage{}, err
 	}
 
 	var b strings.Builder
@@ -588,22 +600,45 @@ func extractOutputText(respBody []byte, mode string) (string, clnkr.Usage, error
 // extractErrorMessage pulls the message from an API error response body.
 func extractErrorMessage(body []byte) string {
 	type errorBody struct {
-		Error struct {
-			Message string `json:"message"`
-		} `json:"error"`
+		Error responseError `json:"error"`
 	}
 
 	var single errorBody
-	if err := json.Unmarshal(body, &single); err == nil && single.Error.Message != "" {
-		return single.Error.Message
+	if err := json.Unmarshal(body, &single); err == nil {
+		if text := openaiwire.FormatErrorMessage(
+			single.Error.Code,
+			single.Error.Message,
+		); text != "" {
+			return text
+		}
 	}
 
 	var arr []errorBody
-	if err := json.Unmarshal(body, &arr); err == nil && len(arr) > 0 && arr[0].Error.Message != "" {
-		return arr[0].Error.Message
+	if err := json.Unmarshal(body, &arr); err == nil && len(arr) > 0 {
+		if text := openaiwire.FormatErrorMessage(
+			arr[0].Error.Code,
+			arr[0].Error.Message,
+		); text != "" {
+			return text
+		}
 	}
 
 	return string(body)
+}
+
+func failedResponseError(apiResp response) error {
+	if apiResp.Status != "failed" || apiResp.Error == nil {
+		return nil
+	}
+	message := openaiwire.FormatErrorMessage(apiResp.Error.Code, apiResp.Error.Message)
+	if message == "" {
+		message = "response failed"
+	}
+	err := fmt.Errorf("response failed: %s", message)
+	if openaiwire.IsContextLengthErrorText(message) {
+		return fmt.Errorf("%w: %w", clnkr.ErrContextLengthExceeded, err)
+	}
+	return err
 }
 
 func apiError(statusCode int, message string) error {
@@ -618,10 +653,7 @@ func isContextLengthError(statusCode int, message string) bool {
 	if statusCode != http.StatusBadRequest {
 		return false
 	}
-	normalized := strings.ToLower(message)
-	return strings.Contains(normalized, "context_length_exceeded") ||
-		strings.Contains(normalized, "maximum context length") ||
-		strings.Contains(normalized, "context length")
+	return openaiwire.IsContextLengthErrorText(message)
 }
 
 func retryableStatus(statusCode int) bool {

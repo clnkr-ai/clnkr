@@ -97,18 +97,29 @@ const (
 func extractErrorMessage(body []byte) string {
 	type errorBody struct {
 		Error struct {
-			Message string `json:"message"`
+			Code    json.RawMessage `json:"code"`
+			Message string          `json:"message"`
 		} `json:"error"`
 	}
 
 	var single errorBody
-	if err := json.Unmarshal(body, &single); err == nil && single.Error.Message != "" {
-		return single.Error.Message
+	if err := json.Unmarshal(body, &single); err == nil {
+		if text := openaiwire.FormatErrorMessage(
+			single.Error.Code,
+			single.Error.Message,
+		); text != "" {
+			return text
+		}
 	}
 
 	var arr []errorBody
-	if err := json.Unmarshal(body, &arr); err == nil && len(arr) > 0 && arr[0].Error.Message != "" {
-		return arr[0].Error.Message
+	if err := json.Unmarshal(body, &arr); err == nil && len(arr) > 0 {
+		if text := openaiwire.FormatErrorMessage(
+			arr[0].Error.Code,
+			arr[0].Error.Message,
+		); text != "" {
+			return text
+		}
 	}
 
 	return string(body)
@@ -126,10 +137,7 @@ func isContextLengthError(statusCode int, message string) bool {
 	if statusCode != http.StatusBadRequest {
 		return false
 	}
-	normalized := strings.ToLower(message)
-	return strings.Contains(normalized, "context_length_exceeded") ||
-		strings.Contains(normalized, "maximum context length") ||
-		strings.Contains(normalized, "context length")
+	return openaiwire.IsContextLengthErrorText(message)
 }
 
 func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Response, error) {
