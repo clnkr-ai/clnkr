@@ -54,6 +54,19 @@ Skip approvals:
 clnkr --full-send
 ```
 
+## Surfaces
+
+`clnkr` is the interactive terminal REPL. Use it when a human is present to
+approve commands, answer clarification questions, and steer the session.
+
+`clnkr -p` is the unattended one-shot surface. Use it from a shell, script, or
+automation when a task should run to completion and exit. Single-task runs save
+the normal project session by default, so `clnkr --continue` can resume them.
+
+`clnkrd` is the stdio JSONL adapter for tools that embed clnkr behavior. A
+frontend writes JSONL commands to stdin and reads JSONL events from stdout.
+It is not a daemon framework, service host, or model delegation mechanism.
+
 ## Usage
 
 Common workflows:
@@ -82,16 +95,7 @@ Compact older transcript history:
 /compact
 ```
 
-Ask the model to launch a bounded JSONL process:
-
-```text
-/delegate inspect cmd/clnkrd and summarize the JSONL contract
-```
-
-`clnkr` treats `/delegate` as prompt text. The built-in prompt tells the model
-to run `clnkrd` as a normal machine-facing stdio JSONL process, keep process
-artifacts under `/tmp`, read stdout/stderr or event logs, and verify important
-claims in the parent session.
+Inputs such as `/delegate ...` are ordinary prompt text, not host commands.
 
 Emit events or reuse transcripts:
 
@@ -101,7 +105,7 @@ clnkr -p "investigate the bug" --trajectory /tmp/investigation.json
 clnkr -p "write a fix based on the investigation" --load-messages /tmp/investigation.json
 ```
 
-Launch `clnkrd` directly from bash:
+Embed clnkr through the `clnkrd` JSONL adapter:
 
 ```bash
 workdir=$(mktemp -d /tmp/clnkr-processes.$$.XXXXXX)

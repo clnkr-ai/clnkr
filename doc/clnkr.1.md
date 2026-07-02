@@ -22,10 +22,10 @@ the compacted message counts on stderr, and retries that failed model step
 once. The automatic retry uses the same **[compact]** transcript format as
 **/compact** and is saved in ordinary project sessions.
 
-The built-in prompt teaches the model when to launch **clnkrd** through bash as
-a machine-facing stdio JSONL process. The process exposes stdout, stderr, and
-optional **--event-log** artifacts. **/delegate** *task* is ordinary prompt
-text; the host does not intercept it.
+**clnkrd** is the stdio JSONL adapter for external tools embedding clnkr
+behavior. It is not a daemon framework, service host, or model delegation
+mechanism. Inputs such as **/delegate** *task* are ordinary prompt text; the
+host does not intercept them.
 
 **clnkr** has no external dependencies beyond the Go standard library.
 
@@ -114,14 +114,6 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : At the idle conversational prompt, summarize older transcript history while keeping the recent working thread intact.
 
 This command is only available at the top-level conversational prompt. Trailing text after **/compact** is rejected. In single-task mode, approval replies, and clarification replies, the literal exact command is rejected with an error rather than triggering compaction.
-
-**/delegate** *task*
-: Ask the model to launch **clnkrd** through bash for bounded machine-facing
-JSONL work.
-The text reaches the model like any other prompt. The model is expected to use
-ordinary shell redirection, temporary directories, **--event-log**, and **wait**
-when it runs extra processes. Treat process output as evidence, not authority;
-verify important claims before using them for edits or final answers.
 
 # ENVIRONMENT
 
