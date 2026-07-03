@@ -65,7 +65,9 @@ non-empty text rejects the batch and is sent back to the model as guidance.
 
 # JSONL EVENTS
 
-Every stdout event is a JSON object with **type** and **payload** fields.
+Every event written to stdout is a JSON object with **ts**, **type**, and **payload** fields.
+**ts** is a UTC RFC3339Nano timestamp recorded when clnkrd writes the event.
+Older event streams may contain only **type** and **payload**.
 
 **debug**
 : Diagnostic metadata and internal progress. Payload: **message**.

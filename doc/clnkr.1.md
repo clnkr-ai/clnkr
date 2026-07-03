@@ -97,7 +97,7 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : Read a JSON message array from *file* and prepend the messages to the conversation before starting. Host-generated JSON state messages in that transcript restore the current working directory.
 
 **--event-log** *file*
-: Write every agent event as a JSONL line to *file*. Each line is a JSON object with "type" and "payload" fields. Uses O_APPEND for atomic writes, safe to tail from another process.
+: Write every agent event as a JSONL line to *file*. Each line is a JSON object with **ts**, **type**, and **payload** fields. **ts** is a UTC RFC3339Nano timestamp recorded when clnkr writes the event. Older logs may contain only **type** and **payload**. Opens *file* with `O_APPEND`, so another process can tail the file while clnkr appends.
 
 **--trajectory** *file*
 : After the task finishes, write the full message history as a pretty-printed JSON array to *file*. Written before exit, even on error. Only applies to single-task mode (**-p**), not the REPL. Mutually exclusive with **--continue**.

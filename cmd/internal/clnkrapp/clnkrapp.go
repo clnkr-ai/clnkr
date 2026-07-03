@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -119,11 +120,8 @@ func WriteEventLog(w io.Writer, e clnkr.Event) error {
 		}
 		return writeEvent(w, "command_done", payload)
 	case clnkr.EventProtocolFailure:
-		return writeEvent(
-			w,
-			"protocol_failure",
-			map[string]string{"reason": e.Reason, "raw": e.Raw},
-		)
+		payload := map[string]string{"reason": e.Reason, "raw": e.Raw}
+		return writeEvent(w, "protocol_failure", payload)
 	case clnkr.EventCompletionGate:
 		return writeEvent(w, "completion_gate", map[string]any{
 			"decision": e.Decision,
@@ -138,7 +136,11 @@ func WriteEventLog(w io.Writer, e clnkr.Event) error {
 }
 
 func writeEvent(w io.Writer, typ string, payload any) error {
-	return json.NewEncoder(w).Encode(map[string]any{"type": typ, "payload": payload})
+	return json.NewEncoder(w).Encode(map[string]any{
+		"ts":      time.Now().UTC().Format(time.RFC3339Nano),
+		"type":    typ,
+		"payload": payload,
+	})
 }
 
 // RunMetadata describes the configuration for a clnkr run, recorded as debug

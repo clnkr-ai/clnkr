@@ -8,13 +8,34 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/clnkr-ai/clnkr"
 )
 
 type eventLogEntry struct {
+	TS      string          `json:"ts"`
 	Type    string          `json:"type"`
 	Payload json.RawMessage `json:"payload"`
+}
+
+func TestWriteEventLogIncludesTimestamp(t *testing.T) {
+	entry := writeEventLogEntry(t, clnkr.EventDebug{Message: "querying model..."})
+
+	if entry.TS == "" {
+		t.Fatal("ts is empty, want RFC3339Nano UTC timestamp")
+	}
+
+	ts, err := time.Parse(time.RFC3339Nano, entry.TS)
+	if err != nil {
+		t.Fatalf("parse ts %q: %v", entry.TS, err)
+	}
+	if ts.Location() != time.UTC {
+		t.Fatalf("ts location = %v, want UTC", ts.Location())
+	}
+	if entry.Type != "debug" {
+		t.Fatalf("type = %q, want debug", entry.Type)
+	}
 }
 
 func TestWriteEventLogResponsePayload(t *testing.T) {
