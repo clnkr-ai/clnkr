@@ -66,7 +66,7 @@ func TestLoadPromptWithOptions_BasePrompt(t *testing.T) {
 	})
 }
 
-func TestLoadPromptWithOptions_ClnkrdProcessAutonomy(t *testing.T) {
+func TestLoadPromptWithOptions_SurfaceBoundaries(t *testing.T) {
 	tests := []struct {
 		name string
 		opts PromptOptions
@@ -75,25 +75,22 @@ func TestLoadPromptWithOptions_ClnkrdProcessAutonomy(t *testing.T) {
 		{
 			name: "inline protocol",
 			want: []string{
-				"<parallel-work>",
-				"Bash is your only tool. You may use bash to run `clnkrd` as a machine-facing stdio JSONL process whenever it would materially reduce uncertainty, parallelize independent work, verify a claim, or explore a non-blocking question.",
-				"If the user writes `/delegate ...`, treat it as prompt text asking you to launch `clnkrd` through bash for bounded machine-facing JSONL work; do not treat it as a host command.",
-				"workdir=$(mktemp -d /tmp/clnkr-processes.$$.XXXXXX)",
-				`clnkrd --event-log "$workdir/prompt-review/events.jsonl"`,
-				`wait "$pid1" "$pid2"`,
-				"Treat process output as evidence to evaluate, not proof.",
+				"<surface-boundaries>",
+				"Bash is your only tool. Work in the current `clnkr` session unless the user explicitly asks you to run another process.",
+				"`clnkr -p` is the unattended one-shot CLI surface.",
+				"`clnkrd` is a stdio JSONL adapter for external tools that embed clnkr behavior.",
+				"Do not treat it as default delegation, subagent, or review-loop machinery inside this session.",
+				"If the user writes `/delegate ...`, treat it as ordinary prompt text, not as a host command and not as an instruction that requires `clnkrd`.",
 			},
 		},
 		{
 			name: "tool-call protocol",
 			opts: PromptOptions{ActProtocol: ActProtocolToolCalls},
 			want: []string{
-				"<parallel-work>",
-				"Bash is your only tool. You may use bash to run `clnkrd` as a machine-facing stdio JSONL process whenever it would materially reduce uncertainty, parallelize independent work, verify a claim, or explore a non-blocking question.",
-				"If the user writes `/delegate ...`, treat it as prompt text asking you to launch `clnkrd` through bash for bounded machine-facing JSONL work; do not treat it as a host command.",
-				"workdir=$(mktemp -d /tmp/clnkr-processes.$$.XXXXXX)",
-				`clnkrd --event-log "$workdir/docs-review/events.jsonl"`,
-				"Do not use extra processes when a normal bash command, test, grep, or file read gives the answer directly.",
+				"<surface-boundaries>",
+				"`clnkr -p` is the unattended one-shot CLI surface.",
+				"`clnkrd` is a stdio JSONL adapter for external tools that embed clnkr behavior.",
+				"If the user writes `/delegate ...`, treat it as ordinary prompt text, not as a host command and not as an instruction that requires `clnkrd`.",
 			},
 		},
 	}
@@ -102,6 +99,12 @@ func TestLoadPromptWithOptions_ClnkrdProcessAutonomy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			prompt := loadPromptWithCleanEnv(t, tc.opts)
 			mustContainAll(t, prompt, tc.want)
+			mustNotContainAny(t, prompt, []string{
+				"<parallel-work>",
+				"asking you to launch `clnkrd`",
+				"clnkrd --event-log",
+				"workdir=$(mktemp -d /tmp/clnkr-processes",
+			})
 		})
 	}
 }

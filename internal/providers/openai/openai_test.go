@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/clnkr-ai/clnkr"
@@ -256,6 +257,104 @@ func TestModelExtractsAPIErrorMessages(t *testing.T) {
 				t.Errorf("got %q, want %q", err.Error(), tt.want)
 			}
 		})
+	}
+}
+
+func TestModelClassifiesContextLengthErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		message string
+	}{
+		{
+			name:    "context length exceeded code",
+			message: "context_length_exceeded",
+		},
+		{
+			name:    "maximum context length",
+			message: "This model's maximum context length is 128000 tokens. However, your messages resulted in 130000 tokens.",
+		},
+		{
+			name:    "context length",
+			message: "Request exceeds context length.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					writeAPIError(t, w, http.StatusBadRequest, tt.message)
+				}),
+			)
+			defer server.Close()
+
+			m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+			_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+			if !errors.Is(err, clnkr.ErrContextLengthExceeded) {
+				t.Fatalf("Query error = %v, want ErrContextLengthExceeded", err)
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.message) {
+				t.Fatalf("Query error = %v, want provider message %q", err, tt.message)
+			}
+		})
+	}
+}
+
+func TestModelClassifiesContextLengthErrorCodeWithoutMessage(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeAPIErrorBody(t, w, http.StatusBadRequest, map[string]any{
+				"error": map[string]any{"code": "context_length_exceeded"},
+			})
+		}),
+	)
+	defer server.Close()
+
+	m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+	_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+	if !errors.Is(err, clnkr.ErrContextLengthExceeded) {
+		t.Fatalf("Query error = %v, want ErrContextLengthExceeded", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "context_length_exceeded") {
+		t.Fatalf("Query error = %v, want error code", err)
+	}
+}
+
+func TestModelClassifiesContextWindowWording(t *testing.T) {
+	message := "Your input exceeds the context window of this model. Please adjust your input and try again."
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeAPIError(t, w, http.StatusBadRequest, message)
+		}),
+	)
+	defer server.Close()
+
+	m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+	_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+	if !errors.Is(err, clnkr.ErrContextLengthExceeded) {
+		t.Fatalf("Query error = %v, want ErrContextLengthExceeded", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), message) {
+		t.Fatalf("Query error = %v, want provider message %q", err, message)
+	}
+}
+
+func TestModelDoesNotClassifyUnrelatedContextLengthMessage(t *testing.T) {
+	message := "invalid request: context length must be a positive integer"
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeAPIError(t, w, http.StatusBadRequest, message)
+		}),
+	)
+	defer server.Close()
+
+	m := openai.NewModel(server.URL, "test-key", "gpt-test", "sys")
+	_, err := m.Query(context.Background(), []clnkr.Message{{Role: "user", Content: "hi"}})
+	if errors.Is(err, clnkr.ErrContextLengthExceeded) {
+		t.Fatalf("Query error = %v, did not want ErrContextLengthExceeded", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), message) {
+		t.Fatalf("Query error = %v, want provider message %q", err, message)
 	}
 }
 
@@ -593,6 +692,14 @@ func writeAPIError(t *testing.T, w http.ResponseWriter, status int, message stri
 		"error": map[string]any{"code": status, "message": message},
 	}); err != nil {
 		t.Fatalf("encode error response: %v", err)
+	}
+}
+
+func writeAPIErrorBody(t *testing.T, w http.ResponseWriter, status int, body any) {
+	t.Helper()
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		t.Fatalf("write error body: %v", err)
 	}
 }
 

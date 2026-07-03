@@ -92,11 +92,12 @@ type jsonCommand struct {
 }
 
 var (
-	ErrInvalidJSON     = errors.New("invalid JSON")
-	ErrMissingCommand  = errors.New("act turn requires at least one command")
-	ErrEmptyClarify    = errors.New("clarify turn requires non-empty question")
-	ErrEmptySummary    = errors.New("done turn requires non-empty summary")
-	ErrUnknownTurnType = errors.New("unknown turn type")
+	ErrInvalidJSON           = errors.New("invalid JSON")
+	ErrMissingCommand        = errors.New("act turn requires at least one command")
+	ErrEmptyClarify          = errors.New("clarify turn requires non-empty question")
+	ErrEmptySummary          = errors.New("done turn requires non-empty summary")
+	ErrUnknownTurnType       = errors.New("unknown turn type")
+	ErrContextLengthExceeded = errors.New("context length exceeded")
 )
 
 const protocolActExample = `{"type":"act","bash":{"commands":[{"command":"...","workdir":null}]}}`

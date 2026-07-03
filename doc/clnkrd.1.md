@@ -21,10 +21,9 @@ protocol events.
 clnkrd is a stdio adapter. It does not open sockets, authenticate clients,
 serve HTTP, host plugins, or manage a background service lifecycle.
 
-Tools, editors, wrappers, evals, automation, and agents can launch clnkrd
-through bash for bounded work. In that use, clnkrd is still just a
-machine-facing stdio JSONL process; stdout, stderr, and **--event-log** are the
-process artifact surfaces.
+Tools, editors, wrappers, eval harnesses, and automation can launch clnkrd
+when they need to embed clnkr behavior behind a stdio JSONL protocol. In that
+use, stdout, stderr, and **--event-log** are the process artifact surfaces.
 
 # JSONL COMMANDS
 
@@ -66,7 +65,9 @@ non-empty text rejects the batch and is sent back to the model as guidance.
 
 # JSONL EVENTS
 
-Every stdout event is a JSON object with **type** and **payload** fields.
+Every event written to stdout is a JSON object with **ts**, **type**, and **payload** fields.
+**ts** is a UTC RFC3339Nano timestamp recorded when clnkrd writes the event.
+Older event streams may contain only **type** and **payload**.
 
 **debug**
 : Diagnostic metadata and internal progress. Payload: **message**.
@@ -102,6 +103,11 @@ Each command has **command** and optional **workdir**.
 **error**
 : Driver-visible run error. Payload: **message**.
 
+When the context length backstop runs, **clnkrd** emits debug events for
+compaction and retry progress, emits the normal **compacted** event with
+compacted and kept message counts, then continues with the normal **response**,
+**done**, or **error** event. No separate JSONL command is required.
+
 # OPTIONS
 
 clnkrd accepts the same provider, prompt, session, and run-control options as
@@ -115,9 +121,9 @@ the clnkr CLI where they apply to non-interactive operation:
 **--event-log** writes the same JSONL event stream to a file while also writing
 events to stdout.
 
-# MACHINE-FACING JSONL EXAMPLES
+# STDIO JSONL EXAMPLES
 
-Run one bounded process and inspect its JSONL events:
+Run one adapter process and inspect its JSONL events:
 
 ```bash
 workdir=$(mktemp -d /tmp/clnkr-processes.$$.XXXXXX)
@@ -129,7 +135,8 @@ printf '%s\n' '{"type":"prompt","text":"Inspect README.md. Do not edit files. Re
 sed -n '1,200p' "$workdir/readme/out.jsonl"
 ```
 
-Run two independent processes in parallel, then synthesize their output:
+Run two independent adapter processes in parallel, then synthesize their
+output:
 
 ```bash
 workdir=$(mktemp -d /tmp/clnkr-processes.$$.XXXXXX)

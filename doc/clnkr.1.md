@@ -16,10 +16,16 @@ In default mode, **clnkr** starts an interactive REPL. With **-p**, it runs a si
 
 At the main idle conversational prompt, **/compact** summarizes older transcript history while keeping recent context intact for the current working thread.
 
-The built-in prompt teaches the model when to launch **clnkrd** through bash as
-a machine-facing stdio JSONL process. The process exposes stdout, stderr, and
-optional **--event-log** artifacts. **/delegate** *task* is ordinary prompt
-text; the host does not intercept it.
+If a provider rejects a model step because the transcript exceeds the model
+context window, clnkr automatically compacts older transcript history, reports
+the compacted message counts on stderr, and retries that failed model step
+once. The automatic retry uses the same **[compact]** transcript format as
+**/compact** and is saved in ordinary project sessions.
+
+**clnkrd** is the stdio JSONL adapter for external tools embedding clnkr
+behavior. It is not a daemon framework, service host, or model delegation
+mechanism. Inputs such as **/delegate** *task* are ordinary prompt text; the
+host does not intercept them.
 
 **clnkr** has no external dependencies beyond the Go standard library.
 
@@ -91,7 +97,7 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : Read a JSON message array from *file* and prepend the messages to the conversation before starting. Host-generated JSON state messages in that transcript restore the current working directory.
 
 **--event-log** *file*
-: Write every agent event as a JSONL line to *file*. Each line is a JSON object with "type" and "payload" fields. Uses O_APPEND for atomic writes, safe to tail from another process.
+: Write every agent event as a JSONL line to *file*. Each line is a JSON object with **ts**, **type**, and **payload** fields. **ts** is a UTC RFC3339Nano timestamp recorded when clnkr writes the event. Older logs may contain only **type** and **payload**. Opens *file* with `O_APPEND`, so another process can tail the file while clnkr appends.
 
 **--trajectory** *file*
 : After the task finishes, write the full message history as a pretty-printed JSON array to *file*. Written before exit, even on error. Only applies to single-task mode (**-p**), not the REPL. Mutually exclusive with **--continue**.
@@ -108,14 +114,6 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 : At the idle conversational prompt, summarize older transcript history while keeping the recent working thread intact.
 
 This command is only available at the top-level conversational prompt. Trailing text after **/compact** is rejected. In single-task mode, approval replies, and clarification replies, the literal exact command is rejected with an error rather than triggering compaction.
-
-**/delegate** *task*
-: Ask the model to launch **clnkrd** through bash for bounded machine-facing
-JSONL work.
-The text reaches the model like any other prompt. The model is expected to use
-ordinary shell redirection, temporary directories, **--event-log**, and **wait**
-when it runs extra processes. Treat process output as evidence, not authority;
-verify important claims before using them for edits or final answers.
 
 # ENVIRONMENT
 

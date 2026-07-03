@@ -33,7 +33,7 @@ var usageText = `clnkr - a minimal coding agent
 
 Usage:
   clnkr                     Start conversational mode
-  Models may run clnkrd through bash for bounded JSONL work.
+  clnkr -p task             Run an unattended one-shot task
 
 Options:
   -p, --prompt string       Task to run unattended and exit
@@ -502,6 +502,12 @@ func installAgentNotify(agent *clnkr.Agent, modelWait **modelWaitIndicator, opts
 				_, _ = fmt.Fprintf(os.Stderr, "[clnkr] protocol error: %s\n", e.Reason)
 			}
 		case clnkr.EventDebug:
+			if e.Message == clnkr.ContextLengthBackstopCompactingDebug {
+				_, _ = fmt.Fprintln(
+					os.Stderr,
+					"[Context limit reached; compacting session and retrying once]",
+				)
+			}
 			if opts.verbose {
 				_, _ = fmt.Fprintf(os.Stderr, "[clnkr] %s\n", e.Message)
 			}

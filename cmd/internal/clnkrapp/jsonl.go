@@ -68,15 +68,12 @@ func WriteJSONL(w io.Writer, event any) error {
 			"kept_messages":      event.Stats.KeptMessages,
 		})
 	case EventError:
-		return writeEvent(w, "error", map[string]string{"message": errorMessage(event.Err)})
+		message := ""
+		if event.Err != nil {
+			message = event.Err.Error()
+		}
+		return writeEvent(w, "error", map[string]string{"message": message})
 	default:
 		return fmt.Errorf("write JSONL: unsupported event %T", event)
 	}
-}
-
-func errorMessage(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
 }

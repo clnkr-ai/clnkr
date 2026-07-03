@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/clnkr-ai/clnkr"
 )
@@ -132,6 +133,11 @@ func TestWriteJSONL(t *testing.T) {
 			typ:   "command_done",
 		},
 		{
+			name:  "context backstop debug event",
+			event: clnkr.EventDebug{Message: clnkr.ContextLengthBackstopRetryingDebug},
+			typ:   "debug",
+		},
+		{
 			name:  "clarification request",
 			event: EventClarificationRequest{Question: "Which repo?"},
 			typ:   "clarify",
@@ -166,11 +172,19 @@ func TestWriteJSONL(t *testing.T) {
 	decoder := json.NewDecoder(&b)
 	for i, tt := range tests {
 		var got struct {
+			TS      string         `json:"ts"`
 			Type    string         `json:"type"`
 			Payload map[string]any `json:"payload"`
 		}
 		if err := decoder.Decode(&got); err != nil {
 			t.Fatalf("decode event %d: %v", i, err)
+		}
+		ts, err := time.Parse(time.RFC3339Nano, got.TS)
+		if err != nil {
+			t.Fatalf("event %d ts = %q, want RFC3339Nano timestamp: %v", i, got.TS, err)
+		}
+		if ts.Location() != time.UTC {
+			t.Fatalf("event %d ts location = %v, want UTC", i, ts.Location())
 		}
 		if got.Type != tt.typ {
 			t.Fatalf("event %d type = %q, want %q", i, got.Type, tt.typ)

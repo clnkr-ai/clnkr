@@ -382,12 +382,15 @@ func (a *Agent) RequestStepLimitSummary(ctx context.Context) error {
 		"Step limit reached. Respond with " + protocolDoneExample + " summarizing your progress.",
 	)
 
-	queryMessages := transcript.CloneMessages(a.messages)
+	return a.retryStepLimitSummary(ctx)
+}
+
+func (a *Agent) retryStepLimitSummary(ctx context.Context) error {
 	query := a.model.Query
 	if finalModel, ok := a.model.(FinalSummaryModel); ok {
 		query = finalModel.QueryFinal
 	}
-	resp, err := query(ctx, queryMessages)
+	resp, err := query(ctx, transcript.CloneMessages(a.messages))
 	if err != nil {
 		return fmt.Errorf("query model (final): %w", err)
 	}
@@ -418,7 +421,16 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 // RunWithPolicy loops Step until done, clarify, or step limit. The policy
 // decides whether act turns execute and supplies clarification replies.
 func (a *Agent) RunWithPolicy(ctx context.Context, task string, policy RunPolicy) error {
-	run := newRunPolicyState(policy)
+	return a.RunWithPolicyOptions(ctx, task, policy, RunOptions{})
+}
+
+func (a *Agent) RunWithPolicyOptions(
+	ctx context.Context,
+	task string,
+	policy RunPolicy,
+	opts RunOptions,
+) error {
+	run := newRunPolicyStateOptions(policy, opts)
 	a.AppendUserMessage(task)
 
 	for ctx.Err() == nil {

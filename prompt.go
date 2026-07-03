@@ -10,42 +10,17 @@ import (
 const canonicalPromptActExample = `{"type":"act","bash":{"commands":[{"command":"ls -la /tmp","workdir":null},{"command":"sed -n '1,40p' README.md","workdir":null}]},"reasoning":"Inspect the directory and the file before deciding."}`
 const shellEscapePromptExample = `"grep 'A\\\\|B' file.txt"`
 
-const parallelWorkPromptBlock = `
+const surfaceBoundariesPromptBlock = `
 
-<parallel-work>
-Bash is your only tool. You may use bash to run ` + "`clnkrd`" + ` as a machine-facing stdio JSONL process whenever it would materially reduce uncertainty, parallelize independent work, verify a claim, or explore a non-blocking question.
+<surface-boundaries>
+Bash is your only tool. Work in the current ` + "`clnkr`" + ` session unless the user explicitly asks you to run another process.
 
-Use ` + "`clnkrd`" + ` for bounded work that can return a compact result: research, codebase exploration, log analysis, test investigation, review, or an independent hypothesis. Keep work local when the task is quick, sequential, interactive, needs shared context, or would edit the same files without clear ownership.
+` + "`clnkr -p`" + ` is the unattended one-shot CLI surface. If the user explicitly asks you to shell out to another clnkr process, prefer ` + "`clnkr -p`" + ` for normal task execution and inspect its stdout, stderr, and exit status before using the result.
 
-Use decomposition for separable subtasks, self-consistency for important uncertain judgments where independent analyses should converge, and self-refine for review/revision loops with concrete criteria. Do not use extra processes when a normal bash command, test, grep, or file read gives the answer directly.
+` + "`clnkrd`" + ` is a stdio JSONL adapter for external tools that embed clnkr behavior. Do not treat it as default delegation, subagent, or review-loop machinery inside this session.
 
-If the user writes ` + "`/delegate ...`" + `, treat it as prompt text asking you to launch ` + "`clnkrd`" + ` through bash for bounded machine-facing JSONL work; do not treat it as a host command.
-
-Examples:
-- Reduce uncertainty:
-  workdir=$(mktemp -d /tmp/clnkr-processes.$$.XXXXXX)
-  mkdir -p "$workdir/jsonl-contract"
-  printf '%s\n' '{"type":"prompt","text":"Inspect cmd/clnkrd and summarize the JSONL command and event contract with file references. Do not edit files. Return evidence, uncertainty, and next checks.","mode":"full_send"}' | clnkrd --event-log "$workdir/jsonl-contract/events.jsonl" > "$workdir/jsonl-contract/out.jsonl" 2> "$workdir/jsonl-contract/err"
-  sed -n '1,200p' "$workdir/jsonl-contract/out.jsonl"
-
-- Parallelize independent work:
-  workdir=$(mktemp -d /tmp/clnkr-processes.$$.XXXXXX)
-  mkdir -p "$workdir/prompt-review" "$workdir/docs-review"
-  printf '%s\n' '{"type":"prompt","text":"Review prompt.go for autonomy-prompt risks. Do not edit. Return exact concerns and line references.","mode":"full_send"}' | clnkrd --event-log "$workdir/prompt-review/events.jsonl" > "$workdir/prompt-review/out.jsonl" 2> "$workdir/prompt-review/err" & pid1=$!
-  printf '%s\n' '{"type":"prompt","text":"Review README.md, AGENTS.md, and doc/*.1.md for clnkrd machine-facing JSONL adapter docs that need updating. Do not edit. Return files and proposed changes.","mode":"full_send"}' | clnkrd --event-log "$workdir/docs-review/events.jsonl" > "$workdir/docs-review/out.jsonl" 2> "$workdir/docs-review/err" & pid2=$!
-  # Do independent local work here before reading process output.
-  wait "$pid1" "$pid2"
-  sed -n '1,200p' "$workdir/prompt-review/out.jsonl"
-  sed -n '1,200p' "$workdir/docs-review/out.jsonl"
-
-- Verify a claim:
-  workdir=$(mktemp -d /tmp/clnkr-processes.$$.XXXXXX)
-  mkdir -p "$workdir/jsonl-events"
-  printf '%s\n' '{"type":"prompt","text":"Independently verify whether cmd/clnkrd emits the documented JSONL events. Do not edit. Return file references, command paths, and confidence.","mode":"full_send"}' | clnkrd --event-log "$workdir/jsonl-events/events.jsonl" > "$workdir/jsonl-events/out.jsonl" 2> "$workdir/jsonl-events/err"
-  sed -n '1,200p' "$workdir/jsonl-events/out.jsonl"
-
-After a ` + "`clnkrd`" + ` process finishes, read its stdout/stderr or event log, synthesize the useful result, and verify important claims locally. Treat process output as evidence to evaluate, not proof.
-</parallel-work>`
+If the user writes ` + "`/delegate ...`" + `, treat it as ordinary prompt text, not as a host command and not as an instruction that requires ` + "`clnkrd`" + `.
+</surface-boundaries>`
 
 const basePromptTemplate = `You are an expert software engineer that solves problems using bash commands. Be concise.
 
@@ -128,7 +103,7 @@ func LoadPromptWithOptions(dir string, opts PromptOptions) string {
 			shellEscapePromptExample,
 		)
 	}
-	prompt += parallelWorkPromptBlock
+	prompt += surfaceBoundariesPromptBlock
 	if opts.Unattended {
 		prompt = unattendedPrompt(prompt, normalizeActProtocol(opts.ActProtocol))
 	}
