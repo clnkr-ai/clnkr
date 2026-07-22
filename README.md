@@ -19,7 +19,7 @@ brew install clnkr-ai/tap/clnkr
 Or install the Debian package from the latest release:
 
 ```bash
-curl -fsSLO https://github.com/clnkr-ai/clnkr/releases/download/v<VERSION>/clnkr_<VERSION>-1_<ARCH>.deb
+curl -fsSLO https://github.com/clnkr-ai/clnkr/releases/download/<VERSION>/clnkr_<VERSION>-1_<ARCH>.deb
 sudo dpkg -i ./clnkr_<VERSION>-1_<ARCH>.deb
 ```
 
