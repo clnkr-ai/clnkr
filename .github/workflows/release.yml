@@ -311,3 +311,21 @@ jobs:
             git commit -m "Update clnkr to ${VERSION}"
             git push
           }
+
+      - name: Publish Go module tag
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          GO_TAG="v${VERSION}"
+          RELEASE_COMMIT="${GITHUB_SHA}"
+
+          if git rev-parse --verify --quiet "refs/tags/${GO_TAG}" >/dev/null; then
+            EXISTING_COMMIT="$(git rev-list -n 1 "${GO_TAG}")"
+            if [ "${EXISTING_COMMIT}" != "${RELEASE_COMMIT}" ]; then
+              echo "${GO_TAG} points at ${EXISTING_COMMIT}, expected ${RELEASE_COMMIT}" >&2
+              exit 1
+            fi
+            exit 0
+          fi
+
+          git tag "${GO_TAG}" "${RELEASE_COMMIT}"
+          git push origin "refs/tags/${GO_TAG}"
