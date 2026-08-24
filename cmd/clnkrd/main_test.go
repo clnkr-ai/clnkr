@@ -149,7 +149,9 @@ func TestRunJSONLReplyApprovesPendingCommand(t *testing.T) {
 	var out, errOut bytes.Buffer
 	reader, writer := io.Pipe()
 	defer writer.Close() //nolint:errcheck
-	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
+	executor := &fakeExecutor{results: []clnkr.CommandResult{{
+		Stdout: "hi\n", Outcome: exitOutcome(0),
+	}}}
 	driver := newTestDriver(t, &out, []clnkr.Response{
 		mustResponse(`{"type":"act","bash":{"commands":[{"command":"echo hi","workdir":null}]}}`),
 		mustResponse(doneRaw),
@@ -616,29 +618,30 @@ func (m *fakeModel) Query(context.Context, []clnkr.Message) (clnkr.Response, err
 
 type fakeExecutor struct {
 	results []clnkr.CommandResult
-	errs    []error
 	calls   int
 	gotCmds []string
 }
 
-func (e *fakeExecutor) Execute(_ context.Context, command, _ string) (clnkr.CommandResult, error) {
+func (e *fakeExecutor) Execute(_ context.Context, command, _ string) clnkr.CommandResult {
 	e.gotCmds = append(e.gotCmds, command)
 	if e.calls >= len(e.results) {
-		return clnkr.CommandResult{}, fmt.Errorf("no more results")
+		return clnkr.CommandResult{
+			Outcome: clnkr.CommandOutcome{
+				Type:    clnkr.CommandOutcomeError,
+				Message: "no more results",
+			},
+		}
 	}
 	result := e.results[e.calls]
-	if result.Command == "" {
-		result.Command = command
-	}
-	var err error
-	if e.calls < len(e.errs) {
-		err = e.errs[e.calls]
-	}
 	e.calls++
-	return result, err
+	return result
 }
 
 func (e *fakeExecutor) SetEnv(map[string]string) {}
+
+func exitOutcome(code int) clnkr.CommandOutcome {
+	return clnkr.CommandOutcome{Type: clnkr.CommandOutcomeExit, ExitCode: &code}
+}
 
 type fakeCompactor struct {
 	summary  string

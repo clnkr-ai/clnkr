@@ -34,23 +34,19 @@ func (e *ShellExecutor) SetEnv(env map[string]string) {
 	}
 }
 
-// Execute runs a command in dir and returns separated stdout/stderr plus exit code.
+// Execute runs a command in dir and returns separated streams and one outcome.
 func (e *ShellExecutor) Execute(
 	ctx context.Context,
 	command string,
 	dir string,
-) (CommandResult, error) {
+) CommandResult {
 	baseline := gitfeedback.Detect(dir)
 
 	wrapped, stateFile, cleanup, err := shellstate.Wrap(command)
 	if err != nil {
 		return CommandResult{
-				Command: command,
-				Outcome: commandOutcomeError(err),
-			}, fmt.Errorf(
-				"wrap command: %w",
-				err,
-			)
+			Outcome: commandOutcomeError(fmt.Errorf("wrap command: %w", err)),
+		}
 	}
 	defer cleanup()
 
@@ -81,32 +77,27 @@ func (e *ShellExecutor) Execute(
 	cmd.Stderr = &stderr
 
 	err = cmd.Run()
-	result := CommandResult{Command: command, Stdout: stdout.String(), Stderr: stderr.String()}
+	result := CommandResult{Stdout: stdout.String(), Stderr: stderr.String()}
 
+	exitCode := 0
 	if cmd.ProcessState != nil {
-		result.ExitCode = cmd.ProcessState.ExitCode()
+		exitCode = cmd.ProcessState.ExitCode()
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		result.ExitCode = exitErr.ExitCode()
+		exitCode = exitErr.ExitCode()
 	}
-	result.Outcome = classifyCommandOutcome(ctx, err, result.ExitCode)
-
-	if err == nil {
-		result, stateErr := e.applyPostState(result, stateFile)
-		if stateErr != nil {
-			result.Outcome = commandOutcomeError(stateErr)
-			return result, stateErr
-		}
-		return applyCommandFeedback(result, baseline, dir), nil
-	}
+	result.Outcome = classifyCommandOutcome(ctx, err, exitCode)
 
 	result, stateErr := e.applyPostState(result, stateFile)
 	if stateErr != nil {
-		return result, fmt.Errorf("run command: %w (shell state: %v)", err, stateErr)
+		if err != nil {
+			stateErr = fmt.Errorf("run command: %w (shell state: %v)", err, stateErr)
+		}
+		result.Outcome = commandOutcomeError(stateErr)
+		return result
 	}
-	result = applyCommandFeedback(result, baseline, dir)
-	return result, fmt.Errorf("run command: %w", err)
+	return applyCommandFeedback(result, baseline, dir)
 }
 
 func classifyCommandOutcome(ctx context.Context, err error, exitCode int) CommandOutcome {
@@ -123,7 +114,7 @@ func classifyCommandOutcome(ctx context.Context, err error, exitCode int) Comman
 	if errors.As(err, &exitErr) {
 		return commandOutcomeExit(exitCode)
 	}
-	return commandOutcomeError(err)
+	return commandOutcomeError(fmt.Errorf("run command: %w", err))
 }
 
 func commandOutcomeExit(code int) CommandOutcome {

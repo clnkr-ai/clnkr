@@ -273,13 +273,13 @@ type ExecutorStateSetter interface {
 }
 
 // Step runs one query-parse cycle. Policy lives in Run.
-func (a *Agent) Step(ctx context.Context) (StepResult, error) {
+func (a *Agent) Step(ctx context.Context) (Response, error) {
 	a.started = true
 	a.appendStateMessageIfNeeded()
 	a.notify(EventDebug{Message: "querying model..."})
 	resp, err := a.model.Query(ctx, transcript.CloneMessages(a.messages))
 	if err != nil {
-		return StepResult{}, fmt.Errorf("query model: %w", err)
+		return Response{}, fmt.Errorf("query model: %w", err)
 	}
 	a.notify(
 		EventDebug{
@@ -293,18 +293,18 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) {
 
 	if resp.ProtocolErr != nil {
 		a.appendProtocolFailure(resp, true)
-		return StepResult{Response: resp, ParseErr: resp.ProtocolErr}, nil
+		return resp, nil
 	}
 
 	if err := a.appendSuccessfulResponse(&resp); err != nil {
-		return StepResult{}, err
+		return Response{}, err
 	}
 	a.notify(EventDebug{Message: fmt.Sprintf("parsed turn: %T", resp.Turn)})
-	return StepResult{Response: resp, Turn: resp.Turn}, nil
+	return resp, nil
 }
 
 // ExecuteTurn runs an act turn and appends the command result payload.
-func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (StepResult, error) {
+func (a *Agent) ExecuteTurn(ctx context.Context, act *ActTurn) (ExecutionResult, error) {
 	return a.executeTurn(ctx, act, nil)
 }
 
@@ -314,7 +314,7 @@ func (a *Agent) ExecuteTurnWithSkipped(
 	ctx context.Context,
 	act *ActTurn,
 	skipped []BashAction,
-) (StepResult, error) {
+) (ExecutionResult, error) {
 	return a.executeTurn(ctx, act, skipped)
 }
 
@@ -322,7 +322,7 @@ func (a *Agent) executeTurn(
 	ctx context.Context,
 	act *ActTurn,
 	skipped []BashAction,
-) (StepResult, error) {
+) (ExecutionResult, error) {
 	return actTurnExecutor{agent: a}.Execute(ctx, act, skipped)
 }
 
@@ -363,15 +363,11 @@ func (a *Agent) appendSkippedToolResult(action BashAction, reason string) (strin
 	return content, true
 }
 
-func commandResultIsError(result CommandResult) bool {
-	if result.Outcome.Type == "" ||
-		result.Outcome.Type == CommandOutcomeExit && result.Outcome.ExitCode == nil {
-		return result.ExitCode != 0
-	}
-	if result.Outcome.Type != CommandOutcomeExit {
+func commandOutcomeIsError(outcome CommandOutcome) bool {
+	if outcome.Type != CommandOutcomeExit || outcome.ExitCode == nil {
 		return true
 	}
-	return *result.Outcome.ExitCode != 0
+	return *outcome.ExitCode != 0
 }
 
 // RequestStepLimitSummary asks the model for a final done summary after the

@@ -62,7 +62,6 @@ type CommandResult struct {
 	Command  string
 	Stdout   string
 	Stderr   string
-	ExitCode int
 	Outcome  CommandOutcome
 	Feedback CommandFeedback
 	Guidance string

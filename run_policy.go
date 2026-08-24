@@ -14,7 +14,7 @@ type runPolicyState struct {
 	policy                            RunPolicy
 	commandsUsed, modelTurns          int
 	protocolErrors, completionRejects int
-	completionGate                    CompletionGate
+	completionGate                    completionGate
 	gateCompletions                   bool
 	guidancePressure                  resourcePressure
 	contextLengthBackstop             func(context.Context, error) error
@@ -57,7 +57,7 @@ func (s *runPolicyState) step(ctx context.Context, a *Agent) (bool, error) {
 		}
 	}
 
-	if result.ParseErr != nil {
+	if result.ProtocolErr != nil {
 		return s.handleProtocolFailure(a)
 	}
 	s.protocolErrors = 0
@@ -74,7 +74,7 @@ func (s *runPolicyState) step(ctx context.Context, a *Agent) (bool, error) {
 	}
 }
 
-func (s *runPolicyState) runStepAttempt(ctx context.Context, a *Agent) (StepResult, error) {
+func (s *runPolicyState) runStepAttempt(ctx context.Context, a *Agent) (Response, error) {
 	a.appendStateMessageIfNeeded()
 	a.appendResourceStateMessage(s.commandsUsed, s.modelTurns, s.resourcePressureGuidanceDue(a))
 	result, err := a.Step(ctx)
@@ -96,18 +96,18 @@ func (s *runPolicyState) handleDone(a *Agent, turn *DoneTurn) (bool, error) {
 		return true, nil
 	}
 
-	decision, reasons, guidance := s.completionGate.Decide(turn, s.commandsUsed, a.MaxSteps)
+	decision, reasons, guidance := s.completionGate.decide(*turn, s.commandsUsed, a.MaxSteps)
 	a.notify(
 		EventCompletionGate{
-			Decision: decision,
+			Decision: string(decision),
 			Reasons:  cloneStrings(reasons),
 			Summary:  turn.Summary,
 		},
 	)
 	switch decision {
-	case CompletionAccept:
+	case completionAccept:
 		return true, nil
-	case CompletionReject:
+	case completionReject:
 		s.completionRejects++
 		if s.completionRejects >= 3 {
 			return false, s.runError(
@@ -115,7 +115,7 @@ func (s *runPolicyState) handleDone(a *Agent, turn *DoneTurn) (bool, error) {
 				fmt.Errorf("consecutive completion gate rejections, exiting"),
 			)
 		}
-	case CompletionChallenge:
+	case completionChallenge:
 		s.completionRejects = 0
 	}
 	a.AppendUserMessage(guidance)
@@ -165,7 +165,7 @@ func (s *runPolicyState) handleAct(ctx context.Context, a *Agent, turn *ActTurn)
 		return false, s.runError(a, err)
 	}
 	s.completionRejects = 0
-	s.commandsUsed += execResult.ExecCount
+	s.commandsUsed += execResult.CommandsExecuted
 	a.notify(EventDebug{Message: fmt.Sprintf("step %d/%d", s.commandsUsed, a.MaxSteps)})
 	if a.MaxSteps > 0 && s.commandsUsed >= a.MaxSteps {
 		return s.requestStepLimitSummary(ctx, a)

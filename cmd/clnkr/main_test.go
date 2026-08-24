@@ -90,24 +90,21 @@ func (m *fakeModel) Query(_ context.Context, _ []clnkr.Message) (clnkr.Response,
 
 type fakeExecutor struct {
 	results []clnkr.CommandResult
-	errs    []error
 	calls   int
 }
 
-func (e *fakeExecutor) Execute(_ context.Context, command, _ string) (clnkr.CommandResult, error) {
+func (e *fakeExecutor) Execute(_ context.Context, _, _ string) clnkr.CommandResult {
 	if e.calls >= len(e.results) {
-		return clnkr.CommandResult{}, fmt.Errorf("no more results")
+		return clnkr.CommandResult{
+			Outcome: clnkr.CommandOutcome{
+				Type:    clnkr.CommandOutcomeError,
+				Message: "no more results",
+			},
+		}
 	}
 	result := e.results[e.calls]
-	if result.Command == "" {
-		result.Command = command
-	}
-	var err error
-	if e.calls < len(e.errs) {
-		err = e.errs[e.calls]
-	}
 	e.calls++
-	return result, err
+	return result
 }
 
 func (e *fakeExecutor) SetEnv(map[string]string) {}

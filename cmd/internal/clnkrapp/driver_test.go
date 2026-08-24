@@ -12,7 +12,9 @@ import (
 )
 
 func TestDriverApprovalRequestReplyExecutesCommand(t *testing.T) {
-	executor := &fakeExecutor{results: []clnkr.CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
+	executor := &fakeExecutor{results: []clnkr.CommandResult{{
+		Stdout: "hi\n", Outcome: exitOutcome(0),
+	}}}
 	agent := clnkr.NewAgent(&fakeModel{responses: []clnkr.Response{
 		mustResponse(actJSON("echo hi")),
 		mustResponse(`{"type":"done","summary":"done"}`),

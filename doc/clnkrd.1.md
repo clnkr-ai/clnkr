@@ -91,7 +91,8 @@ Each command has **command** and optional **workdir**.
 
 **command_done**
 : Command execution finished. Payload: **command**, **stdout**, **stderr**,
-**exit_code**, **feedback**, and optional **err**.
+typed **outcome**, and **feedback**. Exit outcomes contain **exit_code**;
+host execution errors contain **message**.
 
 **compacted**
 : Transcript compaction completed. Payload: **compacted_messages** and

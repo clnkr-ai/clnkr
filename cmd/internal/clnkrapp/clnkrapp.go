@@ -109,14 +109,11 @@ func WriteEventLog(w io.Writer, e clnkr.Event) error {
 		return writeEvent(w, "command_start", map[string]string{"command": e.Command, "dir": e.Dir})
 	case clnkr.EventCommandDone:
 		payload := map[string]any{
-			"command":   e.Command,
-			"stdout":    e.Stdout,
-			"stderr":    e.Stderr,
-			"exit_code": e.ExitCode,
-			"feedback":  e.Feedback,
-		}
-		if e.Err != nil {
-			payload["err"] = e.Err.Error()
+			"command":  e.Command,
+			"stdout":   e.Stdout,
+			"stderr":   e.Stderr,
+			"outcome":  e.Outcome,
+			"feedback": e.Feedback,
 		}
 		return writeEvent(w, "command_done", payload)
 	case clnkr.EventProtocolFailure:

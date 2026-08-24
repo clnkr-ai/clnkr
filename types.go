@@ -97,13 +97,11 @@ const (
 // CommandOutcome captures a command's completion state.
 type CommandOutcome = transcript.CommandOutcome
 
-// CommandResult captures one shell command execution.
+// CommandResult captures one shell command execution. Outcome is required.
 // Zero PostCwd = no change; nil PostEnv = no snapshot.
 type CommandResult struct {
-	Command  string
 	Stdout   string
 	Stderr   string
-	ExitCode int
 	PostCwd  string
 	PostEnv  map[string]string
 	Outcome  CommandOutcome
@@ -123,5 +121,5 @@ type FinalSummaryModel interface {
 
 // Executor runs a shell command and returns its structured result.
 type Executor interface {
-	Execute(ctx context.Context, command string, dir string) (CommandResult, error)
+	Execute(ctx context.Context, command string, dir string) CommandResult
 }
