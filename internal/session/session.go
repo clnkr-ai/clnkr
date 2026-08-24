@@ -123,6 +123,10 @@ func SaveSessionWithMetadata(pwd string, messages []clnkr.Message, metadata any)
 		_ = temporary.Close()
 		return fmt.Errorf("save session: write temporary file: %w", err)
 	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return fmt.Errorf("save session: sync temporary file: %w", err)
+	}
 	if err := temporary.Close(); err != nil {
 		return fmt.Errorf("save session: close temporary file: %w", err)
 	}
@@ -306,6 +310,9 @@ func publishSessionFile(dir, temporaryPath string, now time.Time) (string, error
 		path := filepath.Join(dir, filename)
 		err := os.Link(temporaryPath, path)
 		if err == nil {
+			if err := syncDirectory(dir); err != nil {
+				return "", fmt.Errorf("sync session directory: %w", err)
+			}
 			return path, nil
 		}
 		if !os.IsExist(err) {
@@ -313,4 +320,19 @@ func publishSessionFile(dir, temporaryPath string, now time.Time) (string, error
 		}
 	}
 	return "", fmt.Errorf("too many sessions for timestamp %s", prefix)
+}
+
+func syncDirectory(path string) error {
+	directory, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open: %w", err)
+	}
+	if err := directory.Sync(); err != nil {
+		_ = directory.Close()
+		return fmt.Errorf("sync: %w", err)
+	}
+	if err := directory.Close(); err != nil {
+		return fmt.Errorf("close: %w", err)
+	}
+	return nil
 }
