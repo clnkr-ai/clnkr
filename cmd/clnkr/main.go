@@ -80,6 +80,11 @@ type lineResult struct {
 	err  error
 }
 
+type terminalInputError struct{ err error }
+
+func (e *terminalInputError) Error() string { return e.err.Error() }
+func (e *terminalInputError) Unwrap() error { return e.err }
+
 type lineReader struct {
 	lines chan lineResult
 }
@@ -92,7 +97,7 @@ func newLineReader(r io.Reader) *lineReader {
 			lr.lines <- lineResult{text: scanner.Text()}
 		}
 		if err := scanner.Err(); err != nil {
-			lr.lines <- lineResult{err: err}
+			lr.lines <- lineResult{err: &terminalInputError{err: err}}
 		}
 		close(lr.lines)
 	}()
@@ -215,7 +220,7 @@ func drainDriverEvents(
 				eventLog,
 				stopModelWait,
 			)
-			if err != nil && runErr == nil {
+			if err != nil && (runErr == nil || isTerminalInputError(err)) {
 				runErr = err
 			}
 		default:
@@ -280,7 +285,7 @@ func replyToTerminalRequest(
 		fmt.Fprint(os.Stderr, prompt) //nolint:errcheck
 		reply, err := reader.ReadLine(ctx)
 		if err != nil {
-			return err
+			return fmt.Errorf("read terminal reply: %w", err)
 		}
 		reply = strings.TrimSpace(reply)
 		if reply == "" {
@@ -646,10 +651,10 @@ func runPromptLoop(
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			fatalf("%v", err)
+			return fmt.Errorf("read prompt: %w", err)
 		}
 		if lines, err := reader.ReadQueuedLines(); err != nil {
-			fatalf("%v", err)
+			return fmt.Errorf("read queued prompt lines: %w", err)
 		} else if len(lines) > 0 {
 			input = strings.Join(append([]string{input}, lines...), "\n")
 		}
@@ -667,7 +672,7 @@ func runPromptLoop(
 			eventLog,
 			modelWait.Stop,
 		); err != nil {
-			if !showPrompt {
+			if !showPrompt || isTerminalInputError(err) {
 				stop()
 				return err
 			}
@@ -681,6 +686,11 @@ func runPromptLoop(
 		stop()
 	}
 	return nil
+}
+
+func isTerminalInputError(err error) bool {
+	var inputErr *terminalInputError
+	return errors.As(err, &inputErr)
 }
 
 func summarizeCommand(cmd string) string {

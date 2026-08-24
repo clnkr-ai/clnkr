@@ -159,6 +159,80 @@ func TestSaveSessionWithMetadataPreservesLoadCompatibility(t *testing.T) {
 	}
 }
 
+func TestSaveSessionMarshalFailurePublishesNothing(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	projectDir := "/tmp/test-project-save-marshal-failure"
+
+	err := session.SaveSessionWithMetadata(
+		projectDir,
+		[]clnkr.Message{{Role: "user", Content: "hello"}},
+		map[string]any{"unsupported": func() {}},
+	)
+	if err == nil || !strings.Contains(err.Error(), "marshal metadata") {
+		t.Fatalf("SaveSessionWithMetadata error = %v, want metadata marshal error", err)
+	}
+	assertSessionFileCount(t, projectDir, 0)
+}
+
+func TestSaveSessionPublishesCompletePrivateFile(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	projectDir := "/tmp/test-project-save-complete"
+	want := []clnkr.Message{{Role: "user", Content: "complete"}}
+
+	if err := session.SaveSession(projectDir, want); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	dir, err := session.SessionDir(projectDir)
+	if err != nil {
+		t.Fatalf("SessionDir: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 1 || filepath.Ext(entries[0].Name()) != ".json" {
+		t.Fatalf("session directory entries = %#v, want one public JSON file", entries)
+	}
+	info, err := entries[0].Info()
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("session file mode = %o, want 600", got)
+	}
+
+	var stored struct {
+		Created  string          `json:"created"`
+		Messages []clnkr.Message `json:"messages"`
+	}
+	readOnlySessionFile(t, projectDir, &stored)
+	if stored.Created == "" || !reflect.DeepEqual(stored.Messages, want) {
+		t.Fatalf("stored session = %#v, want created timestamp and messages %#v", stored, want)
+	}
+
+	if err := os.WriteFile(
+		filepath.Join(dir, ".session-leftover"),
+		[]byte("{"),
+		0o600,
+	); err != nil {
+		t.Fatalf("WriteFile leftover: %v", err)
+	}
+	listed, err := session.ListSessions(projectDir)
+	if err != nil {
+		t.Fatalf("ListSessions with leftover: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("ListSessions with leftover = %#v, want one session", listed)
+	}
+	loaded, err := session.LoadLatestSession(projectDir)
+	if err != nil {
+		t.Fatalf("LoadLatestSession with leftover: %v", err)
+	}
+	if !reflect.DeepEqual(loaded, want) {
+		t.Fatalf("loaded = %#v, want %#v", loaded, want)
+	}
+}
+
 func TestLoadLatestSessionOrdersBySessionFilename(t *testing.T) {
 	tests := []struct {
 		name            string

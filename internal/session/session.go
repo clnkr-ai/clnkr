@@ -89,18 +89,7 @@ func SaveSessionWithMetadata(pwd string, messages []clnkr.Message, metadata any)
 	if err != nil {
 		return fmt.Errorf("save session: %w", err)
 	}
-
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("save session: mkdir: %w", err)
-	}
-
 	now := time.Now().UTC()
-	f, err := openSessionFile(dir, now)
-	if err != nil {
-		return fmt.Errorf("save session: open: %w", err)
-	}
-	defer f.Close() //nolint:errcheck
-
 	data := sessionFile{
 		Created:  now.Format(time.RFC3339Nano),
 		Messages: messages,
@@ -113,8 +102,33 @@ func SaveSessionWithMetadata(pwd string, messages []clnkr.Message, metadata any)
 		data.Metadata = encoded
 	}
 
-	if err := json.NewEncoder(f).Encode(data); err != nil {
+	encoded, err := json.Marshal(data)
+	if err != nil {
 		return fmt.Errorf("save session: encode: %w", err)
+	}
+	encoded = append(encoded, '\n')
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("save session: mkdir: %w", err)
+	}
+
+	temporary, err := os.CreateTemp(dir, ".session-*")
+	if err != nil {
+		return fmt.Errorf("save session: create temporary file: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	defer func() { _ = os.Remove(temporaryPath) }()
+
+	if _, err := temporary.Write(encoded); err != nil {
+		_ = temporary.Close()
+		return fmt.Errorf("save session: write temporary file: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("save session: close temporary file: %w", err)
+	}
+
+	if _, err := publishSessionFile(dir, temporaryPath, now); err != nil {
+		return fmt.Errorf("save session: publish: %w", err)
 	}
 
 	return nil
@@ -285,15 +299,18 @@ func loadSessionFile(path string) (sessionFile, error) {
 	return sf, err
 }
 
-func openSessionFile(dir string, now time.Time) (*os.File, error) {
+func publishSessionFile(dir, temporaryPath string, now time.Time) (string, error) {
 	prefix := now.Format("2006-01-02T150405.000000000Z")
 	for i := 0; i < 1000; i++ {
 		filename := fmt.Sprintf("%s-%03d.json", prefix, i)
 		path := filepath.Join(dir, filename)
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err == nil || !os.IsExist(err) {
-			return f, err
+		err := os.Link(temporaryPath, path)
+		if err == nil {
+			return path, nil
+		}
+		if !os.IsExist(err) {
+			return "", err
 		}
 	}
-	return nil, fmt.Errorf("too many sessions for timestamp %s", prefix)
+	return "", fmt.Errorf("too many sessions for timestamp %s", prefix)
 }

@@ -61,6 +61,10 @@ func NewModelWithOptions(baseURL, apiKey, model, systemPrompt string, opts Optio
 	if opts.MaxTokens > 0 {
 		maxTokens = opts.MaxTokens
 	}
+	thinkingMode := opts.ThinkingMode
+	if thinkingMode == ThinkingModeOmitted && opts.ThinkingBudgetTokens > 0 {
+		thinkingMode = ThinkingModeManual
+	}
 	return &Model{
 		baseURL:              baseURL,
 		apiKey:               apiKey,
@@ -68,7 +72,7 @@ func NewModelWithOptions(baseURL, apiKey, model, systemPrompt string, opts Optio
 		systemPrompt:         systemPrompt,
 		maxTokens:            maxTokens,
 		thinkingBudgetTokens: opts.ThinkingBudgetTokens,
-		thinkingMode:         opts.ThinkingMode,
+		thinkingMode:         thinkingMode,
 		effort:               opts.Effort,
 		useBashToolCalls:     opts.UseBashToolCalls,
 		unattended:           opts.Unattended,
@@ -217,7 +221,7 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 		outputCfg.Effort = m.effort
 	}
 
-	body, err := json.Marshal(request{
+	apiResp, respBody, err := m.structuredRequest(ctx, request{
 		Model:        m.model,
 		MaxTokens:    m.maxTokens,
 		System:       m.systemPrompt,
@@ -227,20 +231,6 @@ func (m *Model) Query(ctx context.Context, messages []clnkr.Message) (clnkr.Resp
 		Tools:        tools,
 	})
 	if err != nil {
-		return clnkr.Response{}, fmt.Errorf("marshal request: %w", err)
-	}
-
-	respBody, err := m.doRequest(ctx, body)
-	if err != nil {
-		return clnkr.Response{}, err
-	}
-
-	var apiResp response
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return clnkr.Response{}, fmt.Errorf("unmarshal response: %w", err)
-	}
-
-	if err := contextWindowStopReasonError(apiResp.StopReason); err != nil {
 		return clnkr.Response{}, err
 	}
 
@@ -290,7 +280,7 @@ func (m *Model) QueryFinal(ctx context.Context, messages []clnkr.Message) (clnkr
 	if m.effort != "" {
 		outputCfg.Effort = m.effort
 	}
-	body, err := json.Marshal(request{
+	apiResp, _, err := m.structuredRequest(ctx, request{
 		Model:        m.model,
 		MaxTokens:    m.maxTokens,
 		System:       m.systemPrompt,
@@ -299,22 +289,28 @@ func (m *Model) QueryFinal(ctx context.Context, messages []clnkr.Message) (clnkr
 		Thinking:     m.thinkingOptions(),
 	})
 	if err != nil {
-		return clnkr.Response{}, fmt.Errorf("marshal request: %w", err)
-	}
-
-	respBody, err := m.doRequest(ctx, body)
-	if err != nil {
-		return clnkr.Response{}, err
-	}
-
-	var apiResp response
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return clnkr.Response{}, fmt.Errorf("unmarshal response: %w", err)
-	}
-	if err := contextWindowStopReasonError(apiResp.StopReason); err != nil {
 		return clnkr.Response{}, err
 	}
 	return parseStructuredResponse(apiResp, "structured output response")
+}
+
+func (m *Model) structuredRequest(ctx context.Context, req request) (response, []byte, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return response{}, nil, fmt.Errorf("marshal request: %w", err)
+	}
+	respBody, err := m.doRequest(ctx, body)
+	if err != nil {
+		return response{}, nil, err
+	}
+	var apiResp response
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return response{}, nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+	if err := contextWindowStopReasonError(apiResp.StopReason); err != nil {
+		return response{}, nil, err
+	}
+	return apiResp, respBody, nil
 }
 
 func parseStructuredResponse(apiResp response, context string) (clnkr.Response, error) {
@@ -603,10 +599,6 @@ func bashToolSchema() anthropicTool {
 func (m *Model) thinkingOptions() *thinkingOptions {
 	if m.thinkingMode == ThinkingModeOmitted && m.thinkingBudgetTokens == 0 {
 		return nil
-	}
-	// Auto-derive mode from legacy ThinkingBudgetTokens field.
-	if m.thinkingMode == ThinkingModeOmitted && m.thinkingBudgetTokens > 0 {
-		m.thinkingMode = ThinkingModeManual
 	}
 	anthropicType := m.thinkingMode
 	if m.thinkingMode == ThinkingModeManual {

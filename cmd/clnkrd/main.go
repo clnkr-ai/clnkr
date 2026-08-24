@@ -241,6 +241,24 @@ type jsonlInput struct {
 	err     error
 }
 
+type activeRun struct {
+	done   <-chan error
+	cancel context.CancelFunc
+}
+
+func (r *activeRun) doneChannel() <-chan error {
+	if r == nil {
+		return nil
+	}
+	return r.done
+}
+
+func (r *activeRun) cancelRun() {
+	if r != nil {
+		r.cancel()
+	}
+}
+
 func runJSONL(
 	ctx context.Context,
 	r io.Reader,
@@ -252,33 +270,30 @@ func runJSONL(
 	defer cancel()
 
 	inputs, readerDone := readJSONL(ctx, r)
-	var runDone <-chan error
-	var cancelRun context.CancelFunc
+	var run *activeRun
 	var inputsClosed bool
 	fail := func(err error) error {
 		fmt.Fprintf(errOut, "%v\n", err) //nolint:errcheck
-		if cancelRun != nil {
-			cancelRun()
-		}
-		if cleanupErr := waitRunAndDrain(out, driver, runDone); cleanupErr != nil {
+		run.cancelRun()
+		if cleanupErr := waitRunAndDrain(out, driver, run); cleanupErr != nil {
 			return cleanupErr
 		}
 		return err
 	}
 
-	for inputs != nil || runDone != nil {
+	for inputs != nil || run != nil {
 		select {
 		case input, ok := <-inputs:
 			if !ok {
 				inputs = nil
 				inputsClosed = true
-				if runDone != nil && driver.Pending() != clnkrapp.PendingNone {
-					cancelRun()
+				if run != nil && driver.HasPendingReply() {
+					run.cancelRun()
 				}
 				continue
 			}
 			var harvestErr error
-			runDone, cancelRun, harvestErr = harvestReadyRun(out, driver, runDone, cancelRun)
+			run, harvestErr = harvestReadyRun(out, driver, run)
 			if harvestErr != nil {
 				return harvestErr
 			}
@@ -286,11 +301,10 @@ func runJSONL(
 				return fail(fmt.Errorf("read JSONL: %w", input.err))
 			}
 			var err error
-			runDone, cancelRun, err = handleJSONLCommand(
+			run, err = handleJSONLCommand(
 				ctx,
 				input.command,
-				runDone,
-				cancelRun,
+				run,
 				driver,
 			)
 			if err != nil {
@@ -301,7 +315,7 @@ func runJSONL(
 				if closer, ok := r.(io.Closer); ok {
 					_ = closer.Close()
 				}
-				if err := waitRunAndDrain(out, driver, runDone); err != nil {
+				if err := waitRunAndDrain(out, driver, run); err != nil {
 					return err
 				}
 				<-readerDone
@@ -311,12 +325,11 @@ func runJSONL(
 			if err := clnkrapp.WriteJSONL(out, event); err != nil {
 				return fail(err)
 			}
-			if inputsClosed && cancelRun != nil && driver.Pending() != clnkrapp.PendingNone {
-				cancelRun()
+			if inputsClosed && run != nil && driver.HasPendingReply() {
+				run.cancelRun()
 			}
-		case err := <-runDone:
-			runDone = nil
-			cancelRun = nil
+		case err := <-run.doneChannel():
+			run = nil
 			if drainErr := drainDriverEvents(out, driver); drainErr != nil {
 				return drainErr
 			}
@@ -324,10 +337,8 @@ func runJSONL(
 				return err
 			}
 		case <-ctx.Done():
-			if cancelRun != nil {
-				cancelRun()
-			}
-			if cleanupErr := waitRunAndDrain(out, driver, runDone); cleanupErr != nil {
+			run.cancelRun()
+			if cleanupErr := waitRunAndDrain(out, driver, run); cleanupErr != nil {
 				return cleanupErr
 			}
 			return ctx.Err()
@@ -339,29 +350,28 @@ func runJSONL(
 func harvestReadyRun(
 	out io.Writer,
 	driver *clnkrapp.Driver,
-	runDone <-chan error,
-	cancelRun context.CancelFunc,
-) (<-chan error, context.CancelFunc, error) {
-	if runDone == nil {
-		return runDone, cancelRun, nil
+	run *activeRun,
+) (*activeRun, error) {
+	if run == nil {
+		return nil, nil
 	}
 	select {
-	case err := <-runDone:
+	case err := <-run.done:
 		if drainErr := drainDriverEvents(out, driver); drainErr != nil {
-			return nil, nil, drainErr
+			return nil, drainErr
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		return nil, nil, nil
+		return nil, nil
 	default:
-		return runDone, cancelRun, nil
+		return run, nil
 	}
 }
 
-func waitRunAndDrain(out io.Writer, driver *clnkrapp.Driver, runDone <-chan error) error {
-	if runDone != nil {
-		<-runDone
+func waitRunAndDrain(out io.Writer, driver *clnkrapp.Driver, run *activeRun) error {
+	if run != nil {
+		<-run.done
 	}
 	return drainDriverEvents(out, driver)
 }
@@ -411,48 +421,45 @@ func readJSONL(ctx context.Context, r io.Reader) (<-chan jsonlInput, <-chan stru
 func handleJSONLCommand(
 	ctx context.Context,
 	command clnkrapp.JSONLCommand,
-	runDone <-chan error,
-	cancelRun context.CancelFunc,
+	run *activeRun,
 	driver *clnkrapp.Driver,
-) (<-chan error, context.CancelFunc, error) {
+) (*activeRun, error) {
 	switch command.Type {
 	case "prompt":
-		if runDone != nil {
-			return runDone, cancelRun, fmt.Errorf("prompt: driver run already in progress")
+		if run != nil {
+			return run, fmt.Errorf("prompt: driver run already in progress")
 		}
-		runDone, cancelRun = startDriverRun(ctx, func(runCtx context.Context) error {
+		run = startDriverRun(ctx, func(runCtx context.Context) error {
 			return driver.Prompt(runCtx, command.Text, command.Mode)
 		})
 	case "reply":
-		if driver.Pending() == clnkrapp.PendingNone {
-			return runDone, cancelRun, fmt.Errorf("reply: no pending request")
+		if !driver.HasPendingReply() {
+			return run, fmt.Errorf("reply: no pending request")
 		}
-		return runDone, cancelRun, driver.Reply(ctx, command.Text)
+		return run, driver.Reply(ctx, command.Text)
 	case "compact":
-		if runDone != nil {
-			return runDone, cancelRun, fmt.Errorf("compact: driver run already in progress")
+		if run != nil {
+			return run, fmt.Errorf("compact: driver run already in progress")
 		}
-		runDone, cancelRun = startDriverRun(ctx, func(runCtx context.Context) error {
+		run = startDriverRun(ctx, func(runCtx context.Context) error {
 			return driver.Compact(runCtx)
 		})
 	case "shutdown":
-		if cancelRun != nil {
-			cancelRun()
-		}
+		run.cancelRun()
 	default:
-		return runDone, cancelRun, fmt.Errorf("unknown JSONL command type %q", command.Type)
+		return run, fmt.Errorf("unknown JSONL command type %q", command.Type)
 	}
-	return runDone, cancelRun, nil
+	return run, nil
 }
 
 func startDriverRun(
 	ctx context.Context,
 	run func(context.Context) error,
-) (<-chan error, context.CancelFunc) {
+) *activeRun {
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() {
 		done <- run(runCtx)
 	}()
-	return done, cancel
+	return &activeRun{done: done, cancel: cancel}
 }

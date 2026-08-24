@@ -17,6 +17,7 @@
 value GitRef {
     name: String
     kind: branch | pull_request | semver_tag
+    sha: String
 }
 
 value ReleaseAsset {
@@ -31,6 +32,13 @@ value ReleaseAsset {
 enum RunStatus { requested | running | passed | failed | skipped }
 enum ValidationRequirement { actionlint | make_check | race_tests | thoth_guardrails }
 enum EvaluationProvider { openai | anthropic }
+enum ReleaseObservation {
+    debian_branch_updated |
+    debian_changelog_updated |
+    project_changelog_updated |
+    generated_manpages_packaged |
+    homebrew_tap_updated
+}
 
 ------------------------------------------------------------
 -- Entities and Variants
@@ -71,20 +79,11 @@ entity ReleaseRun {
     ref: GitRef
     status: RunStatus
     assets: Set<ReleaseAsset>
-    live_evaluations_passed: Boolean
-    main_status_required: Boolean
-    tag_latest_main_intended: Boolean
-    tag_latest_main_enforced: Boolean
-    site_deployment_required: Boolean
-    debian_branch_updated: Boolean
-    debian_changelog_updated: Boolean
-    project_changelog_updated: Boolean
-    generated_manpages_packaged: Boolean
-    generated_docs_committed: Boolean
-    homebrew_tap_updated: Boolean
+    observations: Set<ReleaseObservation>
 
     transitions status {
         requested -> running
+        requested -> failed
         running -> passed
         running -> failed
         terminal: passed, failed
@@ -235,7 +234,6 @@ rule PublishLiveEvaluationArtifacts {
 rule ReleaseSemverTag {
     when: SemverTagPushed(host, ref)
     requires: ref.kind = semver_tag
-    requires: LiveEvaluationsPassed(ref)
 
     ensures: ReleaseRun.created(
         ref: ref,
@@ -250,35 +248,38 @@ rule ReleaseSemverTag {
             ReleaseAsset{name: "source", kind: source_archive},
             ReleaseAsset{name: "checksums", kind: checksum}
         },
-        live_evaluations_passed: true,
-        main_status_required: true,
-        tag_latest_main_intended: true,
-        tag_latest_main_enforced: false,
-        site_deployment_required: false,
-        debian_branch_updated: false,
-        debian_changelog_updated: false,
-        project_changelog_updated: false,
-        generated_manpages_packaged: false,
-        generated_docs_committed: false,
-        homebrew_tap_updated: false
+        observations: {}
     )
+}
+
+rule StartReleaseWhenPrerequisitesPass {
+    when: ReleasePrerequisitesCompleted(host, run, main_ref)
+    requires: run.status = requested
+    requires: main_ref.kind = branch
+    requires: main_ref.name = "main"
+    requires: MainRepositoryStatusIsGreen(main_ref)
+    requires: LiveEvaluationsPassed(run.ref)
+
+    ensures: run.status = running
+}
+
+rule FailReleaseWhenPrerequisitesFail {
+    when: ReleasePrerequisitesFailed(host, run)
+    requires: run.status = requested
+
+    ensures: run.status = failed
 }
 
 rule ReleasePublishesDownstreamState {
     when: run: ReleaseRun.status transitions_to running
-    requires: run.live_evaluations_passed = true
-    requires: MainRepositoryStatusIsGreen(run.ref)
-    requires: run.tag_latest_main_intended = true
-    requires: run.tag_latest_main_enforced = false
-    requires: run.site_deployment_required = false
 
-    ensures:
-        run.debian_branch_updated = true
-        run.debian_changelog_updated = true
-        run.project_changelog_updated = true
-        run.generated_manpages_packaged = true
-        run.generated_docs_committed = false
-        run.homebrew_tap_updated = true
+    ensures: run.observations = {
+        debian_branch_updated,
+        debian_changelog_updated,
+        project_changelog_updated,
+        generated_manpages_packaged,
+        homebrew_tap_updated
+    }
 }
 
 rule MainIsGreenWhenValidationAndSitePass {
@@ -291,16 +292,12 @@ rule MainIsGreenWhenValidationAndSitePass {
 
 rule ReleasePassesWhenArtifactsAndDownstreamStateExist {
     when: ReleaseWorkCompleted(host, run)
-    requires: run.live_evaluations_passed = true
-    requires: MainRepositoryStatusIsGreen(run.ref)
-    requires: run.site_deployment_required = false
     requires: ReleaseAssetsPublished(run)
-    requires: run.debian_branch_updated = true
-    requires: run.debian_changelog_updated = true
-    requires: run.project_changelog_updated = true
-    requires: run.generated_manpages_packaged = true
-    requires: run.generated_docs_committed = false
-    requires: run.homebrew_tap_updated = true
+    requires: debian_branch_updated in run.observations
+    requires: debian_changelog_updated in run.observations
+    requires: project_changelog_updated in run.observations
+    requires: generated_manpages_packaged in run.observations
+    requires: homebrew_tap_updated in run.observations
 
     ensures: run.status = passed
 }
@@ -391,6 +388,8 @@ surface WorkflowRuntime {
     provides:
         ValidationRequirementsCompleted(host, run)
         MainStatusChecked(ref)
+        ReleasePrerequisitesCompleted(host, run, main_ref)
+        ReleasePrerequisitesFailed(host, run)
         ReleaseWorkCompleted(host, run)
         SitePublishCompleted(host, deployment)
 }
@@ -427,17 +426,7 @@ surface ReleaseStatus {
         run.ref
         run.status
         run.assets
-        run.live_evaluations_passed
-        run.main_status_required
-        run.tag_latest_main_intended
-        run.tag_latest_main_enforced
-        run.site_deployment_required
-        run.debian_branch_updated
-        run.debian_changelog_updated
-        run.project_changelog_updated
-        run.generated_manpages_packaged
-        run.generated_docs_committed
-        run.homebrew_tap_updated
+        run.observations
 }
 
 surface SiteDeploymentStatus {

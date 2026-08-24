@@ -23,7 +23,3 @@ func (values *providerFlags) apply(opts *cliOptions) {
 	opts.provider = *values.provider
 	opts.providerAPI = *values.providerAPI
 }
-
-func (values *providerFlags) applyTo(opts *cliOptions, _ *flag.FlagSet, _ bool) {
-	values.apply(opts)
-}

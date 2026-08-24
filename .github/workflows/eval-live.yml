@@ -5,19 +5,32 @@ on:
   workflow_dispatch:
 
 jobs:
-  evaluations-live-openai:
+  evaluations-live:
+    name: Live evaluations (${{ matrix.provider }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: openai
+            secret_name: OPENAI_API_KEY
+            base_url_var: CLNKR_EVALUATION_BASE_URL
+            model_var: CLNKR_EVALUATION_MODEL
+          - provider: anthropic
+            secret_name: ANTHROPIC_API_KEY
+            base_url_var: CLNKR_EVALUATION_ANTHROPIC_BASE_URL
+            model_var: CLNKR_EVALUATION_ANTHROPIC_MODEL
     steps:
       - name: Check live evaluation configuration
         id: config
         run: |
           if [ -z "${CLNKR_EVALUATION_API_KEY}" ]; then
-            echo "Live evaluation failed: OPENAI_API_KEY secret is not set." >&2
+            echo "Live evaluation failed: ${{ matrix.secret_name }} secret is not set." >&2
             exit 1
           fi
           echo "configured=true" >> "$GITHUB_OUTPUT"
         env:
-          CLNKR_EVALUATION_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLNKR_EVALUATION_API_KEY: ${{ secrets[matrix.secret_name] }}
 
       - uses: actions/checkout@v5
         if: steps.config.outputs.configured == 'true'
@@ -48,139 +61,80 @@ jobs:
 
       - name: Run live evaluations
         if: steps.config.outputs.configured == 'true'
-        run: make evaluations-live-openai
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          CLNKR_EVALUATION_OPENAI_BASE_URL: ${{ vars.CLNKR_EVALUATION_BASE_URL }}
-          CLNKR_EVALUATION_OPENAI_MODEL: ${{ vars.CLNKR_EVALUATION_MODEL }}
+          CLNKR_EVALUATION_API_KEY: ${{ secrets[matrix.secret_name] }}
+          CLNKR_EVALUATION_BASE_URL: ${{ vars[matrix.base_url_var] }}
+          CLNKR_EVALUATION_MODEL: ${{ vars[matrix.model_var] }}
+        run: |
+          case "${{ matrix.provider }}" in
+            openai)
+              OPENAI_API_KEY="$CLNKR_EVALUATION_API_KEY" \
+                CLNKR_EVALUATION_OPENAI_BASE_URL="$CLNKR_EVALUATION_BASE_URL" \
+                CLNKR_EVALUATION_OPENAI_MODEL="$CLNKR_EVALUATION_MODEL" \
+                make evaluations-live-openai
+              ;;
+            anthropic)
+              ANTHROPIC_API_KEY="$CLNKR_EVALUATION_API_KEY" \
+                CLNKR_EVALUATION_ANTHROPIC_BASE_URL="$CLNKR_EVALUATION_BASE_URL" \
+                CLNKR_EVALUATION_ANTHROPIC_MODEL="$CLNKR_EVALUATION_MODEL" \
+                make evaluations-live-anthropic
+              ;;
+            *)
+              echo "unsupported evaluation provider: ${{ matrix.provider }}" >&2
+              exit 2
+              ;;
+          esac
 
       - name: Show live evaluation bundles on failure
         if: failure() && steps.config.outputs.configured == 'true'
         run: |
-          find evaluations/trials -maxdepth 5 -type f | sort || true
-          echo
-          find evaluations/reports -maxdepth 1 -type f | sort || true
-          for trial_dir in $(find evaluations/trials -mindepth 1 -maxdepth 1 -type d | sort); do
-            echo
-            echo "== $(basename "$trial_dir") bundle =="
-            sed -n '1,200p' "$trial_dir/bundle.json" || true
-            echo
-            echo "== $(basename "$trial_dir") normalized graders =="
-            sed -n '1,200p' "$trial_dir/normalized/graders.jsonl" || true
-            echo
-            echo "== $(basename "$trial_dir") outcome diff =="
-            sed -n '1,200p' "$trial_dir/outcome/diff.patch" || true
-            echo
-            echo "== $(basename "$trial_dir") raw commands =="
-            sed -n '1,200p' "$trial_dir/raw/commands.jsonl" || true
-            if [ -f "$trial_dir/raw/agent/events.jsonl" ]; then
-              echo
-              echo "== $(basename "$trial_dir") raw agent events =="
-              sed -n '1,200p' "$trial_dir/raw/agent/events.jsonl" || true
-            fi
-            if [ -f "$trial_dir/raw/provider-responses.jsonl" ]; then
-              echo
-              echo "== $(basename "$trial_dir") raw provider responses =="
-              sed -n '1,200p' "$trial_dir/raw/provider-responses.jsonl" || true
-            fi
-          done
-
-      - name: Upload live evaluation artifacts
-        if: always() && steps.config.outputs.configured == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: live-evaluations-openai-${{ github.run_id }}
-          path: |
-            evaluations/trials/
-            evaluations/reports/
-          if-no-files-found: warn
-          retention-days: 14
-
-  evaluations-live-anthropic:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check live evaluation configuration
-        id: config
-        run: |
-          if [ -z "${CLNKR_EVALUATION_API_KEY}" ]; then
-            echo "Live evaluation failed: ANTHROPIC_API_KEY secret is not set." >&2
-            exit 1
+          if [ -d evaluations/trials ]; then
+            find evaluations/trials -maxdepth 5 -type f | sort
           fi
-          echo "configured=true" >> "$GITHUB_OUTPUT"
-        env:
-          CLNKR_EVALUATION_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-
-      - uses: actions/checkout@v5
-        if: steps.config.outputs.configured == 'true'
-
-      - uses: actions/setup-go@v6
-        if: steps.config.outputs.configured == 'true'
-        with:
-          go-version-file: go.mod
-
-      - name: Add local user bin to PATH
-        if: steps.config.outputs.configured == 'true'
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Install clankerval release package
-        if: steps.config.outputs.configured == 'true'
-        env:
-          DEBIAN_FRONTEND: noninteractive
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          version="$(sed -n 's/^CLANKERVAL_PINNED_VERSION := //p' Makefile)"
-          arch="$(dpkg --print-architecture)"
-          pattern="clankerval_${version}-*_${arch}.deb"
-          gh release download "v${version}" --repo clnkr-ai/clankerval --pattern "$pattern"
-          deb="$(find . -maxdepth 1 -name "$pattern" -print -quit)"
-          sudo apt-get update
-          sudo apt-get install -y "$deb"
-          rm -f "$deb"
-
-      - name: Run live evaluations
-        if: steps.config.outputs.configured == 'true'
-        run: make evaluations-live-anthropic
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CLNKR_EVALUATION_ANTHROPIC_BASE_URL: ${{ vars.CLNKR_EVALUATION_ANTHROPIC_BASE_URL }}
-          CLNKR_EVALUATION_ANTHROPIC_MODEL: ${{ vars.CLNKR_EVALUATION_ANTHROPIC_MODEL }}
-
-      - name: Show live evaluation bundles on failure
-        if: failure() && steps.config.outputs.configured == 'true'
-        run: |
-          find evaluations/trials -maxdepth 5 -type f | sort || true
           echo
-          find evaluations/reports -maxdepth 1 -type f | sort || true
-          for trial_dir in $(find evaluations/trials -mindepth 1 -maxdepth 1 -type d | sort); do
-            echo
-            echo "== $(basename "$trial_dir") bundle =="
-            sed -n '1,200p' "$trial_dir/bundle.json" || true
-            echo
-            echo "== $(basename "$trial_dir") normalized graders =="
-            sed -n '1,200p' "$trial_dir/normalized/graders.jsonl" || true
-            echo
-            echo "== $(basename "$trial_dir") outcome diff =="
-            sed -n '1,200p' "$trial_dir/outcome/diff.patch" || true
-            echo
-            echo "== $(basename "$trial_dir") raw commands =="
-            sed -n '1,200p' "$trial_dir/raw/commands.jsonl" || true
-            if [ -f "$trial_dir/raw/agent/events.jsonl" ]; then
+          if [ -d evaluations/reports ]; then
+            find evaluations/reports -maxdepth 1 -type f | sort
+          fi
+          if [ -d evaluations/trials ]; then
+            for trial_dir in $(find evaluations/trials -mindepth 1 -maxdepth 1 -type d | sort); do
               echo
-              echo "== $(basename "$trial_dir") raw agent events =="
-              sed -n '1,200p' "$trial_dir/raw/agent/events.jsonl" || true
-            fi
-            if [ -f "$trial_dir/raw/provider-responses.jsonl" ]; then
+              echo "== $(basename "$trial_dir") bundle =="
+              if [ -f "$trial_dir/bundle.json" ]; then
+                sed -n '1,200p' "$trial_dir/bundle.json"
+              fi
               echo
-              echo "== $(basename "$trial_dir") raw provider responses =="
-              sed -n '1,200p' "$trial_dir/raw/provider-responses.jsonl" || true
-            fi
-          done
+              echo "== $(basename "$trial_dir") normalized graders =="
+              if [ -f "$trial_dir/normalized/graders.jsonl" ]; then
+                sed -n '1,200p' "$trial_dir/normalized/graders.jsonl"
+              fi
+              echo
+              echo "== $(basename "$trial_dir") outcome diff =="
+              if [ -f "$trial_dir/outcome/diff.patch" ]; then
+                sed -n '1,200p' "$trial_dir/outcome/diff.patch"
+              fi
+              echo
+              echo "== $(basename "$trial_dir") raw commands =="
+              if [ -f "$trial_dir/raw/commands.jsonl" ]; then
+                sed -n '1,200p' "$trial_dir/raw/commands.jsonl"
+              fi
+              if [ -f "$trial_dir/raw/agent/events.jsonl" ]; then
+                echo
+                echo "== $(basename "$trial_dir") raw agent events =="
+                sed -n '1,200p' "$trial_dir/raw/agent/events.jsonl"
+              fi
+              if [ -f "$trial_dir/raw/provider-responses.jsonl" ]; then
+                echo
+                echo "== $(basename "$trial_dir") raw provider responses =="
+                sed -n '1,200p' "$trial_dir/raw/provider-responses.jsonl"
+              fi
+            done
+          fi
 
       - name: Upload live evaluation artifacts
         if: always() && steps.config.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: live-evaluations-anthropic-${{ github.run_id }}
+          name: live-evaluations-${{ matrix.provider }}-${{ github.run_id }}
           path: |
             evaluations/trials/
             evaluations/reports/

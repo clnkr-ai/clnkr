@@ -123,11 +123,10 @@ type responsesContentItem struct {
 }
 
 type response struct {
-	Status    string            `json:"status"`
-	Error     *responseError    `json:"error"`
-	Output    []outputItem      `json:"output"`
-	RawOutput []json.RawMessage `json:"-"`
-	Usage     struct {
+	Status string         `json:"status"`
+	Error  *responseError `json:"error"`
+	Output []outputItem   `json:"output"`
+	Usage  struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage"`
@@ -139,14 +138,15 @@ type responseError struct {
 }
 
 type outputItem struct {
-	Type      string         `json:"type"`
-	ID        string         `json:"id"`
-	CallID    string         `json:"call_id"`
-	Name      string         `json:"name"`
-	Arguments string         `json:"arguments"`
-	Status    string         `json:"status"`
-	Role      string         `json:"role"`
-	Content   []responseItem `json:"content"`
+	Type      string          `json:"type"`
+	ID        string          `json:"id"`
+	CallID    string          `json:"call_id"`
+	Name      string          `json:"name"`
+	Arguments string          `json:"arguments"`
+	Status    string          `json:"status"`
+	Role      string          `json:"role"`
+	Content   []responseItem  `json:"content"`
+	Raw       json.RawMessage `json:"-"`
 }
 
 type responseItem struct {
@@ -542,13 +542,14 @@ func unmarshalResponse(respBody []byte) (response, error) {
 	if err := json.Unmarshal(respBody, &raw); err != nil {
 		return response{}, fmt.Errorf("unmarshal response: %w", err)
 	}
-	apiResp := response{Status: raw.Status, Error: raw.Error, RawOutput: raw.Output}
+	apiResp := response{Status: raw.Status, Error: raw.Error}
 	apiResp.Usage = raw.Usage
 	apiResp.Output = make([]outputItem, len(raw.Output))
 	for i, item := range raw.Output {
 		if err := json.Unmarshal(item, &apiResp.Output[i]); err != nil {
 			return response{}, fmt.Errorf("unmarshal response output item %d: %w", i, err)
 		}
+		apiResp.Output[i].Raw = append(json.RawMessage(nil), item...)
 	}
 	return apiResp, nil
 }

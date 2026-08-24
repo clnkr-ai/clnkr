@@ -442,6 +442,8 @@ func TestRunWithPolicyOptionsBackstopsContextLengthOnce(t *testing.T) {
 		},
 	}
 	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+	notify, events := collectEvents()
+	agent.Notify = notify
 	backstopCalls := 0
 
 	err := agent.RunWithPolicyOptions(
@@ -451,6 +453,16 @@ func TestRunWithPolicyOptionsBackstopsContextLengthOnce(t *testing.T) {
 		RunOptions{
 			ContextLengthBackstop: func(context.Context, error) error {
 				backstopCalls++
+				var compacted []Message
+				for _, message := range agent.messages {
+					if message.Role == "user" &&
+						(strings.Contains(message.Content, `"type":"state"`) ||
+							strings.Contains(message.Content, `"type":"resource_state"`)) {
+						continue
+					}
+					compacted = append(compacted, message)
+				}
+				agent.messages = compacted
 				agent.AppendUserMessage("compacted marker")
 				return nil
 			},
@@ -470,6 +482,49 @@ func TestRunWithPolicyOptionsBackstopsContextLengthOnce(t *testing.T) {
 	}
 	if countUserMessages(agent.Messages(), "compacted marker") != 1 {
 		t.Fatalf("backstop marker not appended once: %#v", agent.Messages())
+	}
+	if got := messagesText(model.got[1]); !strings.Contains(got, `"model_turns_used":1`) {
+		t.Fatalf("retry query messages = %s, want refreshed resource state", got)
+	}
+	if !hasMessage(model.got[1], "user", transcript.FormatStateMessage("/tmp")) {
+		t.Fatalf("retry query messages = %#v, want refreshed cwd state", model.got[1])
+	}
+	if got := strings.Join(debugMessages(*events), "\n"); !strings.Contains(
+		got,
+		ContextLengthBackstopCompactingDebug+"\n"+ContextLengthBackstopRetryingDebug,
+	) {
+		t.Fatalf("debug messages = %q, want compact then retry", got)
+	}
+}
+
+func TestRunWithPolicyOptionsCancelsAfterContextCompaction(t *testing.T) {
+	contextErr := fmt.Errorf("%w: provider said context too long", ErrContextLengthExceeded)
+	model := &fakeModel{errs: []error{contextErr}}
+	ctx, cancel := context.WithCancel(context.Background())
+	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+	notify, events := collectEvents()
+	agent.Notify = notify
+
+	err := agent.RunWithPolicyOptions(
+		ctx,
+		"inspect",
+		FullSendPolicy{},
+		RunOptions{ContextLengthBackstop: func(context.Context, error) error {
+			cancel()
+			return nil
+		}},
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunWithPolicyOptions error = %v, want context.Canceled", err)
+	}
+	if model.calls != 1 {
+		t.Fatalf("model calls = %d, want 1", model.calls)
+	}
+	got := strings.Join(debugMessages(*events), "\n")
+	if !strings.Contains(got, ContextLengthBackstopCompactingDebug) ||
+		strings.Contains(got, ContextLengthBackstopRetryingDebug) ||
+		!strings.Contains(got, "run error: model_turns=1") {
+		t.Fatalf("debug messages = %q", got)
 	}
 }
 
@@ -722,6 +777,51 @@ func TestRunWithPolicyOptionsDoesNotBackstopTwice(t *testing.T) {
 	}
 	if model.calls != 2 {
 		t.Fatalf("model calls = %d, want 2", model.calls)
+	}
+}
+
+func TestRunWithPolicyOptionsDoesNotBackstopLaterContextFailure(t *testing.T) {
+	contextErr := fmt.Errorf("%w: provider said context too long", ErrContextLengthExceeded)
+	model := &fakeModel{
+		errs: []error{contextErr, nil, contextErr},
+		responses: []Response{{Turn: &ActTurn{Bash: BashBatch{Commands: []BashAction{{
+			Command: "pwd",
+		}}}}}},
+	}
+	executor := &fakeExecutor{results: []CommandResult{{Stdout: "/tmp\n", ExitCode: 0}}}
+	agent := NewAgent(model, executor, "/tmp")
+	notify, events := collectEvents()
+	agent.Notify = notify
+	backstopCalls := 0
+
+	err := agent.RunWithPolicyOptions(
+		context.Background(),
+		"inspect",
+		FullSendPolicy{},
+		RunOptions{ContextLengthBackstop: func(context.Context, error) error {
+			backstopCalls++
+			return nil
+		}},
+	)
+	if !errors.Is(err, ErrContextLengthExceeded) {
+		t.Fatalf("RunWithPolicyOptions error = %v, want ErrContextLengthExceeded", err)
+	}
+	if strings.Contains(err.Error(), "retry failed") {
+		t.Fatalf("RunWithPolicyOptions error = %v, want later failure without retry context", err)
+	}
+	if backstopCalls != 1 || model.calls != 3 || len(executor.gotCmds) != 1 {
+		t.Fatalf(
+			"backstop calls=%d model calls=%d executor calls=%d, want 1, 3, 1",
+			backstopCalls,
+			model.calls,
+			len(executor.gotCmds),
+		)
+	}
+	got := strings.Join(debugMessages(*events), "\n")
+	if strings.Count(got, ContextLengthBackstopCompactingDebug) != 1 ||
+		strings.Count(got, ContextLengthBackstopRetryingDebug) != 1 ||
+		!strings.Contains(got, "run error: model_turns=3") {
+		t.Fatalf("debug messages = %q", got)
 	}
 }
 
@@ -1381,6 +1481,16 @@ func eventDecisions(events []Event) []string {
 		}
 	}
 	return decisions
+}
+
+func debugMessages(events []Event) []string {
+	var messages []string
+	for _, event := range events {
+		if ev, ok := event.(EventDebug); ok {
+			messages = append(messages, ev.Message)
+		}
+	}
+	return messages
 }
 
 func hasMessage(messages []Message, role, content string) bool {

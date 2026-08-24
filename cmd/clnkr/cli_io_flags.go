@@ -19,7 +19,3 @@ func (values *ioFlags) apply(opts *cliOptions) {
 	opts.trajectory = *values.trajectory
 	opts.loadMessages = *values.loadMessages
 }
-
-func (values *ioFlags) applyTo(opts *cliOptions, _ *flag.FlagSet, _ bool) {
-	values.apply(opts)
-}

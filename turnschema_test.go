@@ -123,6 +123,12 @@ func TestParseTurnRejectsInvalidTurns(t *testing.T) {
 			want:  clnkr.ErrInvalidJSON,
 		},
 		{
+			name:   "act with null done field",
+			input:  `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"verification":null}`,
+			want:   clnkr.ErrInvalidJSON,
+			detail: "act turn only allows verification when it is omitted",
+		},
+		{
 			name:   "provider-shaped act siblings",
 			input:  `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null}]},"question":null,"summary":null,"reasoning":null}`,
 			want:   clnkr.ErrInvalidJSON,
@@ -132,6 +138,23 @@ func TestParseTurnRejectsInvalidTurns(t *testing.T) {
 			name:  "missing command workdir in canonical act",
 			input: `{"type":"act","bash":{"commands":[{"command":"pwd"}]}}`,
 			want:  clnkr.ErrInvalidJSON,
+		},
+		{
+			name:   "unknown command field",
+			input:  `{"type":"act","bash":{"commands":[{"command":"pwd","workdir":null,"shell":"bash"}]}}`,
+			want:   clnkr.ErrInvalidJSON,
+			detail: `unknown field "shell"`,
+		},
+		{
+			name:   "unknown verification check field",
+			input:  `{"type":"done","summary":"Finished.","verification":{"status":"verified","checks":[{"command":"go test ./...","outcome":"passed","evidence":"passed","duration":"1s"}]},"known_risks":[]}`,
+			want:   clnkr.ErrInvalidJSON,
+			detail: `unknown field "duration"`,
+		},
+		{
+			name:  "null clarify question",
+			input: `{"type":"clarify","question":null}`,
+			want:  clnkr.ErrEmptyClarify,
 		},
 		{
 			name:  "whitespace only clarify question",
@@ -206,7 +229,7 @@ func TestParseTurnRejectsInvalidTurns(t *testing.T) {
 	}
 }
 
-func TestParseTurnNormalizesEscapedClarifyText(t *testing.T) {
+func TestParseTurnPreservesLiteralEscapes(t *testing.T) {
 	raw := `{"type":"clarify","question":"Here are the skills I found:\\n- **citations-agent**: Verify claims.\\\\- **humanizer**: Sound more natural.\\nWhat would you like to work on?","reasoning":"Need to list the available skills.\\\\nThen I can ask a follow-up."}`
 	turn, err := clnkr.ParseTurn(raw)
 	if err != nil {
@@ -216,11 +239,11 @@ func TestParseTurnNormalizesEscapedClarifyText(t *testing.T) {
 	if !ok {
 		t.Fatalf("turn = %T, want *ClarifyTurn", turn)
 	}
-	wantQuestion := "Here are the skills I found:\n- **citations-agent**: Verify claims.\n- **humanizer**: Sound more natural.\nWhat would you like to work on?"
+	wantQuestion := `Here are the skills I found:\n- **citations-agent**: Verify claims.\\- **humanizer**: Sound more natural.\nWhat would you like to work on?`
 	if cl.Question != wantQuestion {
 		t.Fatalf("question = %q, want %q", cl.Question, wantQuestion)
 	}
-	wantReasoning := "Need to list the available skills.\nThen I can ask a follow-up."
+	wantReasoning := `Need to list the available skills.\\nThen I can ask a follow-up.`
 	if cl.Reasoning != wantReasoning {
 		t.Fatalf("reasoning = %q, want %q", cl.Reasoning, wantReasoning)
 	}

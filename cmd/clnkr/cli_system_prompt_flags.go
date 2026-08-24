@@ -22,7 +22,3 @@ func (values *systemPromptFlags) apply(opts *cliOptions) {
 	opts.systemPromptAppend = *values.systemPromptAppend
 	opts.dumpSystemPrompt = *values.dumpSystemPrompt
 }
-
-func (values *systemPromptFlags) applyTo(opts *cliOptions, _ *flag.FlagSet, _ bool) {
-	values.apply(opts)
-}

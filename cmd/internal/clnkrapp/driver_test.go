@@ -31,8 +31,8 @@ func TestDriverApprovalRequestReplyExecutesCommand(t *testing.T) {
 	if len(request.Commands) != 1 || request.Commands[0].Command != "echo hi" {
 		t.Fatalf("commands = %#v, want echo hi", request.Commands)
 	}
-	if got := driver.Pending(); got != PendingApproval {
-		t.Fatalf("Pending() = %q, want %q", got, PendingApproval)
+	if !driver.HasPendingReply() {
+		t.Fatal("HasPendingReply() = false, want true")
 	}
 
 	if err := driver.Reply(context.Background(), "y"); err != nil {
@@ -47,8 +47,8 @@ func TestDriverApprovalRequestReplyExecutesCommand(t *testing.T) {
 	if executor.calls != 1 {
 		t.Fatalf("executor calls = %d, want 1", executor.calls)
 	}
-	if got := driver.Pending(); got != PendingNone {
-		t.Fatalf("Pending() = %q, want %q", got, PendingNone)
+	if driver.HasPendingReply() {
+		t.Fatal("HasPendingReply() = true, want false")
 	}
 }
 
@@ -68,8 +68,8 @@ func TestDriverClarificationReplyContinuesRun(t *testing.T) {
 	if request.Question != "Which repo?" {
 		t.Fatalf("question = %q, want model question", request.Question)
 	}
-	if got := driver.Pending(); got != PendingClarification {
-		t.Fatalf("Pending() = %q, want %q", got, PendingClarification)
+	if !driver.HasPendingReply() {
+		t.Fatal("HasPendingReply() = false, want true")
 	}
 
 	if err := driver.Reply(context.Background(), "/tmp/repo"); err != nil {
@@ -84,8 +84,8 @@ func TestDriverClarificationReplyContinuesRun(t *testing.T) {
 	if !hasUserMessage(agent.Messages(), "/tmp/repo") {
 		t.Fatalf("clarification reply not appended: %#v", agent.Messages())
 	}
-	if got := driver.Pending(); got != PendingNone {
-		t.Fatalf("Pending() = %q, want %q", got, PendingNone)
+	if driver.HasPendingReply() {
+		t.Fatal("HasPendingReply() = true, want false")
 	}
 }
 
@@ -118,8 +118,8 @@ func TestDriverTopLevelCompactDispatch(t *testing.T) {
 	if hasUserMessage(agent.Messages(), "/compact") {
 		t.Fatalf("compact command leaked into transcript: %#v", agent.Messages())
 	}
-	if got := driver.Pending(); got != PendingNone {
-		t.Fatalf("Pending() = %q, want %q", got, PendingNone)
+	if driver.HasPendingReply() {
+		t.Fatal("HasPendingReply() = true, want false")
 	}
 }
 
@@ -180,8 +180,36 @@ func TestDriverCompactDispatch(t *testing.T) {
 	if compacted.Stats.CompactedMessages != 2 || compacted.Stats.KeptMessages != 4 {
 		t.Fatalf("stats = %#v, want 2 compacted and 4 kept", compacted.Stats)
 	}
-	if got := driver.Pending(); got != PendingNone {
-		t.Fatalf("Pending() = %q, want %q", got, PendingNone)
+	if driver.HasPendingReply() {
+		t.Fatal("HasPendingReply() = true, want false")
+	}
+}
+
+func TestDriverPendingReplyClearsOnCancellation(t *testing.T) {
+	agent := clnkr.NewAgent(&fakeModel{responses: []clnkr.Response{
+		mustResponse(`{"type":"clarify","question":"Which repo?"}`),
+	}}, &fakeExecutor{}, "/tmp")
+	driver := NewDriver(agent, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- driver.Prompt(ctx, "inspect", PromptModeApproval)
+	}()
+
+	event := nextDriverEvent(t, driver)
+	if _, ok := event.(EventClarificationRequest); !ok {
+		t.Fatalf("event = %T, want EventClarificationRequest", event)
+	}
+	if !driver.HasPendingReply() {
+		t.Fatal("HasPendingReply() = false, want true")
+	}
+
+	cancel()
+	if err := <-errCh; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Prompt error = %v, want context cancellation", err)
+	}
+	if driver.HasPendingReply() {
+		t.Fatal("HasPendingReply() = true after cancellation, want false")
 	}
 }
 

@@ -26,10 +26,6 @@ func (values *generationFlags) apply(opts *cliOptions, flags *flag.FlagSet) {
 	)
 }
 
-func (values *generationFlags) applyTo(opts *cliOptions, flags *flag.FlagSet, _ bool) {
-	values.apply(opts, flags)
-}
-
 func generationFlagSetValues(
 	flags *flag.FlagSet,
 ) (actProtocolSet, maxOutputTokensSet, thinkingBudgetTokensSet bool) {

@@ -235,6 +235,59 @@ func TestRewriteForCompaction(t *testing.T) {
 		}
 	})
 
+	t.Run("does not duplicate latest state retained inside tail", func(t *testing.T) {
+		state := FormatStateMessage("/tmp/latest")
+		messages := []Message{
+			{Role: "user", Content: "first task"},
+			{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+			{Role: "user", Content: state},
+			{Role: "user", Content: "second task"},
+			{Role: "user", Content: state},
+			{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
+			{Role: "user", Content: "third task"},
+			{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+		}
+
+		got, stats, err := RewriteForCompaction(messages, "summary", 2)
+		if err != nil {
+			t.Fatalf("RewriteForCompaction: %v", err)
+		}
+		stateCount := 0
+		for _, msg := range got {
+			if msg.Role == "user" && msg.Content == state {
+				stateCount++
+			}
+		}
+		if stateCount != 1 {
+			t.Fatalf("rewritten messages = %#v, want one retained latest state", got)
+		}
+		if stats != (CompactStats{CompactedMessages: 3, KeptMessages: 5}) {
+			t.Fatalf("stats = %#v, want compacted=3 kept=5", stats)
+		}
+	})
+
+	t.Run("ignores assistant state when choosing latest state", func(t *testing.T) {
+		state := FormatStateMessage("/tmp/latest")
+		messages := []Message{
+			{Role: "user", Content: "first task"},
+			{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+			{Role: "user", Content: state},
+			{Role: "user", Content: "second task"},
+			{Role: "assistant", Content: state},
+			{Role: "assistant", Content: `{"type":"done","summary":"state echoed"}`},
+			{Role: "user", Content: "third task"},
+			{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+		}
+
+		got, _, err := RewriteForCompaction(messages, "summary", 1)
+		if err != nil {
+			t.Fatalf("RewriteForCompaction: %v", err)
+		}
+		if len(got) < 2 || got[1].Role != "user" || got[1].Content != state {
+			t.Fatalf("rewritten messages = %#v, want latest valid user state preserved", got)
+		}
+	})
+
 	t.Run("errors when not enough history", func(t *testing.T) {
 		messages := []Message{
 			{Role: "user", Content: "first task"},

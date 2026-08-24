@@ -3,7 +3,6 @@ package transcript
 import (
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"strings"
 )
 
@@ -110,6 +109,13 @@ func RewriteForCompaction(
 			"rewrite for compaction: not enough history to compact",
 		)
 	}
+	latestState := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messageKind(messages[i]) == "state" {
+			latestState = i
+			break
+		}
+	}
 
 	keptTail := make([]Message, 0, len(messages)-boundary)
 	for _, msg := range messages[boundary:] {
@@ -126,22 +132,9 @@ func RewriteForCompaction(
 	)
 
 	keptMessages := len(keptTail)
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messageKind(messages[i]) != "state" {
-			continue
-		}
-		stateMsg, present := CloneMessage(messages[i]), false
-		for _, msg := range keptTail {
-			if sameMessage(msg, stateMsg) {
-				present = true
-				break
-			}
-		}
-		if !present {
-			rewritten = append(rewritten, stateMsg)
-			keptMessages++
-		}
-		break
+	if latestState >= 0 && latestState < boundary {
+		rewritten = append(rewritten, CloneMessage(messages[latestState]))
+		keptMessages++
 	}
 
 	rewritten = append(rewritten, keptTail...)
@@ -150,14 +143,6 @@ func RewriteForCompaction(
 		CompactedMessages: boundary,
 		KeptMessages:      keptMessages,
 	}, nil
-}
-
-func sameMessage(a, b Message) bool {
-	return a.Role == b.Role &&
-		a.Content == b.Content &&
-		reflect.DeepEqual(a.BashToolCalls, b.BashToolCalls) &&
-		reflect.DeepEqual(a.BashToolResult, b.BashToolResult) &&
-		reflect.DeepEqual(a.ProviderReplay, b.ProviderReplay)
 }
 
 func compactMessage(content string) bool {

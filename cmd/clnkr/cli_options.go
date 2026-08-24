@@ -11,7 +11,13 @@ func parseCLIOptions(args []string, usage string) cliOptions {
 	flags := flag.NewFlagSet("clnkr", flag.ContinueOnError)
 	flags.Usage = func() {}
 	flags.SetOutput(io.Discard)
-	appliers := newCLIFlagAppliers(flags)
+	prompt := newPromptFlags(flags)
+	provider := newProviderFlags(flags)
+	generation := newGenerationFlags(flags)
+	run := newRunFlags(flags)
+	inputOutput := newIOFlags(flags)
+	session := newSessionFlags(flags)
+	systemPrompt := newSystemPromptFlags(flags)
 
 	args, dumpUnattendedPrompt := unattendedPromptDumpArgs(args)
 	if err := flags.Parse(args); err != nil {
@@ -23,9 +29,13 @@ func parseCLIOptions(args []string, usage string) cliOptions {
 		os.Exit(1)
 	}
 	var opts cliOptions
-	for _, apply := range appliers {
-		apply(&opts, flags, dumpUnattendedPrompt)
-	}
+	prompt.apply(&opts, dumpUnattendedPrompt)
+	provider.apply(&opts)
+	generation.apply(&opts, flags)
+	run.apply(&opts)
+	inputOutput.apply(&opts)
+	session.apply(&opts)
+	systemPrompt.apply(&opts)
 	return opts
 }
 

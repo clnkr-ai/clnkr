@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/clnkr-ai/clnkr"
@@ -181,6 +182,255 @@ func TestModelRequestSerialization(t *testing.T) {
 			t.Errorf("path = %q, want /v1/messages", gotPath)
 		}
 	})
+}
+
+func TestModelThinkingOptionsAcrossQueryMethods(t *testing.T) {
+	tests := []struct {
+		name string
+		opts anthropic.Options
+		want map[string]any
+	}{
+		{name: "omitted", want: nil},
+		{
+			name: "enabled",
+			opts: anthropic.Options{ThinkingMode: anthropic.ThinkingModeEnabled},
+			want: map[string]any{"type": "enabled"},
+		},
+		{
+			name: "adaptive",
+			opts: anthropic.Options{ThinkingMode: anthropic.ThinkingModeAdaptive},
+			want: map[string]any{"type": "adaptive"},
+		},
+		{
+			name: "manual",
+			opts: anthropic.Options{
+				ThinkingMode:         anthropic.ThinkingModeManual,
+				ThinkingBudgetTokens: 2048,
+			},
+			want: map[string]any{"type": "enabled", "budget_tokens": float64(2048)},
+		},
+		{
+			name: "legacy budget",
+			opts: anthropic.Options{ThinkingBudgetTokens: 2048},
+			want: map[string]any{"type": "enabled", "budget_tokens": float64(2048)},
+		},
+	}
+	methods := []struct {
+		name string
+		call func(*anthropic.Model) error
+	}{
+		{
+			name: "Query",
+			call: func(model *anthropic.Model) error {
+				_, err := model.Query(
+					context.Background(),
+					[]clnkr.Message{{Role: "user", Content: "hello"}},
+				)
+				return err
+			},
+		},
+		{
+			name: "QueryFinal",
+			call: func(model *anthropic.Model) error {
+				_, err := model.QueryFinal(
+					context.Background(),
+					[]clnkr.Message{{Role: "user", Content: "hello"}},
+				)
+				return err
+			},
+		},
+		{
+			name: "QueryText",
+			call: func(model *anthropic.Model) error {
+				_, err := model.QueryText(
+					context.Background(),
+					[]clnkr.Message{{Role: "user", Content: "hello"}},
+				)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		for _, method := range methods {
+			t.Run(tt.name+"/"+method.name, func(t *testing.T) {
+				var gotBody map[string]any
+				server := jsonServer(t, func(r *http.Request) any {
+					gotBody = requestBody(t, r)
+					return textResponse(anthropicWrappedDone("ok"))
+				})
+				defer server.Close()
+
+				model := anthropic.NewModelWithOptions(
+					server.URL,
+					"test-key",
+					"claude-test",
+					"sys",
+					tt.opts,
+				)
+				if err := method.call(model); err != nil {
+					t.Fatalf("%s: %v", method.name, err)
+				}
+				got, ok := gotBody["thinking"]
+				if tt.want == nil {
+					if ok {
+						t.Fatalf("thinking = %#v, want omitted", got)
+					}
+					return
+				}
+				if !ok {
+					t.Fatal("thinking omitted, want configured")
+				}
+				gotThinking := got.(map[string]any)
+				if gotThinking["type"] != tt.want["type"] ||
+					gotThinking["budget_tokens"] != tt.want["budget_tokens"] {
+					t.Fatalf("thinking = %#v, want %#v", gotThinking, tt.want)
+				}
+			})
+		}
+	}
+}
+
+func TestModelThinkingOptionsAreImmutable(t *testing.T) {
+	requests := make(chan map[string]any, 6)
+	server := jsonServer(t, func(r *http.Request) any {
+		requests <- requestBody(t, r)
+		return textResponse(anthropicWrappedDone("ok"))
+	})
+	defer server.Close()
+
+	model := anthropic.NewModelWithOptions(
+		server.URL,
+		"test-key",
+		"claude-test",
+		"sys",
+		anthropic.Options{ThinkingBudgetTokens: 2048},
+	)
+	calls := []func() error{
+		func() error {
+			_, err := model.Query(
+				context.Background(),
+				[]clnkr.Message{{Role: "user", Content: "hello"}},
+			)
+			return err
+		},
+		func() error {
+			_, err := model.QueryFinal(
+				context.Background(),
+				[]clnkr.Message{{Role: "user", Content: "hello"}},
+			)
+			return err
+		},
+		func() error {
+			_, err := model.QueryText(
+				context.Background(),
+				[]clnkr.Message{{Role: "user", Content: "hello"}},
+			)
+			return err
+		},
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, len(calls))
+	var wg sync.WaitGroup
+	for _, call := range calls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- call()
+		}()
+	}
+	close(start)
+	wg.Wait()
+	for range calls {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent query: %v", err)
+		}
+	}
+	for _, call := range calls {
+		if err := call(); err != nil {
+			t.Fatalf("repeated query: %v", err)
+		}
+	}
+	for range 2 * len(calls) {
+		thinking := (<-requests)["thinking"].(map[string]any)
+		if thinking["type"] != "enabled" || thinking["budget_tokens"] != float64(2048) {
+			t.Fatalf("thinking = %#v, want stable legacy budget configuration", thinking)
+		}
+	}
+}
+
+func TestModelStructuredTransportErrorParity(t *testing.T) {
+	methods := []struct {
+		name string
+		call func(*anthropic.Model) error
+	}{
+		{
+			name: "Query",
+			call: func(model *anthropic.Model) error {
+				_, err := model.Query(
+					context.Background(),
+					[]clnkr.Message{{Role: "user", Content: "hello"}},
+				)
+				return err
+			},
+		},
+		{
+			name: "QueryFinal",
+			call: func(model *anthropic.Model) error {
+				_, err := model.QueryFinal(
+					context.Background(),
+					[]clnkr.Message{{Role: "user", Content: "hello"}},
+				)
+				return err
+			},
+		},
+	}
+
+	t.Run("request", func(t *testing.T) {
+		for _, method := range methods {
+			t.Run(method.name, func(t *testing.T) {
+				model := anthropic.NewModel("://bad", "test-key", "claude-test", "sys")
+				err := method.call(model)
+				if err == nil || !strings.Contains(err.Error(), "create request:") {
+					t.Fatalf("error = %v, want create request context", err)
+				}
+			})
+		}
+	})
+
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "malformed response", body: `{`, want: "unmarshal response:"},
+		{
+			name: "context stop reason",
+			body: `{"stop_reason":"model_context_window_exceeded"}`,
+			want: "model_context_window_exceeded",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_, _ = io.WriteString(w, tt.body)
+				}),
+			)
+			defer server.Close()
+			for _, method := range methods {
+				t.Run(method.name, func(t *testing.T) {
+					model := anthropic.NewModel(server.URL, "test-key", "claude-test", "sys")
+					err := method.call(model)
+					if err == nil || !strings.Contains(err.Error(), tt.want) {
+						t.Fatalf("error = %v, want %q", err, tt.want)
+					}
+				})
+			}
+		})
+	}
 }
 
 func TestModelStructuredResponses(t *testing.T) {

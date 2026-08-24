@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -156,7 +157,7 @@ func TestRunJSONLReplyApprovesPendingCommand(t *testing.T) {
 	errCh := runJSONLAsync(reader, &out, &errOut, driver)
 
 	writeJSONL(t, writer, `{"type":"prompt","text":"say hi","mode":"approval"}`)
-	waitForPending(t, driver, clnkrapp.PendingApproval)
+	waitForPendingReply(t, driver)
 	writeJSONL(t, writer, `{"type":"reply","text":"y"}`)
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close input: %v", err)
@@ -311,6 +312,90 @@ func TestRunJSONLCommandErrorWaitsForActivePrompt(t *testing.T) {
 	}
 }
 
+func TestActiveRunLifecycle(t *testing.T) {
+	driver := clnkrapp.NewDriver(clnkr.NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp"), nil)
+
+	t.Run("inactive", func(t *testing.T) {
+		var run *activeRun
+		if run.doneChannel() != nil {
+			t.Fatal("inactive done channel is non-nil")
+		}
+		run.cancelRun()
+	})
+
+	for _, tt := range []struct {
+		name   string
+		runErr error
+	}{
+		{name: "ready success"},
+		{name: "ready error", runErr: errors.New("run failed")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			done := make(chan error, 1)
+			done <- tt.runErr
+			run := &activeRun{done: done, cancel: func() {}}
+
+			var out bytes.Buffer
+			remaining, err := harvestReadyRun(&out, driver, run)
+			if remaining != nil {
+				t.Fatal("harvested run remains active")
+			}
+			if !errors.Is(err, tt.runErr) {
+				t.Fatalf("harvest error = %v, want %v", err, tt.runErr)
+			}
+		})
+	}
+
+	t.Run("active then cancelled", func(t *testing.T) {
+		started := make(chan struct{})
+		finished := make(chan struct{})
+		run := startDriverRun(context.Background(), func(ctx context.Context) error {
+			close(started)
+			defer close(finished)
+			<-ctx.Done()
+			return ctx.Err()
+		})
+		<-started
+
+		var out bytes.Buffer
+		remaining, err := harvestReadyRun(&out, driver, run)
+		if err != nil {
+			t.Fatalf("harvest active run: %v", err)
+		}
+		if remaining != run {
+			t.Fatal("active run was harvested before completion")
+		}
+
+		run.cancelRun()
+		<-finished
+		err = <-run.done
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled run error = %v, want context cancellation", err)
+		}
+	})
+}
+
+func TestRunJSONLDrainsEventsBeforeRunCompletion(t *testing.T) {
+	var out, errOut bytes.Buffer
+	modelErr := errors.New("model failed")
+	agent := clnkr.NewAgent(&fakeModel{errs: []error{modelErr}}, &fakeExecutor{}, "/tmp")
+	driver := clnkrapp.NewDriver(agent, nil)
+
+	err := runJSONL(
+		context.Background(),
+		strings.NewReader(`{"type":"prompt","text":"inspect","mode":"full_send"}`+"\n"),
+		&out,
+		&errOut,
+		driver,
+	)
+	if !errors.Is(err, modelErr) {
+		t.Fatalf("runJSONL error = %v, want model error", err)
+	}
+	if got := jsonlTypes(t, out.String()); !slices.Equal(got, []string{"error"}) {
+		t.Fatalf("event types = %v, want [error]\nstdout:\n%s", got, out.String())
+	}
+}
+
 func runMainForTest(args []string, input string) (int, string, string) {
 	var out, errOut bytes.Buffer
 	code := runMain(
@@ -399,20 +484,20 @@ func assertTypesContainInOrder(t *testing.T, got []string, want []string, stdout
 	}
 }
 
-func waitForPending(t *testing.T, driver *clnkrapp.Driver, want string) {
+func waitForPendingReply(t *testing.T, driver *clnkrapp.Driver) {
 	t.Helper()
 
 	deadline := time.After(2 * time.Second)
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if got := driver.Pending(); got == want {
+		if driver.HasPendingReply() {
 			return
 		}
 		select {
 		case <-ticker.C:
 		case <-deadline:
-			t.Fatalf("driver.Pending() never became %q", want)
+			t.Fatal("driver never acquired a pending reply")
 		}
 	}
 }
@@ -513,16 +598,20 @@ func (m *cancellableBlockingModel) releaseQuery() {
 
 type fakeModel struct {
 	responses []clnkr.Response
+	errs      []error
 	calls     int
 }
 
 func (m *fakeModel) Query(context.Context, []clnkr.Message) (clnkr.Response, error) {
-	if m.calls >= len(m.responses) {
+	call := m.calls
+	m.calls++
+	if call < len(m.errs) && m.errs[call] != nil {
+		return clnkr.Response{}, m.errs[call]
+	}
+	if call >= len(m.responses) {
 		return clnkr.Response{}, fmt.Errorf("no more responses")
 	}
-	resp := m.responses[m.calls]
-	m.calls++
-	return resp, nil
+	return m.responses[call], nil
 }
 
 type fakeExecutor struct {
