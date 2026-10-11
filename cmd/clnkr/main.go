@@ -152,8 +152,20 @@ func runDriverPrompt(
 	mode string,
 	eventLog io.Writer,
 	stopModelWait func(),
-) error {
-	defer stopModelWait()
+) (runErr error) {
+	writeProgramStatus("working", input)
+	defer func() {
+		stopModelWait()
+		switch {
+		case errors.Is(runErr, context.Canceled):
+			writeProgramStatus("idle", "Cancelled")
+		case runErr == nil:
+			writeProgramStatus("done", "Run finished")
+		// Clarification is reported where waiting versus exit is known.
+		case !errors.Is(runErr, clnkr.ErrClarificationNeeded):
+			writeProgramStatus("error", runErr.Error())
+		}
+	}()
 
 	promptCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -178,7 +190,6 @@ func runDriverPrompt(
 				stopModelWait,
 			)
 			if err != nil {
-				cancel()
 				return err
 			}
 		case err := <-errCh:
@@ -192,7 +203,6 @@ func runDriverPrompt(
 				stopModelWait,
 			)
 		case <-ctx.Done():
-			cancel()
 			return ctx.Err()
 		}
 	}
@@ -251,6 +261,7 @@ func handleTerminalDriverEvent(
 
 	switch event := event.(type) {
 	case clnkrapp.EventApprovalRequest:
+		writeProgramStatus("blocked:kind=permission", event.Prompt)
 		return nil, replyToTerminalRequest(
 			ctx,
 			driver,
@@ -259,6 +270,7 @@ func handleTerminalDriverEvent(
 			"Send 'y' to approve, or type what the agent should do instead: ",
 		)
 	case clnkrapp.EventClarificationRequest:
+		writeProgramStatus("blocked:kind=question", event.Question)
 		return nil, replyToTerminalRequest(ctx, driver, reader, event.Question, "Clarify: ")
 	case clnkrapp.EventCompacted:
 		fmt.Fprintf(
@@ -284,6 +296,9 @@ func replyToTerminalRequest(
 	for {
 		fmt.Fprint(os.Stderr, prompt) //nolint:errcheck
 		reply, err := reader.ReadLine(ctx)
+		if err == io.EOF {
+			err = context.Canceled
+		}
 		if err != nil {
 			return fmt.Errorf("read terminal reply: %w", err)
 		}
@@ -291,7 +306,11 @@ func replyToTerminalRequest(
 		if reply == "" {
 			continue
 		}
-		return driver.Reply(ctx, reply)
+		err = driver.Reply(ctx, reply)
+		if err == nil && clnkrapp.RejectCompactCommand(reply) == nil {
+			writeProgramStatus("working", "Continuing")
+		}
+		return err
 	}
 }
 
@@ -308,16 +327,15 @@ func fatalWhen(cond bool, format string, args ...any) {
 	}
 }
 
-func exitRunErr(err error) {
+func exitRunErr(err error, clarificationMessage string) {
 	switch {
-	case err == nil:
-		return
 	case errors.Is(err, context.Canceled):
 		os.Exit(130)
 	case errors.Is(err, clnkr.ErrClarificationNeeded):
-		fmt.Fprintln(os.Stderr, "Clarification needed.")
+		writeProgramStatus("error", err.Error())
+		fmt.Fprintln(os.Stderr, clarificationMessage)
 		os.Exit(2)
-	default:
+	case err != nil:
 		fatalf("%v", err)
 	}
 }
@@ -572,6 +590,7 @@ func runSingleTask(
 	)
 	if opts.trajectory != "" {
 		if err := clnkrapp.WriteTrajectory(opts.trajectory, agent.Messages()); err != nil {
+			writeProgramStatus("error", err.Error())
 			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			saveSessionIfMessages(agent, opts.cwd, opts.runMetadata, false)
 			if runErr != nil {
@@ -581,11 +600,7 @@ func runSingleTask(
 		}
 	}
 	saveSessionIfMessages(agent, opts.cwd, opts.runMetadata, false)
-	if errors.Is(runErr, clnkr.ErrClarificationNeeded) {
-		_, _ = fmt.Fprintln(os.Stderr, "clarify not allowed in unattended mode")
-		os.Exit(2)
-	}
-	exitRunErr(runErr)
+	exitRunErr(runErr, "clarify not allowed in unattended mode")
 }
 
 func saveSessionIfMessages(
@@ -631,7 +646,7 @@ func runREPL(
 	}
 	loopErr := runPromptLoop(driver, reader, *modelWait, showPrompt, mode, eventLog)
 	saveSessionIfMessages(agent, cwd, runMetadata, true)
-	exitRunErr(loopErr)
+	exitRunErr(loopErr, "Clarification needed.")
 }
 
 func runPromptLoop(
@@ -641,29 +656,39 @@ func runPromptLoop(
 	showPrompt bool,
 	mode string,
 	eventLog io.Writer,
-) error {
+) (loopErr error) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	var promptErr error
+	defer func() {
+		if showPrompt && errors.Is(promptErr, clnkr.ErrClarificationNeeded) {
+			if loopErr == nil || errors.Is(loopErr, context.Canceled) {
+				writeProgramStatus("idle", "Cancelled")
+			} else {
+				writeProgramStatus("error", loopErr.Error())
+			}
+		}
+		stop()
+	}()
 	for {
 		if showPrompt {
 			_, _ = fmt.Fprint(os.Stderr, "clnkr> ")
 		}
-		input, err := reader.ReadLine(context.Background())
+		input, err := reader.ReadLine(ctx)
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
+			if err == io.EOF {
+				return nil
 			}
 			return fmt.Errorf("read prompt: %w", err)
 		}
-		if lines, err := reader.ReadQueuedLines(); err != nil {
+		lines, err := reader.ReadQueuedLines()
+		if err != nil {
 			return fmt.Errorf("read queued prompt lines: %w", err)
-		} else if len(lines) > 0 {
-			input = strings.Join(append([]string{input}, lines...), "\n")
 		}
-		input = strings.TrimSpace(input)
+		input = strings.TrimSpace(strings.Join(append([]string{input}, lines...), "\n"))
 		if input == "" {
 			continue
 		}
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-		if err := runDriverPrompt(
+		promptErr = runDriverPrompt(
 			ctx,
 			driver,
 			reader,
@@ -671,21 +696,20 @@ func runPromptLoop(
 			mode,
 			eventLog,
 			modelWait.Stop,
-		); err != nil {
-			if !showPrompt || isTerminalInputError(err) {
-				stop()
-				return err
-			}
-			if errors.Is(err, clnkr.ErrClarificationNeeded) || errors.Is(err, io.EOF) ||
-				errors.Is(err, context.Canceled) {
-				stop()
-				continue
-			}
-			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		}
+		)
 		stop()
+		ctx, stop = signal.NotifyContext(context.Background(), os.Interrupt)
+		switch {
+		case promptErr == nil:
+		case !showPrompt || isTerminalInputError(promptErr):
+			return promptErr
+		case errors.Is(promptErr, clnkr.ErrClarificationNeeded):
+			writeProgramStatus("blocked:kind=question", "Clarification needed")
+		case errors.Is(promptErr, io.EOF), errors.Is(promptErr, context.Canceled):
+		default:
+			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", promptErr)
+		}
 	}
-	return nil
 }
 
 func isTerminalInputError(err error) bool {

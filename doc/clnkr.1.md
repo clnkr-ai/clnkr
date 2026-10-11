@@ -35,6 +35,14 @@ In **tool-calls** mode, command execution uses provider-native **bash** tool cal
 
 By default, **clnkr** asks for approval before each **act** turn in conversational mode. One approval accepts the whole command batch. Approval prompts show each requested command and any explicit workdir override. Pass **--full-send** to execute commands immediately without approval. Single-task mode (**-p**) implies **--full-send** and uses an unattended turn contract that omits **clarify**.
 
+When stderr is a terminal, **clnkr** sends OSC 7501 program status reports with
+**app=clnkr**. Reports distinguish running, waiting for approval or clarification,
+completion, failure, and cancellation. Completion and failure remain while the
+next conversational prompt waits. Completion means the run ended, not that
+clnkr independently verified the task. Descriptions are single-line text,
+limited to 512 Unicode code points. Redirected stderr, stdout, event logs, and
+trajectory files contain no status reports. No terminal support query is sent.
+
 For Anthropic runs, **clnkr** requests Anthropic's native structured output format on every turn. Use **--model** with a model Anthropic documents as supporting structured output.
 
 On OpenAI-compatible backends, the selected model path must support structured outputs. If a backend rejects the resolved OpenAI API surface, **clnkr** returns the provider error. When a proxy or gateway expects a different OpenAI surface, override with **--provider-api** or **CLNKR_PROVIDER_API**.
