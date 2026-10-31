@@ -3,7 +3,6 @@ package clnkrapp
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"io"
 	"reflect"
 	"strings"
@@ -124,7 +123,7 @@ func TestWriteEventLogSnakeCasePayloads(t *testing.T) {
 		{
 			name: "completion gate",
 			event: clnkr.EventCompletionGate{
-				Decision: clnkr.CompletionChallenge,
+				Decision: "challenge",
 				Reasons:  []string{"artifact_claim_without_check"},
 				Summary:  "created result.txt",
 			},
@@ -164,29 +163,26 @@ func TestWriteEventLogSnakeCasePayloads(t *testing.T) {
 
 func TestWriteEventLogCommandDonePayload(t *testing.T) {
 	tests := []struct {
-		name       string
-		event      clnkr.EventCommandDone
-		wantErr    any
-		wantErrKey bool
+		name        string
+		event       clnkr.EventCommandDone
+		wantOutcome map[string]any
 	}{
 		{
-			name: "feedback included and nil err omitted",
+			name: "feedback and exit outcome included",
 			event: clnkr.EventCommandDone{
 				Command:  "touch note.txt",
-				ExitCode: 0,
+				Outcome:  exitOutcome(0),
 				Feedback: clnkr.CommandFeedback{ChangedFiles: []string{"note.txt"}},
 			},
-			wantErr: nil,
+			wantOutcome: map[string]any{"type": "exit", "exit_code": float64(0)},
 		},
 		{
-			name: "err included when present",
+			name: "host error remains typed",
 			event: clnkr.EventCommandDone{
-				Command:  "false",
-				ExitCode: 1,
-				Err:      errors.New("boom"),
+				Command: "missing-command",
+				Outcome: clnkr.CommandOutcome{Type: clnkr.CommandOutcomeError, Message: "boom"},
 			},
-			wantErr:    "boom",
-			wantErrKey: true,
+			wantOutcome: map[string]any{"type": "error", "message": "boom"},
 		},
 	}
 
@@ -198,18 +194,14 @@ func TestWriteEventLogCommandDonePayload(t *testing.T) {
 			}
 
 			payload := payloadObject(t, entry)
-			if payload["Command"] != nil || payload["ExitCode"] != nil {
+			if payload["Command"] != nil || payload["Outcome"] != nil {
 				t.Fatalf("payload has Go field names: %#v", payload)
 			}
-			if got, ok := payload["err"]; ok != tt.wantErrKey ||
-				!reflect.DeepEqual(got, tt.wantErr) {
-				t.Fatalf(
-					"err = %#v, present = %v; want %#v, present = %v",
-					got,
-					ok,
-					tt.wantErr,
-					tt.wantErrKey,
-				)
+			if payload["exit_code"] != nil || payload["err"] != nil {
+				t.Fatalf("payload has legacy completion fields: %#v", payload)
+			}
+			if !reflect.DeepEqual(payload["outcome"], tt.wantOutcome) {
+				t.Fatalf("outcome = %#v, want %#v", payload["outcome"], tt.wantOutcome)
 			}
 			if len(tt.event.Feedback.ChangedFiles) > 0 {
 				feedback := payload["feedback"].(map[string]any)
@@ -232,10 +224,10 @@ func TestWriteEventLogPreservesRawCommandOutput(t *testing.T) {
 	) + "stderr-tail\n"
 
 	entry := writeEventLogEntry(t, clnkr.EventCommandDone{
-		Command:  "make test",
-		Stdout:   stdout,
-		Stderr:   stderr,
-		ExitCode: 1,
+		Command: "make test",
+		Stdout:  stdout,
+		Stderr:  stderr,
+		Outcome: exitOutcome(1),
 	})
 	if entry.Type != "command_done" {
 		t.Fatalf("event type = %q, want command_done", entry.Type)

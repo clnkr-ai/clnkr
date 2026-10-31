@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"github.com/clnkr-ai/clnkr/internal/core/transcript"
 )
@@ -19,48 +18,35 @@ func (e actTurnExecutor) Execute(
 	ctx context.Context,
 	act *ActTurn,
 	skipped []BashAction,
-) (StepResult, error) {
+) (ExecutionResult, error) {
 	a := e.agent
 	if act == nil || len(act.Bash.Commands) == 0 {
-		return StepResult{Turn: act}, fmt.Errorf("execute act turn: %w", ErrMissingCommand)
+		return ExecutionResult{}, fmt.Errorf("execute act turn: %w", ErrMissingCommand)
 	}
 
-	outputs, execCount := make([]string, 0, len(act.Bash.Commands)), 0
-	var execErr error
-
+	execCount := 0
 	for i, action := range act.Bash.Commands {
-		payload, commandErr := e.executeCommand(ctx, action)
+		result := e.executeCommand(ctx, action)
 		execCount++
-
-		outputs = append(outputs, payload)
-		if execErr = commandErr; execErr != nil {
+		if commandOutcomeIsError(result.Outcome) {
 			for _, notRun := range act.Bash.Commands[i+1:] {
-				if payload, ok := e.agent.appendSkippedToolResult(
+				e.agent.appendSkippedToolResult(
 					notRun,
 					"previous command failed",
-				); ok {
-					outputs = append(outputs, payload)
-				}
+				)
 			}
 			break
 		}
 	}
 
 	for _, action := range skipped {
-		if payload, ok := a.appendSkippedToolResult(action, "max steps"); ok {
-			outputs = append(outputs, payload)
-		}
+		a.appendSkippedToolResult(action, "max steps")
 	}
 	a.appendStateMessageIfNeeded()
-	return StepResult{
-		Turn:      act,
-		Output:    strings.Join(outputs, "\n\n"),
-		ExecErr:   execErr,
-		ExecCount: execCount,
-	}, nil
+	return ExecutionResult{CommandsExecuted: execCount}, nil
 }
 
-func (e actTurnExecutor) executeCommand(ctx context.Context, action BashAction) (string, error) {
+func (e actTurnExecutor) executeCommand(ctx context.Context, action BashAction) CommandResult {
 	a := e.agent
 	if setter, ok := a.executor.(ExecutorStateSetter); ok {
 		setter.SetEnv(a.env)
@@ -69,22 +55,18 @@ func (e actTurnExecutor) executeCommand(ctx context.Context, action BashAction) 
 	execDir := e.executionDir(action)
 	a.notify(EventCommandStart{Command: action.Command, Dir: execDir})
 
-	execResult, commandErr := a.executor.Execute(ctx, action.Command, execDir)
+	execResult := normalizeExecutorResult(a.executor.Execute(ctx, action.Command, execDir))
 	e.applyPostCommandState(execResult)
-	payload := e.formatCommandResult(execResult)
-	if commandErr != nil {
-		a.notify(EventDebug{Message: fmt.Sprintf("command error: %v", commandErr)})
-	}
+	payload := e.formatCommandResult(action.Command, execResult)
 	a.notify(EventCommandDone{
 		Command:  action.Command,
 		Stdout:   execResult.Stdout,
 		Stderr:   execResult.Stderr,
-		ExitCode: execResult.ExitCode,
+		Outcome:  execResult.Outcome,
 		Feedback: execResult.Feedback,
-		Err:      commandErr,
 	})
 	e.appendCommandMessage(action, execResult, payload)
-	return payload, commandErr
+	return execResult
 }
 
 func (e actTurnExecutor) executionDir(action BashAction) string {
@@ -109,16 +91,15 @@ func (e actTurnExecutor) applyPostCommandState(result CommandResult) {
 	a.notify(EventDebug{Message: fmt.Sprintf("cwd: %s", a.cwd)})
 }
 
-func (e actTurnExecutor) formatCommandResult(result CommandResult) string {
+func (e actTurnExecutor) formatCommandResult(command string, result CommandResult) string {
 	guidance := ""
 	if result.Outcome.Type == CommandOutcomeTimeout {
 		guidance = timeoutGuidance
 	}
 	return transcript.FormatCommandResult(transcript.CommandResult{
-		Command:  result.Command,
+		Command:  command,
 		Stdout:   result.Stdout,
 		Stderr:   result.Stderr,
-		ExitCode: result.ExitCode,
 		Outcome:  result.Outcome,
 		Feedback: result.Feedback,
 		Guidance: guidance,
@@ -135,8 +116,35 @@ func (e actTurnExecutor) appendCommandMessage(
 		msg.BashToolResult = &BashToolResult{
 			ID:      action.ID,
 			Content: payload,
-			IsError: commandResultIsError(result),
+			IsError: commandOutcomeIsError(result.Outcome),
 		}
 	}
 	e.agent.messages = append(e.agent.messages, msg)
+}
+
+func normalizeExecutorResult(result CommandResult) CommandResult {
+	outcome := result.Outcome
+	switch outcome.Type {
+	case CommandOutcomeExit:
+		if outcome.ExitCode == nil {
+			result.Outcome = commandOutcomeError(
+				fmt.Errorf("executor returned exit outcome without exit code"),
+			)
+			return result
+		}
+		result.Outcome = commandOutcomeExit(*outcome.ExitCode)
+	case CommandOutcomeTimeout, CommandOutcomeCancelled, CommandOutcomeDenied:
+		result.Outcome = CommandOutcome{Type: outcome.Type}
+	case CommandOutcomeSkipped:
+		result.Outcome = CommandOutcome{Type: outcome.Type, Reason: outcome.Reason}
+	case CommandOutcomeError:
+		result.Outcome = CommandOutcome{Type: outcome.Type, Message: outcome.Message}
+	case "":
+		result.Outcome = commandOutcomeError(fmt.Errorf("executor returned no command outcome"))
+	default:
+		result.Outcome = commandOutcomeError(
+			fmt.Errorf("executor returned unknown command outcome %q", outcome.Type),
+		)
+	}
+	return result
 }

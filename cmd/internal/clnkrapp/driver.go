@@ -33,12 +33,6 @@ const (
 	PromptModeFullSend = "full_send"
 )
 
-const (
-	PendingNone          = ""
-	PendingApproval      = "approval"
-	PendingClarification = "clarification"
-)
-
 type Driver struct {
 	agent            *clnkr.Agent
 	compactorFactory compaction.Factory
@@ -50,7 +44,6 @@ type Driver struct {
 }
 
 type pendingReply struct {
-	kind  string
 	reply chan string
 	done  chan struct{}
 }
@@ -165,21 +158,18 @@ func (d *Driver) Reply(ctx context.Context, text string) error {
 	}
 }
 
-func (d *Driver) Pending() string {
+func (d *Driver) HasPendingReply() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.pending == nil {
-		return PendingNone
-	}
-	return d.pending.kind
+	return d.pending != nil
 }
 
 func (d *Driver) DecideAct(
 	ctx context.Context,
 	proposal clnkr.ActProposal,
 ) (clnkr.ActDecision, error) {
-	reply, err := d.waitForReply(ctx, PendingApproval, EventApprovalRequest{
+	reply, err := d.waitForReply(ctx, EventApprovalRequest{
 		Commands: proposal.Commands,
 		Prompt:   proposal.Prompt,
 	})
@@ -193,7 +183,7 @@ func (d *Driver) DecideAct(
 }
 
 func (d *Driver) Clarify(ctx context.Context, question string) (string, error) {
-	return d.waitForReply(ctx, PendingClarification, EventClarificationRequest{Question: question})
+	return d.waitForReply(ctx, EventClarificationRequest{Question: question})
 }
 
 func (d *Driver) setRunning(running bool) error {
@@ -207,9 +197,9 @@ func (d *Driver) setRunning(running bool) error {
 	return nil
 }
 
-func (d *Driver) waitForReply(ctx context.Context, kind string, event DriverEvent) (string, error) {
+func (d *Driver) waitForReply(ctx context.Context, event DriverEvent) (string, error) {
 	for {
-		reply, err := d.requestReply(ctx, kind, event)
+		reply, err := d.requestReply(ctx, event)
 		if err != nil {
 			return "", err
 		}
@@ -227,9 +217,8 @@ func (d *Driver) waitForReply(ctx context.Context, kind string, event DriverEven
 	}
 }
 
-func (d *Driver) requestReply(ctx context.Context, kind string, event DriverEvent) (string, error) {
+func (d *Driver) requestReply(ctx context.Context, event DriverEvent) (string, error) {
 	pending := &pendingReply{
-		kind:  kind,
 		reply: make(chan string),
 		done:  make(chan struct{}),
 	}

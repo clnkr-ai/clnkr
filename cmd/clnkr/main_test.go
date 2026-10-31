@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,8 +12,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	clnkr "github.com/clnkr-ai/clnkr"
 	"github.com/clnkr-ai/clnkr/cmd/internal/clnkrapp"
@@ -66,6 +69,16 @@ type fakeModel struct {
 	calls     int
 }
 
+type notifyingModel struct {
+	response clnkr.Response
+	queried  chan struct{}
+}
+
+func (m *notifyingModel) Query(context.Context, []clnkr.Message) (clnkr.Response, error) {
+	close(m.queried)
+	return m.response, nil
+}
+
 func (m *fakeModel) Query(_ context.Context, _ []clnkr.Message) (clnkr.Response, error) {
 	if m.calls >= len(m.responses) {
 		return clnkr.Response{}, fmt.Errorf("no more responses")
@@ -77,24 +90,21 @@ func (m *fakeModel) Query(_ context.Context, _ []clnkr.Message) (clnkr.Response,
 
 type fakeExecutor struct {
 	results []clnkr.CommandResult
-	errs    []error
 	calls   int
 }
 
-func (e *fakeExecutor) Execute(_ context.Context, command, _ string) (clnkr.CommandResult, error) {
+func (e *fakeExecutor) Execute(_ context.Context, _, _ string) clnkr.CommandResult {
 	if e.calls >= len(e.results) {
-		return clnkr.CommandResult{}, fmt.Errorf("no more results")
+		return clnkr.CommandResult{
+			Outcome: clnkr.CommandOutcome{
+				Type:    clnkr.CommandOutcomeError,
+				Message: "no more results",
+			},
+		}
 	}
 	result := e.results[e.calls]
-	if result.Command == "" {
-		result.Command = command
-	}
-	var err error
-	if e.calls < len(e.errs) {
-		err = e.errs[e.calls]
-	}
 	e.calls++
-	return result, err
+	return result
 }
 
 func (e *fakeExecutor) SetEnv(map[string]string) {}
@@ -480,6 +490,38 @@ func TestCommandProgressWritesToStderr(t *testing.T) {
 	}
 	if *calls != 2 {
 		t.Fatalf("model calls = %d, want 2", *calls)
+	}
+}
+
+func TestProgramStatusDoesNotChangeRedirectedOutput(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	server, _ := newOpenAIChatServer(t, func(int) string { return openAIWrappedDone("done") })
+	defer server.Close()
+	events := filepath.Join(t.TempDir(), "events.jsonl")
+	trajectory := filepath.Join(t.TempDir(), "trajectory.json")
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
+		"--provider", "openai", "--provider-api", "openai-chat-completions",
+		"--base-url", server.URL, "--model", "gpt-test", "-p", "inspect",
+		"--event-log", events, "--trajectory", trajectory)
+	if err != nil || stdout.String() != "done\n" || stderr.String() != "" {
+		t.Fatalf("run = %v, stdout = %q, stderr = %q", err, stdout.String(), stderr.String())
+	}
+	for _, path := range []string{events, trajectory} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(data) == 0 || bytes.Contains(data, []byte("\x1b]7501;")) ||
+			bytes.Contains(data, []byte(`\u001b]7501;`)) {
+			t.Fatalf("invalid artifact %s: %q", path, data)
+		}
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		for decoder.More() {
+			var value any
+			if err := decoder.Decode(&value); err != nil {
+				t.Fatalf("decode %s: %v", path, err)
+			}
+		}
 	}
 }
 
@@ -1010,6 +1052,108 @@ func TestSingleTaskRejectsExplicitFullSendFalse(t *testing.T) {
 	}
 }
 
+func TestSingleTaskFullSendFinalValueWins(t *testing.T) {
+	server, _ := newOpenAIChatServer(t, func(int) string { return openAIWrappedDone("done") })
+	defer server.Close()
+
+	baseArgs := []string{
+		"--provider", "openai",
+		"--provider-api", "openai-chat-completions",
+		"--base-url", server.URL,
+		"--model", "gpt-test",
+	}
+	tests := []struct {
+		name         string
+		args         []string
+		wantConflict bool
+	}{
+		{
+			name: "false then true",
+			args: []string{"-p", "hi", "--full-send=false", "--full-send=true"},
+		},
+		{
+			name:         "true then false",
+			args:         []string{"-p", "hi", "--full-send=true", "--full-send=false"},
+			wantConflict: true,
+		},
+		{name: "absent", args: []string{"-p", "hi"}},
+		{name: "bare true", args: []string{"-p", "hi", "--full-send"}},
+		{name: "long prompt", args: []string{"--prompt", "hi"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			args := append(append([]string{}, baseArgs...), tt.args...)
+			stdout, stderr, err := runMainHelperWithEnv(
+				t,
+				[]string{"CLNKR_API_KEY=test-key"},
+				args...,
+			)
+			if tt.wantConflict {
+				if err == nil ||
+					!strings.Contains(stderr.String(), "--full-send=false conflicts with -p") {
+					t.Fatalf(
+						"run main err = %v, stderr = %q, want full-send conflict",
+						err,
+						stderr.String(),
+					)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf(
+					"run main: %v\nstdout: %s\nstderr: %s",
+					err,
+					stdout.String(),
+					stderr.String(),
+				)
+			}
+			if stdout.String() != "done\n" {
+				t.Fatalf("stdout = %q, want summary", stdout.String())
+			}
+		})
+	}
+}
+
+func TestParseCLIOptionsAppliesEveryFlagGroup(t *testing.T) {
+	opts := parseCLIOptions([]string{
+		"--prompt", "task",
+		"--full-send",
+		"--provider", "openai",
+		"--provider-api", "openai-responses",
+		"--model", "gpt-test",
+		"--base-url", "https://example.test",
+		"--act-protocol", "json",
+		"--effort", "high",
+		"--thinking-budget-tokens", "1000",
+		"--max-output-tokens", "2000",
+		"--max-steps", "7",
+		"--verbose",
+		"--version",
+		"--event-log", "events.jsonl",
+		"--trajectory", "trajectory.json",
+		"--load-messages", "messages.json",
+		"--continue",
+		"--list-sessions",
+		"--no-system-prompt",
+		"--system-prompt-append", "extra",
+		"--dump-system-prompt",
+	}, "usage")
+
+	if opts.taskPrompt != "task" || !opts.singleTask || !opts.fullSend ||
+		opts.provider != "openai" || opts.providerAPI != "openai-responses" ||
+		opts.model != "gpt-test" || opts.baseURL != "https://example.test" ||
+		opts.actProtocol != "json" || !opts.actProtocolSet || opts.effort != "high" ||
+		opts.thinkingBudgetTokens != 1000 || !opts.thinkingBudgetSet ||
+		opts.maxOutputTokens != 2000 || !opts.maxOutputTokensSet || opts.maxSteps != 7 ||
+		!opts.verbose || !opts.showVersion || opts.eventLog != "events.jsonl" ||
+		opts.trajectory != "trajectory.json" || opts.loadMessages != "messages.json" ||
+		!opts.continueSession || !opts.listSessions || !opts.noSystemPrompt ||
+		opts.systemPromptAppend != "extra" || !opts.dumpSystemPrompt {
+		t.Fatalf("parsed options = %#v, want every concrete flag group applied", opts)
+	}
+}
+
 func TestToolCallsActProtocolDoesNotRequireFullSendBeforeProviderConfig(t *testing.T) {
 	stdout, stderr, err := runMainHelperWithEnv(t, []string{
 		"CLNKR_API_KEY=test-key",
@@ -1095,4 +1239,166 @@ func TestRunPromptLoopTreatsQueuedPasteLinesAsOnePrompt(t *testing.T) {
 	if userMessages[0] != "first line\nsecond line\nthird line" {
 		t.Fatalf("prompt = %q, want pasted lines joined", userMessages[0])
 	}
+}
+
+func TestRunPromptLoopReturnsInputFailures(t *testing.T) {
+	primaryErr := errors.New("primary input failed")
+	primary := &lineReader{lines: make(chan lineResult, 1)}
+	primary.lines <- lineResult{err: &terminalInputError{err: primaryErr}}
+	close(primary.lines)
+	if err := runPromptLoop(
+		nil,
+		primary,
+		nil,
+		false,
+		clnkrapp.PromptModeApproval,
+		nil,
+	); !errors.Is(
+		err,
+		primaryErr,
+	) ||
+		!strings.Contains(err.Error(), "read prompt") {
+		t.Fatalf("primary error = %v, want contextual input failure", err)
+	}
+
+	queuedErr := errors.New("queued input failed")
+	queued := &lineReader{lines: make(chan lineResult, 2)}
+	queued.lines <- lineResult{text: "prompt"}
+	queued.lines <- lineResult{err: &terminalInputError{err: queuedErr}}
+	close(queued.lines)
+	if err := runPromptLoop(
+		nil,
+		queued,
+		nil,
+		false,
+		clnkrapp.PromptModeApproval,
+		nil,
+	); !errors.Is(
+		err,
+		queuedErr,
+	) ||
+		!strings.Contains(err.Error(), "read queued prompt lines") {
+		t.Fatalf("queued error = %v, want contextual input failure", err)
+	}
+}
+
+func TestRunPromptLoopReturnsReplyInputFailures(t *testing.T) {
+	tests := []struct {
+		name     string
+		response clnkr.Response
+	}{
+		{
+			name: "approval",
+			response: mustResponse(
+				`{"type":"act","bash":{"commands":[{"command":"printf ok","workdir":null}]}}`,
+			),
+		},
+		{
+			name: "clarification",
+			response: mustResponse(
+				`{"type":"clarify","question":"Which repo?"}`,
+			),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			queried := make(chan struct{})
+			model := &notifyingModel{response: tt.response, queried: queried}
+			agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
+			driver := clnkrapp.NewDriver(agent, nil)
+			pipeReader, pipeWriter := io.Pipe()
+			reader := newLineReader(pipeReader)
+			inputErr := errors.New("reply input failed")
+			writeErr := make(chan error, 1)
+			go func() {
+				if _, err := io.WriteString(pipeWriter, "inspect\n"); err != nil {
+					writeErr <- err
+					return
+				}
+				<-queried
+				writeErr <- pipeWriter.CloseWithError(inputErr)
+			}()
+
+			err := runPromptLoop(driver, reader, nil, true, clnkrapp.PromptModeApproval, nil)
+			if !errors.Is(err, inputErr) || !isTerminalInputError(err) ||
+				!strings.Contains(err.Error(), "read terminal reply") {
+				t.Fatalf("runPromptLoop error = %v, want marked reply input failure", err)
+			}
+			if err := <-writeErr; err != nil {
+				t.Fatalf("write terminal input: %v", err)
+			}
+		})
+	}
+}
+
+func TestRunPromptLoopPrefersBufferedReplyInputFailure(t *testing.T) {
+	model := &fakeModel{responses: []clnkr.Response{mustResponse(
+		`{"type":"act","bash":{"commands":[{"command":"printf ok","workdir":null}]}}`,
+	)}}
+	agent := clnkr.NewAgent(model, &fakeExecutor{}, "/tmp")
+	driver := clnkrapp.NewDriver(agent, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	promptErr := make(chan error, 1)
+	go func() {
+		promptErr <- driver.Prompt(ctx, "inspect", clnkrapp.PromptModeApproval)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for len(driver.Events()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("approval event was not buffered")
+		}
+		runtime.Gosched()
+	}
+	cancel()
+	runErr := <-promptErr
+
+	inputErr := errors.New("buffered reply input failed")
+	reader := &lineReader{lines: make(chan lineResult, 1)}
+	reader.lines <- lineResult{err: &terminalInputError{err: inputErr}}
+	close(reader.lines)
+	err := drainDriverEvents(
+		context.Background(),
+		driver,
+		reader,
+		nil,
+		runErr,
+		nil,
+		func() {},
+	)
+	if !errors.Is(err, inputErr) || !isTerminalInputError(err) {
+		t.Fatalf("drain error = %v, want buffered reply input failure over %v", err, runErr)
+	}
+}
+
+func TestREPLInputFailureSavesSessionBeforeExit(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	messagesPath := filepath.Join(t.TempDir(), "messages.json")
+	if err := os.WriteFile(
+		messagesPath,
+		[]byte(`[{"role":"user","content":"seeded session"}]`),
+		0o600,
+	); err != nil {
+		t.Fatalf("write messages: %v", err)
+	}
+	stdin, err := os.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open directory stdin: %v", err)
+	}
+	defer stdin.Close() //nolint:errcheck
+
+	stdout, stderr, err := runMainHelperWithEnvAndInput(t, []string{
+		"CLNKR_API_KEY=test-key",
+		"CLNKR_PROVIDER=openai",
+		"CLNKR_MODEL=gpt-test",
+	}, stdin, "--full-send", "--load-messages", messagesPath)
+	if err == nil {
+		t.Fatalf("run main succeeded; stdout: %s stderr: %s", stdout.String(), stderr.String())
+	}
+	savedAt := strings.Index(stderr.String(), "[Session saved to ")
+	errorAt := strings.Index(stderr.String(), "Error: read prompt:")
+	if savedAt < 0 || errorAt < 0 || savedAt > errorAt {
+		t.Fatalf("stderr = %q, want session save before input failure", stderr.String())
+	}
+	requireOneSavedSession(t)
 }

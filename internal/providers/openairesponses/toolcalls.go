@@ -48,7 +48,7 @@ func collectToolCallResponseParts(apiResp response, rawBody string) (toolCallRes
 	}
 	var text strings.Builder
 
-	for i, item := range apiResp.Output {
+	for _, item := range apiResp.Output {
 		switch item.Type {
 		case "function_call":
 			parts.calls = append(parts.calls, item)
@@ -70,12 +70,12 @@ func collectToolCallResponseParts(apiResp response, rawBody string) (toolCallRes
 				}
 			}
 		default:
-			if i < len(apiResp.RawOutput) {
+			if len(item.Raw) > 0 {
 				parts.replay = append(parts.replay, clnkr.ProviderReplayItem{
 					Provider:    replayProvider,
 					ProviderAPI: replayProviderAPI,
 					Type:        item.Type,
-					JSON:        append(json.RawMessage(nil), apiResp.RawOutput[i]...),
+					JSON:        append(json.RawMessage(nil), item.Raw...),
 				})
 			}
 		}

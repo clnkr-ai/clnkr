@@ -41,7 +41,7 @@ returns a **Response**.
 
 **Executor**
 : Interface for command runners. **Execute** receives a command and working
-directory and returns a **CommandResult**.
+directory and returns a **CommandResult** with one required typed outcome.
 
 **ShellExecutor**
 : Built-in Unix bash executor.
@@ -63,11 +63,14 @@ limit. A **clarify** turn returns **ErrClarificationNeeded**.
 : Policy implementation used by **Agent.Run**.
 
 **Agent.Step**
-: Queries the model once and parses one turn. It does not execute commands.
+: Queries the model once and returns a **Response**. It does not execute
+commands. Successful turns are in **Response.Turn**; protocol failures are in
+**Response.ProtocolErr**.
 
 **Agent.ExecuteTurn**
 : Runs an accepted **ActTurn** and appends command result blocks to the
-transcript.
+transcript. It returns an **ExecutionResult** containing the number of commands
+actually attempted.
 
 **Agent.ExecuteTurnWithSkipped**
 : Runs an accepted **ActTurn** and records skipped bash tool calls.

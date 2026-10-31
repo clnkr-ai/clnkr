@@ -21,9 +21,8 @@ type EventCommandDone struct {
 	Command  string
 	Stdout   string
 	Stderr   string
-	ExitCode int
+	Outcome  CommandOutcome
 	Feedback CommandFeedback
-	Err      error
 }
 
 // EventProtocolFailure fires when the model response fails protocol parsing.
@@ -54,12 +53,7 @@ func (EventProtocolFailure) event() {}
 func (EventCompletionGate) event()  {}
 func (EventDebug) event()           {}
 
-// StepResult is the outcome of one agent operation.
-type StepResult struct {
-	Response  Response
-	Turn      Turn
-	ParseErr  error
-	Output    string
-	ExecErr   error
-	ExecCount int
+// ExecutionResult reports work attempted for one accepted act turn.
+type ExecutionResult struct {
+	CommandsExecuted int
 }

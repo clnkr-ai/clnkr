@@ -35,7 +35,10 @@ func TestStepRecordsModelTurnsAndProtocolFailures(t *testing.T) {
 					},
 				},
 			}}
-			executor := &fakeExecutor{results: []CommandResult{{Stdout: "/tmp\n", ExitCode: 0}}}
+			executor := &fakeExecutor{results: []CommandResult{{
+				Stdout:  "/tmp\n",
+				Outcome: commandOutcomeExit(0),
+			}}}
 			notify, events := collectEvents()
 			agent := NewAgent(model, executor, "/repo")
 			agent.Notify = notify
@@ -88,7 +91,7 @@ func TestStepRecordsModelTurnsAndProtocolFailures(t *testing.T) {
 				t.Fatalf("Step: %v", err)
 			}
 			msgs := agent.Messages()
-			if !errors.Is(result.ParseErr, ErrInvalidJSON) || result.Turn != nil ||
+			if !errors.Is(result.ProtocolErr, ErrInvalidJSON) || result.Turn != nil ||
 				msgs[len(msgs)-2].Content != "no json" ||
 				!strings.Contains(msgs[len(msgs)-1].Content, "[protocol_error]") {
 				t.Fatalf("result=%#v messages=%#v", result, msgs)
@@ -127,12 +130,12 @@ func TestExecuteTurnCoordinatesCommandBatch(t *testing.T) {
 			next := filepath.Join(root, "sub")
 			executor := &fakeExecutor{results: []CommandResult{
 				{
-					Stdout:   "moved\n",
-					ExitCode: 0,
-					PostCwd:  next,
-					PostEnv:  map[string]string{"CLNKR_TEST": "ok"},
+					Stdout:  "moved\n",
+					PostCwd: next,
+					PostEnv: map[string]string{"CLNKR_TEST": "ok"},
+					Outcome: commandOutcomeExit(0),
 				},
-				{Stdout: "ok\n", ExitCode: 0},
+				{Stdout: "ok\n", Outcome: commandOutcomeExit(0)},
 			}}
 			notify, events := collectEvents()
 			agent := NewAgent(&fakeModel{}, executor, root)
@@ -148,7 +151,7 @@ func TestExecuteTurnCoordinatesCommandBatch(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ExecuteTurn: %v", err)
 			}
-			if result.ExecCount != 2 || result.ExecErr != nil {
+			if result.CommandsExecuted != 2 {
 				t.Fatalf("result = %#v", result)
 			}
 			if executor.gotDirs[0] != root || executor.gotDirs[1] != filepath.Join(next, "nested") {
@@ -174,10 +177,8 @@ func TestExecuteTurnCoordinatesCommandBatch(t *testing.T) {
 	t.Run(
 		"stops after a command error and completes later provider tool calls as skipped",
 		func(t *testing.T) {
-			execErr := errors.New("run command: exit status 2")
 			executor := &fakeExecutor{
-				results: []CommandResult{{Stderr: "nope\n", ExitCode: 2}},
-				errs:    []error{execErr},
+				results: []CommandResult{{Stderr: "nope\n", Outcome: commandOutcomeExit(2)}},
 			}
 			agent := NewAgent(&fakeModel{}, executor, "/repo")
 
@@ -191,8 +192,7 @@ func TestExecuteTurnCoordinatesCommandBatch(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ExecuteTurn API error: %v", err)
 			}
-			if !errors.Is(result.ExecErr, execErr) || result.ExecCount != 1 ||
-				len(executor.gotCmds) != 1 {
+			if result.CommandsExecuted != 1 || len(executor.gotCmds) != 1 {
 				t.Fatalf("result = %#v executor calls=%d", result, len(executor.gotCmds))
 			}
 			results := collectToolResults(agent.Messages())
@@ -207,13 +207,11 @@ func TestExecuteTurnCoordinatesCommandBatch(t *testing.T) {
 	)
 
 	t.Run("appends timeout guidance as structured command JSON", func(t *testing.T) {
-		execErr := errors.New("run command: timeout")
 		executor := &fakeExecutor{
 			results: []CommandResult{{
 				Stderr:  "timed out\n",
 				Outcome: CommandOutcome{Type: CommandOutcomeTimeout},
 			}},
-			errs: []error{execErr},
 		}
 		agent := NewAgent(&fakeModel{}, executor, "/repo")
 
@@ -224,8 +222,8 @@ func TestExecuteTurnCoordinatesCommandBatch(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ExecuteTurn API error: %v", err)
 		}
-		if !errors.Is(result.ExecErr, execErr) {
-			t.Fatalf("ExecuteTurn ExecErr = %v, want timeout command error", result.ExecErr)
+		if result.CommandsExecuted != 1 {
+			t.Fatalf("ExecuteTurn result = %#v, want one command", result)
 		}
 
 		got := messagesText(agent.Messages())
@@ -253,6 +251,76 @@ func TestExecuteTurnCoordinatesCommandBatch(t *testing.T) {
 	})
 }
 
+func TestExecuteTurnNormalizesExecutorResultsAtBoundary(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		result      CommandResult
+		wantMessage string
+	}{
+		{
+			name:        "missing outcome",
+			result:      CommandResult{Stdout: "partial\n"},
+			wantMessage: "executor returned no command outcome",
+		},
+		{
+			name: "exit without code",
+			result: CommandResult{
+				Outcome: CommandOutcome{Type: CommandOutcomeExit},
+			},
+			wantMessage: "executor returned exit outcome without exit code",
+		},
+		{
+			name: "unknown outcome",
+			result: CommandResult{
+				Outcome: CommandOutcome{Type: CommandOutcomeType("future")},
+			},
+			wantMessage: `executor returned unknown command outcome "future"`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			executor := &fakeExecutor{results: []CommandResult{
+				tt.result,
+				{Outcome: commandOutcomeExit(0)},
+			}}
+			notify, events := collectEvents()
+			agent := NewAgent(&fakeModel{}, executor, "/repo")
+			agent.Notify = notify
+
+			result, err := agent.ExecuteTurn(
+				context.Background(),
+				&ActTurn{Bash: BashBatch{Commands: []BashAction{
+					{ID: "call_1", Command: "first"},
+					{ID: "call_2", Command: "second"},
+				}}},
+			)
+			if err != nil {
+				t.Fatalf("ExecuteTurn: %v", err)
+			}
+			if result.CommandsExecuted != 1 || strings.Join(executor.gotCmds, ",") != "first" {
+				t.Fatalf("result=%#v commands=%#v", result, executor.gotCmds)
+			}
+
+			commandDone, ok := firstEvent[EventCommandDone](*events)
+			if !ok || commandDone.Command != "first" ||
+				commandDone.Outcome.Type != CommandOutcomeError ||
+				commandDone.Outcome.Message != tt.wantMessage {
+				t.Fatalf("command done event = %#v", commandDone)
+			}
+			toolResults := collectToolResults(agent.Messages())
+			if len(toolResults) != 2 || !toolResults[0].IsError || !toolResults[1].IsError ||
+				payloadOutcome(t, toolResults[1].Content) != CommandOutcomeSkipped {
+				t.Fatalf("tool results = %#v", toolResults)
+			}
+			payload := decodeCommandPayload(t, toolResults[0].Content)
+			if payload.Command != "first" ||
+				payload.Outcome.Type != commandDone.Outcome.Type ||
+				payload.Outcome.Message != commandDone.Outcome.Message {
+				t.Fatalf("payload=%#v event=%#v", payload, commandDone)
+			}
+		})
+	}
+}
+
 func TestRunWithPolicyCoordinatesTheFacadeLoop(t *testing.T) {
 	t.Run(
 		"full-send executes act, sends command result and resource state, then stops on done",
@@ -261,7 +329,10 @@ func TestRunWithPolicyCoordinatesTheFacadeLoop(t *testing.T) {
 				{Turn: &ActTurn{Bash: BashBatch{Commands: []BashAction{{Command: "echo hi"}}}}},
 				{Turn: verifiedDone("finished")},
 			}}
-			executor := &fakeExecutor{results: []CommandResult{{Stdout: "hi\n", ExitCode: 0}}}
+			executor := &fakeExecutor{results: []CommandResult{{
+				Stdout:  "hi\n",
+				Outcome: commandOutcomeExit(0),
+			}}}
 			agent := NewAgent(model, executor, "/tmp")
 
 			if err := agent.Run(context.Background(), "say hi"); err != nil {
@@ -346,11 +417,14 @@ func TestRunWithPolicyCoordinatesTheFacadeLoop(t *testing.T) {
 		results := make([]CommandResult, 9)
 		for i := range firstBatch {
 			firstBatch[i] = BashAction{Command: fmt.Sprintf("echo first-%d", i)}
-			results[i] = CommandResult{Stdout: "ok\n", ExitCode: 0}
+			results[i] = CommandResult{Stdout: "ok\n", Outcome: commandOutcomeExit(0)}
 		}
 		for i := range secondBatch {
 			secondBatch[i] = BashAction{Command: fmt.Sprintf("echo second-%d", i)}
-			results[len(firstBatch)+i] = CommandResult{Stdout: "ok\n", ExitCode: 0}
+			results[len(firstBatch)+i] = CommandResult{
+				Stdout:  "ok\n",
+				Outcome: commandOutcomeExit(0),
+			}
 		}
 		model := &fakeModel{responses: []Response{
 			{Turn: &ActTurn{Bash: BashBatch{Commands: firstBatch}}},
@@ -442,6 +516,8 @@ func TestRunWithPolicyOptionsBackstopsContextLengthOnce(t *testing.T) {
 		},
 	}
 	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+	notify, events := collectEvents()
+	agent.Notify = notify
 	backstopCalls := 0
 
 	err := agent.RunWithPolicyOptions(
@@ -451,6 +527,16 @@ func TestRunWithPolicyOptionsBackstopsContextLengthOnce(t *testing.T) {
 		RunOptions{
 			ContextLengthBackstop: func(context.Context, error) error {
 				backstopCalls++
+				var compacted []Message
+				for _, message := range agent.messages {
+					if message.Role == "user" &&
+						(strings.Contains(message.Content, `"type":"state"`) ||
+							strings.Contains(message.Content, `"type":"resource_state"`)) {
+						continue
+					}
+					compacted = append(compacted, message)
+				}
+				agent.messages = compacted
 				agent.AppendUserMessage("compacted marker")
 				return nil
 			},
@@ -471,6 +557,49 @@ func TestRunWithPolicyOptionsBackstopsContextLengthOnce(t *testing.T) {
 	if countUserMessages(agent.Messages(), "compacted marker") != 1 {
 		t.Fatalf("backstop marker not appended once: %#v", agent.Messages())
 	}
+	if got := messagesText(model.got[1]); !strings.Contains(got, `"model_turns_used":1`) {
+		t.Fatalf("retry query messages = %s, want refreshed resource state", got)
+	}
+	if !hasMessage(model.got[1], "user", transcript.FormatStateMessage("/tmp")) {
+		t.Fatalf("retry query messages = %#v, want refreshed cwd state", model.got[1])
+	}
+	if got := strings.Join(debugMessages(*events), "\n"); !strings.Contains(
+		got,
+		ContextLengthBackstopCompactingDebug+"\n"+ContextLengthBackstopRetryingDebug,
+	) {
+		t.Fatalf("debug messages = %q, want compact then retry", got)
+	}
+}
+
+func TestRunWithPolicyOptionsCancelsAfterContextCompaction(t *testing.T) {
+	contextErr := fmt.Errorf("%w: provider said context too long", ErrContextLengthExceeded)
+	model := &fakeModel{errs: []error{contextErr}}
+	ctx, cancel := context.WithCancel(context.Background())
+	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+	notify, events := collectEvents()
+	agent.Notify = notify
+
+	err := agent.RunWithPolicyOptions(
+		ctx,
+		"inspect",
+		FullSendPolicy{},
+		RunOptions{ContextLengthBackstop: func(context.Context, error) error {
+			cancel()
+			return nil
+		}},
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunWithPolicyOptions error = %v, want context.Canceled", err)
+	}
+	if model.calls != 1 {
+		t.Fatalf("model calls = %d, want 1", model.calls)
+	}
+	got := strings.Join(debugMessages(*events), "\n")
+	if !strings.Contains(got, ContextLengthBackstopCompactingDebug) ||
+		strings.Contains(got, ContextLengthBackstopRetryingDebug) ||
+		!strings.Contains(got, "run error: model_turns=1") {
+		t.Fatalf("debug messages = %q", got)
+	}
 }
 
 func TestRunWithPolicyOptionsBackstopsStepLimitSummaryContextLength(t *testing.T) {
@@ -482,7 +611,10 @@ func TestRunWithPolicyOptionsBackstopsStepLimitSummaryContextLength(t *testing.T
 		},
 		errs: []error{nil, contextErr},
 	}
-	executor := &fakeExecutor{results: []CommandResult{{Stdout: "/tmp\n", ExitCode: 0}}}
+	executor := &fakeExecutor{results: []CommandResult{{
+		Stdout:  "/tmp\n",
+		Outcome: commandOutcomeExit(0),
+	}}}
 	policy := &scriptedPolicy{decisions: []ActDecision{{Kind: ActDecisionApprove}}}
 	agent := NewAgent(model, executor, "/tmp")
 	agent.MaxSteps = 1
@@ -529,7 +661,10 @@ func TestRunWithPolicyOptionsReportsStepLimitSummaryCompactionFailure(t *testing
 		},
 		errs: []error{nil, contextErr},
 	}
-	executor := &fakeExecutor{results: []CommandResult{{Stdout: "/tmp\n", ExitCode: 0}}}
+	executor := &fakeExecutor{results: []CommandResult{{
+		Stdout:  "/tmp\n",
+		Outcome: commandOutcomeExit(0),
+	}}}
 	policy := &scriptedPolicy{decisions: []ActDecision{{Kind: ActDecisionApprove}}}
 	agent := NewAgent(model, executor, "/tmp")
 	agent.MaxSteps = 1
@@ -568,7 +703,10 @@ func TestRunWithPolicyOptionsReportsStepLimitSummaryRetryFailure(t *testing.T) {
 		},
 		errs: []error{nil, contextErr, retryErr},
 	}
-	executor := &fakeExecutor{results: []CommandResult{{Stdout: "/tmp\n", ExitCode: 0}}}
+	executor := &fakeExecutor{results: []CommandResult{{
+		Stdout:  "/tmp\n",
+		Outcome: commandOutcomeExit(0),
+	}}}
 	policy := &scriptedPolicy{decisions: []ActDecision{{Kind: ActDecisionApprove}}}
 	agent := NewAgent(model, executor, "/tmp")
 	agent.MaxSteps = 1
@@ -605,7 +743,10 @@ func TestRunWithPolicyOptionsDoesNotBackstopStepLimitSummaryTwice(t *testing.T) 
 		},
 		errs: []error{nil, contextErr, contextErr},
 	}
-	executor := &fakeExecutor{results: []CommandResult{{Stdout: "/tmp\n", ExitCode: 0}}}
+	executor := &fakeExecutor{results: []CommandResult{{
+		Stdout:  "/tmp\n",
+		Outcome: commandOutcomeExit(0),
+	}}}
 	policy := &scriptedPolicy{decisions: []ActDecision{{Kind: ActDecisionApprove}}}
 	agent := NewAgent(model, executor, "/tmp")
 	agent.MaxSteps = 1
@@ -725,6 +866,54 @@ func TestRunWithPolicyOptionsDoesNotBackstopTwice(t *testing.T) {
 	}
 }
 
+func TestRunWithPolicyOptionsDoesNotBackstopLaterContextFailure(t *testing.T) {
+	contextErr := fmt.Errorf("%w: provider said context too long", ErrContextLengthExceeded)
+	model := &fakeModel{
+		errs: []error{contextErr, nil, contextErr},
+		responses: []Response{{Turn: &ActTurn{Bash: BashBatch{Commands: []BashAction{{
+			Command: "pwd",
+		}}}}}},
+	}
+	executor := &fakeExecutor{results: []CommandResult{{
+		Stdout:  "/tmp\n",
+		Outcome: commandOutcomeExit(0),
+	}}}
+	agent := NewAgent(model, executor, "/tmp")
+	notify, events := collectEvents()
+	agent.Notify = notify
+	backstopCalls := 0
+
+	err := agent.RunWithPolicyOptions(
+		context.Background(),
+		"inspect",
+		FullSendPolicy{},
+		RunOptions{ContextLengthBackstop: func(context.Context, error) error {
+			backstopCalls++
+			return nil
+		}},
+	)
+	if !errors.Is(err, ErrContextLengthExceeded) {
+		t.Fatalf("RunWithPolicyOptions error = %v, want ErrContextLengthExceeded", err)
+	}
+	if strings.Contains(err.Error(), "retry failed") {
+		t.Fatalf("RunWithPolicyOptions error = %v, want later failure without retry context", err)
+	}
+	if backstopCalls != 1 || model.calls != 3 || len(executor.gotCmds) != 1 {
+		t.Fatalf(
+			"backstop calls=%d model calls=%d executor calls=%d, want 1, 3, 1",
+			backstopCalls,
+			model.calls,
+			len(executor.gotCmds),
+		)
+	}
+	got := strings.Join(debugMessages(*events), "\n")
+	if strings.Count(got, ContextLengthBackstopCompactingDebug) != 1 ||
+		strings.Count(got, ContextLengthBackstopRetryingDebug) != 1 ||
+		!strings.Contains(got, "run error: model_turns=3") {
+		t.Fatalf("debug messages = %q", got)
+	}
+}
+
 func TestRunCommandBudgetIsLocalToEachRun(t *testing.T) {
 	model := &fakeModel{responses: []Response{
 		{Turn: &ActTurn{Bash: BashBatch{Commands: []BashAction{{Command: "echo one"}}}}},
@@ -733,7 +922,10 @@ func TestRunCommandBudgetIsLocalToEachRun(t *testing.T) {
 		{Turn: verifiedDone("second")},
 	}}
 	executor := &fakeExecutor{
-		results: []CommandResult{{Stdout: "one\n", ExitCode: 0}, {Stdout: "two\n", ExitCode: 0}},
+		results: []CommandResult{
+			{Stdout: "one\n", Outcome: commandOutcomeExit(0)},
+			{Stdout: "two\n", Outcome: commandOutcomeExit(0)},
+		},
 	}
 	agent := NewAgent(model, executor, "/tmp")
 	agent.MaxSteps = 1
@@ -757,7 +949,9 @@ func TestRunBoundsCommandObservationButKeepsRawCommandEvent(t *testing.T) {
 		{Turn: verifiedDone("finished")},
 	}}
 	executor := &fakeExecutor{
-		results: []CommandResult{{Stdout: hugeStdout, Stderr: hugeStderr, ExitCode: 0}},
+		results: []CommandResult{{
+			Stdout: hugeStdout, Stderr: hugeStderr, Outcome: commandOutcomeExit(0),
+		}},
 	}
 	notify, events := collectEvents()
 	agent := NewAgent(model, executor, "/tmp")
@@ -791,8 +985,8 @@ func TestRunWithPolicyEnforcesBudgetsAndCompletionGate(t *testing.T) {
 			}}
 			executor := &fakeExecutor{
 				results: []CommandResult{
-					{Stdout: "/tmp\n", ExitCode: 0},
-					{Stdout: "ok\n", ExitCode: 0},
+					{Stdout: "/tmp\n", Outcome: commandOutcomeExit(0)},
+					{Stdout: "ok\n", Outcome: commandOutcomeExit(0)},
 				},
 			}
 			policy := &scriptedPolicy{decisions: []ActDecision{{Kind: ActDecisionApprove}}}
@@ -890,6 +1084,60 @@ func TestRunWithPolicyCompletionGateEvents(t *testing.T) {
 	}
 }
 
+func TestRunValidatesDoneBeforeCompletionGate(t *testing.T) {
+	model := &fakeModel{responses: []Response{{
+		Turn: &DoneTurn{
+			Summary: "done",
+			Verification: CompletionVerification{
+				Status: VerificationVerified,
+			},
+		},
+	}}}
+	notify, events := collectEvents()
+	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+	agent.Notify = notify
+
+	err := agent.Run(context.Background(), "finish")
+	if err == nil ||
+		!strings.Contains(err.Error(), "verified done requires at least one verification check") {
+		t.Fatalf("Run error = %v", err)
+	}
+	if hasEvent[EventResponse](*events) || hasEvent[EventCompletionGate](*events) {
+		t.Fatalf(
+			"events = %#v, want validation failure before response and completion events",
+			*events,
+		)
+	}
+}
+
+func TestRunCompletionGateRejectsNotVerifiedWithBudgetRemaining(t *testing.T) {
+	model := &fakeModel{responses: []Response{
+		{
+			Turn: &DoneTurn{
+				Summary: "No meaningful verification was run.",
+				Verification: CompletionVerification{
+					Status: VerificationNotVerified,
+				},
+			},
+		},
+		{Turn: verifiedDone("Finished after verification.")},
+	}}
+	notify, events := collectEvents()
+	agent := NewAgent(model, &fakeExecutor{}, "/tmp")
+	agent.MaxSteps = 1
+	agent.Notify = notify
+
+	if err := agent.Run(context.Background(), "finish"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := strings.Join(eventDecisions(*events), ","); got != "reject,accept" {
+		t.Fatalf("completion gate decisions = %q", got)
+	}
+	if !strings.Contains(messagesText(model.got[1]), "not_verified_with_budget_remaining") {
+		t.Fatalf("second query = %#v", model.got[1])
+	}
+}
+
 func TestAgentPublicAPIGuards(t *testing.T) {
 	t.Run("default max steps", func(t *testing.T) {
 		if got := NewAgent(&fakeModel{}, &fakeExecutor{}, "/tmp").MaxSteps; got != DefaultMaxSteps {
@@ -919,7 +1167,10 @@ func TestAgentPublicAPIGuards(t *testing.T) {
 			{Turn: ActTurn{Bash: BashBatch{Commands: []BashAction{{Command: "pwd"}}}}},
 			{Turn: *verifiedDone("done")},
 		}}
-		executor := &fakeExecutor{results: []CommandResult{{Stdout: "/tmp\n", ExitCode: 0}}}
+		executor := &fakeExecutor{results: []CommandResult{{
+			Stdout:  "/tmp\n",
+			Outcome: commandOutcomeExit(0),
+		}}}
 		if err := NewAgent(model, executor, "/tmp").Run(context.Background(), "pwd"); err != nil {
 			t.Fatalf("Run: %v", err)
 		}
@@ -1273,28 +1524,19 @@ func countUserMessages(messages []Message, content string) int {
 
 type fakeExecutor struct {
 	results []CommandResult
-	errs    []error
 	gotCmds []string
 	gotDirs []string
 	gotEnv  []map[string]string
 }
 
-func (e *fakeExecutor) Execute(_ context.Context, command, dir string) (CommandResult, error) {
+func (e *fakeExecutor) Execute(_ context.Context, command, dir string) CommandResult {
 	e.gotCmds = append(e.gotCmds, command)
 	e.gotDirs = append(e.gotDirs, dir)
 	idx := len(e.gotCmds) - 1
 	if idx >= len(e.results) {
-		return CommandResult{}, fmt.Errorf("no more results")
+		return CommandResult{Outcome: commandOutcomeError(fmt.Errorf("no more results"))}
 	}
-	result := e.results[idx]
-	if result.Command == "" {
-		result.Command = command
-	}
-	var err error
-	if idx < len(e.errs) {
-		err = e.errs[idx]
-	}
-	return result, err
+	return e.results[idx]
 }
 
 func (e *fakeExecutor) SetEnv(env map[string]string) {
@@ -1383,6 +1625,16 @@ func eventDecisions(events []Event) []string {
 	return decisions
 }
 
+func debugMessages(events []Event) []string {
+	var messages []string
+	for _, event := range events {
+		if ev, ok := event.(EventDebug); ok {
+			messages = append(messages, ev.Message)
+		}
+	}
+	return messages
+}
+
 func hasMessage(messages []Message, role, content string) bool {
 	for _, msg := range messages {
 		if msg.Role == role && msg.Content == content {
@@ -1420,4 +1672,18 @@ func payloadOutcome(t *testing.T, raw string) CommandOutcomeType {
 		t.Fatalf("payload is not JSON: %v\n%s", err, raw)
 	}
 	return payload.Outcome.Type
+}
+
+type commandPayload struct {
+	Command string         `json:"command"`
+	Outcome CommandOutcome `json:"outcome"`
+}
+
+func decodeCommandPayload(t *testing.T, raw string) commandPayload {
+	t.Helper()
+	var payload commandPayload
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("payload is not JSON: %v\n%s", err, raw)
+	}
+	return payload
 }

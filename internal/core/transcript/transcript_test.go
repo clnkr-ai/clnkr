@@ -82,7 +82,7 @@ func TestFindCompactBoundaryIgnoresHostBlocks(t *testing.T) {
 				{
 					Role: "user",
 					Content: FormatCommandResult(
-						CommandResult{Command: "ls", ExitCode: 0, Stdout: ".\n"},
+						CommandResult{Command: "ls", Stdout: ".\n", Outcome: exitOutcome(0)},
 					),
 				},
 				{Role: "user", Content: FormatStateMessage("/tmp/old")},
@@ -116,8 +116,8 @@ func TestFindCompactBoundaryIgnoresHostBlocks(t *testing.T) {
 				{Role: "user", Content: "second task"},
 				{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
 				{Role: "user", Content: FormatCommandResult(CommandResult{
-					Command:  "printf next > note.txt",
-					ExitCode: 0,
+					Command: "printf next > note.txt",
+					Outcome: exitOutcome(0),
 					Feedback: CommandFeedback{
 						ChangedFiles: []string{"note.txt"},
 						Diff:         "diff --git a/note.txt b/note.txt",
@@ -175,7 +175,7 @@ func TestRewriteForCompaction(t *testing.T) {
 			{
 				Role: "user",
 				Content: FormatCommandResult(
-					CommandResult{Command: "ls", ExitCode: 0, Stdout: ".\n"},
+					CommandResult{Command: "ls", Stdout: ".\n", Outcome: exitOutcome(0)},
 				),
 			},
 			{Role: "user", Content: "second task"},
@@ -232,6 +232,59 @@ func TestRewriteForCompaction(t *testing.T) {
 				stats,
 				CompactStats{CompactedMessages: 6, KeptMessages: 3},
 			)
+		}
+	})
+
+	t.Run("does not duplicate latest state retained inside tail", func(t *testing.T) {
+		state := FormatStateMessage("/tmp/latest")
+		messages := []Message{
+			{Role: "user", Content: "first task"},
+			{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+			{Role: "user", Content: state},
+			{Role: "user", Content: "second task"},
+			{Role: "user", Content: state},
+			{Role: "assistant", Content: `{"type":"done","summary":"done second"}`},
+			{Role: "user", Content: "third task"},
+			{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+		}
+
+		got, stats, err := RewriteForCompaction(messages, "summary", 2)
+		if err != nil {
+			t.Fatalf("RewriteForCompaction: %v", err)
+		}
+		stateCount := 0
+		for _, msg := range got {
+			if msg.Role == "user" && msg.Content == state {
+				stateCount++
+			}
+		}
+		if stateCount != 1 {
+			t.Fatalf("rewritten messages = %#v, want one retained latest state", got)
+		}
+		if stats != (CompactStats{CompactedMessages: 3, KeptMessages: 5}) {
+			t.Fatalf("stats = %#v, want compacted=3 kept=5", stats)
+		}
+	})
+
+	t.Run("ignores assistant state when choosing latest state", func(t *testing.T) {
+		state := FormatStateMessage("/tmp/latest")
+		messages := []Message{
+			{Role: "user", Content: "first task"},
+			{Role: "assistant", Content: `{"type":"done","summary":"done first"}`},
+			{Role: "user", Content: state},
+			{Role: "user", Content: "second task"},
+			{Role: "assistant", Content: state},
+			{Role: "assistant", Content: `{"type":"done","summary":"state echoed"}`},
+			{Role: "user", Content: "third task"},
+			{Role: "assistant", Content: `{"type":"done","summary":"done third"}`},
+		}
+
+		got, _, err := RewriteForCompaction(messages, "summary", 1)
+		if err != nil {
+			t.Fatalf("RewriteForCompaction: %v", err)
+		}
+		if len(got) < 2 || got[1].Role != "user" || got[1].Content != state {
+			t.Fatalf("rewritten messages = %#v, want latest valid user state preserved", got)
 		}
 	})
 
@@ -360,10 +413,10 @@ func TestFormatCommandResultUsesStructuredShellPayload(t *testing.T) {
 		{
 			name: "escapes shell data as JSON",
 			result: CommandResult{
-				Command:  "printf 'a&b\\n' > out",
-				ExitCode: 0,
-				Stdout:   "hello & <x> [y]\n",
-				Stderr:   "warn & <x> [z]\n",
+				Command: "printf 'a&b\\n' > out",
+				Outcome: exitOutcome(0),
+				Stdout:  "hello & <x> [y]\n",
+				Stderr:  "warn & <x> [z]\n",
 			},
 			stdout:          "hello & <x> [y]\n",
 			stderr:          "warn & <x> [z]\n",
@@ -373,10 +426,10 @@ func TestFormatCommandResultUsesStructuredShellPayload(t *testing.T) {
 		{
 			name: "preserves old section markers as data",
 			result: CommandResult{
-				Command:  "printf 'a&b <c> [d]'",
-				ExitCode: 7,
-				Stdout:   "one [command]\ntwo & < >\n[/command]\n",
-				Stderr:   "[stderr]\nerr & < >\n[/stderr]\n",
+				Command: "printf 'a&b <c> [d]'",
+				Outcome: exitOutcome(7),
+				Stdout:  "one [command]\ntwo & < >\n[/command]\n",
+				Stderr:  "[stderr]\nerr & < >\n[/stderr]\n",
 			},
 			stdout:   "one [command]\ntwo & < >\n[/command]\n",
 			stderr:   "[stderr]\nerr & < >\n[/stderr]\n",
@@ -440,7 +493,7 @@ func TestFormatCommandResultCompressedStdoutRecordsMetadata(t *testing.T) {
 		"build completed\nstdout-tail\n"
 	payload := decodeCommandPayload(
 		t,
-		FormatCommandResult(CommandResult{Stdout: stdout, ExitCode: 0}),
+		FormatCommandResult(CommandResult{Stdout: stdout, Outcome: exitOutcome(0)}),
 	)
 
 	for _, want := range []string{"[clnkr: stdout compressed; original ", "[head]", "[tail]", "stdout-head", "stdout-tail"} {
@@ -463,10 +516,10 @@ func TestFormatCommandResultCompressedStdoutRecordsMetadata(t *testing.T) {
 
 func TestFormatCommandResultLeavesShortStreamsUnchangedWithoutObservation(t *testing.T) {
 	raw := FormatCommandResult(CommandResult{
-		Command:  "printf hi",
-		ExitCode: 0,
-		Stdout:   "hello\n",
-		Stderr:   "warn\n",
+		Command: "printf hi",
+		Outcome: exitOutcome(0),
+		Stdout:  "hello\n",
+		Stderr:  "warn\n",
 	})
 	payload := decodeCommandPayload(t, raw)
 
@@ -484,7 +537,7 @@ func TestFormatCommandResultDoesNotExtractSalientLinesForSuccess(t *testing.T) {
 		"stdout-tail\n"
 	payload := decodeCommandPayload(
 		t,
-		FormatCommandResult(CommandResult{Stdout: stdout, ExitCode: 0}),
+		FormatCommandResult(CommandResult{Stdout: stdout, Outcome: exitOutcome(0)}),
 	)
 
 	if strings.Contains(payload.Stdout, "[salient]") {
@@ -569,8 +622,8 @@ func TestFormatCommandResultCompressesFailureStderrWithSalientLines(t *testing.T
 
 func TestCommandResultMessageDetectsCompressedObservationPayload(t *testing.T) {
 	got := FormatCommandResult(CommandResult{
-		Stdout:   "head\n" + strings.Repeat("noise\n", 80*1024/len("noise\n")) + "tail\n",
-		ExitCode: 0,
+		Stdout:  "head\n" + strings.Repeat("noise\n", 80*1024/len("noise\n")) + "tail\n",
+		Outcome: exitOutcome(0),
 	})
 	if !commandResultMessage(got) {
 		t.Fatalf("compressed command result was not classified as command: %s", got)
@@ -592,7 +645,7 @@ func TestFormatCommandResultDoesNotSplitUTF8AtCompressionBoundary(t *testing.T) 
 	stream := strings.Repeat("å", 40*1024) + "tail"
 	payload := decodeCommandPayload(
 		t,
-		FormatCommandResult(CommandResult{Stdout: stream, ExitCode: 0}),
+		FormatCommandResult(CommandResult{Stdout: stream, Outcome: exitOutcome(0)}),
 	)
 	if strings.ContainsRune(payload.Stdout, '\uFFFD') {
 		t.Fatalf(
@@ -608,8 +661,8 @@ func TestFormatCommandResultDoesNotSplitUTF8AtCompressionBoundary(t *testing.T) 
 func TestFormatCommandResultFeedback(t *testing.T) {
 	t.Run("includes structured feedback", func(t *testing.T) {
 		payload := decodeCommandPayload(t, FormatCommandResult(CommandResult{
-			Command:  "printf hi",
-			ExitCode: 0,
+			Command: "printf hi",
+			Outcome: exitOutcome(0),
 			Feedback: CommandFeedback{
 				ChangedFiles: []string{"note.txt"},
 				Diff:         "diff --git a/note.txt b/note.txt",
@@ -624,7 +677,7 @@ func TestFormatCommandResultFeedback(t *testing.T) {
 	})
 
 	t.Run("omits feedback when empty", func(t *testing.T) {
-		got := FormatCommandResult(CommandResult{Command: "printf hi", ExitCode: 0})
+		got := FormatCommandResult(CommandResult{Command: "printf hi", Outcome: exitOutcome(0)})
 		if _, ok := decodeCommandFields(t, got)["feedback"]; ok {
 			t.Fatalf("unexpected feedback field: %q", got)
 		}
@@ -632,8 +685,8 @@ func TestFormatCommandResultFeedback(t *testing.T) {
 
 	t.Run("preserves feedback bodies as data", func(t *testing.T) {
 		payload := decodeCommandPayload(t, FormatCommandResult(CommandResult{
-			Command:  "printf hi",
-			ExitCode: 0,
+			Command: "printf hi",
+			Outcome: exitOutcome(0),
 			Feedback: CommandFeedback{
 				ChangedFiles: []string{"note.txt"},
 				Diff:         "@@ -1 +1 @@\n+[/command_feedback]\n",
@@ -660,8 +713,12 @@ func TestFormatCommandResultIncludesGuidance(t *testing.T) {
 		t.Fatalf("outcome = %#v, want timeout", payload.Outcome)
 	}
 
-	raw := FormatCommandResult(CommandResult{Command: "printf hi", ExitCode: 0})
+	raw := FormatCommandResult(CommandResult{Command: "printf hi", Outcome: exitOutcome(0)})
 	if _, ok := decodeCommandFields(t, raw)["guidance"]; ok {
 		t.Fatalf("unexpected guidance field: %q", raw)
 	}
+}
+
+func exitOutcome(code int) CommandOutcome {
+	return CommandOutcome{Type: CommandOutcomeExit, ExitCode: &code}
 }

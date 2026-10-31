@@ -1,4 +1,4 @@
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION ?= $(shell git describe --tags --match '[0-9]*' --always --dirty 2>/dev/null || echo dev)
 LATEST_TAG ?= $(shell git tag -l '[0-9]*' --sort=-v:refname | head -1)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 HUGO ?= $(or $(shell command -v hugo 2>/dev/null),$(shell go env GOPATH)/bin/hugo)
@@ -26,13 +26,13 @@ CLANKERVAL_PREFLIGHT = \
 .DEFAULT_GOAL := build
 .PHONY: \
 	build clean install run \
-	clnkr send readme-image \
+	clnkr send \
 	check test evaluations evaluations-live evaluations-live-openai evaluations-live-anthropic \
 	thoth-critical-check architecture-shape-report semantic-cohesion-report test-fidelity-report \
 	help man docs docs-serve \
 	_build-clnkr _build-clnkrd \
 	_fmt _fmt-check _vet _lint _arch _script-tests sloc frontend-sloc _workflow-make-targets \
-	_hooks _check-docs _require-run-clnkr-tools _require-pandoc _require-readme-image-tools _site-sync _site-build
+	_hooks _check-docs _require-run-clnkr-tools _require-pandoc _site-sync _site-build
 
 PREFIX ?= /usr/local
 CORE_SLOC_LIMIT := 2450
@@ -41,11 +41,6 @@ DOC_MAN_DIR := build/docs/man
 DOC_MAN_OUTPUTS := $(DOC_MAN_DIR)/clnkr.1 $(DOC_MAN_DIR)/clnkrd.1 $(DOC_MAN_DIR)/clnkr.3 $(DOC_MAN_DIR)/clnkr.7
 DOC_CONTENT_DIR := site/content/docs
 DOC_PAGE_TEMPLATE := site/pandoc/doc-page.md
-README_IMAGE := site/static/readme-terminal.png
-README_FONT_REPO ?= git@github.com:cosgroveb/berkeley-mono-nerd-font.git
-README_FONT_CHECKOUT := build/deps/berkeley-mono-nerd-font
-README_FONT := build/readme-fonts/BerkeleyMonoNerdFont-Regular.otf
-README_FONT_PATCH_LOG := build/readme-fonts/font-patcher.log
 GENERATED_SITE_DOCS := \
 	$(DOC_CONTENT_DIR)/clnkr.md \
 	$(DOC_CONTENT_DIR)/clnkrd.md
@@ -56,7 +51,6 @@ build: _build-clnkr _build-clnkrd ## Build shipped binaries
 clean: ## Remove build artifacts
 	rm -f clnkr clnkrd
 	rm -rf build/docs
-	rm -rf build/deps build/readme-fonts
 	find "$(DOC_CONTENT_DIR)" -maxdepth 1 -type f ! -name '_index.md' -delete
 
 install: build ## Install shipped binaries
@@ -168,25 +162,6 @@ docs: _site-build ## Build documentation site
 docs-serve: _site-sync ## Run documentation site locally
 	HUGO_CLNKR_LATEST_TAG='$(LATEST_TAG)' $(HUGO) server --source site
 
-readme-image: _require-readme-image-tools ## Render README terminal image
-	@mkdir -p "$(dir $(README_FONT))" "$(dir $(README_FONT_CHECKOUT))"
-	@if [ -d "$(README_FONT_CHECKOUT)/.git" ]; then \
-		git -C "$(README_FONT_CHECKOUT)" fetch --quiet origin main; \
-		git -C "$(README_FONT_CHECKOUT)" checkout --quiet main; \
-		git -C "$(README_FONT_CHECKOUT)" reset --quiet --hard origin/main; \
-	else \
-		git clone --quiet "$(README_FONT_REPO)" "$(README_FONT_CHECKOUT)"; \
-	fi
-	rm -f "$(README_FONT)" "$(README_FONT_PATCH_LOG)"
-	@fontforge -script "$(README_FONT_CHECKOUT)/font-patcher" --complete --has-no-italic \
-		-out "$(dir $(README_FONT))" "$(README_FONT_CHECKOUT)/BerkeleyMono-Regular.otf" \
-		>"$(README_FONT_PATCH_LOG)" 2>&1 || { \
-			echo "error: failed to patch README font; see $(README_FONT_PATCH_LOG)" >&2; \
-			tail -40 "$(README_FONT_PATCH_LOG)" >&2; \
-			exit 1; \
-		}
-	CLNKR_README_IMAGE_FONT="$(CURDIR)/$(README_FONT)" ./scripts/render-readme-banner-png.sh "$(README_IMAGE)"
-
 _check-docs: man _site-build
 
 _require-pandoc:
@@ -202,29 +177,6 @@ _require-run-clnkr-tools:
 	}
 	@command -v jq >/dev/null 2>&1 || { \
 		echo "error: jq is required for clnkr wrapper" >&2; \
-		exit 1; \
-	}
-
-_require-readme-image-tools:
-	@command -v git >/dev/null 2>&1 || { \
-		echo "error: git is required for README image font checkout" >&2; \
-		exit 1; \
-	}
-	@command -v gum >/dev/null 2>&1 || { \
-		echo "error: gum is required for README image generation" >&2; \
-		echo "install it from https://github.com/charmbracelet/gum" >&2; \
-		exit 1; \
-	}
-	@command -v fontforge >/dev/null 2>&1 || { \
-		echo "error: fontforge is required for README image font patching" >&2; \
-		echo "Ubuntu: sudo apt-get install fontforge" >&2; \
-		echo "macOS: brew install fontforge" >&2; \
-		exit 1; \
-	}
-	@{ command -v magick >/dev/null 2>&1 || command -v convert >/dev/null 2>&1; } || { \
-		echo "error: ImageMagick is required for README image generation" >&2; \
-		echo "Ubuntu: sudo apt-get install imagemagick" >&2; \
-		echo "macOS: brew install imagemagick" >&2; \
 		exit 1; \
 	}
 

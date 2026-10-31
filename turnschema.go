@@ -4,10 +4,37 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"regexp"
-	"strconv"
 	"strings"
 )
+
+type rawTurnEnvelope struct {
+	Type         string          `json:"type"`
+	Bash         json.RawMessage `json:"bash"`
+	Question     json.RawMessage `json:"question"`
+	Summary      json.RawMessage `json:"summary"`
+	Verification json.RawMessage `json:"verification"`
+	KnownRisks   json.RawMessage `json:"known_risks"`
+	Reasoning    string          `json:"reasoning"`
+}
+
+type rawBashEnvelope struct {
+	Commands []rawCommand `json:"commands"`
+}
+
+type rawCommand struct {
+	Command string          `json:"command"`
+	Workdir json.RawMessage `json:"workdir"`
+}
+
+type rawVerification struct {
+	Status VerificationStatus `json:"status"`
+	Checks json.RawMessage    `json:"checks"`
+}
+
+type rawTurnField struct {
+	name  string
+	value json.RawMessage
+}
 
 // ParseTurn validates an exact canonical turn without recovery or prose extraction.
 func ParseTurn(raw string) (Turn, error) {
@@ -16,7 +43,7 @@ func ParseTurn(raw string) (Turn, error) {
 		return nil, fmt.Errorf("%w: empty response", ErrInvalidJSON)
 	}
 
-	var env jsonEnvelope
+	var env rawTurnEnvelope
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&env); err != nil {
@@ -26,47 +53,37 @@ func ParseTurn(raw string) (Turn, error) {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
 	}
 
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
-	}
-	env.Question = normalizeTurnHumanText(env.Question)
-	env.Summary = normalizeTurnHumanText(env.Summary)
-	env.Reasoning = normalizeTurnHumanText(env.Reasoning)
-	return strictTurnFromEnvelope(env, fields)
+	return strictTurnFromEnvelope(env)
 }
 
-func strictTurnFromEnvelope(env jsonEnvelope, fields map[string]json.RawMessage) (Turn, error) {
+func strictTurnFromEnvelope(env rawTurnEnvelope) (Turn, error) {
 	switch env.Type {
 	case "act":
-		if err := requireActCommandWorkdirs(fields); err != nil {
+		bash, err := parseActBash(env.Bash)
+		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
 		}
-		if env.Bash == nil || len(env.Bash.Commands) == 0 {
+		if len(bash.Commands) == 0 {
 			return nil, ErrMissingCommand
 		}
-		if err := rejectPresentField(
-			fields,
-			"question",
-			"act turn only allows question when it is omitted",
+		if err := rejectTurnFields("act",
+			rawTurnField{"question", env.Question},
+			rawTurnField{"summary", env.Summary},
+			rawTurnField{"verification", env.Verification},
+			rawTurnField{"known_risks", env.KnownRisks},
 		); err != nil {
 			return nil, err
 		}
-		if err := rejectPresentField(
-			fields,
-			"summary",
-			"act turn only allows summary when it is omitted",
-		); err != nil {
-			return nil, err
-		}
-		actions := make([]BashAction, 0, len(env.Bash.Commands))
-		for _, command := range env.Bash.Commands {
+		actions := make([]BashAction, 0, len(bash.Commands))
+		for _, command := range bash.Commands {
 			if strings.TrimSpace(command.Command) == "" {
 				return nil, ErrMissingCommand
 			}
 			action := BashAction{Command: command.Command}
-			if command.Workdir != nil {
-				action.Workdir = *command.Workdir
+			if string(command.Workdir) != "null" {
+				if err := json.Unmarshal(command.Workdir, &action.Workdir); err != nil {
+					return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+				}
 			}
 			actions = append(actions, action)
 		}
@@ -75,55 +92,46 @@ func strictTurnFromEnvelope(env jsonEnvelope, fields map[string]json.RawMessage)
 			Reasoning: env.Reasoning,
 		}, nil
 	case "clarify":
-		if strings.TrimSpace(env.Question) == "" {
+		question, err := parseStringField(env.Question)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+		}
+		if strings.TrimSpace(question) == "" {
 			return nil, ErrEmptyClarify
 		}
-		if err := rejectPresentField(
-			fields,
-			"bash",
-			"clarify turn only allows bash when it is omitted",
+		if err := rejectTurnFields("clarify",
+			rawTurnField{"bash", env.Bash},
+			rawTurnField{"summary", env.Summary},
+			rawTurnField{"verification", env.Verification},
+			rawTurnField{"known_risks", env.KnownRisks},
 		); err != nil {
 			return nil, err
 		}
-		if err := rejectPresentField(
-			fields,
-			"summary",
-			"clarify turn only allows summary when it is omitted",
-		); err != nil {
-			return nil, err
-		}
-		return &ClarifyTurn{Question: env.Question, Reasoning: env.Reasoning}, nil
+		return &ClarifyTurn{Question: question, Reasoning: env.Reasoning}, nil
 	case "done":
-		if strings.TrimSpace(env.Summary) == "" {
+		summary, err := parseStringField(env.Summary)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+		}
+		if strings.TrimSpace(summary) == "" {
 			return nil, ErrEmptySummary
 		}
-		if err := rejectPresentField(
-			fields,
-			"bash",
-			"done turn only allows bash when it is omitted",
+		if err := rejectTurnFields("done",
+			rawTurnField{"bash", env.Bash},
+			rawTurnField{"question", env.Question},
 		); err != nil {
 			return nil, err
 		}
-		if err := rejectPresentField(
-			fields,
-			"question",
-			"done turn only allows question when it is omitted",
-		); err != nil {
-			return nil, err
-		}
-		knownRisks, err := requireDoneArrayFields(fields)
+		verification, knownRisks, err := parseDoneFields(env.Verification, env.KnownRisks)
 		if err != nil {
 			return nil, err
 		}
-		if env.Verification == nil {
-			return nil, fmt.Errorf("%w: missing required field %q", ErrInvalidJSON, "verification")
-		}
-		if err := validateDoneVerification(*env.Verification, knownRisks); err != nil {
+		if err := validateDoneVerification(verification, knownRisks); err != nil {
 			return nil, err
 		}
 		return &DoneTurn{
-			Summary:      env.Summary,
-			Verification: *env.Verification,
+			Summary:      summary,
+			Verification: verification,
 			KnownRisks:   knownRisks,
 			Reasoning:    env.Reasoning,
 		}, nil
@@ -134,58 +142,122 @@ func strictTurnFromEnvelope(env jsonEnvelope, fields map[string]json.RawMessage)
 	}
 }
 
-func requireDoneArrayFields(fields map[string]json.RawMessage) ([]string, error) {
-	rawVerification, ok := fields["verification"]
-	if !ok {
-		return nil, fmt.Errorf("%w: missing required field %q", ErrInvalidJSON, "verification")
+func parseActBash(raw json.RawMessage) (rawBashEnvelope, error) {
+	if raw == nil {
+		return rawBashEnvelope{}, fmt.Errorf("missing required field %q", "bash")
 	}
-	var verificationFields map[string]json.RawMessage
-	if err := json.Unmarshal(
-		rawVerification,
-		&verificationFields,
-	); err != nil ||
-		verificationFields == nil {
-		return nil, fmt.Errorf("%w: verification must be an object", ErrInvalidJSON)
+	var bash rawBashEnvelope
+	if string(raw) == "null" {
+		return bash, fmt.Errorf("field %q must contain array %q", "bash", "commands")
 	}
-	rawChecks, ok := verificationFields["checks"]
-	if !ok {
-		return nil, fmt.Errorf(
+	if err := unmarshalStrict(raw, &bash); err != nil || bash.Commands == nil {
+		if err != nil {
+			return bash, err
+		}
+		return bash, fmt.Errorf("field %q must contain array %q", "bash", "commands")
+	}
+	for i, command := range bash.Commands {
+		if command.Workdir == nil {
+			return bash, fmt.Errorf(
+				"missing required field %q",
+				fmt.Sprintf("bash.commands[%d].workdir", i),
+			)
+		}
+	}
+	return bash, nil
+}
+
+func parseStringField(raw json.RawMessage) (string, error) {
+	var value string
+	if raw == nil || string(raw) == "null" {
+		return value, nil
+	}
+	return value, json.Unmarshal(raw, &value)
+}
+
+func parseDoneFields(
+	verificationJSON,
+	rawRisks json.RawMessage,
+) (CompletionVerification, []string, error) {
+	if verificationJSON == nil {
+		return CompletionVerification{}, nil, fmt.Errorf(
+			"%w: missing required field %q",
+			ErrInvalidJSON,
+			"verification",
+		)
+	}
+	if string(verificationJSON) == "null" {
+		return CompletionVerification{}, nil, fmt.Errorf(
+			"%w: verification must be an object",
+			ErrInvalidJSON,
+		)
+	}
+	var raw rawVerification
+	if err := unmarshalStrict(verificationJSON, &raw); err != nil {
+		return CompletionVerification{}, nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+	}
+	if raw.Checks == nil {
+		return CompletionVerification{}, nil, fmt.Errorf(
 			"%w: missing required field %q",
 			ErrInvalidJSON,
 			"verification.checks",
 		)
 	}
-	if string(rawChecks) == "null" {
-		return nil, fmt.Errorf("%w: verification.checks must be an array", ErrInvalidJSON)
+	if string(raw.Checks) == "null" {
+		return CompletionVerification{}, nil, fmt.Errorf(
+			"%w: verification.checks must be an array",
+			ErrInvalidJSON,
+		)
 	}
-	var checks []json.RawMessage
-	if err := json.Unmarshal(rawChecks, &checks); err != nil {
-		return nil, fmt.Errorf("%w: verification.checks must be an array", ErrInvalidJSON)
+	var checks []VerificationCheck
+	if err := unmarshalStrict(raw.Checks, &checks); err != nil {
+		return CompletionVerification{}, nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
 	}
-
-	rawRisks, ok := fields["known_risks"]
-	if !ok {
-		return nil, fmt.Errorf("%w: missing required field %q", ErrInvalidJSON, "known_risks")
+	if rawRisks == nil {
+		return CompletionVerification{}, nil, fmt.Errorf(
+			"%w: missing required field %q",
+			ErrInvalidJSON,
+			"known_risks",
+		)
 	}
 	if string(rawRisks) == "null" {
-		return nil, fmt.Errorf("%w: known_risks must be an array", ErrInvalidJSON)
+		return CompletionVerification{}, nil, fmt.Errorf(
+			"%w: known_risks must be an array",
+			ErrInvalidJSON,
+		)
 	}
 	var risks []string
 	if err := json.Unmarshal(rawRisks, &risks); err != nil {
-		return nil, fmt.Errorf("%w: known_risks must be an array", ErrInvalidJSON)
+		return CompletionVerification{}, nil, fmt.Errorf(
+			"%w: known_risks must be an array",
+			ErrInvalidJSON,
+		)
 	}
-	return risks, nil
+	return CompletionVerification{Status: raw.Status, Checks: checks}, risks, nil
 }
 
 func cloneStrings(values []string) []string {
 	return append([]string{}, values...)
 }
 
-func rejectPresentField(fields map[string]json.RawMessage, field, detail string) error {
-	if _, ok := fields[field]; ok {
-		return fmt.Errorf("%w: %s", ErrInvalidJSON, detail)
+func rejectTurnFields(turn string, fields ...rawTurnField) error {
+	for _, field := range fields {
+		if field.value != nil {
+			return fmt.Errorf(
+				"%w: %s turn only allows %s when it is omitted",
+				ErrInvalidJSON,
+				turn,
+				field.name,
+			)
+		}
 	}
 	return nil
+}
+
+func unmarshalStrict(raw json.RawMessage, dst any) error {
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	return dec.Decode(dst)
 }
 
 func ensureSingleTurnJSONObject(dec *json.Decoder) error {
@@ -197,73 +269,4 @@ func ensureSingleTurnJSONObject(dec *json.Decoder) error {
 		return err
 	}
 	return nil
-}
-
-func requireActCommandWorkdirs(fields map[string]json.RawMessage) error {
-	raw, ok := fields["bash"]
-	if !ok {
-		return fmt.Errorf("missing required field %q", "bash")
-	}
-	var bash struct {
-		Commands []map[string]json.RawMessage `json:"commands"`
-	}
-	if err := json.Unmarshal(raw, &bash); err != nil || bash.Commands == nil {
-		return fmt.Errorf("field %q must contain array %q", "bash", "commands")
-	}
-	for i, item := range bash.Commands {
-		if item == nil {
-			return fmt.Errorf("field %q must be object", fmt.Sprintf("bash.commands[%d]", i))
-		}
-		if _, ok := item["workdir"]; !ok {
-			return fmt.Errorf(
-				"missing required field %q",
-				fmt.Sprintf("bash.commands[%d].workdir", i),
-			)
-		}
-	}
-	return nil
-}
-
-var escapedTurnListMarker = regexp.MustCompile(`(?m)^\\([*-])\s`)
-var inlineEscapedTurnListMarker = regexp.MustCompile(`\\([*-])\s`)
-
-func normalizeTurnHumanText(value string) string {
-	if value == "" || !strings.Contains(value, `\`) {
-		return value
-	}
-
-	normalized := value
-	for range 2 {
-		decoded, ok := decodeEscapedTurnHumanText(normalized)
-		if !ok || decoded == normalized {
-			break
-		}
-		normalized = decoded
-	}
-
-	normalized = escapedTurnListMarker.ReplaceAllString(normalized, `$1 `)
-	if strings.Contains(normalized, "\n- ") ||
-		strings.Contains(normalized, "\n* ") ||
-		strings.HasPrefix(normalized, "- ") ||
-		strings.HasPrefix(normalized, "* ") {
-		normalized = inlineEscapedTurnListMarker.ReplaceAllString(normalized, "\n$1 ")
-	}
-	return normalized
-}
-
-func decodeEscapedTurnHumanText(value string) (string, bool) {
-	if !strings.Contains(value, `\n`) &&
-		!strings.Contains(value, `\r`) &&
-		!strings.Contains(value, `\\-`) &&
-		!strings.Contains(value, `\\*`) &&
-		!strings.Contains(value, `\"`) {
-		return "", false
-	}
-
-	quoted := `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
-	decoded, err := strconv.Unquote(quoted)
-	if err != nil {
-		return "", false
-	}
-	return decoded, true
 }

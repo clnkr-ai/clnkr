@@ -14,11 +14,10 @@ type runPolicyState struct {
 	policy                            RunPolicy
 	commandsUsed, modelTurns          int
 	protocolErrors, completionRejects int
-	completionGate                    CompletionGate
+	completionGate                    completionGate
 	gateCompletions                   bool
 	guidancePressure                  resourcePressure
 	contextLengthBackstop             func(context.Context, error) error
-	contextLengthBackstopOriginal     error
 }
 
 func newRunPolicyStateOptions(policy RunPolicy, opts RunOptions) runPolicyState {
@@ -33,15 +32,32 @@ func newRunPolicyStateOptions(policy RunPolicy, opts RunOptions) runPolicyState 
 }
 
 func (s *runPolicyState) step(ctx context.Context, a *Agent) (bool, error) {
-	a.appendStateMessageIfNeeded()
-	a.appendResourceStateMessage(s.commandsUsed, s.modelTurns, s.resourcePressureGuidanceDue(a))
-	result, err := a.Step(ctx)
-	s.modelTurns++
+	result, err := s.runStepAttempt(ctx, a)
 	if err != nil {
-		return false, s.handleStepError(ctx, a, err)
+		if !errors.Is(err, ErrContextLengthExceeded) || s.contextLengthBackstop == nil {
+			return false, s.runError(a, err)
+		}
+
+		originalErr := err
+		backstop := s.contextLengthBackstop
+		s.contextLengthBackstop = nil
+		a.notify(EventDebug{Message: ContextLengthBackstopCompactingDebug})
+		if compactErr := backstop(ctx, originalErr); compactErr != nil {
+			compactErr = fmt.Errorf("context_length_backstop: compaction failed: %w", compactErr)
+			return false, s.runError(a, errors.Join(originalErr, compactErr))
+		}
+		if err := ctx.Err(); err != nil {
+			return false, s.runError(a, err)
+		}
+		a.notify(EventDebug{Message: ContextLengthBackstopRetryingDebug})
+		result, err = s.runStepAttempt(ctx, a)
+		if err != nil {
+			retryErr := fmt.Errorf("context_length_backstop: retry failed: %w", err)
+			return false, s.runError(a, errors.Join(originalErr, retryErr))
+		}
 	}
-	s.contextLengthBackstopOriginal = nil
-	if result.ParseErr != nil {
+
+	if result.ProtocolErr != nil {
 		return s.handleProtocolFailure(a)
 	}
 	s.protocolErrors = 0
@@ -58,25 +74,12 @@ func (s *runPolicyState) step(ctx context.Context, a *Agent) (bool, error) {
 	}
 }
 
-func (s *runPolicyState) handleStepError(ctx context.Context, a *Agent, err error) error {
-	if s.contextLengthBackstopOriginal != nil {
-		retryErr := fmt.Errorf("context_length_backstop: retry failed: %w", err)
-		return s.runError(a, errors.Join(s.contextLengthBackstopOriginal, retryErr))
-	}
-	if !errors.Is(err, ErrContextLengthExceeded) || s.contextLengthBackstop == nil {
-		return s.runError(a, err)
-	}
-
-	backstop := s.contextLengthBackstop
-	s.contextLengthBackstop = nil
-	s.contextLengthBackstopOriginal = err
-	a.notify(EventDebug{Message: ContextLengthBackstopCompactingDebug})
-	if compactErr := backstop(ctx, err); compactErr != nil {
-		compactErr = fmt.Errorf("context_length_backstop: compaction failed: %w", compactErr)
-		return s.runError(a, errors.Join(err, compactErr))
-	}
-	a.notify(EventDebug{Message: ContextLengthBackstopRetryingDebug})
-	return nil
+func (s *runPolicyState) runStepAttempt(ctx context.Context, a *Agent) (Response, error) {
+	a.appendStateMessageIfNeeded()
+	a.appendResourceStateMessage(s.commandsUsed, s.modelTurns, s.resourcePressureGuidanceDue(a))
+	result, err := a.Step(ctx)
+	s.modelTurns++
+	return result, err
 }
 
 func (s *runPolicyState) handleProtocolFailure(a *Agent) (bool, error) {
@@ -93,18 +96,18 @@ func (s *runPolicyState) handleDone(a *Agent, turn *DoneTurn) (bool, error) {
 		return true, nil
 	}
 
-	decision, reasons, guidance := s.completionGate.Decide(turn, s.commandsUsed, a.MaxSteps)
+	decision, reasons, guidance := s.completionGate.decide(*turn, s.commandsUsed, a.MaxSteps)
 	a.notify(
 		EventCompletionGate{
-			Decision: decision,
+			Decision: string(decision),
 			Reasons:  cloneStrings(reasons),
 			Summary:  turn.Summary,
 		},
 	)
 	switch decision {
-	case CompletionAccept:
+	case completionAccept:
 		return true, nil
-	case CompletionReject:
+	case completionReject:
 		s.completionRejects++
 		if s.completionRejects >= 3 {
 			return false, s.runError(
@@ -112,7 +115,7 @@ func (s *runPolicyState) handleDone(a *Agent, turn *DoneTurn) (bool, error) {
 				fmt.Errorf("consecutive completion gate rejections, exiting"),
 			)
 		}
-	case CompletionChallenge:
+	case completionChallenge:
 		s.completionRejects = 0
 	}
 	a.AppendUserMessage(guidance)
@@ -162,7 +165,7 @@ func (s *runPolicyState) handleAct(ctx context.Context, a *Agent, turn *ActTurn)
 		return false, s.runError(a, err)
 	}
 	s.completionRejects = 0
-	s.commandsUsed += execResult.ExecCount
+	s.commandsUsed += execResult.CommandsExecuted
 	a.notify(EventDebug{Message: fmt.Sprintf("step %d/%d", s.commandsUsed, a.MaxSteps)})
 	if a.MaxSteps > 0 && s.commandsUsed >= a.MaxSteps {
 		return s.requestStepLimitSummary(ctx, a)
@@ -185,19 +188,31 @@ func (s *runPolicyState) limitActTurn(a *Agent, turn *ActTurn) (*ActTurn, []Bash
 
 func (s *runPolicyState) requestStepLimitSummary(ctx context.Context, a *Agent) (bool, error) {
 	a.appendResourceStateMessage(s.commandsUsed, s.modelTurns, s.resourcePressureGuidanceDue(a))
-	summarize := a.RequestStepLimitSummary
-	for {
-		err := summarize(ctx)
-		s.modelTurns++
-		if err == nil {
-			s.contextLengthBackstopOriginal = nil
-			return true, nil
-		}
-		if handleErr := s.handleStepError(ctx, a, err); handleErr != nil {
-			return false, handleErr
-		}
-		summarize = a.retryStepLimitSummary
+	err := a.RequestStepLimitSummary(ctx)
+	s.modelTurns++
+	if err == nil {
+		return true, nil
 	}
+	if !errors.Is(err, ErrContextLengthExceeded) || s.contextLengthBackstop == nil {
+		return false, s.runError(a, err)
+	}
+
+	originalErr := err
+	backstop := s.contextLengthBackstop
+	s.contextLengthBackstop = nil
+	a.notify(EventDebug{Message: ContextLengthBackstopCompactingDebug})
+	if compactErr := backstop(ctx, originalErr); compactErr != nil {
+		compactErr = fmt.Errorf("context_length_backstop: compaction failed: %w", compactErr)
+		return false, s.runError(a, errors.Join(originalErr, compactErr))
+	}
+	a.notify(EventDebug{Message: ContextLengthBackstopRetryingDebug})
+	if retryErr := a.retryStepLimitSummary(ctx); retryErr != nil {
+		s.modelTurns++
+		retryErr = fmt.Errorf("context_length_backstop: retry failed: %w", retryErr)
+		return false, s.runError(a, errors.Join(originalErr, retryErr))
+	}
+	s.modelTurns++
+	return true, nil
 }
 
 func (s *runPolicyState) resourcePressureGuidanceDue(a *Agent) bool {

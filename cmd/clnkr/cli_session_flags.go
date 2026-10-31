@@ -20,7 +20,3 @@ func (values *sessionFlags) apply(opts *cliOptions) {
 	opts.continueSession = *values.continueSession || *values.continueShort
 	opts.listSessions = *values.listSessions || *values.listSessionsShort
 }
-
-func (values *sessionFlags) applyTo(opts *cliOptions, _ *flag.FlagSet, _ bool) {
-	values.apply(opts)
-}

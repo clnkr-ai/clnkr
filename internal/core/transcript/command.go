@@ -15,9 +15,9 @@ var salientPattern = regexp.MustCompile(
 
 // FormatCommandResult renders a command result as structured shell output.
 func FormatCommandResult(result CommandResult) string {
-	outcome := normalizedOutcome(result.Outcome, result.ExitCode)
+	outcome := result.Outcome
 	diagnostic := outcome.Type != CommandOutcomeExit ||
-		outcome.ExitCode != nil && *outcome.ExitCode != 0
+		outcome.ExitCode == nil || *outcome.ExitCode != 0
 	stdout, stdoutMeta := compressCommandStream(
 		"stdout",
 		result.Stdout,
@@ -125,15 +125,4 @@ func FormatSkippedCommandResult(reason string) string {
 			},
 		)
 	}
-}
-
-func normalizedOutcome(outcome CommandOutcome, fallbackExitCode int) CommandOutcome {
-	if outcome.Type == "" {
-		return CommandOutcome{Type: CommandOutcomeExit, ExitCode: &fallbackExitCode}
-	}
-	if outcome.Type == CommandOutcomeExit && outcome.ExitCode == nil {
-		code := fallbackExitCode
-		outcome.ExitCode = &code
-	}
-	return outcome
 }

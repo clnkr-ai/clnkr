@@ -23,7 +23,3 @@ func (values *runFlags) apply(opts *cliOptions) {
 	opts.verbose = *values.verbose || *values.verboseShort
 	opts.showVersion = *values.showVersion || *values.showVersionShort
 }
-
-func (values *runFlags) applyTo(opts *cliOptions, _ *flag.FlagSet, _ bool) {
-	values.apply(opts)
-}

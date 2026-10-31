@@ -7,21 +7,20 @@ import (
 
 type promptFlags struct {
 	taskPrompt, promptLong *string
-	fullSend               *bool
-	explicitFullSendFalse  bool
+	fullSend               bool
+	fullSendSet            bool
 }
 
 func newPromptFlags(flags *flag.FlagSet) *promptFlags {
 	values := &promptFlags{}
 	values.taskPrompt, values.promptLong = flags.String("p", "", ""), flags.String("prompt", "", "")
-	values.fullSend = new(bool)
 	flags.BoolFunc("full-send", "", func(s string) error {
 		value, err := strconv.ParseBool(s)
 		if err != nil {
 			return err
 		}
-		*values.fullSend = value
-		values.explicitFullSendFalse = values.explicitFullSendFalse || !value
+		values.fullSend = value
+		values.fullSendSet = true
 		return nil
 	})
 	return values
@@ -30,15 +29,8 @@ func newPromptFlags(flags *flag.FlagSet) *promptFlags {
 func (values *promptFlags) apply(opts *cliOptions, dumpUnattendedPrompt bool) {
 	opts.taskPrompt = aliasedString(*values.promptLong, *values.taskPrompt)
 	opts.singleTask = opts.taskPrompt != "" || dumpUnattendedPrompt
-	if opts.singleTask && values.explicitFullSendFalse {
+	if opts.singleTask && values.fullSendSet && !values.fullSend {
 		fatalOptionf("--full-send=false conflicts with -p")
 	}
-	if opts.singleTask {
-		*values.fullSend = true
-	}
-	opts.fullSend = *values.fullSend
-}
-
-func (values *promptFlags) applyTo(opts *cliOptions, _ *flag.FlagSet, dumpUnattendedPrompt bool) {
-	values.apply(opts, dumpUnattendedPrompt)
+	opts.fullSend = opts.singleTask || values.fullSend
 }

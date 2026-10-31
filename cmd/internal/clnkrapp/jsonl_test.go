@@ -128,9 +128,11 @@ func TestWriteJSONL(t *testing.T) {
 			typ:   "command_start",
 		},
 		{
-			name:  "core command done event uses event log encoding",
-			event: clnkr.EventCommandDone{Command: "echo hi", Stdout: "hi\n", ExitCode: 0},
-			typ:   "command_done",
+			name: "core command done event uses event log encoding",
+			event: clnkr.EventCommandDone{
+				Command: "echo hi", Stdout: "hi\n", Outcome: exitOutcome(0),
+			},
+			typ: "command_done",
 		},
 		{
 			name:  "context backstop debug event",

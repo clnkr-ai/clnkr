@@ -37,10 +37,7 @@ func TestShellExecutor(t *testing.T) {
 	}
 
 	t.Run("captures stdout stderr cwd and exit", func(t *testing.T) {
-		out, err := exec.Execute(ctx, `pwd && echo error >&2`, "/tmp")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		out := exec.Execute(ctx, `pwd && echo error >&2`, "/tmp")
 		trimmed := strings.TrimSpace(out.Stdout)
 		if trimmed != "/tmp" && trimmed != "/private/tmp" {
 			t.Errorf("stdout = %q, want /tmp or /private/tmp", out.Stdout)
@@ -48,20 +45,11 @@ func TestShellExecutor(t *testing.T) {
 		if strings.TrimSpace(out.Stderr) != "error" {
 			t.Errorf("stderr = %q, want %q", out.Stderr, "error")
 		}
-		if out.ExitCode != 0 {
-			t.Errorf("exit code = %d, want 0", out.ExitCode)
-		}
 		assertExitOutcome(t, out.Outcome, 0)
 	})
 
-	t.Run("returns exit code and stderr on failure", func(t *testing.T) {
-		out, err := exec.Execute(ctx, "echo nope >&2; exit 7", "/tmp")
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-		if out.ExitCode != 7 {
-			t.Errorf("exit code = %d, want 7", out.ExitCode)
-		}
+	t.Run("returns exit outcome and stderr on failure", func(t *testing.T) {
+		out := exec.Execute(ctx, "echo nope >&2; exit 7", "/tmp")
 		if strings.TrimSpace(out.Stderr) != "nope" {
 			t.Errorf("stderr = %q, want %q", out.Stderr, "nope")
 		}
@@ -72,12 +60,9 @@ func TestShellExecutor(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 
-		out, err := exec.Execute(ctx, "sleep 1", "/tmp")
-		if err == nil {
-			t.Fatal("expected error from expired context, got nil")
-		}
+		out := exec.Execute(ctx, "sleep 1", "/tmp")
 		if ctx.Err() != context.DeadlineExceeded {
-			t.Fatalf("caller context = %v, want deadline exceeded (err=%v)", ctx.Err(), err)
+			t.Fatalf("caller context = %v, want deadline exceeded", ctx.Err())
 		}
 		if out.Outcome.Type != CommandOutcomeTimeout {
 			t.Fatalf("outcome = %#v, want timeout", out.Outcome)
@@ -87,25 +72,40 @@ func TestShellExecutor(t *testing.T) {
 	t.Run("records cancelled outcome", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		out, err := exec.Execute(ctx, "echo hello", "/tmp")
-		if err == nil {
-			t.Fatal("expected error from cancelled context, got nil")
-		}
+		out := exec.Execute(ctx, "echo hello", "/tmp")
 		if out.Outcome.Type != CommandOutcomeCancelled {
 			t.Fatalf("outcome = %#v, want cancelled", out.Outcome)
 		}
 	})
 
 	t.Run("records host execution error outcome", func(t *testing.T) {
-		out, err := exec.Execute(ctx, "pwd", filepath.Join(t.TempDir(), "missing"))
-		if err == nil {
-			t.Fatal("expected host execution error, got nil")
-		}
+		out := exec.Execute(ctx, "pwd", filepath.Join(t.TempDir(), "missing"))
 		if out.Outcome.Type != CommandOutcomeError {
 			t.Fatalf("outcome = %#v, want error", out.Outcome)
 		}
 		if out.Outcome.Message == "" {
 			t.Fatal("outcome message is empty, want host error detail")
+		}
+	})
+
+	t.Run("records wrapper setup failure as error outcome", func(t *testing.T) {
+		t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
+		out := exec.Execute(ctx, "pwd", "/tmp")
+		if out.Outcome.Type != CommandOutcomeError ||
+			!strings.Contains(out.Outcome.Message, "wrap command: create state file") {
+			t.Fatalf("outcome = %#v, want wrapper setup error", out.Outcome)
+		}
+	})
+
+	t.Run("records shell state failure as error outcome", func(t *testing.T) {
+		out := exec.Execute(
+			ctx,
+			`rm -f "$CLNKR_STATE_FILE" && mkdir "$CLNKR_STATE_FILE"`,
+			"/tmp",
+		)
+		if out.Outcome.Type != CommandOutcomeError ||
+			!strings.Contains(out.Outcome.Message, "read state file") {
+			t.Fatalf("outcome = %#v, want shell state error", out.Outcome)
 		}
 	})
 
@@ -115,9 +115,9 @@ func TestShellExecutor(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 
-		_, err := exec.Execute(ctx, "sh -c 'sleep 1; touch child-survived' & wait", dir)
-		if err == nil {
-			t.Fatal("expected error from expired context, got nil")
+		out := exec.Execute(ctx, "sh -c 'sleep 1; touch child-survived' & wait", dir)
+		if out.Outcome.Type != CommandOutcomeTimeout {
+			t.Fatalf("outcome = %#v, want timeout", out.Outcome)
 		}
 
 		time.Sleep(1500 * time.Millisecond)
@@ -134,12 +134,12 @@ func TestShellExecutor(t *testing.T) {
 			t.Fatalf("failed to get parent pgid: %v", err)
 		}
 
-		out, err := exec.Execute(ctx, "ps -o pgid= -p $$", "/tmp")
-		if err != nil {
+		out := exec.Execute(ctx, "ps -o pgid= -p $$", "/tmp")
+		if commandOutcomeIsError(out.Outcome) {
 			if strings.Contains(out.Stderr, "Operation not permitted") {
 				t.Skip("ps is not permitted in this sandbox")
 			}
-			t.Fatalf("unexpected error: %v", err)
+			t.Fatalf("unexpected outcome: %#v", out.Outcome)
 		}
 		childPgid, err := strconv.Atoi(strings.TrimSpace(out.Stdout))
 		if err != nil {
@@ -157,14 +157,11 @@ func TestShellExecutor(t *testing.T) {
 			"PATH":       os.Getenv("PATH"),
 		}}
 
-		out, err := envExec.Execute(
+		out := envExec.Execute(
 			ctx,
 			`printf "%s,%s" "$CLNKR_ONLY" "$CLNKR_PARENT_ONLY"`,
 			"/tmp",
 		)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
 		if out.Stdout != "yes," {
 			t.Fatalf("stdout = %q, want %q", out.Stdout, "yes,")
 		}
@@ -177,20 +174,14 @@ func TestShellExecutor(t *testing.T) {
 		envExec.SetEnv(base)
 		base["CLNKR_SETENV_COPY"] = "after"
 
-		out, err := envExec.Execute(ctx, `printf %s "$CLNKR_SETENV_COPY"`, "/tmp")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		out := envExec.Execute(ctx, `printf %s "$CLNKR_SETENV_COPY"`, "/tmp")
 		if out.Stdout != "before" {
 			t.Fatalf("stdout = %q, want %q", out.Stdout, "before")
 		}
 	})
 
 	t.Run("captures post-command shell state", func(t *testing.T) {
-		out, err := exec.Execute(ctx, `export CLNKR_TEST_VAR=ok && cd /tmp && printf done`, "/")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		out := exec.Execute(ctx, `export CLNKR_TEST_VAR=ok && cd /tmp && printf done`, "/")
 		if out.Stdout != "done" {
 			t.Fatalf("stdout = %q, want %q", out.Stdout, "done")
 		}
@@ -207,10 +198,7 @@ func TestShellExecutor(t *testing.T) {
 		delete(base, "CLNKR_STATE_FILE")
 		envExec.SetEnv(base)
 
-		out, err := envExec.Execute(ctx, `export CLNKR_TEST_VAR=ok && printf done`, "/tmp")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		out := envExec.Execute(ctx, `export CLNKR_TEST_VAR=ok && printf done`, "/tmp")
 		if _, ok := out.PostEnv["CLNKR_STATE_FILE"]; ok {
 			t.Fatalf("CLNKR_STATE_FILE leaked into PostEnv: %+v", out.PostEnv)
 		}
@@ -257,14 +245,11 @@ func TestShellExecutor(t *testing.T) {
 			t.Fatalf("state file leaked into PostEnv: %+v", out3.PostEnv)
 		}
 
-		out4, err := envExec.Execute(
+		out4 := envExec.Execute(
 			ctx,
 			`printf "%s,%s" "$CLNKR_CHAIN_ONE" "$CLNKR_CHAIN_TWO"`,
 			"/tmp",
 		)
-		if err != nil {
-			t.Fatalf("step 4: %v", err)
-		}
 		if out4.Stdout != ",two" {
 			t.Fatalf("stdout = %q, want %q", out4.Stdout, ",two")
 		}
@@ -276,10 +261,7 @@ func TestShellExecutor(t *testing.T) {
 		runGit(t, repo, "add", "note.txt")
 		runGit(t, repo, "commit", "-qm", "add note")
 
-		out, err := exec.Execute(ctx, "printf 'next\\n' > note.txt", repo)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		out := exec.Execute(ctx, "printf 'next\\n' > note.txt", repo)
 		if got := out.Feedback.ChangedFiles; !reflect.DeepEqual(got, []string{"note.txt"}) {
 			t.Fatalf("changed files = %#v, want %#v", got, []string{"note.txt"})
 		}
@@ -293,10 +275,7 @@ func TestShellExecutor(t *testing.T) {
 		repo := initGitRepo(t)
 		writeFile(t, filepath.Join(repo, "dirty.txt"), "dirty\n")
 
-		out, err := exec.Execute(ctx, "printf 'next\\n' > note.txt", repo)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		out := exec.Execute(ctx, "printf 'next\\n' > note.txt", repo)
 		if len(out.Feedback.ChangedFiles) != 0 || out.Feedback.Diff != "" {
 			t.Fatalf("feedback = %#v, want empty", out.Feedback)
 		}
@@ -308,10 +287,7 @@ func TestShellExecutor(t *testing.T) {
 		runGit(t, repo, "add", "old.txt")
 		runGit(t, repo, "commit", "-qm", "add old")
 
-		out, err := exec.Execute(ctx, "git mv old.txt new.txt", repo)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		out := exec.Execute(ctx, "git mv old.txt new.txt", repo)
 		if got := out.Feedback.ChangedFiles; !reflect.DeepEqual(
 			got,
 			[]string{"new.txt", "old.txt"},
@@ -324,14 +300,11 @@ func TestShellExecutor(t *testing.T) {
 		repo := initGitRepo(t)
 		subdir := filepath.Join(repo, "dir", "subdir")
 
-		out, err := exec.Execute(
+		out := exec.Execute(
 			ctx,
 			"mkdir -p dir/subdir && cd dir/subdir && printf 'nested\\n' > local.txt",
 			repo,
 		)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
 		assertSamePath(t, out.PostCwd, subdir)
 		if got := out.Feedback.ChangedFiles; !reflect.DeepEqual(got, []string{"local.txt"}) {
 			t.Fatalf("changed files = %#v, want %#v", got, []string{"local.txt"})
@@ -372,9 +345,9 @@ func assertSamePath(t *testing.T, got, want string) {
 func executeAndUseEnv(t *testing.T, exec *ShellExecutor, command, dir string) CommandResult {
 	t.Helper()
 
-	out, err := exec.Execute(context.Background(), command, dir)
-	if err != nil {
-		t.Fatalf("execute %q: %v", command, err)
+	out := exec.Execute(context.Background(), command, dir)
+	if commandOutcomeIsError(out.Outcome) {
+		t.Fatalf("execute %q: %#v", command, out.Outcome)
 	}
 	exec.SetEnv(out.PostEnv)
 	return out

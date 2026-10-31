@@ -2,55 +2,46 @@ package clnkr
 
 import "strings"
 
-const CompletionAccept, CompletionReject, CompletionChallenge = "accept", "reject", "challenge"
+type completionDecision string
 
-type CompletionGate struct{ challengesUsed int }
+const (
+	completionAccept    completionDecision = "accept"
+	completionReject    completionDecision = "reject"
+	completionChallenge completionDecision = "challenge"
+)
 
-func (g *CompletionGate) Decide(
-	done *DoneTurn,
+type completionGate struct{ challengesUsed int }
+
+func (g *completionGate) decide(
+	done DoneTurn,
 	commandsUsed, maxSteps int,
-) (string, []string, string) {
+) (completionDecision, []string, string) {
 	if reasons := completionRejectReasons(done, commandsUsed, maxSteps); len(reasons) > 0 {
-		return CompletionReject, reasons, completionRejectGuidance(reasons[0])
+		return completionReject, reasons, completionRejectGuidance(reasons[0])
 	}
 	if reasons := completionChallengeReasons(done, commandsUsed); len(reasons) > 0 {
 		if g.challengesUsed > 0 {
-			return CompletionAccept, []string{"challenge_limit_reached"}, ""
+			return completionAccept, []string{"challenge_limit_reached"}, ""
 		}
 		g.challengesUsed++
-		return CompletionChallenge, reasons, completionChallengeGuidance()
+		return completionChallenge, reasons, completionChallengeGuidance()
 	}
-	return CompletionAccept, nil, ""
+	return completionAccept, nil, ""
 }
 
-func completionRejectReasons(done *DoneTurn, commandsUsed, maxSteps int) []string {
-	if done == nil {
-		return []string{"missing_done_turn"}
-	}
+func completionRejectReasons(done DoneTurn, commandsUsed, maxSteps int) []string {
 	var reasons []string
-	reasons = appendReason(reasons, strings.TrimSpace(done.Summary) == "", "empty_summary")
 	reasons = appendReason(
 		reasons,
 		containsAny(strings.ToLower(done.Summary), incompleteSummaryPhrases),
 		"incomplete_summary",
 	)
-	switch done.Verification.Status {
-	case VerificationVerified:
-		reasons = appendReason(
-			reasons,
-			len(done.Verification.Checks) == 0,
-			"verified_without_checks",
-		)
-	case VerificationPartiallyVerified:
-		reasons = appendReason(reasons, len(done.KnownRisks) == 0, "partial_without_risks")
-	case VerificationNotVerified:
+	if done.Verification.Status == VerificationNotVerified {
 		reasons = appendReason(
 			reasons,
 			maxSteps <= 0 || commandsUsed < maxSteps,
 			"not_verified_with_budget_remaining",
 		)
-	default:
-		reasons = append(reasons, "invalid_verification_status")
 	}
 	return reasons
 }
@@ -87,10 +78,7 @@ var completionChallengeRules = []completionChallengeRule{
 	},
 }
 
-func completionChallengeReasons(done *DoneTurn, commandsUsed int) []string {
-	if done == nil {
-		return nil
-	}
+func completionChallengeReasons(done DoneTurn, commandsUsed int) []string {
 	summary := strings.ToLower(done.Summary)
 	checks := checksText(done.Verification.Checks)
 	var reasons []string

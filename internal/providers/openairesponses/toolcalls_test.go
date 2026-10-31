@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -86,6 +87,57 @@ func TestModelQueryToolCalls(t *testing.T) {
 	}
 	if len(resp.ProviderReplay) != 1 || resp.ProviderReplay[0].Type != "reasoning" {
 		t.Fatalf("ProviderReplay = %#v", resp.ProviderReplay)
+	}
+}
+
+func TestModelQueryToolCallsReplaysInterleavedRawOutput(t *testing.T) {
+	reasoning := `{"type":"reasoning", "id":"rs_1", "summary":[], "encrypted_content":"opaque"}`
+	unknown := `{"type":"custom_trace", "payload":{"spacing": "preserved"}}`
+	secondReasoning := `{"type":"reasoning", "id":"rs_2", "summary":[]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"output":[`+reasoning+`,{`+
+			`"type":"message","role":"assistant","content":[]},`+unknown+`,{`+
+			`"type":"function_call","call_id":"call_1","name":"bash",`+
+			`"arguments":"{\"command\":\"pwd\",\"workdir\":null}","status":"completed"},`+
+			secondReasoning+`],"usage":{"input_tokens":3,"output_tokens":4}}`)
+	}))
+	defer server.Close()
+
+	model := openairesponses.NewModelWithOptions(
+		server.URL,
+		"test-key",
+		"gpt-5",
+		"sys prompt",
+		openairesponses.Options{UseBashToolCalls: true},
+	)
+	resp, err := model.Query(
+		context.Background(),
+		[]clnkr.Message{{Role: "user", Content: "where"}},
+	)
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	want := []struct {
+		typ string
+		raw string
+	}{
+		{typ: "reasoning", raw: reasoning},
+		{typ: "custom_trace", raw: unknown},
+		{typ: "reasoning", raw: secondReasoning},
+	}
+	if len(resp.ProviderReplay) != len(want) {
+		t.Fatalf("ProviderReplay = %#v, want %d items", resp.ProviderReplay, len(want))
+	}
+	for i, item := range resp.ProviderReplay {
+		if item.Type != want[i].typ || string(item.JSON) != want[i].raw {
+			t.Fatalf(
+				"ProviderReplay[%d] = %#v, want type %q JSON %q",
+				i,
+				item,
+				want[i].typ,
+				want[i].raw,
+			)
+		}
 	}
 }
 
