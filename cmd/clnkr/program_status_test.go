@@ -253,135 +253,143 @@ func TestProgramStatusProviderEOF(t *testing.T) {
 	requireProgramStates(t, output, "working", "error")
 }
 
+func programStatusClarificationCommand(t *testing.T, extraArgs ...string) (*exec.Cmd, func()) {
+	t.Helper()
+	server, _ := newOpenAIChatServer(t, func(call int) string {
+		if call == 1 {
+			return `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":null,"reasoning":null}}`
+		}
+		return openAIWrappedDone("done")
+	})
+	args := []string{"-test.run=TestMainHelper", "--", "--full-send",
+		"--provider", "openai", "--provider-api", "openai-chat-completions",
+		"--base-url", server.URL, "--model", "gpt-test"}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	cmd := exec.CommandContext(ctx, os.Args[0], append(args, extraArgs...)...)
+	cmd.Env = append(withoutCLNKREnv(os.Environ()), "CLNKR_HELPER_MAIN=1", "CLNKR_API_KEY=test-key")
+	cmd.Stdin, cmd.Stderr = os.Stderr, os.Stderr
+	return cmd, func() {
+		cancel()
+		if cmd.Process != nil && cmd.ProcessState == nil {
+			_ = cmd.Wait()
+		}
+		server.Close()
+	}
+}
+
+func requireProgramStatusExit(t *testing.T, cmd *exec.Cmd, want int) {
+	t.Helper()
+	err := cmd.Wait()
+	var exitErr *exec.ExitError
+	if err != nil && !errors.As(err, &exitErr) {
+		t.Fatal(err)
+	}
+	if got := cmd.ProcessState.ExitCode(); got != want {
+		t.Fatalf("exit code = %d, want %d", got, want)
+	}
+}
+
+func waitForNextProgramStatusPrompt(t *testing.T, out *guardedBuffer) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for strings.Count(out.String(), "clnkr> ") != 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if strings.Count(out.String(), "clnkr> ") != 2 {
+		t.Fatalf("next prompt not shown: %q", out.String())
+	}
+}
+
 func TestProgramStatusFullSendClarification(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	for _, tt := range []struct {
-		name                             string
-		singleTask, pipe, eof, interrupt bool
-		trajectoryFailure                bool
+		name, reply, finalMessage string
+		exitKey                   byte
+		wantExit                  int
+		states                    []string
 	}{
-		{name: "interactive"},
-		{name: "interactive EOF", eof: true},
-		{name: "interactive SIGINT", interrupt: true},
-		{name: "unattended terminal stdin", singleTask: true},
-		{name: "unattended trajectory failure", singleTask: true, trajectoryFailure: true},
-		{name: "piped stdin", pipe: true},
+		{"reply", "this repo\n", "", 4, 0, []string{"working", "blocked/question", "working", "done"}},
+		{"EOF", "", "Cancelled", 4, 0, []string{"working", "blocked/question", "idle"}},
+		{"SIGINT", "", "Cancelled", 3, 130, []string{"working", "blocked/question", "idle"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			server, _ := newOpenAIChatServer(t, func(call int) string {
-				if call == 1 {
-					return `{"turn":{"type":"clarify","bash":null,"question":"Which repo?","summary":null,"reasoning":null}}`
-				}
-				return openAIWrappedDone("done")
-			})
-			defer server.Close()
-			var trajectory string
 			output := captureProgramStatus(t, func(out *guardedBuffer, input *os.File) {
-				args := []string{"-test.run=TestMainHelper", "--", "--full-send",
-					"--provider", "openai", "--provider-api", "openai-chat-completions",
-					"--base-url", server.URL, "--model", "gpt-test"}
-				if tt.singleTask {
-					args = append(args, "-p", "inspect")
-				}
-				if tt.trajectoryFailure {
-					trajectory = t.TempDir()
-					args = append(args, "--trajectory", trajectory)
-				}
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				cmd := exec.CommandContext(ctx, os.Args[0], args...)
-				defer func() {
-					cancel()
-					if cmd.Process != nil && cmd.ProcessState == nil {
-						_ = cmd.Wait()
-					}
-				}()
-				cmd.Env = append(
-					withoutCLNKREnv(os.Environ()),
-					"CLNKR_HELPER_MAIN=1",
-					"CLNKR_API_KEY=test-key",
-				)
-				cmd.Stdin, cmd.Stderr = os.Stderr, os.Stderr
-				if tt.interrupt {
+				cmd, cleanup := programStatusClarificationCommand(t)
+				defer cleanup()
+				if tt.exitKey == 3 {
 					cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
-				}
-				if tt.pipe {
-					cmd.Stdin = strings.NewReader("inspect\n")
 				}
 				if err := cmd.Start(); err != nil {
 					t.Fatal(err)
 				}
-				if !tt.singleTask && !tt.pipe {
-					waitForOutput(t, out, "clnkr> ")
-					if _, err := io.WriteString(input, "inspect\n"); err != nil {
-						t.Fatal(err)
-					}
-					waitForOutput(t, out, "Which repo?")
-					// Waiting for the next prompt must retain the question status.
-					deadline := time.Now().Add(time.Second)
-					for strings.Count(out.String(), "clnkr> ") != 2 && time.Now().Before(deadline) {
-						time.Sleep(time.Millisecond)
-					}
-					if strings.Count(out.String(), "clnkr> ") != 2 {
-						t.Fatalf("next prompt not shown: %q", out.String())
-					}
-					requireProgramStates(t, out.String(), "working", "blocked/question")
-					reports := programStatuses(t, out.String())
-					if reports[1]["msg"] != "Clarification needed" {
-						t.Fatalf("question status = %#v", reports[1])
-					}
-					if !tt.eof && !tt.interrupt {
-						if _, err := io.WriteString(input, "this repo\n"); err != nil {
-							t.Fatal(err)
-						}
-						waitForOutput(t, out, "state=done")
-					}
-					exitKey := byte(4)
-					if tt.interrupt {
-						exitKey = 3
-					}
-					if _, err := input.Write([]byte{exitKey}); err != nil {
-						t.Fatal(err)
-					}
-				}
-				err := cmd.Wait()
-				if tt.singleTask || tt.pipe || tt.interrupt {
-					wantExit := 2
-					if tt.interrupt {
-						wantExit = 130
-					} else if tt.trajectoryFailure {
-						wantExit = 1
-					}
-					var exitErr *exec.ExitError
-					if !errors.As(err, &exitErr) || exitErr.ExitCode() != wantExit {
-						t.Fatalf("exit error = %v, want exit %d", err, wantExit)
-					}
-				} else if err != nil {
+				waitForOutput(t, out, "clnkr> ")
+				if _, err := io.WriteString(input, "inspect\n"); err != nil {
 					t.Fatal(err)
 				}
+				waitForOutput(t, out, "Which repo?")
+				waitForNextProgramStatusPrompt(t, out)
+				requireProgramStates(t, out.String(), "working", "blocked/question")
+				reports := programStatuses(t, out.String())
+				if reports[1]["msg"] != "Clarification needed" {
+					t.Fatalf("question status = %#v", reports[1])
+				}
+				if tt.reply != "" {
+					if _, err := io.WriteString(input, tt.reply); err != nil {
+						t.Fatal(err)
+					}
+					waitForOutput(t, out, "state=done")
+				}
+				if _, err := input.Write([]byte{tt.exitKey}); err != nil {
+					t.Fatal(err)
+				}
+				requireProgramStatusExit(t, cmd, tt.wantExit)
 			})
-			if tt.singleTask || tt.pipe {
-				requireProgramStates(t, output, "working", "error")
-				if tt.trajectoryFailure {
-					wantError := fmt.Sprintf(
-						"cannot write trajectory %q: open %s: is a directory",
-						trajectory,
-						trajectory,
-					)
-					if report := programStatuses(t, output)[1]; report["msg"] != wantError {
-						t.Fatalf("error status = %#v, want %q", report, wantError)
-					}
-					wantDiagnostics := "Error: " + wantError + "\r\nError: clarify: clarification needed\r\n"
-					if !strings.HasSuffix(output, wantDiagnostics) {
-						t.Fatalf("output = %q, want final diagnostics %q", output, wantDiagnostics)
-					}
+			requireProgramStates(t, output, tt.states...)
+			reports := programStatuses(t, output)
+			if tt.finalMessage != "" && reports[2]["msg"] != tt.finalMessage {
+				t.Fatalf("cancellation status = %#v", reports[2])
+			}
+		})
+	}
+}
+
+func TestProgramStatusFullSendUnattendedClarification(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	trajectory := t.TempDir()
+	trajectoryError := fmt.Sprintf(
+		"cannot write trajectory %q: open %s: is a directory",
+		trajectory,
+		trajectory,
+	)
+	for _, tt := range []struct {
+		name, input, message, diagnostics string
+		args                              []string
+		wantExit                          int
+	}{
+		{name: "terminal stdin", args: []string{"-p", "inspect"}, wantExit: 2},
+		{name: "trajectory failure", args: []string{"-p", "inspect", "--trajectory", trajectory}, wantExit: 1,
+			message: trajectoryError, diagnostics: "Error: " + trajectoryError + "\r\nError: clarify: clarification needed\r\n"},
+		{name: "piped stdin", input: "inspect\n", wantExit: 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			output := captureProgramStatus(t, func(*guardedBuffer, *os.File) {
+				cmd, cleanup := programStatusClarificationCommand(t, tt.args...)
+				defer cleanup()
+				if tt.input != "" {
+					cmd.Stdin = strings.NewReader(tt.input)
 				}
-			} else if tt.eof || tt.interrupt {
-				requireProgramStates(t, output, "working", "blocked/question", "idle")
-				if reports := programStatuses(t, output); reports[2]["msg"] != "Cancelled" {
-					t.Fatalf("cancellation status = %#v", reports[2])
+				if err := cmd.Start(); err != nil {
+					t.Fatal(err)
 				}
-			} else {
-				requireProgramStates(t, output, "working", "blocked/question", "working", "done")
+				requireProgramStatusExit(t, cmd, tt.wantExit)
+			})
+			requireProgramStates(t, output, "working", "error")
+			if report := programStatuses(t, output)[1]; tt.message != "" &&
+				report["msg"] != tt.message {
+				t.Fatalf("error status = %#v, want %q", report, tt.message)
+			}
+			if !strings.HasSuffix(output, tt.diagnostics) {
+				t.Fatalf("output = %q, want final diagnostics %q", output, tt.diagnostics)
 			}
 		})
 	}
@@ -617,13 +625,7 @@ func TestProgramStatusPreservesOutcomeAtNextPrompt(t *testing.T) {
 					}()
 					defer close(reader.lines)
 					waitForOutput(t, out, "state="+final)
-					deadline := time.Now().Add(time.Second)
-					for strings.Count(out.String(), "clnkr> ") != 2 && time.Now().Before(deadline) {
-						time.Sleep(time.Millisecond)
-					}
-					if strings.Count(out.String(), "clnkr> ") != 2 {
-						t.Fatalf("next prompt not shown: %q", out.String())
-					}
+					waitForNextProgramStatusPrompt(t, out)
 					requireProgramStates(t, out.String(), "working", final)
 					reader.lines <- lineResult{err: ending.err}
 					wantErr := ending.err
