@@ -493,6 +493,38 @@ func TestCommandProgressWritesToStderr(t *testing.T) {
 	}
 }
 
+func TestProgramStatusDoesNotChangeRedirectedOutput(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	server, _ := newOpenAIChatServer(t, func(int) string { return openAIWrappedDone("done") })
+	defer server.Close()
+	events := filepath.Join(t.TempDir(), "events.jsonl")
+	trajectory := filepath.Join(t.TempDir(), "trajectory.json")
+	stdout, stderr, err := runMainHelperWithEnv(t, []string{"CLNKR_API_KEY=test-key"},
+		"--provider", "openai", "--provider-api", "openai-chat-completions",
+		"--base-url", server.URL, "--model", "gpt-test", "-p", "inspect",
+		"--event-log", events, "--trajectory", trajectory)
+	if err != nil || stdout.String() != "done\n" || stderr.String() != "" {
+		t.Fatalf("run = %v, stdout = %q, stderr = %q", err, stdout.String(), stderr.String())
+	}
+	for _, path := range []string{events, trajectory} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(data) == 0 || bytes.Contains(data, []byte("\x1b]7501;")) ||
+			bytes.Contains(data, []byte(`\u001b]7501;`)) {
+			t.Fatalf("invalid artifact %s: %q", path, data)
+		}
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		for decoder.More() {
+			var value any
+			if err := decoder.Decode(&value); err != nil {
+				t.Fatalf("decode %s: %v", path, err)
+			}
+		}
+	}
+}
+
 func TestStepLimitInvalidSummaryExitsNonzero(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	server, _ := newOpenAIChatServer(t, func(call int) string {
