@@ -12,10 +12,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - provider: openai
-            secret_name: OPENAI_API_KEY
-            base_url_var: CLNKR_EVALUATION_BASE_URL
-            model_var: CLNKR_EVALUATION_MODEL
+          # Temporarily skip OpenAI live evals until its CI credentials are fixed.
           - provider: anthropic
             secret_name: ANTHROPIC_API_KEY
             base_url_var: CLNKR_EVALUATION_ANTHROPIC_BASE_URL
