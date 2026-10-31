@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Require latest main checks success
+      - name: Require prepared changelog and green tagged main
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/release-require-green-main.sh
@@ -234,25 +234,6 @@ jobs:
           git add debian/changelog
           git commit --allow-empty -m "Update changelog for ${VERSION}-1"
           git push origin debian/main
-
-      - name: Generate CHANGELOG.md
-        run: |
-          git checkout main
-          VERSION="${GITHUB_REF_NAME}"
-          DATE=$(git log -1 --format=%cs "$GITHUB_REF_NAME")
-          {
-            echo "# Changelog"
-            echo ""
-            echo "## ${VERSION} (${DATE})"
-            echo ""
-            echo "- Restart release history for the clnkr CLI."
-            echo ""
-          } > CHANGELOG.md
-          git add CHANGELOG.md
-          git diff --cached --quiet || {
-            git commit -m "Update CHANGELOG.md for ${GITHUB_REF_NAME}"
-            git push origin main
-          }
 
       - name: Collect assets
         run: |

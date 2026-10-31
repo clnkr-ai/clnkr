@@ -10,10 +10,35 @@ if [[ -z "$repo" ]]; then
   exit 2
 fi
 
+version="${GITHUB_REF_NAME:-}"
+release_sha="${GITHUB_SHA:-}"
+if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || -z "$release_sha" ]]; then
+  echo "error: GITHUB_REF_NAME must be a plain version tag and GITHUB_SHA its commit" >&2
+  exit 2
+fi
+
+changelog="$(git show "${release_sha}:CHANGELOG.md")"
+heading="$(awk '/^## / { print; exit }' <<<"$changelog")"
+heading_pattern="^## ${version//./\\.} \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$"
+if [[ ! "$heading" =~ $heading_pattern ]]; then
+  echo "error: tagged CHANGELOG.md must start with ## ${version} (YYYY-MM-DD)" >&2
+  exit 1
+fi
+notes="$(awk '/^## / { if (seen++) exit; next } seen && NF { print }' <<<"$changelog")"
+if [[ -z "$notes" ]]; then
+  echo "error: tagged CHANGELOG.md needs release notes for ${version}" >&2
+  exit 1
+fi
+
 main_json="$(gh api "/repos/${repo}/git/ref/heads/main")"
 main_sha="$(jq -r '.object.sha // empty' <<<"$main_json")"
 if [[ -z "$main_sha" ]]; then
   echo "error: could not resolve heads/main" >&2
+  exit 1
+fi
+
+if [[ "$release_sha" != "$main_sha" ]]; then
+  echo "error: tagged commit ${release_sha} must match main snapshot ${main_sha}" >&2
   exit 1
 fi
 

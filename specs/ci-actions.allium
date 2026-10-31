@@ -35,7 +35,6 @@ enum EvaluationProvider { openai | anthropic }
 enum ReleaseObservation {
     debian_branch_updated |
     debian_changelog_updated |
-    project_changelog_updated |
     generated_manpages_packaged |
     homebrew_tap_updated
 }
@@ -257,6 +256,8 @@ rule StartReleaseWhenPrerequisitesPass {
     requires: run.status = requested
     requires: main_ref.kind = branch
     requires: main_ref.name = "main"
+    requires: run.ref.sha = main_ref.sha
+    requires: TaggedChangelogStartsWithVersionAndReleaseNotes(run.ref)
     requires: MainRepositoryStatusIsGreen(main_ref)
     requires: LiveEvaluationsPassed(run.ref)
 
@@ -276,7 +277,6 @@ rule ReleasePublishesDownstreamState {
     ensures: run.observations = {
         debian_branch_updated,
         debian_changelog_updated,
-        project_changelog_updated,
         generated_manpages_packaged,
         homebrew_tap_updated
     }
@@ -295,7 +295,6 @@ rule ReleasePassesWhenArtifactsAndDownstreamStateExist {
     requires: ReleaseAssetsPublished(run)
     requires: debian_branch_updated in run.observations
     requires: debian_changelog_updated in run.observations
-    requires: project_changelog_updated in run.observations
     requires: generated_manpages_packaged in run.observations
     requires: homebrew_tap_updated in run.observations
 
