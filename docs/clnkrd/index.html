@@ -9,27 +9,198 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body class="page-docs">
-  <center><h1>clnkr</h1><center>... coming soon
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <div class="viewport">
+      <div class="screen">
+        <header class="status-bar">
+          <a class="status-link" href="/">F1 Help</a>
+          <a class="status-link" href="/docs/">F2 Docs</a>
+          <a class="status-link" href="https://github.com/clnkr-ai/clnkr">F3 GitHub</a>
+        </header>
+
+        <main id="main-content" class="screen-main">
+          
   
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
+  <div class="docs-grid docs-grid-single">
+    <aside class="pane">
+      <div class="pane-bar">
+        <span>docs.nav</span>
+        <span>docs</span>
+      </div>
+      <div class="pane-body">
+        <p class="line-label">PAGE</p>
+        <h1>clnkrd</h1>
+        <p class="page-summary">Stdio JSONL adapter manual page</p>
+        <nav class="docs-nav" aria-label="Documentation">
+          <a href="/docs/">Overview</a>
+          
+            <a class="" href="/docs/clnkr/">clnkr</a>
+          
+            <a class="is-active" href="/docs/clnkrd/">clnkrd</a>
+          
+        </nav>
+      </div>
+    </aside>
+
+    <article class="pane pane-wide">
+      <div class="pane-bar">
+        <span>clnkrd</span>
+        <span>manual</span>
+      </div>
+      <div class="pane-body doc-body">
+        <h1 id="name">NAME</h1>
+<p>clnkrd - stdio JSONL adapter for clnkr</p>
+<h1 id="synopsis">SYNOPSIS</h1>
+<p><strong>clnkrd</strong> [<strong>&ndash;model</strong> <em>name</em>] [<strong>&ndash;base-url</strong> <em>url</em>]
+[<strong>&ndash;provider</strong> <em>mode</em>] [<strong>&ndash;provider-api</strong> <em>surface</em>]
+[<strong>&ndash;act-protocol</strong> <em>protocol</em>] [<strong>&ndash;effort</strong> <em>level</em>]
+[<strong>&ndash;thinking-budget-tokens</strong> <em>n</em>] [<strong>&ndash;max-output-tokens</strong> <em>n</em>]
+[<strong>&ndash;max-steps</strong> <em>n</em>] [<strong>&ndash;continue</strong>] [<strong>&ndash;load-messages</strong>
+<em>file</em>] [<strong>&ndash;event-log</strong> <em>file</em>] [<strong>&ndash;no-system-prompt</strong>]
+[<strong>&ndash;system-prompt-append</strong> <em>text</em>] [<strong>&ndash;dump-system-prompt</strong>]
+[<strong>&ndash;version</strong>]</p>
+<h1 id="description">DESCRIPTION</h1>
+<p><strong>clnkrd</strong> runs clnkr behind a newline-delimited JSON protocol on
+standard input and standard output. A frontend writes one JSON command
+per line to stdin. clnkrd writes one JSON event per line to stdout.</p>
+<p>Normal diagnostics, flag errors, configuration errors, JSONL decode
+errors, and run errors are written to stderr. In JSONL mode, stdout is
+reserved for protocol events.</p>
+<p>clnkrd is a stdio adapter. It does not open sockets, authenticate
+clients, serve HTTP, host plugins, or manage a background service
+lifecycle.</p>
+<p>Tools, editors, wrappers, eval harnesses, and automation can launch
+clnkrd when they need to embed clnkr behavior behind a stdio JSONL
+protocol. In that use, stdout, stderr, and <strong>&ndash;event-log</strong> are the
+process artifact surfaces.</p>
+<h1 id="jsonl-commands">JSONL COMMANDS</h1>
+<p>Every stdin line is one JSON object with a <strong>type</strong> field. Each command
+line may be up to 16 MiB. Longer lines are rejected as bad JSONL input,
+with diagnostics on stderr and exit status <strong>1</strong>.</p>
+<p><strong>prompt</strong><br>
+Start a run. Requires <strong>text</strong> and <strong>mode</strong>. <strong>mode</strong> is <strong>approval</strong> or
+<strong>full_send</strong>. Only one prompt can run at a time.</p>
+<pre><code>{&quot;type&quot;:&quot;prompt&quot;,&quot;text&quot;:&quot;inspect this repo&quot;,&quot;mode&quot;:&quot;approval&quot;}
+</code></pre>
+<p><strong>reply</strong><br>
+Answer a pending <strong>approval_request</strong> or <strong>clarify</strong> event. For
+approval, <strong>text</strong> equal to <strong>y</strong> approves the command batch. Any other
+non-empty text rejects the batch and is sent back to the model as
+guidance.</p>
+<pre><code>{&quot;type&quot;:&quot;reply&quot;,&quot;text&quot;:&quot;y&quot;}
+</code></pre>
+<p><strong>compact</strong><br>
+Compact older transcript history.</p>
+<pre><code>{&quot;type&quot;:&quot;compact&quot;}
+</code></pre>
+<p><strong>shutdown</strong><br>
+Cancel an active run, drain pending events, and exit successfully.</p>
+<pre><code>{&quot;type&quot;:&quot;shutdown&quot;}
+</code></pre>
+<h1 id="jsonl-events">JSONL EVENTS</h1>
+<p>Every event written to stdout is a JSON object with <strong>ts</strong>, <strong>type</strong>,
+and <strong>payload</strong> fields. <strong>ts</strong> is a UTC RFC3339Nano timestamp recorded
+when clnkrd writes the event. Older event streams may contain only
+<strong>type</strong> and <strong>payload</strong>.</p>
+<p><strong>debug</strong><br>
+Diagnostic metadata and internal progress. Payload: <strong>message</strong>.</p>
+<p><strong>response</strong><br>
+Accepted model turn. Payload: <strong>turn</strong>, <strong>usage</strong>, and optional <strong>raw</strong>.
+<strong>usage</strong> contains <strong>input_tokens</strong> and <strong>output_tokens</strong>.</p>
+<p><strong>protocol_failure</strong><br>
+Rejected model response. Payload: <strong>reason</strong> and <strong>raw</strong>.</p>
+<p><strong>approval_request</strong><br>
+Command batch waiting for a <strong>reply</strong>. Payload: <strong>prompt</strong> and
+<strong>commands</strong>. Each command has <strong>command</strong> and optional <strong>workdir</strong>.</p>
+<p><strong>clarify</strong><br>
+User question waiting for a <strong>reply</strong>. Payload: <strong>question</strong>.</p>
+<p><strong>command_start</strong><br>
+Command execution started. Payload: <strong>command</strong> and <strong>dir</strong>.</p>
+<p><strong>command_done</strong><br>
+Command execution finished. Payload: <strong>command</strong>, <strong>stdout</strong>,
+<strong>stderr</strong>, typed <strong>outcome</strong>, and <strong>feedback</strong>. Exit outcomes contain
+<strong>exit_code</strong>; host execution errors contain <strong>message</strong>.</p>
+<p><strong>compacted</strong><br>
+Transcript compaction completed. Payload: <strong>compacted_messages</strong> and
+<strong>kept_messages</strong>.</p>
+<p><strong>done</strong><br>
+Prompt run completed. Payload: <strong>summary</strong>.</p>
+<p><strong>error</strong><br>
+Driver-visible run error. Payload: <strong>message</strong>.</p>
+<p>When the context length backstop runs, <strong>clnkrd</strong> emits debug events for
+compaction and retry progress, emits the normal <strong>compacted</strong> event with
+compacted and kept message counts, then continues with the normal
+<strong>response</strong>, <strong>done</strong>, or <strong>error</strong> event. No separate JSONL command is
+required.</p>
+<h1 id="options">OPTIONS</h1>
+<p>clnkrd accepts the same provider, prompt, session, and run-control
+options as the clnkr CLI where they apply to non-interactive operation:
+<strong>&ndash;model</strong>, <strong>&ndash;base-url</strong>, <strong>&ndash;provider</strong>, <strong>&ndash;provider-api</strong>,
+<strong>&ndash;act-protocol</strong>, <strong>&ndash;effort</strong>, <strong>&ndash;thinking-budget-tokens</strong>,
+<strong>&ndash;max-output-tokens</strong>, <strong>&ndash;max-steps</strong>, <strong>&ndash;continue</strong>,
+<strong>&ndash;load-messages</strong>, <strong>&ndash;event-log</strong>, <strong>&ndash;no-system-prompt</strong>,
+<strong>&ndash;system-prompt-append</strong>, <strong>&ndash;dump-system-prompt</strong>, and <strong>&ndash;version</strong>.</p>
+<p><strong>&ndash;event-log</strong> writes the same JSONL event stream to a file while also
+writing events to stdout.</p>
+<h1 id="stdio-jsonl-examples">STDIO JSONL EXAMPLES</h1>
+<p>Run one adapter process and inspect its JSONL events:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>workdir<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>mktemp -d /tmp/clnkr-processes.$$.XXXXXX<span style="color:#66d9ef">)</span>
+</span></span><span style="display:flex;"><span>mkdir -p <span style="color:#e6db74">&#34;</span>$workdir<span style="color:#e6db74">/readme&#34;</span>
+</span></span><span style="display:flex;"><span>printf <span style="color:#e6db74">&#39;%s\n&#39;</span> <span style="color:#e6db74">&#39;{&#34;type&#34;:&#34;prompt&#34;,&#34;text&#34;:&#34;Inspect README.md. Do not edit files. Return evidence and uncertainty.&#34;,&#34;mode&#34;:&#34;full_send&#34;}&#39;</span> |
+</span></span><span style="display:flex;"><span>  clnkrd --event-log <span style="color:#e6db74">&#34;</span>$workdir<span style="color:#e6db74">/readme/events.jsonl&#34;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>    &gt; <span style="color:#e6db74">&#34;</span>$workdir<span style="color:#e6db74">/readme/out.jsonl&#34;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>    2&gt; <span style="color:#e6db74">&#34;</span>$workdir<span style="color:#e6db74">/readme/err&#34;</span>
+</span></span><span style="display:flex;"><span>sed -n <span style="color:#e6db74">&#39;1,200p&#39;</span> <span style="color:#e6db74">&#34;</span>$workdir<span style="color:#e6db74">/readme/out.jsonl&#34;</span>
+</span></span></code></pre></div><p>Run two independent adapter processes in parallel, then synthesize their
+output:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>workdir<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>mktemp -d /tmp/clnkr-processes.$$.XXXXXX<span style="color:#66d9ef">)</span>
+</span></span><span style="display:flex;"><span>mkdir -p <span style="color:#e6db74">&#34;</span>$workdir<span style="color:#e6db74">/code&#34;</span> <span style="color:#e6db74">&#34;</span>$workdir<span style="color:#e6db74">/docs&#34;</span>
+</span></span><span style="display:flex;"><span>printf <span style="color:#e6db74">&#39;%s\n&#39;</span> <span style="color:#e6db74">&#39;{&#34;type&#34;:&#34;prompt&#34;,&#34;text&#34;:&#34;Review prompt.go for clnkrd machine-facing JSONL adapter risks. Do not edit.&#34;,&#34;mode&#34;:&#34;full_send&#34;}&#39;</span> |
+</span></span><span style="display:flex;"><span>  clnkrd --event-log <span style="color:#e6db74">&#34;</span>$workdir<span style="color:#e6db74">/code/events.jsonl&#34;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>    &gt; <span style="color:#e6db74">&#34;</span>$workdir<span style="color:#e6db74">/code/out.jsonl&#34;</span> 2&gt; <span style="color:#e6db74">&#34;</span>$workdir<span style="color:#e6db74">/code/err&#34;</span> &amp; pid1<span style="color:#f92672">=</span>$!
+</span></span><span style="display:flex;"><span>printf <span style="color:#e6db74">&#39;%s\n&#39;</span> <span style="color:#e6db74">&#39;{&#34;type&#34;:&#34;prompt&#34;,&#34;text&#34;:&#34;Review doc/*.1.md for clnkrd machine-facing JSONL adapter docs. Do not edit.&#34;,&#34;mode&#34;:&#34;full_send&#34;}&#39;</span> |
+</span></span><span style="display:flex;"><span>  clnkrd --event-log <span style="color:#e6db74">&#34;</span>$workdir<span style="color:#e6db74">/docs/events.jsonl&#34;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>    &gt; <span style="color:#e6db74">&#34;</span>$workdir<span style="color:#e6db74">/docs/out.jsonl&#34;</span> 2&gt; <span style="color:#e6db74">&#34;</span>$workdir<span style="color:#e6db74">/docs/err&#34;</span> &amp; pid2<span style="color:#f92672">=</span>$!
+</span></span><span style="display:flex;"><span>wait <span style="color:#e6db74">&#34;</span>$pid1<span style="color:#e6db74">&#34;</span> <span style="color:#e6db74">&#34;</span>$pid2<span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span>sed -n <span style="color:#e6db74">&#39;1,200p&#39;</span> <span style="color:#e6db74">&#34;</span>$workdir<span style="color:#e6db74">/code/out.jsonl&#34;</span>
+</span></span><span style="display:flex;"><span>sed -n <span style="color:#e6db74">&#39;1,200p&#39;</span> <span style="color:#e6db74">&#34;</span>$workdir<span style="color:#e6db74">/docs/out.jsonl&#34;</span>
+</span></span></code></pre></div><h1 id="exit-status">EXIT STATUS</h1>
+<p><strong>0</strong><br>
+Clean EOF on stdin, <strong>shutdown</strong>, <strong>&ndash;help</strong>, <strong>&ndash;version</strong>, or
+<strong>&ndash;dump-system-prompt</strong>.</p>
+<p><strong>1</strong><br>
+Invalid flags, missing provider configuration, bad JSONL input, invalid
+command sequencing, session load failure, provider error, command/run
+error, or event write failure.</p>
+<p><strong>130</strong><br>
+Interrupted by SIGINT.</p>
+<h1 id="environment">ENVIRONMENT</h1>
+<p><strong>CLNKR_API_KEY</strong><br>
+API key for the LLM provider.</p>
+<p><strong>CLNKR_PROVIDER</strong><br>
+Provider adapter semantics.</p>
+<p><strong>CLNKR_PROVIDER_API</strong><br>
+OpenAI-only API surface override.</p>
+<p><strong>CLNKR_MODEL</strong><br>
+Default model identifier when <strong>&ndash;model</strong> is not provided.</p>
+<p><strong>CLNKR_BASE_URL</strong><br>
+Default LLM endpoint when <strong>&ndash;base-url</strong> is not provided.</p>
+<h1 id="see-also">SEE ALSO</h1>
+<p><strong>clnkr</strong>(1), <strong>clnkr</strong>(3), <strong>clnkr</strong>(7)</p>
+
+      </div>
+    </article>
+  </div>
+
+        </main>
+
+        <footer class="window-bar window-bar-bottom">
+          <a href="/docs/clnkr/">man clnkr</a>
+          <a href="/evaluations/">/evals/</a>
+          <a href="/docs/">/docs/</a>
+          <a href="https://github.com/clnkr-ai/clnkr">github.com/clnkr-ai/clnkr</a>
+        </footer>
+      </div>
+    </div>
   </body>
 </html>

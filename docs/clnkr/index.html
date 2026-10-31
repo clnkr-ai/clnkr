@@ -9,27 +9,266 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body class="page-docs">
-  <center><h1>clnkr</h1><center>... coming soon
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <div class="viewport">
+      <div class="screen">
+        <header class="status-bar">
+          <a class="status-link" href="/">F1 Help</a>
+          <a class="status-link" href="/docs/">F2 Docs</a>
+          <a class="status-link" href="https://github.com/clnkr-ai/clnkr">F3 GitHub</a>
+        </header>
+
+        <main id="main-content" class="screen-main">
+          
   
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
+  <div class="docs-grid docs-grid-single">
+    <aside class="pane">
+      <div class="pane-bar">
+        <span>docs.nav</span>
+        <span>docs</span>
+      </div>
+      <div class="pane-body">
+        <p class="line-label">PAGE</p>
+        <h1>clnkr</h1>
+        <p class="page-summary">Plain CLI manual page</p>
+        <nav class="docs-nav" aria-label="Documentation">
+          <a href="/docs/">Overview</a>
+          
+            <a class="is-active" href="/docs/clnkr/">clnkr</a>
+          
+            <a class="" href="/docs/clnkrd/">clnkrd</a>
+          
+        </nav>
+      </div>
+    </aside>
+
+    <article class="pane pane-wide">
+      <div class="pane-bar">
+        <span>clnkr</span>
+        <span>manual</span>
+      </div>
+      <div class="pane-body doc-body">
+        <h1 id="name">NAME</h1>
+<p>clnkr - a minimal coding agent (plain CLI)</p>
+<h1 id="synopsis">SYNOPSIS</h1>
+<p><strong>clnkr</strong> [<strong>-p</strong>|<strong>&ndash;prompt</strong> <em>task</em>] [<strong>-m</strong>|<strong>&ndash;model</strong> <em>name</em>]
+[<strong>&ndash;base-url</strong> <em>url</em>] [<strong>&ndash;provider</strong> <em>mode</em>] [<strong>&ndash;provider-api</strong>
+<em>surface</em>] [<strong>&ndash;act-protocol</strong> <em>protocol</em>] [<strong>&ndash;effort</strong> <em>level</em>]
+[<strong>&ndash;thinking-budget-tokens</strong> <em>n</em>] [<strong>&ndash;max-output-tokens</strong> <em>n</em>]
+[<strong>&ndash;max-steps</strong> <em>n</em>] [<strong>&ndash;full-send</strong>] [<strong>-c</strong>|<strong>&ndash;continue</strong>]
+[<strong>-l</strong>|<strong>&ndash;list-sessions</strong>] [<strong>-S</strong>|<strong>&ndash;no-system-prompt</strong>]
+[<strong>&ndash;system-prompt-append</strong> <em>text</em>] [<strong>&ndash;dump-system-prompt</strong>]
+[<strong>&ndash;load-messages</strong> <em>file</em>] [<strong>&ndash;event-log</strong> <em>file</em>]
+[<strong>&ndash;trajectory</strong> <em>file</em>] [<strong>-v</strong>|<strong>&ndash;verbose</strong>]
+[<strong>-V</strong>|<strong>&ndash;version</strong>]</p>
+<h1 id="description">DESCRIPTION</h1>
+<p><strong>clnkr</strong> is a minimal coding agent that queries LLMs and executes bash
+commands using an act protocol. The default protocol is <strong>auto</strong>, which
+uses provider-native <strong>bash</strong> tool calls when the resolved provider/API
+supports them and falls back to provider-portable clnkr act JSON
+otherwise.</p>
+<p>In default mode, <strong>clnkr</strong> starts an interactive REPL. With <strong>-p</strong>, it
+runs a single unattended task and exits. Single-task runs save the
+project session by default, so later <strong>clnkr &ndash;continue</strong> and <strong>clnkr
+&ndash;list-sessions</strong> can see them.</p>
+<p>At the main idle conversational prompt, <strong>/compact</strong> summarizes older
+transcript history while keeping recent context intact for the current
+working thread.</p>
+<p>If a provider rejects a model step because the transcript exceeds the
+model context window, clnkr automatically compacts older transcript
+history, reports the compacted message counts on stderr, and retries
+that failed model step once. The automatic retry uses the same
+<strong>[compact]</strong> transcript format as <strong>/compact</strong> and is saved in
+ordinary project sessions.</p>
+<p><strong>clnkrd</strong> is the stdio JSONL adapter for external tools embedding clnkr
+behavior. It is not a daemon framework, service host, or model
+delegation mechanism. Inputs such as <strong>/delegate</strong> <em>task</em> are ordinary
+prompt text; the host does not intercept them.</p>
+<p><strong>clnkr</strong> has no external dependencies beyond the Go standard library.</p>
+<p>The agent communicates through JSON turns: <strong>act</strong> (execute one or more
+<code>bash.commands[]</code> entries with <code>command</code> and nullable <code>workdir</code>),
+<strong>clarify</strong> (ask the user), and <strong>done</strong> (signal completion).</p>
+<p>In <strong>tool-calls</strong> mode, command execution uses provider-native <strong>bash</strong>
+tool calls. <strong>clarify</strong> and <strong>done</strong> remain text JSON. Explicit
+<strong>tool-calls</strong> is rejected for OpenAI Chat Completions and
+OpenAI-compatible endpoints.</p>
+<p>By default, <strong>clnkr</strong> asks for approval before each <strong>act</strong> turn in
+conversational mode. One approval accepts the whole command batch.
+Approval prompts show each requested command and any explicit workdir
+override. Pass <strong>&ndash;full-send</strong> to execute commands immediately without
+approval. Single-task mode (<strong>-p</strong>) implies <strong>&ndash;full-send</strong> and uses an
+unattended turn contract that omits <strong>clarify</strong>.</p>
+<p>When stderr is a terminal, <strong>clnkr</strong> sends OSC 7501 program status
+reports with <strong>app=clnkr</strong>. Reports distinguish running, waiting for
+approval or clarification, completion, failure, and cancellation.
+Completion and failure remain while the next conversational prompt
+waits. Completion means the run ended, not that clnkr independently
+verified the task. Descriptions are single-line text, limited to 512
+Unicode code points. Redirected stderr, stdout, event logs, and
+trajectory files contain no status reports. No terminal support query is
+sent.</p>
+<p>For Anthropic runs, <strong>clnkr</strong> requests Anthropic&rsquo;s native structured
+output format on every turn. Use <strong>&ndash;model</strong> with a model Anthropic
+documents as supporting structured output.</p>
+<p>On OpenAI-compatible backends, the selected model path must support
+structured outputs. If a backend rejects the resolved OpenAI API
+surface, <strong>clnkr</strong> returns the provider error. When a proxy or gateway
+expects a different OpenAI surface, override with <strong>&ndash;provider-api</strong> or
+<strong>CLNKR_PROVIDER_API</strong>.</p>
+<p><strong>clnkr</strong> rejects <code>gpt-5.2-pro</code>, <code>gpt-5.4-pro</code>, and their dated
+snapshots even if you force <strong>openai-chat-completions</strong>, because agent
+turns require structured outputs.</p>
+<p>Project-specific instructions are loaded from an <strong>AGENTS.md</strong> file in
+the current working directory, if present.</p>
+<h1 id="options">OPTIONS</h1>
+<p><strong>-p</strong>, <strong>&ndash;prompt</strong> <em>task</em><br>
+Run the given task unattended and exit. Without this flag, clnkr starts
+in conversational REPL mode. This implies <strong>&ndash;full-send</strong> and removes
+<strong>clarify</strong> from the model turn contract; passing <strong>&ndash;full-send=false</strong>
+with <strong>-p</strong> is rejected.</p>
+<p><strong>-m</strong>, <strong>&ndash;model</strong> <em>name</em><br>
+LLM model identifier. Required unless <strong>CLNKR_MODEL</strong> is set.</p>
+<p><strong>&ndash;base-url</strong> <em>url</em><br>
+LLM endpoint transport URL. If omitted, clnkr uses the provider default:
+<strong><a href="https://api.anthropic.com">https://api.anthropic.com</a></strong> for <strong>anthropic</strong> or
+<strong><a href="https://api.openai.com/v1">https://api.openai.com/v1</a></strong> for <strong>openai</strong>. <strong>CLNKR_BASE_URL</strong>
+overrides the default when set.</p>
+<p><strong>&ndash;provider</strong> <em>mode</em><br>
+Provider adapter semantics: <strong>anthropic</strong> or <strong>openai</strong>. Required unless
+<strong>CLNKR_PROVIDER</strong> is set.</p>
+<p><strong>&ndash;provider-api</strong> <em>surface</em><br>
+OpenAI-only API surface override: <strong>auto</strong>, <strong>openai-chat-completions</strong>,
+or <strong>openai-responses</strong>. With <strong>provider=openai</strong>, <strong>auto</strong> prefers
+<strong>openai-responses</strong> for known supported names and other OpenAI-looking
+model names such as <strong>gpt-</strong><em>, <strong>o</strong> followed by a digit, <strong>codex</strong>,
+<strong>codex-</strong></em>, names ending in <strong>-codex</strong>, and names containing
+<strong>-codex-</strong>. Names that do not look OpenAI-ish, such as <strong>llama3</strong>,
+<strong>gemini-2.0-flash</strong>, <strong>orca-</strong><em>, <strong>olmo-</strong></em>, <strong>openhermes-</strong><em>, and
+<strong>chatgpt-</strong></em>, stay on <strong>openai-chat-completions</strong>. This flag is
+rejected for <strong>provider=anthropic</strong>.</p>
+<p><strong>&ndash;act-protocol</strong> <em>protocol</em><br>
+Command proposal mode: <strong>auto</strong>, <strong>clnkr-inline</strong>, or <strong>tool-calls</strong>.
+The default is <strong>auto</strong>, which uses provider-native <strong>bash</strong> tool calls
+when the resolved provider/API supports them and falls back to
+<strong>clnkr-inline</strong> otherwise. <strong>clnkr-inline</strong> accepts provider-portable
+clnkr act JSON in assistant text. <strong>tool-calls</strong> forces provider-native
+tools and is rejected when unsupported. Most users do not need this
+flag.</p>
+<p><strong>&ndash;effort</strong> <em>level</em><br>
+Provider effort level. Accepted values are <strong>auto</strong>, <strong>low</strong>,
+<strong>medium</strong>, <strong>high</strong>, <strong>xhigh</strong>, and <strong>max</strong>. Provider/model validation
+rejects levels that are not supported. For OpenAI Responses, maps to
+reasoning effort; <strong>gpt-5-pro</strong> accepts only <strong>high</strong>, and <strong>xhigh</strong> is
+accepted only for known codex-max-or-newer model families. For
+Anthropic, <strong>low</strong>, <strong>medium</strong>, and <strong>high</strong> send both
+<code>output_config.effort</code> and <code>thinking.type=adaptive</code> to the API. <strong>auto</strong>
+omits both fields. <strong>max</strong> is accepted only where supported and is
+otherwise rejected.</p>
+<p><strong>&ndash;thinking-budget-tokens</strong> <em>n</em><br>
+Anthropic manual thinking budget (legacy/debug flag). Requires
+<strong>provider=anthropic</strong> and a Claude model that supports extended
+thinking. Uses <code>thinking.type=enabled</code> with <code>budget_tokens=n</code>. Cannot be
+used with non-auto <strong>&ndash;effort</strong> or with Opus 4.7+ models. The value must
+be at least 1024 and less than the effective Anthropic <strong>max_tokens</strong>
+value.</p>
+<p><strong>&ndash;max-output-tokens</strong> <em>n</em><br>
+Provider output-token limit. Supported for Anthropic Messages and OpenAI
+Responses. For Anthropic it overrides the <strong>max_tokens</strong> request field;
+the default is 4096 when unset. Anthropic values above 21333 are
+rejected. OpenAI Chat Completions rejects this flag.</p>
+<p><strong>&ndash;max-steps</strong> <em>n</em><br>
+Maximum executed commands before requesting a final summary. 0 uses the
+default of 100. If an <strong>act</strong> batch exceeds the remaining budget, clnkr
+executes only the commands that fit and then requests a final summary.</p>
+<p><strong>&ndash;full-send</strong><br>
+Execute every <strong>act</strong> turn immediately. Without this flag, clnkr asks
+for approval before each command batch in conversational mode. Implied
+by <strong>-p</strong>.</p>
+<p><strong>-c</strong>, <strong>&ndash;continue</strong><br>
+Resume the most recent session for the current project directory. Saved
+JSON state messages restore the last persisted working directory.
+Mutually exclusive with <strong>&ndash;trajectory</strong>.</p>
+<p><strong>-l</strong>, <strong>&ndash;list-sessions</strong><br>
+List all saved sessions for the current project directory and exit.</p>
+<p><strong>-S</strong>, <strong>&ndash;no-system-prompt</strong><br>
+Omit the built-in system prompt entirely.</p>
+<p><strong>&ndash;system-prompt-append</strong> <em>text</em><br>
+Append <em>text</em> to the built-in system prompt after any loaded
+<strong>AGENTS.md</strong> content.</p>
+<p><strong>&ndash;dump-system-prompt</strong><br>
+Print the composed system prompt and exit. By default this prints the
+conversational prompt. Use <strong>&ndash;dump-system-prompt -p</strong> to print the
+unattended prompt.</p>
+<p><strong>&ndash;load-messages</strong> <em>file</em><br>
+Read a JSON message array from <em>file</em> and prepend the messages to the
+conversation before starting. Host-generated JSON state messages in that
+transcript restore the current working directory.</p>
+<p><strong>&ndash;event-log</strong> <em>file</em><br>
+Write every agent event as a JSONL line to <em>file</em>. Each line is a JSON
+object with <strong>ts</strong>, <strong>type</strong>, and <strong>payload</strong> fields. <strong>ts</strong> is a UTC
+RFC3339Nano timestamp recorded when clnkr writes the event. Older logs
+may contain only <strong>type</strong> and <strong>payload</strong>. Opens <em>file</em> with <code>O_APPEND</code>,
+so another process can tail the file while clnkr appends.</p>
+<p><strong>&ndash;trajectory</strong> <em>file</em><br>
+After the task finishes, write the full message history as a
+pretty-printed JSON array to <em>file</em>. Written before exit, even on error.
+Only applies to single-task mode (<strong>-p</strong>), not the REPL. Mutually
+exclusive with <strong>&ndash;continue</strong>.</p>
+<p><strong>-v</strong>, <strong>&ndash;verbose</strong><br>
+Show internal decisions (queries, parsing, working directory).</p>
+<p><strong>-V</strong>, <strong>&ndash;version</strong><br>
+Print version and exit.</p>
+<h1 id="interactive-commands">INTERACTIVE COMMANDS</h1>
+<p><strong>/compact</strong><br>
+At the idle conversational prompt, summarize older transcript history
+while keeping the recent working thread intact.</p>
+<p>This command is only available at the top-level conversational prompt.
+Trailing text after <strong>/compact</strong> is rejected. In single-task mode,
+approval replies, and clarification replies, the literal exact command
+is rejected with an error rather than triggering compaction.</p>
+<h1 id="environment">ENVIRONMENT</h1>
+<p><strong>CLNKR_API_KEY</strong><br>
+API key for the LLM provider (required).</p>
+<p><strong>CLNKR_PROVIDER</strong><br>
+Provider adapter semantics.</p>
+<p><strong>CLNKR_PROVIDER_API</strong><br>
+OpenAI-only API surface override.</p>
+<p><strong>CLNKR_MODEL</strong><br>
+Default model identifier when <strong>&ndash;model</strong> is not provided.</p>
+<p><strong>CLNKR_BASE_URL</strong><br>
+Default LLM endpoint when <strong>&ndash;base-url</strong> is not provided.</p>
+<h1 id="files">FILES</h1>
+<p><strong>AGENTS.md</strong><br>
+If present in the current directory, its contents are appended to the
+system prompt as project-specific instructions.</p>
+<h1 id="exit-status">EXIT STATUS</h1>
+<p><strong>0</strong><br>
+Success.</p>
+<p><strong>1</strong><br>
+Error (no API key, invalid flags, session load failure, failed final
+step-limit summary, etc.).</p>
+<p><strong>2</strong><br>
+In single-task mode or non-interactive <strong>&ndash;full-send</strong> mode, the run
+stopped because the agent asked for clarification. The question is
+printed to stderr.</p>
+<h1 id="author">AUTHOR</h1>
+<p>Brian Cosgrove <a href="mailto:cosgroveb@gmail.com">cosgroveb@gmail.com</a></p>
+<h1 id="see-also">SEE ALSO</h1>
+<p><strong>clnkr</strong>(3), <strong>clnkr</strong>(7)</p>
+
+      </div>
+    </article>
+  </div>
+
+        </main>
+
+        <footer class="window-bar window-bar-bottom">
+          <a href="/docs/clnkr/">man clnkr</a>
+          <a href="/evaluations/">/evals/</a>
+          <a href="/docs/">/docs/</a>
+          <a href="https://github.com/clnkr-ai/clnkr">github.com/clnkr-ai/clnkr</a>
+        </footer>
+      </div>
+    </div>
   </body>
 </html>
