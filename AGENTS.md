@@ -16,7 +16,10 @@ allium analyse specs/  # Analyse spec process gaps
 make _fmt        # Format source
 make _hooks      # Configure repo-local Git hooks
 ```
-Run `make _fmt` then `make check` before committing. Do not commit if either fails.
+For code changes, run `make _fmt` then `make check` before committing. Do not commit if either fails.
+For changes limited to website content, assets, or templates, run `make docs` and inspect the affected output. Application tests and evals are not required.
+For agent-instruction-only changes, review the diff and run `git diff --check`.
+Mixed changes require the checks for each affected area.
 
 ## Rules
 - No external deps in root go.mod. Stdlib only.
@@ -100,6 +103,8 @@ Optimize for live runs that measure actual agent behavior. Fixture evals exist f
 
 ## Site
 Hugo site under `site/`. Source of truth for reference docs is `doc/*.1.md`. Run `make docs` to regenerate. Do not commit `site/public/`. Deployment to `gh-pages` is automatic from `main`.
+
+Put downloadable assets in `site/static/`. Hugo publishes them at the same path relative to `https://clnkr.ai/`. After pushing website changes, verify the Site workflow and affected public URLs. Website deployments do not require agent evals or a tagged application release.
 
 ## Testing
 - Provider adapters: `httptest.NewServer`, external test packages, no real API calls
