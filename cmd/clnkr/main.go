@@ -43,6 +43,10 @@ Options:
                             (implied by -p)
   -v, --verbose             Show internal decisions
 
+Interactive prompt:
+  Up/Down or Ctrl-P/N       Recall prompts from this directory
+  Ctrl-G                    Edit the draft in $EDITOR
+
 Sessions:
   -c, --continue            Resume most recent session for this project
   -l, --list-sessions       List saved sessions for this project
@@ -64,15 +68,20 @@ Defaults:
   openai base URL     https://api.openai.com/v1
 `
 
+func ioctl(fd, request uintptr, value unsafe.Pointer) syscall.Errno {
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, request, uintptr(value))
+	return errno
+}
+
+func terminalSize(fd uintptr) (int, bool) {
+	var size [4]uint16
+	errno := ioctl(fd, syscall.TIOCGWINSZ, unsafe.Pointer(&size))
+	return int(size[1]), errno == 0
+}
+
 func isTerminal(fd uintptr) bool {
-	var winsize [4]uint16
-	_, _, errno := syscall.Syscall(
-		syscall.SYS_IOCTL,
-		fd,
-		syscall.TIOCGWINSZ,
-		uintptr(unsafe.Pointer(&winsize)),
-	)
-	return errno == 0
+	_, ok := terminalSize(fd)
+	return ok
 }
 
 type lineResult struct {
@@ -112,34 +121,44 @@ func (r *lineReader) ReadLine(ctx context.Context) (string, error) {
 		if !ok {
 			return "", io.EOF
 		}
-		if line.err != nil {
-			return "", line.err
-		}
-		return line.text, nil
+		return line.text, line.err
 	}
 }
 
-func (r *lineReader) ReadQueuedLines() ([]string, error) {
-	timer := time.NewTimer(10 * time.Millisecond)
-	defer timer.Stop()
+type replyReader interface {
+	ReadLine(context.Context) (string, error)
+}
 
-	var lines []string
-	for {
-		select {
-		case line, ok := <-r.lines:
-			if !ok {
-				return lines, nil
-			}
-			if line.err != nil {
-				return lines, line.err
-			}
-			lines = append(lines, line.text)
-			if !timer.Stop() {
-				<-timer.C
-			}
-			timer.Reset(time.Millisecond)
-		case <-timer.C:
-			return lines, nil
+type promptReader interface {
+	replyReader
+	ReadPrompt(bool) (string, error)
+}
+
+func (r *lineReader) ReadPrompt(show bool) (string, error) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if show {
+		_, _ = fmt.Fprint(os.Stderr, "clnkr> ")
+	}
+	first, err := r.ReadLine(ctx)
+	if err == io.EOF {
+		return "", io.EOF
+	}
+	if err != nil {
+		return "", fmt.Errorf("read prompt: %w", err)
+	}
+	lines := []string{first}
+	for delay := 10 * time.Millisecond; ; delay = time.Millisecond {
+		burst, cancel := context.WithTimeout(ctx, delay)
+		line, err := r.ReadLine(burst)
+		cancel()
+		switch err {
+		case nil:
+			lines = append(lines, line)
+		case context.DeadlineExceeded, io.EOF:
+			return strings.Join(lines, "\n"), nil
+		default:
+			return "", fmt.Errorf("read queued prompt lines: %w", err)
 		}
 	}
 }
@@ -147,7 +166,7 @@ func (r *lineReader) ReadQueuedLines() ([]string, error) {
 func runDriverPrompt(
 	ctx context.Context,
 	driver *clnkrapp.Driver,
-	reader *lineReader,
+	reader replyReader,
 	input string,
 	mode string,
 	eventLog io.Writer,
@@ -175,62 +194,43 @@ func runDriverPrompt(
 		errCh <- driver.Prompt(promptCtx, input, mode)
 	}()
 
-	var pendingErr error
+	terminal := terminalRun{
+		driver:   driver,
+		reader:   reader,
+		eventLog: eventLog,
+		stopWait: stopModelWait,
+	}
 	for {
 		select {
 		case event := <-driver.Events():
-			var err error
-			pendingErr, err = handleTerminalDriverEvent(
-				promptCtx,
-				driver,
-				reader,
-				event,
-				pendingErr,
-				eventLog,
-				stopModelWait,
-			)
-			if err != nil {
+			if err := terminal.handle(promptCtx, event); err != nil {
 				return err
 			}
 		case err := <-errCh:
-			return drainDriverEvents(
-				promptCtx,
-				driver,
-				reader,
-				pendingErr,
-				err,
-				eventLog,
-				stopModelWait,
-			)
+			return terminal.drain(promptCtx, err)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
 }
 
-func drainDriverEvents(
-	ctx context.Context,
-	driver *clnkrapp.Driver,
-	reader *lineReader,
-	pendingErr error,
-	runErr error,
-	eventLog io.Writer,
-	stopModelWait func(),
-) error {
+type terminalRun struct {
+	driver     *clnkrapp.Driver
+	reader     replyReader
+	eventLog   io.Writer
+	stopWait   func()
+	pendingErr error
+}
+
+func (r *terminalRun) drain(ctx context.Context, runErr error) error {
 	for {
 		select {
-		case event := <-driver.Events():
-			var err error
-			pendingErr, err = handleTerminalDriverEvent(
+		case event := <-r.driver.Events():
+			if err := r.handle(
 				ctx,
-				driver,
-				reader,
 				event,
-				pendingErr,
-				eventLog,
-				stopModelWait,
-			)
-			if err != nil && (runErr == nil || isTerminalInputError(err)) {
+			); err != nil &&
+				(runErr == nil || isTerminalInputError(err)) {
 				runErr = err
 			}
 		default:
@@ -239,39 +239,31 @@ func drainDriverEvents(
 	}
 }
 
-func handleTerminalDriverEvent(
-	ctx context.Context,
-	driver *clnkrapp.Driver,
-	reader *lineReader,
-	event clnkrapp.DriverEvent,
-	pendingErr error,
-	eventLog io.Writer,
-	stopModelWait func(),
-) (error, error) {
-	stopModelWait()
+func (r *terminalRun) handle(ctx context.Context, event clnkrapp.DriverEvent) error {
+	r.stopWait()
 	if eventErr, ok := event.(clnkrapp.EventError); ok {
-		return eventErr.Err, nil
+		r.pendingErr = eventErr.Err
+		return nil
 	}
-	if eventLog != nil {
-		_ = clnkrapp.WriteJSONL(eventLog, event)
+	if r.eventLog != nil {
+		_ = clnkrapp.WriteJSONL(r.eventLog, event)
 	}
-	if pendingErr != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", pendingErr) //nolint:errcheck
+	if r.pendingErr != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "Error:", r.pendingErr)
+		r.pendingErr = nil
 	}
 
 	switch event := event.(type) {
 	case clnkrapp.EventApprovalRequest:
 		writeProgramStatus("blocked:kind=permission", event.Prompt)
-		return nil, replyToTerminalRequest(
+		return r.reply(
 			ctx,
-			driver,
-			reader,
 			event.Prompt,
 			"Send 'y' to approve, or type what the agent should do instead: ",
 		)
 	case clnkrapp.EventClarificationRequest:
 		writeProgramStatus("blocked:kind=question", event.Question)
-		return nil, replyToTerminalRequest(ctx, driver, reader, event.Question, "Clarify: ")
+		return r.reply(ctx, event.Question, "Clarify: ")
 	case clnkrapp.EventCompacted:
 		fmt.Fprintf(
 			os.Stderr,
@@ -281,21 +273,16 @@ func handleTerminalDriverEvent(
 		) //nolint:errcheck
 	case clnkrapp.EventDone:
 	default:
-		return nil, fmt.Errorf("unhandled driver event %T", event)
+		return fmt.Errorf("unhandled driver event %T", event)
 	}
-	return nil, nil
+	return nil
 }
 
-func replyToTerminalRequest(
-	ctx context.Context,
-	driver *clnkrapp.Driver,
-	reader *lineReader,
-	text, prompt string,
-) error {
+func (r *terminalRun) reply(ctx context.Context, text, prompt string) error {
 	fmt.Fprintln(os.Stderr, text) //nolint:errcheck
 	for {
 		fmt.Fprint(os.Stderr, prompt) //nolint:errcheck
-		reply, err := reader.ReadLine(ctx)
+		reply, err := r.reader.ReadLine(ctx)
 		if err == io.EOF {
 			err = context.Canceled
 		}
@@ -306,7 +293,7 @@ func replyToTerminalRequest(
 		if reply == "" {
 			continue
 		}
-		err = driver.Reply(ctx, reply)
+		err = r.driver.Reply(ctx, reply)
 		if err == nil && clnkrapp.RejectCompactCommand(reply) == nil {
 			writeProgramStatus("working", "Continuing")
 		}
@@ -632,7 +619,8 @@ func runREPL(
 		!opts.fullSend && !showPrompt,
 		"approval mode requires interactive stdin; pass --full-send=true to bypass approval",
 	)
-	reader, mode := newLineReader(os.Stdin), clnkrapp.PromptModeApproval
+	reader := interactiveInput(cwd, showPrompt && isTerminal(os.Stderr.Fd()))
+	mode := clnkrapp.PromptModeApproval
 	if opts.fullSend {
 		mode = clnkrapp.PromptModeFullSend
 	}
@@ -651,13 +639,12 @@ func runREPL(
 
 func runPromptLoop(
 	driver *clnkrapp.Driver,
-	reader *lineReader,
+	reader promptReader,
 	modelWait *modelWaitIndicator,
 	showPrompt bool,
 	mode string,
 	eventLog io.Writer,
 ) (loopErr error) {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	var promptErr error
 	defer func() {
 		if showPrompt && errors.Is(promptErr, clnkr.ErrClarificationNeeded) {
@@ -667,27 +654,20 @@ func runPromptLoop(
 				writeProgramStatus("error", loopErr.Error())
 			}
 		}
-		stop()
 	}()
 	for {
-		if showPrompt {
-			_, _ = fmt.Fprint(os.Stderr, "clnkr> ")
+		input, err := reader.ReadPrompt(showPrompt)
+		if err == io.EOF {
+			return nil
 		}
-		input, err := reader.ReadLine(ctx)
 		if err != nil {
-			if err == io.EOF {
-				return nil
-			}
-			return fmt.Errorf("read prompt: %w", err)
+			return err
 		}
-		lines, err := reader.ReadQueuedLines()
-		if err != nil {
-			return fmt.Errorf("read queued prompt lines: %w", err)
-		}
-		input = strings.TrimSpace(strings.Join(append([]string{input}, lines...), "\n"))
+		input = strings.TrimSpace(input)
 		if input == "" {
 			continue
 		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		promptErr = runDriverPrompt(
 			ctx,
 			driver,
@@ -698,7 +678,6 @@ func runPromptLoop(
 			modelWait.Stop,
 		)
 		stop()
-		ctx, stop = signal.NotifyContext(context.Background(), os.Interrupt)
 		switch {
 		case promptErr == nil:
 		case !showPrompt || isTerminalInputError(promptErr):
