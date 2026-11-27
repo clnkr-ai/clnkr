@@ -1356,15 +1356,8 @@ func TestRunPromptLoopPrefersBufferedReplyInputFailure(t *testing.T) {
 	reader := &lineReader{lines: make(chan lineResult, 1)}
 	reader.lines <- lineResult{err: &terminalInputError{err: inputErr}}
 	close(reader.lines)
-	err := drainDriverEvents(
-		context.Background(),
-		driver,
-		reader,
-		nil,
-		runErr,
-		nil,
-		func() {},
-	)
+	terminal := terminalRun{driver: driver, reader: reader, stopWait: func() {}}
+	err := terminal.drain(context.Background(), runErr)
 	if !errors.Is(err, inputErr) || !isTerminalInputError(err) {
 		t.Fatalf("drain error = %v, want buffered reply input failure over %v", err, runErr)
 	}

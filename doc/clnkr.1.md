@@ -118,6 +118,14 @@ Project-specific instructions are loaded from an **AGENTS.md** file in the curre
 
 # INTERACTIVE COMMANDS
 
+At **clnkr>**, press **Up** or **Ctrl-P** to recall an older prompt from this working directory. **Down** or **Ctrl-N** moves forward and restores the draft you started typing. History persists across conversations. Approval and clarification replies entered at dedicated reply prompts stay out of history.
+
+Type or backspace at the end of a single-line draft. **Ctrl-U** clears the draft. **Ctrl-G** opens the whole draft in **$EDITOR** (default **vi**). An editor executable can have a path containing spaces. Editor commands with simple space-separated arguments, such as **code --wait**, also work. Use an editor that waits until you close the file. After the editor exits, press **Enter** to submit. If the editor fails, clnkr restores the original draft.
+
+Terminals with bracketed paste mark the start and end of pasted text. A multiline paste stays in the draft until you press **Enter**. If a paste stalls, pause and press the terminal interrupt key to exit. On older terminals clnkr groups lines that arrive together. Use **Ctrl-G** to review multiline text when the terminal does not mark pastes.
+
+A multiline draft shows its first line and a line count. Press **Ctrl-G** to inspect or edit all lines. clnkr prints the full submission in ordinary terminal scrollback. These keys are available on Linux and macOS when stdin and stderr are terminals and **TERM** is not **dumb**.
+
 **/compact**
 : At the idle conversational prompt, summarize older transcript history while keeping the recent working thread intact.
 
