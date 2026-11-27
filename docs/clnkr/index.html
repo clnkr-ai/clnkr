@@ -219,6 +219,28 @@ Show internal decisions (queries, parsing, working directory).</p>
 <p><strong>-V</strong>, <strong>&ndash;version</strong><br>
 Print version and exit.</p>
 <h1 id="interactive-commands">INTERACTIVE COMMANDS</h1>
+<p>At <strong>clnkr&gt;</strong>, press <strong>Up</strong> or <strong>Ctrl-P</strong> to recall an older prompt
+from this working directory. <strong>Down</strong> or <strong>Ctrl-N</strong> moves forward and
+restores the draft you started typing. History persists across
+conversations. Approval and clarification replies entered at dedicated
+reply prompts stay out of history.</p>
+<p>Type or backspace at the end of a single-line draft. <strong>Ctrl-U</strong> clears
+the draft. <strong>Ctrl-G</strong> opens the whole draft in <strong>$EDITOR</strong> (default
+<strong>vi</strong>). An editor executable can have a path containing spaces. Editor
+commands with simple space-separated arguments, such as <strong>code &ndash;wait</strong>,
+also work. Use an editor that waits until you close the file. After the
+editor exits, press <strong>Enter</strong> to submit. If the editor fails, clnkr
+restores the original draft.</p>
+<p>Terminals with bracketed paste mark the start and end of pasted text. A
+multiline paste stays in the draft until you press <strong>Enter</strong>. If a paste
+stalls, pause and press the terminal interrupt key to exit. On older
+terminals clnkr groups lines that arrive together. Use <strong>Ctrl-G</strong> to
+review multiline text when the terminal does not mark pastes.</p>
+<p>A multiline draft shows its first line and a line count. Press
+<strong>Ctrl-G</strong> to inspect or edit all lines. clnkr prints the full
+submission in ordinary terminal scrollback. These keys are available on
+Linux and macOS when stdin and stderr are terminals and <strong>TERM</strong> is not
+<strong>dumb</strong>.</p>
 <p><strong>/compact</strong><br>
 At the idle conversational prompt, summarize older transcript history
 while keeping the recent working thread intact.</p>
